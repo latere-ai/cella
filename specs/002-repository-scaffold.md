@@ -157,7 +157,8 @@ deployment that sets one before its spec lands is not refused.
 | `CELLA_REAP_INTERVAL`, `CELLA_LOST_GRACE`, `CELLA_RECOVERY_ATTEMPTS` | 005 | `30s`, `10m`, `5` | the reaper's tick; how long a sandbox is `Lost` without a durable store before it is reaped; how many recreations a durable one gets before `Failed` |
 | `CELLA_POOL_SIZE`, `CELLA_POOL_IMAGE`, `CELLA_SCHEDULING_MODE` | 020, 021 | `0`, unset, `direct` | the default environment's `spec.pool.size`, `spec.pool.image`, and `spec.scheduling.mode`; every other environment declares its own |
 | `CELLA_SECRETS_KEK` | yes when any Secret exists, from 018 | none | 32 bytes, base64, wrapping every secret's data key |
-| `CELLA_EGRESS_URL`, `CELLA_EGRESS_INGEST_TOKEN` | 018 | unset | the default environment's gateway as `cellad` reaches its ingest API, and the bearer it presents; both unset turns egress enforcement into a warning on the default environment |
+| `CELLA_EGRESS_ACK_TIMEOUT` | 018 | `5s` | how long a create waits for one gateway of the environment to acknowledge the sandbox's map |
+| `CELLA_EVENTS_EGRESS` | 018 | unset | `1` delivers per-connection egress records to the sink as events; the journal and the metrics carry them regardless |
 | `CELLA_EGRESS_SIDECAR` | 018 | unset | `1` runs the gateway as a per-Pod sidecar on k8s instead of one Deployment |
 | `CELLA_SOURCE_ALLOW` | 019 | unset | hosts a `Volume` archive source may be fetched from; unset refuses every archive |
 | `CELLA_ENVIRONMENT_OFFLINE` | 021 | `2m` | how long without a worker heartbeat before an environment is `Offline` |

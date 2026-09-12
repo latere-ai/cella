@@ -173,6 +173,7 @@ consumer names a need; it is not in any phase.
 | one way per thing: no `tier` beside `Volume`, no `deadline` beside `ttl`, no `policy` beside labels and admission, no `OpenEgress` beside the egress mode list | 003, 004, 007, 019 | an overlapping pair is two rules to keep consistent and two ways for a reader to be wrong |
 | isolation is a class the environment declares: container, vm, process, none | 004 | a caller that needs a floor names it; the control plane never downgrades silently |
 | the `local` driver builds on `latere.ai/x/pkg/hostsandbox` (v0.60.1), extracted from its first consumer on 2026-09-12 | 004 | one srt renderer, deny table, preflight, and detached handle for both consumers; a fix lands once |
+| the egress gateway is a data plane component that connects outbound with an environment key, like a worker | 018, 021 | maps down and records up on one stream: restart-safe, no inbound route, one mechanism for both plane kinds, monitoring included |
 | two shipped binaries: `cellad` with `serve`, `worker`, `egress`, `check` as roles, and a small `cella` client; stubs test-only | 001, 002 | one image for the server side, a dependency-light client where agents run, one allow list per role package so the merge loosens nothing |
 | fail closed on every webhook and in the provisioning order | 006, 007, 009, 018 | an unavailable decision that allowed, or a half-provisioned sandbox with egress, would make an outage a privilege escalation |
 | the owner policy exists | 006 | a laptop and a small team need no authorizer, and "no authorizer" must still be a policy with tests |
@@ -184,6 +185,7 @@ consumer names a need; it is not in any phase.
 | Question | Where | Owner |
 |---|---|---|
 | The `vm` driver's substrate: a microVM driver of Cella's own, or the k8s runtime class alone; options and criteria in [[024-vm-driver]] | 024 | when a consumer names a need; not before the first release |
+| Extract the gateway's outbound sync protocol and the reverse-door handler of [[018-egress-and-secrets]] into `latere.ai/x/pkg/egress`, so the sibling application platform's gateway shares them | 018 | after 018 is built and the second consumer asks |
 
 ## Open source readiness
 

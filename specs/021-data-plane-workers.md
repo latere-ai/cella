@@ -104,12 +104,11 @@ one outbound route and no inbound one.
 
 Every `Driver` method is one operation type; the worker executes it
 with its own driver and answers with the result or an error in the
-driver's vocabulary. Two operations exist only for workers:
+driver's vocabulary. No operation exists only for workers:
 
 | Operation | Does |
 |---|---|
-| `egress.push` | the compiled map of [[018-egress-and-secrets]] for one sandbox; the worker `PUT`s it to its environment's gateway, so a secret value crosses one hop into the customer's plane and is never dialed in |
-| `egress.purge` | the reverse, on delete |
+| none | the gateway of [[018-egress-and-secrets]] is not driven through the worker: it connects to the control plane itself with the same environment key and receives its maps on its own stream, so a secret value crosses one hop into the customer's plane and is never dialed in |
 
 An operation carries the sandbox's desired state hash; a worker whose
 observed state disagrees answers with a conflict and the controller
