@@ -56,11 +56,11 @@ spec:
     size: 4                        # 0 disables; needs the Pool capability
     image: ghcr.io/example/sandbox:1.4
   workspaceClass: ""               # the storage class of every managed workspace; the driver's default when empty
-  gateway: https://egress.eu.example.internal:3128   # the environment's gateway, as sandboxes reach it
+  gateway: egress.eu.example.internal   # the environment's gateway host, as sandboxes reach it; CreateSpec.Egress.GatewayURL is built from it (018)
 status:
   id: env_01J9...
   owner: https://login.example.com|ops
-  phase: Ready                     # Pending | Ready | Degraded | Offline
+  phase: Ready                     # Pending | Ready | Degraded (reason NoGateway when no gateway is connected) | Offline
   driver: k8s
   capabilities: {Egress: true, Mesh: true, Volumes: true, Display: true, Pool: true}
   workers: 3

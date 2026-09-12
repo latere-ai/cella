@@ -64,7 +64,7 @@ later.
 | [015](015-conformance-suite.md) | Conformance suite: the contract and the API as executable tests, against any server | large | drafted | 003, 008, 011 |
 | [016](016-building-a-plane.md) | Building a plane: how a platform composes the packages and the webhooks without a fork | small | drafted | 001, 004, 006, 007, 015 |
 | [017](017-observability.md) | Observability: metrics, traces, logs, alerts | small | drafted | 002, 005, 008 |
-| [018](018-egress-and-secrets.md) | Egress and secrets: the Secret kind, placeholders, the gateway, the boundary a workload cannot widen | large | drafted | 003, 004, 006 |
+| [018](018-egress-and-secrets.md) | Egress and secrets: the Secret kind, placeholders, the gateway as a data plane component, sync and telemetry, the boundary a workload cannot widen | large | validated | 003, 004, 006, 010 |
 | [019](019-volumes.md) | Volumes: the Volume kind, attachment, the workspace as a volume, what persists and how | medium | drafted | 003, 004 |
 | [020](020-scheduling-and-sets.md) | Scheduling and sets: environment modes, queues, capacity, pools, the SandboxSet kind for rollouts | large | drafted | 003, 005 |
 | [021](021-data-plane-workers.md) | Data plane workers: the Environment kind, registration, the operation queue, the worker role | large | drafted | 004, 006, 018 |
@@ -131,6 +131,7 @@ flowchart BT
   S017 --> S008
   S018 --> S004
   S018 --> S006
+  S018 --> S010
   S019 --> S004
   S020 --> S005
   S021 --> S018
@@ -185,7 +186,7 @@ consumer names a need; it is not in any phase.
 | Question | Where | Owner |
 |---|---|---|
 | The `vm` driver's substrate: a microVM driver of Cella's own, or the k8s runtime class alone; options and criteria in [[024-vm-driver]] | 024 | when a consumer names a need; not before the first release |
-| Extract the gateway's outbound sync protocol and the reverse-door handler of [[018-egress-and-secrets]] into `latere.ai/x/pkg/egress`, so the sibling application platform's gateway shares them | 018 | after 018 is built and the second consumer asks |
+| `pkg/egress` additions [[018-egress-and-secrets]] needs before the gateway role is built: a dependency-free `placeholder` subpackage; a per-principal policy gate (mode, allow, deny, ports) evaluated before a CONNECT completes; per-entry `inject` placement; `Registry` replace-all for an authoritative snapshot; the reverse-door handler and the outbound sync client, which the sibling application platform's gateway can then share | 018 | before phase 3 builds the gateway |
 
 ## Open source readiness
 

@@ -67,6 +67,7 @@ type Tx interface {
 	Journal() Journal
 	Queue() Queue
 	Operations() Operations
+	Records() Records
 	Leases() Leases
 }
 
@@ -133,6 +134,12 @@ type Operations interface { // the worker operation queue (021)
 	Acknowledge(ctx context.Context, opID string, result []byte) error
 	Heartbeat(ctx context.Context, environment, worker string, at time.Time) error
 	Workers(ctx context.Context, environment string) ([]Worker, error) // with their last heartbeat
+}
+
+type Records interface { // egress connection records (018); never the journal
+	Append(ctx context.Context, sandboxID string, r Record) error
+	BySandbox(ctx context.Context, sandboxID string, page Page) ([]Record, string, error) // newest first
+	Prune(ctx context.Context, before time.Time) (n int, err error)
 }
 
 type Leases interface {
@@ -244,7 +251,7 @@ replica; two in-memory replicas cannot detect each other.
 
 Selected by `CELLA_DB_URL`, a `postgres://` URL. Tables: `objects`,
 `observed`, `secret_values`, `revocations`, `ledger`, `events`,
-`queue`, `operations`, `workers`, `leases`. Migrations are embedded
+`egress_records`, `queue`, `operations`, `workers`, `leases`. Migrations are embedded
 under `migrations/` and applied at start through
 `latere.ai/x/pkg/pgxmigrate.Up`, which imports no driver, so
 `internal/store` blank-imports golang-migrate's `pgx/v5` driver and
@@ -263,8 +270,8 @@ deleted_at is null`; `objects (kind, owner, phase)` for lists and the
 count; `objects (kind, environment)`; `objects (kind, root)`; a GIN
 index on `objects.labels` for `?label=`; `observed (environment)`;
 `events (object_id, seq)` and `events (next_attempt_at) where acked_at
-is null`; `revocations (exp)`; `queue (environment, queue, priority
-desc, enqueued_at)`; `operations (environment, state, created_at)`;
+is null`; `revocations (exp)`; `egress_records (sandbox_id, at desc)`; `queue
+(environment, queue, priority desc, enqueued_at)`; `operations (environment, state, created_at)`;
 `workers (environment, last_heartbeat)`.
 
 ### Leases

@@ -156,7 +156,7 @@ applies it so that at no instant is the effective boundary wider than
 both the old and the new manifest. The boundary is enforced twice, by
 the gateway's map and by the driver's rule, and the effective boundary
 is their intersection, so any order keeps the property; the order
-used is map then driver: `Egress.Compile` and `Push`, then
+used is map then driver: `Egress.Compile` and `Send`, then
 `Driver.Update` with `Change.Egress`, `Change.Labels`,
 `Change.Annotations`, `Change.Lifecycle`, `Change.Tier`,
 `Change.Resources`. `Change.Volumes` carries the full desired list and

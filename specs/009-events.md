@@ -59,6 +59,7 @@ platform.
 | `sandbox.attach` | a session ended | duration, bytes each way |
 | `sandbox.files` | a transfer ended | direction, paths, bytes |
 | `sandbox.token` | a token minted outside the projection | the token's `exp`; never the token |
+| `sandbox.egress` | a connection the gateway handled, only with `CELLA_EVENTS_EGRESS=1` ([[018-egress-and-secrets]]) | the record's fields; never a header, body, value, placeholder, or credential |
 | `sandbox.recovered` | the controller recreated a lost sandbox from desired state | what was kept: volumes, workspace |
 | `sandbox.input`, `sandbox.screenshot` | a computer use operation ended | the event count, the geometry; never the text or the image |
 | `sandbox.spawned` | a child was created by a workload | the child's id, the budget left |

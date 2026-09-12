@@ -85,19 +85,18 @@ no valid RSA block is a start-up failure.
 |---|---|---|
 | `iss` | `CELLA_PUBLIC_URL` | `CELLA_PUBLIC_URL` |
 | `sub` | `sandbox:<sbx_ id>` | `environment:<env_ id>` |
-| `aud` | `[CELLA_OIDC_AUDIENCE, "cella-egress"]` | `[CELLA_OIDC_AUDIENCE]` |
+| `aud` | `[CELLA_OIDC_AUDIENCE]` | `[CELLA_OIDC_AUDIENCE]` |
 | `exp` | the sandbox's `expiresAt` or 24 hours from mint, whichever is sooner | `CELLA_ENVIRONMENT_KEY_TTL` (default `8760h`) from mint |
 | `jti` | a ULID; the key of a revocation | a ULID; the key of a revocation and of `DELETE /v1/environments/{name}/keys/{jti}` |
 | `environment` | the `env_` id the sandbox runs in | absent |
 | `spawn` | `{budget, depth, mesh}` from desired state at mint, a copy the control plane never trusts over the store ([[022-mesh-and-spawn]]) | absent |
 
-The audience array is one token that both `cellad` and the gateway
-accept: `cellad` checks that `aud` contains its audience, and
-`pkg/egress.TokenAuth` checks that `aud` contains `cella-egress`
-([[018-egress-and-secrets]]). Both tokens verify with any conforming
-JWT library against the key set, which is what lets a platform or a
-third service trust a sandbox's or a worker's identity without asking
-`cellad`.
+Both tokens verify with any conforming JWT library against the key
+set, which is what lets a platform or a third service trust a
+sandbox's or a worker's identity without asking `cellad`. The egress
+gateway does not verify tokens: it authenticates a sandbox by a
+credential the control plane mints into its map, which never rotates
+under a running process ([[018-egress-and-secrets]]).
 
 Workload token lifecycle: minted by the controller at create and again
 at recovery ([[005-lifecycle-controller]]), projected by the driver at
@@ -111,10 +110,9 @@ checks: the `jti` is not in the revocation list, and the sandbox's
 desired state exists with a phase other than `Deleting`
 ([[010-state]]); a deleted sandbox's token is therefore refused by
 `cellad` at once. The gateway verifies offline and cannot see a
-delete: its bound is the token's `exp`, and the purge on the gateway's
-sync stream ([[018-egress-and-secrets]]) removes the sandbox's map at
-delete so a
-still-valid token reaches a gateway that substitutes nothing for it.
+delete: its bound is the token's `exp`. The gateway's own bound is the
+purge on its sync stream ([[018-egress-and-secrets]]), which removes
+the sandbox's map and with it the credential the gateway accepts.
 Without a durable store, desired state dies with the process and every
 workload token is refused after a restart, which is the same restart
 that reaps the sandboxes ([[010-state]]).
@@ -258,7 +256,7 @@ the HTTP envelope of 401 and 403 ([[008-api]]); the revocation store
 | An unreachable issuer at start is a start-up failure; one that fails later is served from the cached key set | `TestIssuerAtStartAndLater` | not built |
 | A non-loopback `http://` issuer or authorizer is refused at start unless listed insecure; an authorizer URL without a token is a start-up failure | `TestInsecureAndIncompleteEndpoints` | not built |
 | `cellad` refuses to start with no issuer or with a `CELLA_TOKEN_KEY` holding no RSA key | `TestServeRefusesToStartWithoutIdentity` | not built |
-| A workload token verifies with a generic JWT library against `/.well-known/jwks.json` and with `pkg/egress.TokenAuth` at audience `cella-egress`; its `kid` is the RFC 7638 thumbprint | `TestWorkloadTokenIsVerifiableByBoth` | not built |
+| A workload token verifies with a generic JWT library against `/.well-known/jwks.json`; its `kid` is the RFC 7638 thumbprint | `TestWorkloadTokenIsVerifiable` | not built |
 | With two PEM blocks, tokens signed by the second still verify; after the block is removed they do not; the first block signs | `TestKeyRotationByConfiguration` | not built |
 | A workload token is refused by `cellad` after its sandbox is deleted and after its `jti` is revoked; a recovered sandbox's new token verifies and the old `jti` is revoked | `TestWorkloadTokenLifecycle` | not built |
 | A token is re-minted and re-projected at two thirds of its lifetime | `TestTokenReprojection` under a fake clock | not built |

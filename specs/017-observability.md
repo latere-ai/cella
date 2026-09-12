@@ -47,6 +47,8 @@ metrics.
 | `cella_events_pending` | gauge | none |
 | `cella_events_dropped_total` | counter | none |
 | `cella_exec_total` | counter | `exit` (`0`, `nonzero`, `failed`) |
+| `cella_egress_connections_total` | counter | `decision`, `door` |
+| `cella_egress_bytes_total` | counter | `direction`, `door` |
 | `cella_store_query_duration_seconds` | histogram | `op` |
 
 One registry, one package that registers, and a test that every name

@@ -127,7 +127,7 @@ serves.
 |---|---|---|---|
 | `serve` (default) | the whole table | the control plane: the listeners, the controller, the scheduler | this spec |
 | `worker` | `CELLA_URL`, `CELLA_ENVIRONMENT_KEY`, and the selected driver's variables; none of the control plane's | one registered environment's data plane: claims operations and runs a driver | 021 |
-| `egress` | `CELLA_EGRESS_*` and `CELLA_PUBLIC_URL` for the key set; none of the control plane's | the credential-substituting gateway | 018 |
+| `egress` | `CELLA_URL`, `CELLA_ENVIRONMENT_KEY`, `CELLA_EGRESS_PROXY_ADDR`, `CELLA_EGRESS_REVERSE_ADDR`, `CELLA_EGRESS_CA_KEY`; none of the control plane's | the credential-substituting gateway, connecting outbound to the control plane | 018 |
 | `check` | the whole table | one line per requirement of the installation, exit 1 on any failure | 014 |
 
 One binary, one image, one role per process: a Deployment selects the
@@ -158,12 +158,15 @@ deployment that sets one before its spec lands is not refused.
 | `CELLA_POOL_SIZE`, `CELLA_POOL_IMAGE`, `CELLA_SCHEDULING_MODE` | 020, 021 | `0`, unset, `direct` | the default environment's `spec.pool.size`, `spec.pool.image`, and `spec.scheduling.mode`; every other environment declares its own |
 | `CELLA_SECRETS_KEK` | yes when any Secret exists, from 018 | none | 32 bytes, base64, wrapping every secret's data key |
 | `CELLA_EGRESS_ACK_TIMEOUT` | 018 | `5s` | how long a create waits for one gateway of the environment to acknowledge the sandbox's map |
+| `CELLA_EGRESS_RECORDS_RETENTION`, `CELLA_EGRESS_RECORDS_CAP` | 018 | `168h`, `1000` | how long egress records stay in Postgres; how many the memory store keeps per sandbox |
+| `CELLA_URL`, `CELLA_ENVIRONMENT_KEY` | 018, 021 | none | read by the `worker` and `egress` roles: the control plane's public URL and the environment key that authenticates the role's one outbound stream |
+| `CELLA_EGRESS_PROXY_ADDR`, `CELLA_EGRESS_REVERSE_ADDR`, `CELLA_EGRESS_CA_KEY` | 018 | `:3128`, `:8080`, none | the `egress` role's two doors and the PEM key of the certificate authority it terminates TLS with; the key is generated at first start when absent |
 | `CELLA_EVENTS_EGRESS` | 018 | unset | `1` delivers per-connection egress records to the sink as events; the journal and the metrics carry them regardless |
 | `CELLA_EGRESS_SIDECAR` | 018 | unset | `1` runs the gateway as a per-Pod sidecar on k8s instead of one Deployment |
 | `CELLA_SOURCE_ALLOW` | 019 | unset | hosts a `Volume` archive source may be fetched from; unset refuses every archive |
 | `CELLA_ENVIRONMENT_OFFLINE` | 021 | `2m` | how long without a worker heartbeat before an environment is `Offline` |
 | `CELLA_OIDC_ISSUERS` | yes, from 006 | none | comma separated issuer URLs whose tokens are accepted |
-| `CELLA_OIDC_AUDIENCE` | 006 | `cella` | the audience a caller token must contain; the tokens cellad mints carry it, and workload tokens also carry `cella-egress` for the gateway |
+| `CELLA_OIDC_AUDIENCE` | 006 | `cella` | the audience a caller token must contain; the tokens cellad mints carry it |
 | `CELLA_OIDC_INSECURE_ISSUERS` | 006 | unset | issuers from the list that may use `http://` on a host other than loopback; set by the test stubs, never in production |
 | `CELLA_TOKEN_KEY` | yes, from 006 | none | one or two PEM-encoded RSA private keys of at least 2048 bits; the first signs workload tokens and environment keys, every block is in the key set, so rotation is prepending a key and later removing the old block; required in every mode |
 | `CELLA_AUTHORIZER_URL`, `CELLA_AUTHORIZER_TOKEN` | 006 | unset | the operator's authorization endpoint and the bearer cellad sends it; unset selects the built-in owner policy; the URL without the token is a start-up failure |
