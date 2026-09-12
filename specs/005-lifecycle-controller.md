@@ -154,7 +154,7 @@ placement, pools, queues, and sets ([[020-scheduling-and-sets]]).
 |---|---|---|
 | Every field of the manifest maps to the `CreateSpec` field the table names | `TestCreateSpecDerivation`, table-driven | not built |
 | A `Create` that crashes before the store write is adopted, not duplicated, on the next reconcile | `TestReconcileAdoptsAStampedObject` with a failing fake store | not built |
-| The create order is map, volumes, driver, token; a failure at each step leaves no egress and no dangling attachment | `TestCreateOrderFailsClosed` | not built |
+| The create order is map, volumes, driver, and a driver applies the rule before the workload; a failure at each step leaves no running workload and no dangling attachment | `TestCreateOrderFailsClosed` | not built |
 | Each reaper rule fires at its second and not one before, under a fake clock | `TestReaperRules`, one case per rule | not built |
 | `autoStop` on `ephemeral` deletes and on `persistent` stops | `TestAutoStopHonoursTier` | not built |
 | A sandbox whose driver reports `Lost` with Postgres on returns to `Running` with the same id and its persistent volume's files intact; with Postgres off it is reaped after the grace | `TestRecoveryFromDesiredState`, `TestLostWithoutAStoreIsReaped` | not built |

@@ -119,7 +119,7 @@ spec:
     height: 800
   policy: restricted                   # a named policy the admission step resolves
 status:                                # written by the server, ignored on apply
-  id: 01J9ZK2P7Q8R9S0T1U2V3W4X5Y
+  id: sbx_01J9ZK2P7Q8R9S0T1U2V3W4X5Y
   phase: Running
   owner: alice@example.com
   environment: default
@@ -195,7 +195,7 @@ status:                                # written by the server, ignored on apply
 
 | Field | Meaning |
 |---|---|
-| `id` | the stable identifier, a ULID, the key of every `/v1/sandboxes/{id}` path; `name` may be reused after delete, `id` never |
+| `id` | the stable identifier, a `sbx_` prefixed ULID ([[001-architecture]]), the key of every `/v1/sandboxes/{id}` path; `name` may be reused after delete, `id` never |
 | `phase` | `Pending`, `Queued`, `Starting`, `Running`, `Stopping`, `Stopped`, `Recovering`, `Deleting`, `Failed`, `Lost` ([[005-lifecycle-controller]]) |
 | `owner` | the subject that applied the manifest; for a spawned child, the root's owner |
 | `environment`, `driver` | where it runs and what runs it |
@@ -283,9 +283,10 @@ The stages, in order, each one total before the next begins:
    parent's, its volumes are among the parent's with no read-only
    attachment made read-write, its spawn budget and depth fit the
    parent's remainder, its resources do not exceed the parent's, its
-   `ttl` does not outlive the parent's, and `mesh.enabled` is not set
-   because it is inherited. Any violation is `boundary_exceeded` with
-   every offending path.
+   `ttl` does not outlive the parent's, its `environment` is the
+   parent's, and `mesh.enabled` is not set because it is inherited.
+   Nine rules; any violation is `boundary_exceeded` with every
+   offending path.
 7. Capability check against `Environment`: a field the environment
    cannot enforce is either a refusal (`display` without `Display`,
    `expose: public` without `Ingress`) or a warning (`egress` on an
@@ -369,7 +370,7 @@ of the errors ([[008-api]]).
 | Every mounted secret's hosts join the allow list; two secrets on one host are `secret_host_conflict`; a clone secret without the clone host is `secret_out_of_scope` | `TestSecretReferences` | not built |
 | A reserved env key, a proxy key, and a trust-store key are each `reserved_prefix` | `TestReservedEnvKeys` | not built |
 | Every immutable field changed on update is named in one `immutable_field` error; a widened allow list is `boundary_widened` | `TestImmutableAndNarrowingFields` | not built |
-| Each of the eight boundary rules, violated one at a time against a parent, is `boundary_exceeded` naming the path; a conforming child passes | `TestBoundaryCheck`, table-driven | not built |
+| Each of the nine boundary rules, violated one at a time against a parent, is `boundary_exceeded` naming the path; a conforming child passes | `TestBoundaryCheck`, table-driven | not built |
 | Ceilings refuse with the field and the ceiling; a ceiling of zero is no ceiling | `TestCeilings` | not built |
 | `display` without `Display` is refused; egress without `Egress` is a warning; `expose: public` without `Ingress` is refused | `TestCapabilityRefusalsAndWarnings` | not built |
 | `Resolve` on the same input twice yields byte-identical JSON | `TestResolveIsDeterministic` | not built |

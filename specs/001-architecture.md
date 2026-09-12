@@ -1,6 +1,6 @@
 ---
 title: "Architecture: control plane and data plane, packages, extension points, invariants"
-status: drafted
+status: validated
 track: core
 depends_on: []
 affects: [manifest/, runtime/, controller/, egress/, internal/, cmd/cellad/, cmd/cella/, docs/]
@@ -22,7 +22,7 @@ observes it, the scheduling that decides when and where it runs, and
 the boundary the environment lives inside: what it may reach, what
 credentials it may use, what it may spawn. It does not own the
 environment itself. The data plane, the machines and clusters where
-sandboxes run, is either a backend the control plane drives directly
+sandboxes run, is either a driver the control plane runs in-process
 or a self-hosted environment whose worker connects to the control
 plane and executes its operations. The same drivers run in both.
 
@@ -63,10 +63,10 @@ flowchart TB
     Agent[a process inside a sandbox]
   end
   subgraph cp [Control plane: cellad]
-    API[/v1 API: sandboxes, secrets, volumes, sets, environments/]
+    API["/v1 API: sandboxes, secrets, volumes, sets, environments"]
     Resolve[manifest resolve]
     Auth[identity: OIDC verify, workload tokens]
-    Sched[scheduler: immediate, pooled, queued]
+    Sched[scheduler inside the controller: immediate, pooled, queued]
     Ctl[controller: desired to observed]
     Store[(store: desired state, index, journal)]
   end
@@ -79,7 +79,9 @@ flowchart TB
   subgraph dp1 [Data plane: driven directly]
     K8s[k8s driver]
     Podman[podman driver]
+    Local[local driver]
     Native[native driver]
+    VM[vm driver, a stub]
     EG1[cellad egress: gateway]
   end
   subgraph dp2 [Data plane: self-hosted]
@@ -92,13 +94,15 @@ flowchart TB
   API --> Auth --> IdP
   Auth --> Authz
   API --> Resolve --> Adm
-  Resolve --> Sched --> Ctl
+  Resolve --> Ctl
   Ctl <--> Store
+  Ctl --> Sched
   Ctl --> K8s
   Ctl --> Podman
+  Ctl --> Local
   Ctl --> Native
-  Ctl -- operation queue --> Worker
-  Worker -- outbound only --> API
+  Ctl --> VM
+  Worker -- connects outbound, claims operations --> API
   Ctl -- credential maps --> EG1
   Worker --> EG2
   API -- every mutation --> Sink
@@ -110,13 +114,15 @@ executes them with a driver, and posts results, the shape a managed
 agent service uses for customer-hosted execution. A directly driven
 data plane is the same driver called in-process. A caller cannot tell
 which kind of environment its sandbox landed on except by reading
-`status.environment`.
+`status.environment`, `status.driver`, and `status.isolation`.
 
 ### Components
 
-Two binaries ship. `cellad` is the server side, one image, one role
-per process selected by subcommand; `cella` is the client, small and
-dependency-light because it runs where agents run.
+Two binaries ship to users. `cellad` is the server side, one image, one
+role per process selected by subcommand; `cella` is the client, small
+and dependency-light because it runs where agents run. A third,
+`cella-stubs`, ships only as the test image the release pipeline's
+conformance job runs ([[014-release-and-installation]]).
 
 | Binary and role | Runs where | Owns |
 |---|---|---|
@@ -125,7 +131,7 @@ dependency-light because it runs where agents run.
 | `cellad egress` | beside sandboxes in either data plane | the credential-substituting egress gateway: the only path from a sandbox to the network, with a per-sandbox map the control plane pushes |
 | `cellad check` | wherever an installation is verified | one line per requirement, exit 1 on any failure |
 | `cella` | a shell or an agent | the client of the API |
-| `cella-stubs` | tests and `make run` only, never a release artifact | the stub issuer, authorizer, admission endpoint, and sink |
+| `cella-stubs` | tests, `make run`, and the release pipeline's conformance job; never an installation | the stub issuer, authorizer, admission endpoint, and sink |
 
 Each role is its own package under `internal/` (`internal/serve`,
 `internal/worker`, `internal/egressd`, `internal/check`), so the
@@ -137,26 +143,35 @@ client. Splitting a role into a binary of its own later is a new
 
 ### Packages
 
-The module is `latere.ai/x/cella`. Four packages at the root are
-imported by others; everything else is `internal/`.
+The module is `latere.ai/x/cella`. Four package trees at the root,
+`manifest`, `runtime`, `controller`, and `egress`, with their
+subpackages, are imported by others; everything else is `internal/`.
+The word for what turns a manifest into a running environment is
+`driver`, in every spec and every identifier; `backend` is not used.
 
 | Package | Owns | Promise to an importer | Spec |
 |---|---|---|---|
 | `manifest`, `manifest/v1` | the `cella.latere.ai/v1` kinds, strict decoding, validation, defaulting, resolve, the boundary-subset check | a manifest the schema accepts today is accepted by every later `v1` build; new fields are optional; Go API additive within a module major | [[003-manifest-contract]] |
 | `runtime` | the `Driver` interface a data plane implements, its capabilities, the shared types | changes only with a module major | [[004-runtime-backend-contract]] |
-| `runtime/k8s`, `runtime/podman`, `runtime/native`, `runtime/remote`, `runtime/runtimetest` | the three drivers, the remote driver that queues for a worker, and the conformance suite a driver passes | a driver that passes `runtimetest` works under `controller` and under `cellad worker` | [[004-runtime-backend-contract]], [[021-data-plane-workers]] |
+| `runtime/k8s`, `runtime/podman`, `runtime/vm`, `runtime/local`, `runtime/native`, `runtime/remote`, `runtime/runtimetest` | the six drivers, `vm` a stub until [[024-vm-driver]] decides, and the conformance suite a driver passes | a driver that passes `runtimetest` works under `controller` and under `cellad worker` | [[004-runtime-backend-contract]], [[021-data-plane-workers]] |
 | `controller` | desired-to-observed reconciliation, the phase machine, the reaper, recovery, the scheduler and its strategies, sets | drives any conforming driver; owns no HTTP, no identity, no store implementation | [[005-lifecycle-controller]], [[020-scheduling-and-sets]] |
 | `egress` | compiling a sandbox's secrets and egress rules into the map the gateway consumes | none beyond the wire shape it shares with the `egress` role | [[018-egress-and-secrets]] |
 | `internal/api` | the `/v1` handlers, streams, the OpenAPI document | none | [[008-api]], [[023-computer-use-operations]] |
 | `internal/auth` | the OIDC verifier, workload and environment tokens, the authorizer client, the owner policy | none | [[006-identity]] |
-| `internal/admission`, `internal/events`, `internal/store`, `internal/config`, `internal/version`, `internal/cellacli`, `internal/worker` | as their specs say | none | [[007-admission]], [[009-events]], [[010-state]], [[002-repository-scaffold]], [[011-agent-client]], [[021-data-plane-workers]] |
+| `internal/serve`, `internal/worker`, `internal/egressd`, `internal/check` | the four roles of `cellad`, one package each with its own dependency allow list | none | [[002-repository-scaffold]], [[021-data-plane-workers]], [[018-egress-and-secrets]], [[014-release-and-installation]] |
+| `internal/admission`, `internal/events`, `internal/store`, `internal/config`, `internal/version`, `internal/cellacli`, `internal/cellaclient` | as their specs say | none | [[007-admission]], [[009-events]], [[010-state]], [[002-repository-scaffold]], [[011-agent-client]] |
 
-The rule for the root packages: they compute, validate, and drive. They
-never dial an identity provider, a database, a billing system, or a
-webhook. A platform imports them to get the contract, the drivers, and
-the controller with its own identity and policy around them, or runs
-`cellad` and gets the same through the webhooks. Both paths reach one
-`Resolve` and one `Driver`, so a manifest means the same thing on both.
+The rule for the root packages: they compute, validate, and drive.
+`manifest`, `runtime`, `controller`, and `egress` themselves import
+nothing under `internal/`, no HTTP client, no database driver, and no
+identity library; a driver subpackage dials its own substrate (the
+Kubernetes API, the Podman socket, a worker's stream) and nothing else.
+None of them dials an identity provider, a database, a billing system,
+or a webhook. A platform imports them to get the contract, the drivers,
+and the controller with its own identity and policy around them, or
+runs `cellad` and gets the same through the webhooks. Both paths reach
+one `Resolve` and one `Driver`, so a manifest means the same thing on
+both.
 
 ### Kinds
 
@@ -177,7 +192,7 @@ package and served by the same API grammar.
 | The control plane owns | A platform supplies |
 |---|---|
 | the kinds and their evolution | accounts, organizations, teams |
-| one resolve pipeline: decode, default, admit, validate, boundary check | the permission model, as an authorizer |
+| one resolve pipeline, the seven stages of [[003-manifest-contract]] | the permission model, as an authorizer |
 | scheduling: when and where a sandbox runs, pools, queues, sets | quotas, plans, billing, as authorizer limits and admission ceilings |
 | lifecycle: desired state, phases, reaper, recovery | catalogs of images and policies, as admission mutation |
 | the boundary: egress rules, secrets as placeholders, mesh and spawn subsetting | the secrets' values' provenance, and what else its runtime adds through decorators |
@@ -195,7 +210,7 @@ the control plane through an extension point or the exported packages.
 |---|---|---|---|
 | OIDC issuers | on every request | standard OpenID Connect; audience `cella` unless configured | none: `cellad` refuses to start without an issuer |
 | Authorizer webhook | on every request that names a subject and an action | [[006-identity]]; unavailability is a refusal | the built-in owner policy |
-| Admission webhook | on every apply, after defaulting and before validation | [[007-admission]]; unavailability is a refusal | the built-in defaults and ceilings |
+| Admission webhook | on every apply, at stage 3 of [[003-manifest-contract]]'s resolve | [[007-admission]]; unavailability is a refusal | the built-in defaults and ceilings |
 | Event sink | after every mutation and every operation | [[009-events]]: signed `POST`, at-least-once, ordered per object | off |
 | Environments | registered by an operator; a worker connects | [[021-data-plane-workers]] | the one environment the in-process driver of `CELLA_RUNTIME` provides |
 | Driver decorators | at import time, by a platform that constructs a driver itself | [[004-runtime-backend-contract]] | none |
@@ -229,7 +244,8 @@ sequenceDiagram
   K->>S: place (strategy, environment, capacity)
   S-->>K: now, from pool, or queued
   K->>G: push the sandbox's credential map
-  K->>R: Create (with the workload token, volumes, network rule)
+  Note over K,R: then volumes, then Create; the driver's rule before its workload (018)
+  K->>R: Create
   R-->>K: observed state
   A->>E: sandbox.created
   A-->>C: 201, resolved manifest with status
@@ -271,6 +287,13 @@ this is Latere's open source project. The group is therefore the one
 place a Latere name appears in the public contract, and the invariant
 below says so.
 
+Every object has a stable id, a ULID with a kind prefix: `sbx_` for a
+sandbox, `sec_` a secret, `vol_` a volume, `set_` a set, `env_` an
+environment, `msh_` a mesh, `evt_` an event, `op_` a worker operation.
+The id is the key of every `/v1/<kind>/{id}` path, the value after the
+colon in a token subject (`sandbox:sbx_...`), and the `cella.latere.ai/id`
+label; a name may be reused after delete, an id never.
+
 Reserved prefixes: labels and annotations under `cella.latere.ai/` are
 the control plane's and a manifest that sets one is refused; a platform
 picks its own prefix. Paths under `/run/cella/` inside a sandbox are
@@ -292,36 +315,39 @@ new entry is a row with a reason.
 
 ### Invariants
 
-1. The manifest is the only way to create a sandbox. Every surface, the
-   API, the command, and an importer, goes through one `Resolve`, and
-   the resolved manifest a caller reads back is what the data plane was
-   asked for, defaults included.
+1. One schema, one resolver, one meaning. The manifest is the only way
+   to create an object; every surface, the API, the command, and an
+   importer, goes through one `Resolve`; two surfaces never accept
+   different subsets of a kind; and the resolved manifest a caller
+   reads back is what the data plane was asked for, every default
+   included and visible.
 2. Desired state is the control plane's; observed state is the data
-   plane's. No lifecycle decision reads the store for observed state,
-   and no observed state overwrites desired state.
+   plane's. The observed index in the store is a cache rebuilt from the
+   driver and never authoritative: a lifecycle decision that reads it
+   acts on what the driver last reported, and no observed state
+   overwrites desired state.
 3. `cellad` verifies identity and issues none for people. The tokens it
    mints identify sandboxes and environments.
-4. Permission is a decision from outside, and no decision is a refusal.
-   The built-in owner policy is a policy, not an allow-all.
-5. Every default is visible. Nothing the data plane receives is absent
-   from the resolved manifest.
-6. No Latere hostname, namespace, or value anywhere but as a default,
-   an example, or the API group. A fork's tag publishes under the
-   fork's namespace.
-7. The root packages own no policy and dial nothing.
-8. Every mutation and every operation emits one event; the payload
+4. Permission is a decision from outside. An unavailable decision is a
+   refusal. The built-in owner policy is a policy, not an allow-all.
+5. No Latere hostname, namespace, or value in a released artifact, a
+   deploy manifest, a default that a fork would inherit, or the
+   documentation, except as an example or the API group. A fork's tag
+   publishes under the fork's namespace. The module path, its
+   `latere.ai/x/*` dependencies, and the shared CI pipeline are the
+   project's own coordinates and are not what this forbids.
+6. `manifest`, `runtime`, `controller`, and `egress` own no policy and
+   dial nothing; a driver subpackage dials only its substrate.
+7. Every mutation and every operation emits one event; the payload
    names the subject, the object, the action, and never the content.
-9. A secret's value never enters a sandbox. A sandbox holds a
+8. A secret's value never enters a sandbox. A sandbox holds a
    placeholder; the gateway substitutes it only toward a host in the
-   secret's own scope. Scope lives on the secret and no manifest widens
-   it.
-10. The boundary declared when a sandbox is created, its egress rules,
-    its secrets, its volumes, its spawn rights, is never widened by the
-    workload. A child's boundary is a subset of its parent's.
-11. The control plane never dials into a self-hosted data plane; the
+   secret's own scope, and scope lives on the secret.
+9. The boundary declared when a sandbox is created, the fields the
+   boundary check of [[003-manifest-contract]] holds, is never widened
+   by the workload. A child's boundary is a subset of its parent's.
+10. The control plane never dials into a self-hosted data plane; the
     worker connects outbound and claims.
-12. One schema, one resolver, one meaning: two surfaces never accept
-    different subsets of a kind.
 
 ## Not in this spec
 
@@ -339,13 +365,14 @@ the packages ([[016-building-a-plane]]).
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| The root packages import nothing under `internal/` and no package that dials: no `net/http` client, no database driver, no OIDC library | `TestRootPackagesDialNothing` over `go list -deps` | not built |
-| Each binary's build list matches its `depcheck` allow list | the `depcheck` gate | passing for the scaffold's list |
-| No file in the tree names a Latere hostname outside a default, an example, or the API group | `TestNoLatereHostnameOutsideDefaults` over `git ls-files` | not built |
-| A manifest applied through the API and one applied through an importer's call to `Resolve` produce byte-identical resolved manifests | conformance case of [[015-conformance-suite]] | not built |
-| A sandbox created on a directly driven environment and one on a worker's environment are indistinguishable through the API except by `status.environment` | conformance case run against both | not built, [[021-data-plane-workers]] |
+| `manifest`, `runtime`, `controller`, and `egress` import nothing under `internal/`, no HTTP client, no database driver, and no identity library; each driver subpackage reaches only its own substrate's client | `TestRootPackagesDialNothing` over `go list -deps`, one allow list per package | not built |
+| Each role package's and each binary's build list matches its `depcheck` allow list | the `depcheck` gate | passing for the scaffold's list |
+| No released artifact, deploy manifest, inherited default, or documentation page names a Latere hostname or namespace outside an example or the API group | `TestNoLatereCoordinatesInReleasedArtifacts` over `deploy/`, `docs/`, the workflows' image references, and every default in `internal/config`; [[014-release-and-installation]]'s `TestReleasePublishesUnderTheOwnersNamespace` | not built |
+| A manifest applied through the API and one handed to `manifest.Resolve` by an importer with the same options produce byte-identical resolved manifests | `TestAPIAndImporterResolveAgree`, comparing the `PUT` response body with `Resolve`'s output | not built |
+| A sandbox created on a directly driven environment and one on a worker's environment are indistinguishable through the API except by `status.environment`, `status.driver`, and `status.isolation` | conformance case run against both | not built, [[021-data-plane-workers]] |
+| The control plane opens no connection toward a worker's host during the whole e2e tier | [[021-data-plane-workers]]'s `TestNoInboundToTheDataPlane` | not built |
 | `cellad` refuses to start with no issuer configured | `TestServeRefusesToStartWithoutAnIssuer` | not built, [[006-identity]] |
 | With the authorizer URL set and the endpoint down, every request is refused with `authorizer_unavailable` | conformance case | not built, [[006-identity]] |
 | After `cellad` restarts with Postgres and the data plane has lost one of three sandboxes, `GET /v1/sandboxes` lists three and the lost one returns to `Running` with its volume | e2e tier of [[012-test-stubs-and-tiers]] | not built, [[010-state]] |
 | A canary secret value appears in no sandbox environment, file, event, or log across the e2e tier | `TestSecretValuesNeverEnterASandbox` | not built, [[018-egress-and-secrets]] |
-| A child spawned with one more allowed host than its parent is refused with `boundary_exceeded` | conformance case | not built, [[022-mesh-and-spawn]] |
+| A child spawned with one more allowed host than its parent is refused with `boundary_exceeded` | [[022-mesh-and-spawn]]'s `TestSpawnBoundary` | not built |

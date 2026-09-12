@@ -42,7 +42,7 @@ is what it migrates against.
 | Door | Platform runs | Platform writes | Gets |
 |---|---|---|---|
 | webhooks | `cellad` as a service | an authorizer, an admission endpoint, a sink; an OIDC issuer it already has | the whole core, upgraded by image tag; its logic in its own service in any language |
-| packages | its own binary importing `manifest`, `runtime`, `controller` | a server around them, its own identity and store | the contract and the backends in-process; no HTTP hop; its own API shape if it wants one |
+| packages | its own binary importing `manifest`, `runtime`, `controller`, `egress` | a server around them, its own identity and store | the contract and the backends in-process; no HTTP hop; its own API shape if it wants one |
 
 A platform that starts with the packages and later splits into a
 service is not rewriting: the packages are what `cellad` is made of.

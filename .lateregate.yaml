@@ -37,11 +37,12 @@ hermetic:
 tempdir:
   allow: {}
 
-# Spec 001's dependency invariant: the build list of ./cmd/cellad reaches
-# the standard library, latere.ai/x/pkg, and the Kubernetes client the k8s
-# backend of spec 004 drives, and no cloud SDK. Until that backend lands
-# the list is the standard library and pkg, so a new dependency is a
-# decision recorded here.
+# Spec 001's dependency rule: the build list of ./cmd/cellad reaches the
+# standard library, latere.ai/x/pkg, the Kubernetes and Podman clients the
+# drivers of spec 004 drive, the Postgres driver of spec 010, and the
+# OpenTelemetry SDK, and no cloud SDK. Until those specs land the list is
+# the standard library and pkg, so a new dependency is a decision
+# recorded here, one row per role package as the roles land.
 depcheck:
   packages:
     latere.ai/x/cella/cmd/cellad:

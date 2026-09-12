@@ -62,8 +62,8 @@ variable does.
 
 Three places, by who imports it:
 
-- The module root (`manifest/`, `runtime/`, `controller/`) holds the
-  packages a platform built on Cella imports. A change there keeps
+- The module root (`manifest/`, `runtime/`, `controller/`, `egress/`)
+  holds the packages a platform built on Cella imports. A change there keeps
   existing call sites compiling or names the break in the CHANGELOG.
 - `internal/` holds what only `cellad` needs: the HTTP API, identity,
   configuration, the stores.

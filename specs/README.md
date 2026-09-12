@@ -47,7 +47,7 @@ later.
 
 | # | Spec | Effort | Status | Builds on |
 |---|---|---|---|---|
-| [001](001-architecture.md) | Architecture: control plane and data plane, packages, extension points, invariants | medium | drafted | - |
+| [001](001-architecture.md) | Architecture: control plane and data plane, packages, extension points, invariants | medium | validated | - |
 | [002](002-repository-scaffold.md) | Repository scaffold: module, binary, configuration, gate, images, workflows | small | complete | - |
 | [003](003-manifest-contract.md) | Manifest contract: the Sandbox kind, decoding, validation, defaulting, resolve, the boundary check | large | drafted | 001 |
 | [004](004-runtime-backend-contract.md) | Runtime contract: the Driver interface, isolation classes, capabilities, six drivers, conformance | large | drafted | 001, 003 |
@@ -187,8 +187,11 @@ consumer names a need; it is not in any phase.
 The repository is public from its first commit. The conditions the
 tree keeps to, checked by tests where a test can: the gate passes on
 every push; every spec has acceptance criteria that name tests; no
-Latere hostname or value anywhere but as a default, an example, or the
-API group; a fork's tag publishes under the fork's namespace; the
+Latere hostname or namespace in a released artifact, a deploy manifest,
+an inherited default, or a documentation page, except as an example or
+the API group (the module path, its `latere.ai/x/*` dependencies, and
+the shared CI pipeline are the project's coordinates); a fork's tag
+publishes under the fork's namespace; the
 install document is executed by CI; the threat model is written down
 and each control names its test.
 

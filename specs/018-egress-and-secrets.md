@@ -210,9 +210,14 @@ security property:
 ### The boundary never widens
 
 At create the controller provisions in an order where every partial
-failure leaves no egress rather than partial policy: the map is pushed,
-then the network rule is applied, then the workload token that
-authenticates to the gateway is projected, last. After create, a
+failure leaves no running workload rather than partial policy: the map
+is pushed to the gateway, volumes are attached, then the driver creates
+the sandbox, and inside `Create` a driver applies the network rule
+before it starts the workload (a NetworkPolicy before the Pod, a
+per-sandbox network before the container, the sandbox runtime's
+allowlist before the process), so the token the sandbox holds
+authenticates to a gateway whose map already exists behind a rule
+already in force. After create, a
 manifest update may narrow `allowedHosts` or `mode` and may remove a
 secret; it may not add a host, loosen the mode, or add a secret whose
 hosts are not already on `Allow` unless the caller is the owner acting
