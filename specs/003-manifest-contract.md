@@ -175,9 +175,9 @@ caller may narrow, only a non-workload actor may widen); `stopped`
 | `workspace.git.url`, `.ref` | string | none; url required for `git` | no | `https://` or `ssh://`; a branch, tag, or commit |
 | `workspace.git.secret` | string | none | no | a `Secret` name whose scope covers the clone URL's host; the URL must be `https://`, because the gateway substitutes into HTTP and an ssh clone carries none (`secret_out_of_scope` otherwise) |
 | `workspace.volume` | string | none; required for `volume` | no | a `Volume` name attached read-write at `workspace.path` in place of the managed workspace, so the files outlive the sandbox ([[019-volumes]]) |
-| `volumes[]` | list | empty | stopped, `Volumes` | each `{name, path, volume, readOnly}`; `name` a DNS-1123 label, unique; `path` absolute, unique, not equal to or nested with another mount or `/run/cella`; `volume` a `Volume` the caller may attach, in the same environment; a read-write attach of a `single` volume attached read-write elsewhere is `volume_busy` |
+| `volumes[]` | list | empty | stopped, `Volumes` | each `{name, path, volume, readOnly}`; `name` a DNS-1123 label, unique; `path` absolute, unique, not equal to or nested with another mount or `/run/cella`; `volume` a `Volume` the caller may attach, by name among the caller's own or by `vol_` id, in the same environment, and `Available`; an attach its `access` excludes is `volume_busy` ([[019-volumes]]) |
 | `env` | map | empty | no | keys POSIX names; values up to 32 KiB total; a key in the reserved set below is `reserved_prefix` |
-| `secrets[]` | list | empty | narrow | each `{name, env}`; `name` a `Secret` the caller may mount; `env` a POSIX name not in `env`, not reserved, not another entry's `env`, and not equal to any entry's `<env>_HEADER` or `<env>_QUERY`; two entries whose secrets scope one host are `secret_host_conflict` |
+| `secrets[]` | list | empty | narrow | each `{name, env}`; `name` a `Secret` the caller may mount, by name among the caller's own or by `sec_` id; `env` a POSIX name not in `env`, not reserved, not another entry's `env`, and not equal to any entry's `<env>_HEADER` or `<env>_QUERY`; two entries whose secrets scope one host are `secret_host_conflict` |
 | `network.egress.mode` | enum | `allowlist` when any host is set or any secret is mounted, else `open` | narrow | `none` blocks egress; `allowlist` admits `allowedHosts` and every mounted secret's hosts through the gateway; `open` admits everything but `deniedHosts`; DNS and the control plane are admitted by the driver's rule in every mode. Order for narrowing: `open` > `allowlist` > `none`. The environment's `capabilities.egress` list must contain the mode |
 | `network.egress.allowedHosts` | []string | empty | narrow | host patterns under the host rule below; with any mode but `allowlist` is `exclusive_fields`; narrowing removes entries |
 | `network.egress.deniedHosts` | []string | empty | narrow | host patterns; with any mode but `open` is `exclusive_fields`; a denied host wins over a mounted secret's scope; narrowing adds entries |
@@ -275,8 +275,8 @@ type Actor struct {
 // per request; an importer constructs its own.
 type Lookup interface {
 	Environment(ctx context.Context, name string) (*v1.Environment, error)
-	Secret(ctx context.Context, name string) (*v1.Secret, error)
-	Volume(ctx context.Context, name string) (*v1.Volume, error)
+	Secret(ctx context.Context, nameOrID string) (*v1.Secret, error)
+	Volume(ctx context.Context, nameOrID string) (*v1.Volume, error)
 }
 
 // Defaults are the values an absent field takes; Ceilings the values a
@@ -337,10 +337,11 @@ The stages, in order, each one total before the next begins:
    list. Two secrets scoping one host is `secret_host_conflict`. A
    `workspace.git.secret` whose scope has no host of the clone URL, or
    a clone URL that is not `https://`, is `secret_out_of_scope`. A
-   volume in another environment is `invalid_field`; a `single` volume
-   attached read-write elsewhere is `volume_busy` as of the lookup, and
+   volume in another environment is `invalid_field`; an attach the
+   volume's `access` excludes is `volume_busy` as of the lookup, and
    the controller's attach is authoritative if that changes between
-   resolve and create ([[019-volumes]]). The secrets' inject modes fix
+   resolve and create, ending the sandbox `Failed VolumeBusy`
+   ([[019-volumes]]). The secrets' inject modes fix
    which `<env>_HEADER` and `<env>_QUERY` companions exist, and those
    names are checked against `env` and every other `secrets[].env`.
 5. Semantic validation: ceilings (`ceiling_exceeded` with the field and
@@ -414,7 +415,7 @@ status, and its `TestErrorTable` asserts every code here has one.
 | `not_found` | a named `Environment`, `Secret`, or `Volume` the actor cannot see |
 | `secret_host_conflict` | two mounted secrets scope one host |
 | `secret_out_of_scope` | a secret named for a purpose whose host or scheme it does not serve |
-| `volume_busy` | a read-write attach of a `single` volume attached read-write elsewhere |
+| `volume_busy` | an attach a volume's `access` excludes, or a delete of an attached volume |
 | `immutable_field` | an update changes a field the table marks `no` |
 | `boundary_widened` | a workload actor widens a `narrow` field |
 | `boundary_exceeded` | a spawned child or a set replica exceeds its parent's boundary |

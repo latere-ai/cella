@@ -39,7 +39,7 @@ connection reversed so that the data plane needs no inbound route.
 ### The Environment kind
 
 ```yaml
-apiVersion: cella.latere.ai/v1
+apiVersion: cella.latere.ai/v1beta1
 kind: Environment
 metadata:
   name: eu-gpu

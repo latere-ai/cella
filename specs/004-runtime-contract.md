@@ -95,8 +95,8 @@ without the other:
 |---|---|---|
 | `Attach` | `Attacher` | `Attach(ctx, id, AttachRequest) (Session, error)`: a PTY, bytes both ways, resize |
 | `Dial` | `Dialer` | `Dial(ctx, id, port int) (net.Conn, error)`: a connection to a port inside |
-| `Volumes` | `VolumeDriver` | `CreateVolume(ctx, VolumeSpec) (Ref, error)`, `DeleteVolume(ctx, id)`, `ResizeVolume(ctx, id, size)`, `InspectVolume(ctx, id) (VolumeState, error)`, `ListVolumes(ctx) ([]VolumeState, error)` |
-| `Snapshots` | `Snapshotter` | `Snapshot(ctx, volumeID) (snapshotID string, err error)`, `DeleteSnapshot(ctx, snapshotID)` |
+| `Volumes` | `VolumeDriver` | `CreateVolume(ctx, VolumeSpec) (Ref, error)` (fills from the source; `Pending` until done), `DeleteVolume(ctx, id)`, `ResizeVolume(ctx, id, size)`, `InspectVolume(ctx, id) (VolumeState, error)`, `ListVolumes(ctx) ([]VolumeState, error)`, `Write(ctx, id, dest string, src io.Reader) error` (the control plane's own path in, [[019-volumes]]) |
+| `Snapshots` | `Snapshotter` | `Snapshot(ctx, volumeID) (snapshotID string, err error)` (crash-consistent), `DeleteSnapshot(ctx, snapshotID)`, `ListSnapshots(ctx, volumeID) ([]string, error)` |
 | `Display` | `DisplayDriver` | `Display(ctx, id) (Geometry, error)`, `Screenshot(ctx, id, ScreenshotRequest) (io.ReadCloser, error)`, `Screen(ctx, id, fps int) (<-chan Frame, error)` |
 | `Input` | `InputDriver` | `Input(ctx, id, []InputEvent) error` |
 | `Pool` | none | `CreateSpec.Prewarm` and adoption through `Update` are accepted |
@@ -120,8 +120,8 @@ Every type is in `runtime`; the enumerations and `Capabilities` are in
 | `AttachRequest` | `Command []string` (the image's shell when empty), `Env`, `Workdir`, `Cols`, `Rows` |
 | `Session` | `io.ReadWriteCloser`, `Resize(cols, rows int) error`, `Wait(ctx) (exitCode int, err error)` |
 | `LogsRequest` | `Follow bool`, `Since time.Time`, `TailLines int` |
-| `VolumeSpec` | `ID`, `Name`, `Owner`, `Size`, `Class`, `Access` (`single`, `shared-read`), `Source{Kind, SnapshotID, Image, ArchiveURL}` |
-| `VolumeState` | `ID`, `Phase`, `Capacity`, `AttachedTo []string`, `Access` |
+| `VolumeSpec` | `ID`, `Name`, `Owner`, `Size`, `Class`, `Access` (`single`, `shared-read`), `Source{Kind, SnapshotID, Image, ArchiveURL, AllowedHosts, MaxBytes, SHA256}` (the control plane validated the URL; the driver re-applies the hosts to redirects and the caps to the fetch) |
+| `VolumeState` | `ID`, `Phase` (`Pending`, `Available`, `Failed`, `Lost`), `Reason`, `Capacity`, `AttachedTo []string`, `Access` |
 | `Geometry`, `ScreenshotRequest`, `Frame`, `InputEvent` | as [[023-computer-use-operations]] defines them: `{Width, Height}`; `{Format, Scale}`; `{At, PNG []byte}`; `{Type, X, Y, Button, Key, Text, DX, DY, Ms}` |
 | `NotReadyError` | `Driver`, `Condition`, `Components []string`, `Remediation`, `Alternative`; the `local` driver converts `hostsandbox.NotReadyError` into it so `runtime` imports no other package |
 

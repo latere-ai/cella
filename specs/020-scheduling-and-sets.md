@@ -99,7 +99,7 @@ the scheduler is asked.
 ### The SandboxSet kind
 
 ```yaml
-apiVersion: cella.latere.ai/v1
+apiVersion: cella.latere.ai/v1beta1
 kind: SandboxSet
 metadata:
   name: swe-rollout-42
@@ -120,7 +120,7 @@ spec:
     command: ["/workspace/run.sh"] # run in each sandbox once Running; its exit ends the replica
     collect:                       # what the control plane keeps per replica before delete
       paths: ["/workspace/result.json", "/workspace/trajectory.jsonl"]
-      volume: rollout-42-results   # a shared-read Volume the collected tars land in, one directory per replica
+      volume: rollout-42-results   # a shared-read Volume the control plane writes each replica's tar into under <index>/ (019 Write)
   onFailure: continue              # continue | stop
 status:
   phase: Running                   # Pending | Running | Succeeded | Failed | Stopped

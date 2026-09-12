@@ -64,7 +64,7 @@ platform.
 | `sandbox.input`, `sandbox.screenshot` | a computer use operation ended | the event count, the geometry; never the text or the image |
 | `sandbox.spawned` | a child was created by a workload | the child's id, the budget left |
 | `secret.created`, `.updated`, `.deleted` | the `Secret` kind | the name, the version, the scope; never the value |
-| `volume.created`, `.attached`, `.detached`, `.snapshotted`, `.deleted` | the `Volume` kind | the sandbox id, the mode |
+| `volume.created`, `.updated`, `.attached`, `.detached`, `.snapshotted`, `.failed`, `.deleted` | the `Volume` kind ([[019-volumes]]) | the sandbox id and mode for attach and detach; the reason for `failed`; the snapshot id |
 | `set.created`, `.replica`, `.completed`, `.deleted` | the `SandboxSet` kind | the counts, the replica index and exit code |
 | `environment.registered`, `.offline`, `.keyed`, `.key_revoked` | the `Environment` kind | the worker count, the `jti` |
 

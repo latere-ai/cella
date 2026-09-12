@@ -65,7 +65,7 @@ later.
 | [016](016-building-a-plane.md) | Building a plane: how a platform composes the packages and the webhooks without a fork | small | drafted | 001, 004, 006, 007, 015 |
 | [017](017-observability.md) | Observability: metrics, traces, logs, alerts | small | drafted | 002, 005, 008 |
 | [018](018-egress-and-secrets.md) | Egress and secrets: the Secret kind, placeholders, the gateway as a data plane component, sync and telemetry, the boundary a workload cannot widen | large | validated | 003, 004, 006, 010 |
-| [019](019-volumes.md) | Volumes: the Volume kind, attachment, the workspace as a volume, what persists and how | medium | drafted | 003, 004 |
+| [019](019-volumes.md) | Volumes: the Volume kind, access and attachment, sources and fill, snapshots, the managed workspace | medium | validated | 003, 004, 005 |
 | [020](020-scheduling-and-sets.md) | Scheduling and sets: environment modes, queues, capacity, pools, the SandboxSet kind for rollouts | large | drafted | 003, 005 |
 | [021](021-data-plane-workers.md) | Data plane workers: the Environment kind, registration, the operation queue, the worker role | large | drafted | 004, 006, 018 |
 | [022](022-mesh-and-spawn.md) | Mesh and spawn: peers that reach each other, sandboxes that create sandboxes, a fixed boundary | medium | drafted | 003, 006, 018 |
@@ -132,7 +132,7 @@ flowchart BT
   S018 --> S004
   S018 --> S006
   S018 --> S010
-  S019 --> S004
+  S019 --> S005
   S020 --> S005
   S021 --> S018
   S022 --> S018
