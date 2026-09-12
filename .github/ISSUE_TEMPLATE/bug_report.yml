@@ -1,0 +1,60 @@
+name: Bug report
+description: Something Cella does that it should not, or does not do that it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not report a security vulnerability here. See
+        [SECURITY.md](https://github.com/latere-ai/cella/blob/main/SECURITY.md).
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you got instead.
+      placeholder: |
+        I applied a manifest with lifecycle.autoStop 15m and the sandbox ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: >
+        The shortest sequence that shows it. The manifest, the `cella` or
+        `curl` command with its output, is ideal. Redact tokens.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The release tag or image digest, from `GET /version`.
+      placeholder: v0.1.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: runtime
+    attributes:
+      label: Runtime backend
+      options:
+        - Kubernetes
+        - Podman
+        - Native
+        - Not applicable
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: >
+        Relevant lines from cellad, and the `trace_id` of the failing
+        request if you have it. Redact tokens and hostnames you would rather
+        not publish.
+      render: text

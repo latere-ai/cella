@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/latere-ai/cella/blob/main/SECURITY.md
+    about: Report it privately to security@latere.ai, never as an issue.
+  - name: Running cellad and writing manifests
+    url: https://github.com/latere-ai/cella/blob/main/docs/README.md
+    about: Install, configuration, manifest reference, API, and operations documentation.

@@ -1,0 +1,57 @@
+# The shared quality bar, read by `go tool lateregate`. The gates live in
+# latere.ai/x/ci-gate, pinned in go.mod; only repository-specific values are
+# here.
+
+cover:
+  trim_prefix: latere.ai/x/cella/
+
+spec:
+  status:
+    - vague
+    - drafted
+    - validated
+    - dispatched
+    - in-progress
+    - testing
+    - complete
+    - stale
+    - superseded
+  require: [title, status, track, depends_on, affects, effort, created, updated, author]
+  wikilinks: true
+  numbered: true
+  started: [dispatched, in-progress, testing, complete]
+  settled: [complete, superseded]
+  require_section:
+    - Overview
+    - Design
+    - Acceptance criteria
+  require_section_by_status:
+    complete: [Outcome]
+
+# The suite runs with only the Go toolchain on PATH. cellad itself needs
+# no binary beside it; the podman and native backends of spec 004 add
+# their own allowances when they land.
+hermetic:
+  allow: []
+
+tempdir:
+  allow: {}
+
+# Spec 001's dependency invariant: the build list of ./cmd/cellad reaches
+# the standard library, latere.ai/x/pkg, and the Kubernetes client the k8s
+# backend of spec 004 drives, and no cloud SDK. Until that backend lands
+# the list is the standard library and pkg, so a new dependency is a
+# decision recorded here.
+depcheck:
+  packages:
+    latere.ai/x/cella/cmd/cellad:
+      decision: >-
+        the server reaches latere.ai/x/pkg and the standard library; the
+        Kubernetes client joins the list with spec 004 and nothing
+        else does without a row here (spec 001)
+      allow:
+        latere.ai/x/pkg: the shared library every Latere service is built on (spec 002)
+
+license:
+  spdx: Apache-2.0
+  holder: Latere AI

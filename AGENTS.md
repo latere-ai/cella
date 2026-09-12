@@ -1,0 +1,10 @@
+- Respond short, precise, and concise.
+- If you didn't add a test, you didn't fix a bug. Every bug fix must include a reproducible test that fails without the fix and passes with it.
+- Specs live in specs/. When implementing a big feature, create specs first then implement. Each spec is tightly scoped. When a spec is completed, record the outcome and archive it.
+- Commit frequently, one small scope diff at a time. Push to main once a full batch of work is complete and verified.
+- Leftovers are cleaned up in follow-up commits.
+- Target a high quality outcome, >90% coverage, each feature verified via an e2e test.
+- Write in audience language: documents aim at user value and usage, the API surface aims at builder precision, code comments aim at technical precision.
+- This repository is public. No Latere hostname, token, or internal reference anywhere but as a default or an example. The hosted plane that builds on it lives elsewhere and is one consumer among any.
+- Relevant latere projects and shared components (latere.ai/x/pkg/*) are in ../
+- Every sentence is written for one reader (user, contributor, developer) and the register follows the reader; an error has one code, one fixed user sentence in `message`, and one developer detail in a separate field. The rule and the review checklist: https://github.com/latere-ai/pkg/blob/main/docs/writing/registers.md

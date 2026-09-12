@@ -1,0 +1,4 @@
+# Every job in this repository runs on GitHub's hosted runners, so no
+# self-hosted label is declared and a fork needs no runner set up.
+self-hosted-runner:
+  labels: []

@@ -1,0 +1,26 @@
+name: Feature request
+description: Something Cella should be able to do.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: >
+        What you are trying to do and where Cella stops you. Describe the
+        situation rather than the solution; the shape of the fix is easier to
+        judge with the constraint in front of it.
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you have in mind
+      description: Optional. How you would solve it, and what you have ruled out.
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: What you do today
+      description: Optional. The workaround you are living with, if any.
