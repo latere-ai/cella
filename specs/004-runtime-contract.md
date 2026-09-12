@@ -97,7 +97,7 @@ without the other:
 | `Dial` | `Dialer` | `Dial(ctx, id, port int) (net.Conn, error)`: a connection to a port inside |
 | `Volumes` | `VolumeDriver` | `CreateVolume(ctx, VolumeSpec) (Ref, error)` (fills from the source; `Pending` until done), `DeleteVolume(ctx, id)`, `ResizeVolume(ctx, id, size)`, `InspectVolume(ctx, id) (VolumeState, error)`, `ListVolumes(ctx) ([]VolumeState, error)`, `Write(ctx, id, dest string, src io.Reader) error` (the control plane's own path in, [[019-volumes]]) |
 | `Snapshots` | `Snapshotter` | `Snapshot(ctx, volumeID) (snapshotID string, err error)` (crash-consistent), `DeleteSnapshot(ctx, snapshotID)`, `ListSnapshots(ctx, volumeID) ([]string, error)` |
-| `Display` | `DisplayDriver` | `Display(ctx, id) (Geometry, error)`, `Screenshot(ctx, id, ScreenshotRequest) (io.ReadCloser, error)`, `Screen(ctx, id, fps int) (<-chan Frame, error)` |
+| `Display` | `DisplayDriver` | `Display(ctx, id) (Geometry, error)`, `Screenshot(ctx, id, ScreenshotRequest) (io.ReadCloser, error)`, `Screen(ctx, id, fps int, format string) (<-chan Frame, error)` |
 | `Input` | `InputDriver` | `Input(ctx, id, []InputEvent) error` |
 | `Pool` | none | `CreateSpec.Prewarm` and adoption through `Update` are accepted |
 | `Egress`, `Mesh`, `Ingress`, `Resize`, `Files`, `Detach` | none | declarations about what the core methods enforce |
@@ -122,7 +122,7 @@ Every type is in `runtime`; the enumerations and `Capabilities` are in
 | `LogsRequest` | `Follow bool`, `Since time.Time`, `TailLines int` |
 | `VolumeSpec` | `ID`, `Name`, `Owner`, `Size`, `Class`, `Access` (`single`, `shared-read`), `Source{Kind, SnapshotID, Image, ArchiveURL, AllowedHosts, MaxBytes, SHA256}` (the control plane validated the URL; the driver re-applies the hosts to redirects and the caps to the fetch) |
 | `VolumeState` | `ID`, `Phase` (`Pending`, `Available`, `Failed`, `Lost`), `Reason`, `Capacity`, `AttachedTo []string`, `Access` |
-| `Geometry`, `ScreenshotRequest`, `Frame`, `InputEvent` | as [[023-computer-use-operations]] defines them: `{Width, Height}`; `{Format, Scale}`; `{At, PNG []byte}`; `{Type, X, Y, Button, Key, Text, DX, DY, Ms}` |
+| `Geometry`, `ScreenshotRequest`, `Frame`, `InputEvent` | declared in `runtime/display` as [[023-computer-use-operations]] defines them: `{Width, Height}`; `{Format, Scale}`; `{At, Format, Data []byte}`; `{Type, X, Y, ToX, ToY, Button, Modifiers, Key, Text, Direction, Amount, Ms}` |
 | `NotReadyError` | `Driver`, `Condition`, `Components []string`, `Remediation`, `Alternative`; the `local` driver converts `hostsandbox.NotReadyError` into it so `runtime` imports no other package |
 
 ### Capabilities
@@ -155,7 +155,7 @@ type Capabilities struct {
 | Snapshots | where the cluster has the VolumeSnapshot API | by copy | yes | by copy | by copy | the worker's |
 | Attach | yes: SPDY exec with a TTY | yes: hijacked attach | yes: the guest agent | no: the sandbox runtime launches detached stages and has no PTY or stdin seam | yes | the worker's |
 | Dial | yes: port forwarding | yes | yes | no | yes: loopback | the worker's |
-| Display | yes: an Xvfb sidecar | yes: in-container | yes | no | no | the worker's |
+| Display | yes: the `cella-display` sidecar sharing `/tmp` with the workload | yes: in-container | yes: the guest agent | no | no | the worker's |
 | Input | as Display | as Display | as Display | no | no | the worker's |
 | Resize | CPU and memory in place where the cluster allows | CPU and memory | memory balloon | no | no | the worker's |
 | Pool | yes | no | yes | no | no | the worker's |

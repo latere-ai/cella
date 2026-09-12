@@ -38,7 +38,7 @@ force through the gate.
 | Artifact | Name |
 |---|---|
 | binaries | `cellad_<tag>_<os>_<arch>.tar.gz`, `cella_<tag>_<os>_<arch>.tar.gz` for linux and darwin, amd64 and arm64, plus `checksums.txt` |
-| images | `ghcr.io/<owner>/cellad:<tag>`, `ghcr.io/<owner>/cella-stubs:<tag>`, multi-arch, digest-pinned in the release notes |
+| images | `ghcr.io/<owner>/cellad:<tag>`, `ghcr.io/<owner>/cella-stubs:<tag>`, `ghcr.io/<owner>/cella-display:<tag>` (the desktop of [[023-computer-use-operations]]: an X server, a window manager, the capture tool), multi-arch, digest-pinned in the release notes |
 | attestations | cosign signatures over the images and the checksums; an SPDX SBOM per image and one for the module graph; SLSA provenance per image |
 | deploy archive | `deploy-<tag>.tar.gz`, the kustomize base and examples with the image references rewritten to the release |
 

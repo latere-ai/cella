@@ -61,7 +61,8 @@ knows how.
 | streams | exec framing, exit codes, attach round trip, tar both ways, logs | 008 |
 | events | every mutation and exec yields its event on `GET .../events` with no secret in it | 009 |
 | agent | the scenario an agent runs from the skill alone: apply, exec, cp, delete, by way of `cella` | 011 |
-| capability | `display`, `resize`, `network`, `persist`, each gated on `Features` | 004 |
+| computer use | the browser-ready manifest of [[023-computer-use-operations]]: `DisplayReady`, the port proxy, screenshot, input, screenshot again | 023 |
+| capability | `display`, `resize`, `network`, `volumes`, each gated on `Features` | 004 |
 
 Each case cleans up what it created and runs under a timeout; the suite
 runs in under five minutes against the native backend.

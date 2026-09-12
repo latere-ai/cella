@@ -72,6 +72,7 @@ what.
 | a manifest body that exhausts memory | `CELLA_MAX_BODY_BYTES`, the YAML decoder's alias and depth limits, and a 64 KiB annotation cap | 003, 008 |
 | a flood from one subject | the per-subject rate limit and the authorizer's `limits` | 008 |
 | exec output to a caller without the right | `sandbox.exec` guards exec, attach, files, and logs are `sandbox.read` and never include exec output | 008 |
+| the port proxy turned toward another sandbox or the Pod network | the proxy resolves a port name only within the sandbox's own declared ports and dials through the driver; no caller-supplied host or port reaches the dialer | 023 |
 | a key in the environment | `CELLA_TOKEN_KEY` and the webhook secrets are read once at start and never logged; the deploy manifests mount them from Secrets | 002, 014 |
 | a dependency with a known vulnerability | the `vuln` gate on every push | 002 |
 | an image that is not what was released | signed images, SBOMs, and provenance attestations; `gh attestation verify` documented | 014 |
