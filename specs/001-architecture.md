@@ -244,7 +244,7 @@ sequenceDiagram
   K->>S: place (strategy, environment, capacity)
   S-->>K: now, from pool, or queued
   K->>G: push the sandbox's credential map
-  Note over K,R: then volumes, then Create; the driver's rule before its workload (018)
+  Note over K,R: then volumes, then Create, with the driver's rule before its workload (018)
   K->>R: Create
   R-->>K: observed state
   A->>E: sandbox.created
