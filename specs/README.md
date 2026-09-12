@@ -56,7 +56,7 @@ later.
 | [007](007-admission.md) | Admission: AdmitFunc, defaults and ceilings, named policies, the admission webhook, the count ceiling | small | validated | 003, 006 |
 | [008](008-api.md) | API: the /v1 kinds, streams, error envelope, OpenAPI document | large | drafted | 003, 005, 006, 007 |
 | [009](009-events.md) | Events: one signed record per mutation and operation, to the operator's sink | small | drafted | 005, 006 |
-| [010](010-state.md) | State: desired and observed, the store, secret values, revocations, the journal, optional Postgres | medium | drafted | 004, 005 |
+| [010](010-state.md) | State: desired and observed, the store contract, transactions, secret values, the journal, queues and operations, optional Postgres | large | validated | 003, 004, 005 |
 | [011](011-agent-client.md) | Agent client: the cella command and the skill | medium | drafted | 003, 008 |
 | [012](012-test-stubs-and-tiers.md) | Test stubs and tiers: the stubs, the gateway, make run, the driver tiers, CI jobs | medium | drafted | 002, 006, 007, 009 |
 | [013](013-security-and-threat-model.md) | Security and threat model: what Cella protects, against whom, and how | medium | drafted | 001, 004, 006, 008 |

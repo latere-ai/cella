@@ -176,6 +176,7 @@ deployment that sets one before its spec lands is not refused.
 | `CELLA_EVENTS_URL`, `CELLA_EVENTS_SECRET` | 009 | unset | the event sink and the HMAC key; events are off when the URL is unset; the URL without the secret is a start-up failure |
 | `CELLA_DB_URL`, `CELLA_DB_MAX_CONNS` | 010 | unset, `8` | a Postgres URL and the pool size; the URL unset keeps every state in memory and turns recovery off |
 | `CELLA_JOURNAL_CAP` | 010 | `1000` | events kept per object in the in-memory journal |
+| `CELLA_JOURNAL_RETENTION` | 010 | `720h` | how long acknowledged or dropped events stay in the Postgres journal |
 | `CELLA_REQUESTS_PER_MINUTE` | 008 | `600` | requests one subject may send in a minute; `0` turns the limit off |
 | `CELLA_MAX_BODY_BYTES` | 008 | `65536` | the largest manifest body accepted |
 | `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_*` | 017 | unset | the standard OpenTelemetry exporter variables, read by `latere.ai/x/pkg/otel`; telemetry is off without the endpoint |

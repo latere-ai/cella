@@ -456,8 +456,10 @@ no budget left at create; `Resolve` never emits it.
 ### Package layout
 
 `manifest/v1` holds the types of every kind, including `Capabilities`,
-which `runtime` aliases so the two never disagree, and imports nothing
-but the standard library. `manifest` holds `Decode`, `Resolve`, the
+which `runtime` aliases so the two never disagree, and the `Object`
+interface every kind implements (`Kind() string`, `ID() string`,
+`Owner() string`, `Name() string`), which `Decode` returns and the
+store keys by; it imports nothing but the standard library. `manifest` holds `Decode`, `Resolve`, the
 quantity and duration parsers, the host rule, the boundary check, and
 the error type, and imports `manifest/v1` and
 `latere.ai/x/pkg/hostmatch`. Neither imports `internal/` or `runtime`.
