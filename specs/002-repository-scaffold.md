@@ -161,12 +161,12 @@ deployment that sets one before its spec lands is not refused.
 | `CELLA_SOURCE_ALLOW` | 019 | unset | hosts a `Volume` archive source may be fetched from; unset refuses every archive |
 | `CELLA_ENVIRONMENT_OFFLINE` | 021 | `2m` | how long without a worker heartbeat before an environment is `Offline` |
 | `CELLA_OIDC_ISSUERS` | yes, from 006 | none | comma separated issuer URLs whose tokens are accepted |
-| `CELLA_OIDC_AUDIENCE` | 006 | `cella` | the audience a token must carry |
+| `CELLA_OIDC_AUDIENCE` | 006 | `cella` | the audience a caller token must contain; the tokens cellad mints carry it, and workload tokens also carry `cella-egress` for the gateway |
 | `CELLA_OIDC_INSECURE_ISSUERS` | 006 | unset | issuers from the list that may use `http://` on a host other than loopback; set by the test stubs, never in production |
-| `CELLA_TOKEN_KEY` | yes, from 006 | none | PEM-encoded ECDSA P-256 private key that signs workload tokens; required in every mode |
+| `CELLA_TOKEN_KEY` | yes, from 006 | none | one or two PEM-encoded RSA private keys of at least 2048 bits; the first signs workload tokens and environment keys, every block is in the key set, so rotation is prepending a key and later removing the old block; required in every mode |
 | `CELLA_AUTHORIZER_URL`, `CELLA_AUTHORIZER_TOKEN` | 006 | unset | the operator's authorization endpoint and the bearer cellad sends it; unset selects the built-in owner policy; the URL without the token is a start-up failure |
 | `CELLA_AUTHORIZER_TIMEOUT`, `CELLA_AUTHORIZER_CACHE` | 006 | `3s`, `10s` | one decision's deadline and how long it is cached per subject, action, and resource |
-| `CELLA_TOKEN_KEY_OVERLAP` | 006 | `24h` | how long the previous signing key stays in the key set after a rotation |
+| `CELLA_ENVIRONMENT_KEY_TTL` | 006 | `8760h` | the lifetime of an environment key from mint |
 | `CELLA_ADMIN_SUBJECTS` | 006 | unset | comma separated subjects the built-in owner policy lets act on every sandbox; read and unused when an authorizer is set |
 | `CELLA_ADMISSION_URL`, `CELLA_ADMISSION_TOKEN`, `CELLA_ADMISSION_TIMEOUT` | 007 | unset, unset, `3s` | the operator's admission endpoint, its bearer, and one call's deadline; the URL unset selects the built-in defaults and ceilings |
 | `CELLA_MAX_SANDBOXES_PER_SUBJECT` | 007 | `0` | the count ceiling per subject; `0` is none |

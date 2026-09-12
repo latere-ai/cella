@@ -173,7 +173,9 @@ self-hosted plane. `DELETE` purges on sandbox delete.
 CONNECT proxy that terminates TLS with a per-environment authority,
 authenticates the caller by the sandbox's workload token presented as
 proxy credentials (`pkg/egress.TokenAuth` against `cellad`'s key set,
-audience `cellad egress`), looks up the principal's map, and forwards.
+requiring the audience `cella-egress`, which every workload token
+carries beside the control plane's own ([[006-identity]])), looks up
+the principal's map, and forwards.
 Placement per environment:
 
 | Environment | Gateway | Network rule |

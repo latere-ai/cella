@@ -53,7 +53,7 @@ what.
 
 | Threat | Control | Spec |
 |---|---|---|
-| escape from a sandbox to the host | the k8s backend runs Pods as non-root with every capability dropped, a read-only root file system except the workspace and `/tmp`, `seccomp: RuntimeDefault`, no privilege escalation, no host namespaces, no service account token; podman runs rootless; the native backend confines only by directory and says so | 004 |
+| escape from a sandbox to the host | the k8s driver runs Pods as non-root with every capability dropped, a read-only root file system except the workspace and `/tmp`, `seccomp: RuntimeDefault`, no privilege escalation, no host namespaces, no service account token; podman runs rootless; the native driver confines only by directory and says so | 004 |
 | lateral movement between sandboxes | a NetworkPolicy per Pod denies ingress from other Pods and egress to the Pod network; the podman network is per sandbox | 004 |
 | egress to a host not in the manifest | the environment's rule admits only the gateway, DNS, and the control plane; the gateway refuses a CONNECT to a host off the allow list before any bytes flow; where a driver cannot enforce it, `EgressEnforced` is false and the resolved manifest warns | 004, 018 |
 | a secret's value in a sandbox | the sandbox holds a per-sandbox placeholder; the value is decrypted in the control plane only to be pushed to the gateway, substituted only toward the secret's own hosts, and never returned by any API | 018 |
@@ -93,7 +93,7 @@ The deploy manifests that carry the Pod security fields
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| A Pod the k8s backend creates has every field of the escape control set | `TestPodSecurityFields` over the rendered Pod, and the kind tier's `TestClusterPodIsConfined` running `id`, `cat /proc/1/status`, and a mount attempt | not built |
+| A Pod the k8s driver creates has every field of the escape control set | `TestPodSecurityFields` over the rendered Pod, and the kind tier's `TestClusterPodIsConfined` running `id`, `cat /proc/1/status`, and a mount attempt | not built |
 | A sandbox cannot reach another sandbox's IP or the Pod network | `TestClusterNoLateralMovement` | not built |
 | `GET` of another subject's sandbox is 404 and identical to a missing id | `TestForbiddenLooksLikeNotFound` | not built |
 | A canary env value and a canary token appear in no event, log line, or status body across the e2e tier | `TestNoSecretLeaks` grepping every capture | not built |

@@ -55,6 +55,8 @@ spec:
   queues: [default, rollouts]
   gateway: https://egress.eu.example.internal:3128   # the environment's gateway, as sandboxes reach it
 status:
+  id: env_01J9...
+  owner: https://login.example.com|ops
   phase: Ready                     # Pending | Ready | Degraded | Offline
   driver: k8s
   capabilities: {Egress: true, Mesh: true, Volumes: true, Display: true, Pool: true}
@@ -64,8 +66,11 @@ status:
 ```
 
 `POST /v1/environments/{name}/keys` mints an environment key: a token
-signed by `cellad` with `sub: environment:<name>`, `aud: cella`, no
-expiry, revocable, shown once. The operator puts it on the worker's
+signed by `cellad` with `sub: environment:<env_ id>`, the control
+plane's audience, an `exp` of `CELLA_ENVIRONMENT_KEY_TTL` from mint, a
+`jti` that `DELETE .../keys/{jti}` revokes, shown once; an environment
+holds several so each worker carries its own ([[006-identity]]). The
+operator puts it on the worker's
 host. An environment with no worker heartbeat for
 `CELLA_ENVIRONMENT_OFFLINE` (default `2m`) is `Offline`: new sandboxes
 for it queue or fail by their strategy, running ones are `Lost` after

@@ -77,8 +77,8 @@ rebuild, a desired sandbox with no observed counterpart is `Lost` and
 the controller acts ([[005-lifecycle-controller]]). `Secrets` holds
 values under envelope encryption ([[018-egress-and-secrets]]) and hands
 a plaintext to one caller, `egress.Compile`. `Revocations` holds `jti`
-and `exp` of tokens revoked before expiry, and environment keys, which
-have no `exp`. `Ledger` debits a spawn budget in the same transaction
+and `exp` of tokens revoked before expiry, environment keys among
+them, and forgets each at its `exp`. `Ledger` debits a spawn budget in the same transaction
 that writes the child. `Journal` appends events, marks them
 acknowledged, and serves them per object.
 
