@@ -37,7 +37,7 @@ Not built. The shape is Origo's stubs, with an admission stub added.
 |---|---|---|
 | issuer | `/.well-known/openid-configuration`, `/jwks`, `POST /mint {"sub"}` | a real OIDC issuer over one generated key; mints any subject asked, which is what a stub is for and why it never runs in production |
 | authorizer | the contract of [[006-identity]] | allow everything, with `X-Stub-Deny: <action>` on the incoming request or a `-deny` flag to refuse; records every request for the suite to read back |
-| admission | the contract of [[007-admission]] | returns the manifest unchanged, or with a `-rewrite image=<ref>` applied, or refuses with `-refuse`; records requests |
+| admission | the contract of [[007-admission]] | returns the manifest unchanged, or with `-rewrite image=<ref>` applied, or `-warn <text>` added, or refuses with `-refuse`; `-fail-mode timeout|malformed|status:<code>|no-allow|unknown-field|change-kind|oversize` produces each failure 007 names; records requests |
 | sink | the contract of [[009-events]] | verifies the signature, stores events, serves them at `GET /events`, fails the first `-fail-first N` deliveries |
 | gateway | `cellad egress` itself, not a stub | the real gateway of [[018-egress-and-secrets]] on a loopback port with a generated CA, so the tiers prove substitution against the code that ships |
 | upstream | an HTTPS server the sandboxes reach | records every request's host, headers, query, and body, so a tier asserts what left the sandbox and what the gateway rewrote |

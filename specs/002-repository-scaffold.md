@@ -168,7 +168,7 @@ deployment that sets one before its spec lands is not refused.
 | `CELLA_AUTHORIZER_TIMEOUT`, `CELLA_AUTHORIZER_CACHE` | 006 | `3s`, `10s` | one decision's deadline and how long it is cached per subject, action, and resource |
 | `CELLA_ENVIRONMENT_KEY_TTL` | 006 | `8760h` | the lifetime of an environment key from mint |
 | `CELLA_ADMIN_SUBJECTS` | 006 | unset | comma separated subjects the built-in owner policy lets act on every sandbox; read and unused when an authorizer is set |
-| `CELLA_ADMISSION_URL`, `CELLA_ADMISSION_TOKEN`, `CELLA_ADMISSION_TIMEOUT` | 007 | unset, unset, `3s` | the operator's admission endpoint, its bearer, and one call's deadline; the URL unset selects the built-in defaults and ceilings |
+| `CELLA_ADMISSION_URL`, `CELLA_ADMISSION_TOKEN`, `CELLA_ADMISSION_TIMEOUT` | 007 | unset, unset, `3s` | the operator's admission endpoint, its bearer, and one call's deadline; the URL unset selects the built-in named policies; the URL without the token, or a non-loopback `http://` URL, is a start-up failure |
 | `CELLA_MAX_SANDBOXES_PER_SUBJECT` | 007 | `0` | the count ceiling per subject; `0` is none |
 | `CELLA_DEFAULT_CPU`, `CELLA_DEFAULT_MEMORY`, `CELLA_DEFAULT_DISK` | 007 | `1`, `2Gi`, `10Gi` | the resources a manifest gets when it names none |
 | `CELLA_DEFAULT_AUTOSTOP`, `CELLA_DEFAULT_TTL`, `CELLA_DEFAULT_AUTODELETE` | 007 | `15m`, `24h`, `72h` | the lifecycle a manifest gets when it names none |
