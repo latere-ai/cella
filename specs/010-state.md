@@ -1,5 +1,5 @@
 ---
-title: "State: backend truth, the index, revocations, the journal, optional Postgres"
+title: "State: desired and observed, the store, secret values, revocations, the journal, optional Postgres"
 status: drafted
 track: core
 depends_on:
@@ -16,19 +16,26 @@ author: changkun
 
 ## Overview
 
-The backend holds the truth about every sandbox. `cellad` keeps beside
-it an index for fast reads, a revocation list for workload tokens, and
-a journal for events. All three live in memory by default and in
-Postgres when `CELLA_DB_URL` is set. No lifecycle decision reads the
-store; a store that is lost is rebuilt from the backend, minus the
-journal. This is what lets a single binary run on a laptop with nothing
-beside it and the same binary run replicated behind a database.
+Two states. Desired state is what a caller applied, resolved: every
+`Sandbox`, `Secret`, `Volume`, `SandboxSet`, and `Environment` object.
+It is the control plane's and lives in the store. Observed state is
+what the data plane reports about a sandbox: phase, timestamps, the
+shape granted, the labels the driver stamped. It is the driver's, and
+the store keeps only a copy of it as an index, rebuilt from the driver
+at start and after a lost watch. Beside them the store keeps secret
+values encrypted, the revocation list for tokens, the spawn ledger, and
+the event journal. Everything lives in memory by default and in
+Postgres when `CELLA_DB_URL` is set. A durable store is what lets a
+sandbox the data plane lost be recreated rather than forgotten, and
+what lets several control plane replicas share one queue; an in-memory
+store is what lets one binary run on a laptop with nothing beside it.
 
 ## Current state
 
-Not built. The hosted plane kept all product state in Postgres; the
-index-not-truth rule is inherited from its runtime, where labels were
-already the truth for the reaper.
+Not built. The hosted platform kept all product state in Postgres and
+read runtime truth from labels; the split into desired and observed is
+what this spec adds, so that a durable store recovers a sandbox instead
+of merely remembering it.
 
 ## Design
 
@@ -36,38 +43,58 @@ already the truth for the reaper.
 
 ```go
 type Store interface {
-	Index
+	Desired      // every kind's resolved objects, keyed by kind and id
+	Observed     // the index of driver state per sandbox
+	Secrets      // encrypted values, by secret id and version
 	Revocations
+	Ledger       // spawn budgets, debited atomically with a child's create
 	Journal
+	Leases
 	Ready(ctx context.Context) error
 	Close() error
 }
 
-type Index interface {
+type Desired interface {
+	Put(ctx context.Context, obj v1.Object) error
+	Get(ctx context.Context, kind, id string) (v1.Object, error)
+	ByName(ctx context.Context, kind, owner, name string) (v1.Object, error)
+	List(ctx context.Context, kind string, f Filter, page Page) ([]v1.Object, string, error)
+	Delete(ctx context.Context, kind, id string) error
+}
+
+type Observed interface {
 	Put(ctx context.Context, s runtime.State) error
 	Get(ctx context.Context, id string) (runtime.State, error)
-	ByName(ctx context.Context, owner, name string) (runtime.State, error)
 	List(ctx context.Context, f Filter, page Page) ([]runtime.State, string, error)
-	Delete(ctx context.Context, id string) error
-	Rebuild(ctx context.Context, states []runtime.State) error
+	Rebuild(ctx context.Context, environment string, states []runtime.State) error
 }
 ```
 
-`Rebuild` replaces the whole index from a backend `List`, called at
-start and after a lost watch. `Revocations` holds `jti` and `exp` of
-tokens revoked before expiry and forgets them at `exp`. `Journal`
-appends events, marks them acknowledged, and serves them per sandbox.
+`Rebuild` replaces the observed index of one environment from a
+driver's `List`, called at start and after a lost watch; desired state
+is untouched by it, which is what makes recovery possible: after a
+rebuild, a desired sandbox with no observed counterpart is `Lost` and
+the controller acts ([[005-lifecycle-controller]]). `Secrets` holds
+values under envelope encryption ([[018-egress-and-secrets]]) and hands
+a plaintext to one caller, `egress.Compile`. `Revocations` holds `jti`
+and `exp` of tokens revoked before expiry, and environment keys, which
+have no `exp`. `Ledger` debits a spawn budget in the same transaction
+that writes the child. `Journal` appends events, marks them
+acknowledged, and serves them per object.
 
 ### Memory
 
-The default. Maps under a mutex, the journal a ring per sandbox capped
-at `CELLA_JOURNAL_CAP` (default 1000 events) and dropped at process
-end. `Ready` is always nil.
+The default. Maps under a mutex, the journal a ring per object capped
+at `CELLA_JOURNAL_CAP` (default 1000 events), everything dropped at
+process end. `Ready` is always nil. Desired state is not durable, so
+the start-up log says recovery is off and a second replica is refused.
 
 ### Postgres
 
-Selected by `CELLA_DB_URL`. Three tables, `sandboxes`, `revocations`,
-`events`, with migrations embedded and applied at start by
+Selected by `CELLA_DB_URL`. Tables `objects` (desired, one row per
+kind and id with the resolved JSON and a version), `observed`,
+`secret_values`, `revocations`, `ledger`, `events`, `leases`, with
+migrations embedded and applied at start by
 `latere.ai/x/pkg/pgxmigrate`; a schema newer than the binary is a
 start-up failure naming both versions. `Ready` is one `SELECT 1` with a
 1 second budget. The pool is sized by `CELLA_DB_MAX_CONNS` (default 8),
@@ -85,12 +112,16 @@ both refill. Without Postgres, a second replica is a configuration
 error the start-up log names, since two memories of one backend would
 each try to be the reaper.
 
-### Why not truth
+### Why two states
 
-A store that were truth would need the backend to agree with it, and
-the failure mode of that design is a sandbox the store forgot that a
-cluster still bills for. With the backend as truth, the worst loss on
-a store failure is history, and the reaper keeps running from labels.
+If the store were the only truth, a sandbox the store forgot would run
+on unbilled while the control plane denied it existed. If the driver
+were the only truth, a Pod evicted by a node drain would take a
+tenant's environment with it and nothing would notice but the tenant.
+Desired in the store and observed in the driver gives each failure a
+recovery: a driver that lost an object is told to recreate it; a store
+that lost its index rebuilds it from labels; the reaper keeps running
+from labels either way.
 
 ## Not in this spec
 
@@ -103,8 +134,9 @@ Kubernetes Lease object.
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| Both stores pass one suite: put, get, by name, filtered and paged list, delete, rebuild, revoke and forget at `exp`, append and acknowledge and read per sandbox | `TestStoreSuite` over memory and Postgres in a test container | not built |
-| `Rebuild` after the backend holds three sandboxes and the store holds a fourth leaves three | `TestRebuildDropsWhatTheBackendLost` | not built |
+| Both stores pass one suite: desired put, get, by name, filtered and paged list per kind, delete; observed put, get, list, rebuild; secret value round trip under encryption; revoke and forget at `exp`; ledger debit that fails at zero and is atomic under contention; append, acknowledge, read per object; lease acquire and expiry | `TestStoreSuite` over memory and Postgres in a test container | not built |
+| `Rebuild` after the driver holds three sandboxes and the observed index holds a fourth leaves three observed and four desired, and the fourth is reported `Lost` | `TestRebuildKeepsDesiredState` | not built |
+| A plaintext secret value is returned by exactly one method and appears in no other query result or log | `TestSecretValuesAreConfined` | not built |
 | A binary older than the schema refuses to start naming both versions | `TestSchemaAheadOfBinary` | not built |
 | Two replicas against one Postgres run one reaper; killing the holder moves the lease within 15 seconds | `TestLeaseFailover` | not built |
 | The Postgres store serves a 100,000 row list page in under 50 ms | `TestListIsIndexed` with `EXPLAIN` asserting an index scan | not built |

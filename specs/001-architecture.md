@@ -1,9 +1,9 @@
 ---
-title: "Architecture: components, packages, planes, extension points, invariants"
+title: "Architecture: control plane and data plane, packages, extension points, invariants"
 status: drafted
 track: core
 depends_on: []
-affects: [manifest/, runtime/, controller/, internal/, cmd/cellad/, cmd/cella/, docs/]
+affects: [manifest/, runtime/, controller/, internal/, cmd/cellad/, cmd/cella/, cmd/cella-worker/, cmd/cella-egress/, docs/]
 effort: medium
 created: 2026-09-12
 updated: 2026-09-12
@@ -14,146 +14,179 @@ author: changkun
 
 ## Overview
 
-Cella is the open core of a sandbox platform: a declarative contract for
-an agent or workload environment, the server that makes such an
-environment exist on a runtime backend and keeps it alive for as long as
-the contract says, and the packages a platform imports to build a
-hosted product on top. The contract is a manifest in the shape of a
-Kubernetes object, `apiVersion: cella/v1`, `kind: Sandbox`. The server
-is `cellad`. The packages are `manifest`, `runtime`, and `controller`.
+Cella is an open source control plane for sandboxes: the environments
+agents and workloads run in. It owns a declarative contract for such an
+environment, a manifest in the shape of a Kubernetes object under the
+API group `cella.latere.ai/v1`, the API that creates, drives, and
+observes it, the scheduling that decides when and where it runs, and
+the boundary the environment lives inside: what it may reach, what
+credentials it may use, what it may spawn. It does not own the
+environment itself. The data plane, the machines and clusters where
+sandboxes run, is either a backend the control plane drives directly
+or a self-hosted environment whose worker connects to the control
+plane and executes its operations. The same drivers run in both.
 
 The design follows the Kubernetes API server in one respect and Origo
 in another. Like an API server, `cellad` owns the schema, the
-validation, the defaulting, and the reconciliation of desired state
-into a backend, and pushes every question of who may do what to
-endpoints an operator writes. Like Origo, the whole component is
+validation, the defaulting, the desired state, and the reconciliation
+of desired into observed, and pushes every question of who may do what
+to endpoints an operator writes. Like Origo, the whole component is
 public, one installation of it is Latere's, and nothing in the tree
-names that installation except as a default or an example.
+names that installation except as a default, an example, or the API
+group.
 
-This spec fixes what every other spec assumes: the components, the
-package boundary, what the core owns and what a plane built on it
-supplies, the extension points, the flows, and the invariants. Read it
-first.
+This spec fixes what every other spec assumes: the two planes, the
+components, the package boundary, the extension points, the flows, and
+the invariants. Read it first.
 
 ## Current state
 
 Nothing of the design is built. The repository holds the scaffold of
 [[002-repository-scaffold]]: the binary serving its probes, typed
-configuration, and the gate. The specs after this one each take one
-component. The hosted plane this core was extracted from runs today as
-one closed binary with the identity, billing, and product surfaces
-this spec names as a plane's; its migration onto the packages is that
-plane's own work and is out of scope here, except that the boundary
-this spec draws must make it possible.
+configuration, and the gate. The hosted platform this control plane
+was extracted from runs today as one closed binary with its own copies
+of the manifest, the k8s driver, an egress gateway, and the identity,
+billing, and product surfaces this spec names as a platform's; its
+migration onto this control plane is that platform's own work and out
+of scope here, except that the boundary this spec draws must make it
+possible.
 
 ## Design
 
-### Components
+### Two planes
 
 ```mermaid
-flowchart LR
+flowchart TB
   subgraph callers [Callers]
     CLI[cella command]
-    Plane[a platform built on cella]
-    Agent[an agent inside a sandbox]
+    Plat[a platform built on cella]
+    Agent[a process inside a sandbox]
   end
-  subgraph cellad [cellad]
-    API[/v1 API/]
+  subgraph cp [Control plane: cellad]
+    API[/v1 API: sandboxes, secrets, volumes, sets, environments/]
     Resolve[manifest resolve]
     Auth[identity: OIDC verify, workload tokens]
-    Ctl[controller: reconcile, reaper, warm pool]
-    Store[(store: index, optional Postgres)]
+    Sched[scheduler: immediate, pooled, queued]
+    Ctl[controller: desired to observed]
+    Store[(store: desired state, index, journal)]
   end
-  subgraph operator [Operator endpoints]
+  subgraph ops [Operator endpoints]
     IdP[any OIDC issuer]
     Authz[authorizer webhook]
     Adm[admission webhook]
     Sink[event sink]
   end
-  subgraph backends [Runtime backends]
-    K8s[k8s: Pod + PVC]
-    Podman[podman: container + volume]
-    Native[native: host process + dir]
+  subgraph dp1 [Data plane: driven directly]
+    K8s[k8s driver]
+    Podman[podman driver]
+    Native[native driver]
+    EG1[cella-egress gateway]
+  end
+  subgraph dp2 [Data plane: self-hosted]
+    Worker[cella-worker: claims operations, runs a driver]
+    EG2[cella-egress gateway]
   end
   CLI --> API
-  Plane --> API
+  Plat --> API
   Agent -- workload token --> API
-  API --> Auth
-  Auth -- verify --> IdP
-  Auth -- decide --> Authz
-  API --> Resolve
-  Resolve -- mutate, validate --> Adm
-  Resolve --> Ctl
-  Ctl --> Store
+  API --> Auth --> IdP
+  Auth --> Authz
+  API --> Resolve --> Adm
+  Resolve --> Sched --> Ctl
+  Ctl <--> Store
   Ctl --> K8s
   Ctl --> Podman
   Ctl --> Native
+  Ctl -- operation queue --> Worker
+  Worker -- outbound only --> API
+  Ctl -- credential maps --> EG1
+  Worker --> EG2
   API -- every mutation --> Sink
 ```
 
-One binary, three kinds of neighbour. Callers speak the `/v1` API of
-[[008-api]]. Operator endpoints are HTTP contracts the operator or the
-plane implements; each has a default when absent, listed under
-Extension points. Backends are Go implementations of one interface,
-[[004-runtime-backend-contract]], selected by `CELLA_RUNTIME`.
+The control plane never dials into a self-hosted data plane. A worker
+there connects outbound, registers its environment, claims operations,
+executes them with a driver, and posts results, the shape a managed
+agent service uses for customer-hosted execution. A directly driven
+data plane is the same driver called in-process. A caller cannot tell
+which kind of environment its sandbox landed on except by reading
+`status.environment`.
+
+### Components
+
+| Component | Runs where | Owns |
+|---|---|---|
+| `cellad` | the control plane | the API, resolve, identity, scheduling, the controller, the store, the webhook clients, the event delivery |
+| `cella-worker` | a self-hosted data plane | one registered environment: claims operations for it and executes them with the driver its host has (k8s, podman, native) |
+| `cella-egress` | beside sandboxes in either data plane | the credential-substituting egress gateway: the only path from a sandbox to the network, with a per-sandbox map the control plane pushes |
+| `cella` | a shell or an agent | the client of the API |
+| `cella-stubs` | tests and `make run` | the stub issuer, authorizer, admission endpoint, and sink |
 
 ### Packages
 
-The module is `latere.ai/x/cella`. Three packages at the root are
+The module is `latere.ai/x/cella`. Four packages at the root are
 imported by others; everything else is `internal/`.
 
 | Package | Owns | Promise to an importer | Spec |
 |---|---|---|---|
-| `manifest`, `manifest/v1` | the `cella/v1` types, strict decoding from JSON and YAML, structural validation, defaulting, the resolved form | a manifest the schema accepts today is accepted by every later `v1` build; new fields are optional; Go API changes are additive within a module major | [[003-manifest-contract]] |
-| `runtime`, `runtime/k8s`, `runtime/podman`, `runtime/native`, `runtime/runtimetest` | the `Runtime` interface, its optional capabilities, the three backends, and the conformance suite a fourth must pass | the interface changes only with a module major; a backend that passes `runtimetest` works under `controller` | [[004-runtime-backend-contract]] |
-| `controller` | reconciliation of a resolved manifest into backend calls, the reaper, the warm pool | drives any conforming `Runtime`; owns no HTTP, no identity, no store | [[005-lifecycle-controller]] |
-| `internal/api` | the `/v1` handlers, streams, the OpenAPI document | none | [[008-api]] |
-| `internal/auth` | the OIDC verifier over the issuers, the workload token signer and its key set, the authorizer client, the built-in owner policy | none | [[006-identity]] |
-| `internal/admission` | the admission client and the built-in defaults and ceilings | none | [[007-admission]] |
-| `internal/events` | the signed event sink client and the journal | none | [[009-events]] |
-| `internal/store` | the sandbox index, token revocation, and the journal, in memory or in Postgres | none | [[010-state]] |
-| `internal/config`, `internal/version` | typed configuration, build identity | none | [[002-repository-scaffold]] |
-| `internal/cellacli` | the `cella` command | none | [[011-agent-client]] |
+| `manifest`, `manifest/v1` | the `cella.latere.ai/v1` kinds, strict decoding, validation, defaulting, resolve, the boundary-subset check | a manifest the schema accepts today is accepted by every later `v1` build; new fields are optional; Go API additive within a module major | [[003-manifest-contract]] |
+| `runtime` | the `Driver` interface a data plane implements, its capabilities, the shared types | changes only with a module major | [[004-runtime-backend-contract]] |
+| `runtime/k8s`, `runtime/podman`, `runtime/native`, `runtime/remote`, `runtime/runtimetest` | the three drivers, the remote driver that queues for a worker, and the conformance suite a driver passes | a driver that passes `runtimetest` works under `controller` and under `cella-worker` | [[004-runtime-backend-contract]], [[021-data-plane-workers]] |
+| `controller` | desired-to-observed reconciliation, the phase machine, the reaper, recovery, the scheduler and its strategies, sets | drives any conforming driver; owns no HTTP, no identity, no store implementation | [[005-lifecycle-controller]], [[020-scheduling-and-sets]] |
+| `egress` | compiling a sandbox's secrets and egress rules into the map the gateway consumes | none beyond the wire shape it shares with `cella-egress` | [[018-egress-and-secrets]] |
+| `internal/api` | the `/v1` handlers, streams, the OpenAPI document | none | [[008-api]], [[023-computer-use-operations]] |
+| `internal/auth` | the OIDC verifier, workload and environment tokens, the authorizer client, the owner policy | none | [[006-identity]] |
+| `internal/admission`, `internal/events`, `internal/store`, `internal/config`, `internal/version`, `internal/cellacli`, `internal/worker` | as their specs say | none | [[007-admission]], [[009-events]], [[010-state]], [[002-repository-scaffold]], [[011-agent-client]], [[021-data-plane-workers]] |
 
 The rule for the root packages: they compute, validate, and drive. They
 never dial an identity provider, a database, a billing system, or a
-webhook. A platform imports them to get the contract and the backends
-with its own identity and policy around them, or runs `cellad` and gets
-the same through the webhooks. Both paths reach one `Resolve` and one
-`Runtime`, so a manifest means the same thing on both.
+webhook. A platform imports them to get the contract, the drivers, and
+the controller with its own identity and policy around them, or runs
+`cellad` and gets the same through the webhooks. Both paths reach one
+`Resolve` and one `Driver`, so a manifest means the same thing on both.
 
-### The core and a plane
+### Kinds
 
-| The core owns | A plane supplies |
+| Kind | Is | Spec |
+|---|---|---|
+| `Sandbox` | one environment: image, resources, volumes, secrets, network boundary, mesh and spawn rights, scheduling, lifecycle; `status` written by the server | [[003-manifest-contract]] |
+| `Secret` | a credential the control plane holds encrypted and never returns, with its own destination scope and injection rule; a sandbox receives a placeholder | [[018-egress-and-secrets]] |
+| `Volume` | persistent storage with a life of its own, attached to sandboxes by mount; how an application an agent built keeps its state, and how tools and configuration reach a run | [[019-volumes]] |
+| `SandboxSet` | many sandboxes from one template with per-replica variants and a completion policy; the unit an RL rollout or an evaluation asks for | [[020-scheduling-and-sets]] |
+| `Environment` | a registered data plane: driven directly or by a worker; capacity, capabilities, labels | [[021-data-plane-workers]] |
+
+Every kind is one object under `apiVersion: cella.latere.ai/v1` with
+`metadata`, `spec`, and `status`, decoded and resolved by the same
+package and served by the same API grammar.
+
+### The control plane and a platform
+
+| The control plane owns | A platform supplies |
 |---|---|
-| the manifest schema and its evolution | accounts, organizations, teams |
-| one resolve pipeline: decode, default, admit, validate | the permission model, as an authorizer |
-| the runtime backends and their conformance | quotas, plans, and billing, as authorizer limits and admission ceilings |
-| lifecycle: create, start, stop, delete, auto-stop, TTL, deadline, warm pool | catalogs of images and policies, as admission mutation |
-| exec, attach, file transfer, logs | secret brokering and egress substitution, as a runtime decorator or a sidecar the admission step adds |
-| verification of caller identity against listed OIDC issuers | the issuer itself |
-| workload identity: one token per sandbox, the key set that verifies it | what a plane grants that identity beyond the core's own API |
+| the kinds and their evolution | accounts, organizations, teams |
+| one resolve pipeline: decode, default, admit, validate, boundary check | the permission model, as an authorizer |
+| scheduling: when and where a sandbox runs, pools, queues, sets | quotas, plans, billing, as authorizer limits and admission ceilings |
+| lifecycle: desired state, phases, reaper, recovery | catalogs of images and policies, as admission mutation |
+| the boundary: egress rules, secrets as placeholders, mesh and spawn subsetting | the secrets' values' provenance, and what else its runtime adds through decorators |
+| exec, attach, files, ports, display, input | a dashboard, a console, a marketplace |
+| caller identity from listed issuers; workload and environment tokens | the issuer |
 | the events of every mutation, signed, to a sink | the sink, and what it does with them |
-| the `cella` command and its skill | a dashboard, a console, a marketplace |
-| a single-node index, optionally durable in Postgres | multi-region routing, fleet views, activity feeds |
+| the `cella` command, the worker, the gateway, the stubs | multi-region routing, fleet views, activity feeds |
 
-A plane never needs a fork. Everything in the right column reaches the
-core through an extension point below or through the exported packages.
+A platform never needs a fork. Everything in the right column reaches
+the control plane through an extension point or the exported packages.
 
 ### Extension points
 
 | Point | Reached | Contract | Default when absent |
 |---|---|---|---|
-| OIDC issuers | on every request, by discovery and key set | standard OpenID Connect; audience `cella` unless configured | none: `cellad` refuses to start without an issuer, because an API with no identity is not a sandbox service |
-| Authorizer webhook | on every request that names a subject and an action | [[006-identity]]: `POST` one decision per request; unavailability is a refusal | the built-in owner policy: a subject acts on the sandboxes it created; `CELLA_ADMIN_SUBJECTS` act on all |
-| Admission webhook | on every apply, after defaulting and before validation | [[007-admission]]: `POST` the manifest, receive the manifest or a refusal; unavailability is a refusal | the built-in defaults and the ceilings of the configuration |
-| Event sink | after every mutation and every exec | [[009-events]]: signed `POST`, at-least-once, ordered per sandbox | off |
-| Runtime decorators | at import time, by a plane that constructs a backend itself | [[004-runtime-backend-contract]]: a Go hook over the backend's object before it is created | none |
-
-The four HTTP points are the same shape: one URL, one bearer or one HMAC
-secret, one request per decision, fail closed. A stub of each is part
-of the tree ([[012-test-stubs-and-tiers]]) so `make run` and the
-end-to-end tiers exercise the real client against a real endpoint.
+| OIDC issuers | on every request | standard OpenID Connect; audience `cella` unless configured | none: `cellad` refuses to start without an issuer |
+| Authorizer webhook | on every request that names a subject and an action | [[006-identity]]; unavailability is a refusal | the built-in owner policy |
+| Admission webhook | on every apply, after defaulting and before validation | [[007-admission]]; unavailability is a refusal | the built-in defaults and ceilings |
+| Event sink | after every mutation and every operation | [[009-events]]: signed `POST`, at-least-once, ordered per object | off |
+| Environments | registered by an operator; a worker connects | [[021-data-plane-workers]] | the one environment the in-process driver of `CELLA_RUNTIME` provides |
+| Driver decorators | at import time, by a platform that constructs a driver itself | [[004-runtime-backend-contract]] | none |
+| Scheduling strategies | in `controller.Options` | [[020-scheduling-and-sets]] | `immediate`, `pooled`, `queued` |
 
 ### Flows
 
@@ -167,114 +200,138 @@ sequenceDiagram
   participant Z as authorizer
   participant M as resolve
   participant D as admission
+  participant S as scheduler
   participant K as controller
-  participant R as runtime
-  participant S as sink
-  C->>A: PUT /v1/sandboxes/{name} (manifest, JSON or YAML)
+  participant R as driver
+  participant G as cella-egress
+  participant E as sink
+  C->>A: PUT /v1/sandboxes/{name} (manifest)
   A->>I: verify bearer against issuers
-  I-->>A: subject
-  A->>Z: may subject create/update Sandbox name?
+  A->>Z: may subject create Sandbox name?
   Z-->>A: allow (with limits) or deny
   A->>M: decode, default
   M->>D: admit(manifest)
-  D-->>M: manifest' or refusal
-  M->>M: validate, apply ceilings
-  A->>K: reconcile(resolved)
-  K->>R: Create or update
-  R-->>K: ref, state
-  A->>S: sandbox.applied
-  A-->>C: 201 or 200, resolved manifest with status
+  M->>M: validate, ceilings, boundary subset of parent (spawn)
+  A->>K: desired state written to the store
+  K->>S: place (strategy, environment, capacity)
+  S-->>K: now, from pool, or queued
+  K->>G: push the sandbox's credential map
+  K->>R: Create (with the workload token, volumes, network rule)
+  R-->>K: observed state
+  A->>E: sandbox.created
+  A-->>C: 201, resolved manifest with status
 ```
 
-Exec follows the same first three steps, then streams through the
-backend's `Exec` with the request body as stdin and the response as
-stdout, stderr, and exit code, and emits one event with the command,
-the subject, and the exit code and never the output.
+Operations (exec, attach, files, ports, screenshot, input) follow the
+first three steps, then reach the driver, in-process or through a
+worker's claim, and stream back through the API. Each emits one event
+naming the operation and never its content.
 
-Workload identity: at create the controller asks identity for a token
-whose subject is the sandbox and whose audience is `cella`, and the
-backend projects it at `/run/cella/token`. A process inside the sandbox
-calls `/v1` with it. The authorizer sees the sandbox as the subject and
-decides as for any other; the built-in policy lets a sandbox read and
-exec itself and nothing else. The token dies with the sandbox: a
-deleted sandbox's token is refused because the index no longer holds
-its id, whether or not a store is on.
+Spawn: a process inside a sandbox applies a manifest with the workload
+token. Identity sees `workload` set; the authorizer decides as for any
+subject; resolve takes the parent's resolved manifest as the ceiling
+and refuses any field that widens the boundary; the controller debits
+the parent's spawn budget in the same act that creates the child, and
+the child inherits the parent's mesh. The boundary declared at the
+root of a spawn tree bounds every descendant.
 
 ### State
 
-The backend holds the truth about a sandbox: its phase, its labels, its
-timestamps, its resource shape, in the labels and annotations of the
-Pod, the container, or the native record. `cellad` rebuilds its index
-from the backend at start and after a lost watch, so a restart loses
-nothing a backend still knows. The store of [[010-state]] is an index
-and a journal: it makes lists fast, keeps revocations and events across
-restarts, and is optional. With `CELLA_DB_URL` unset the index is in
-memory and the journal is the sink's problem; set, both are in
-Postgres. No decision of the controller reads the store as truth.
+Two states, two truths. Desired state is the resolved manifest, the
+thing a caller applied; it is the control plane's and lives in the
+store. Observed state is what the data plane reports: phase, timestamps,
+the resource shape granted, the labels the driver stamped; it is the
+driver's and is rebuilt from it at start and after a lost watch. The
+controller's job is to make observed match desired. With `CELLA_DB_URL`
+set, desired state survives a control plane restart and a data plane
+that lost the object: a sandbox whose driver reports `Lost` is
+recreated from its desired state with its volumes reattached, rather
+than forgotten. Without Postgres, desired state lives with the process,
+and a lost object is reported and reaped, which the start-up log says.
 
 ### Naming
 
-`cella/v1` is the API group and version of the schema. It carries no
-domain because the project is the authority of its own schema, the way
-`apps/v1` is Kubernetes's own. A platform that accepted an older group
-name maps it to `cella/v1` at its own edge; the core never sees it.
+`cella.latere.ai/v1` is the API group and version. Kubernetes asks only
+that a group be a DNS subdomain and validates nothing about who owns
+it; every project outside the core groups uses its own domain, and
+this is Latere's open source project. The group is therefore the one
+place a Latere name appears in the public contract, and the invariant
+below says so.
 
-Reserved prefixes: labels and annotations under `cella/` are the core's
-and a manifest that sets one is refused; a plane picks its own prefix.
-Paths under `/run/cella/` inside a sandbox are the core's projections.
-Variables the server reads are `CELLA_*`.
+Reserved prefixes: labels and annotations under `cella.latere.ai/` are
+the control plane's and a manifest that sets one is refused; a platform
+picks its own prefix. Paths under `/run/cella/` inside a sandbox are
+the control plane's projections. Environment variables under `CELLA_`
+inside a sandbox are the control plane's; variables the server reads
+are `CELLA_*`.
 
 ### Dependencies
 
 The build list of `./cmd/cellad` reaches the standard library,
-`latere.ai/x/pkg`, the Kubernetes client for the k8s backend, the
-Podman API client for the podman backend, the Postgres driver for the
-store, and the OpenTelemetry SDK, and nothing else: no cloud SDK, no
-web framework, no ORM. The `depcheck` gate holds the list, and a new
-entry is a row with a reason.
+`latere.ai/x/pkg`, the Kubernetes client for the k8s driver, the Podman
+API client for the podman driver, the Postgres driver for the store,
+and the OpenTelemetry SDK, and nothing else: no cloud SDK, no web
+framework, no ORM. `./cmd/cella-worker` reaches the same minus the
+Postgres driver; `./cmd/cella-egress` reaches `latere.ai/x/pkg/egress`
+and the standard library. The `depcheck` gate holds each list, and a
+new entry is a row with a reason.
 
 ### Invariants
 
-1. The manifest is the only way to create a sandbox. Every surface,
-   the API, the command, and an importer, goes through one `Resolve`,
-   and the resolved manifest a caller reads back is what the backend
-   was asked for, defaults included.
-2. Runtime truth lives in the backend. A store is an index and a
-   journal, never consulted for a lifecycle decision.
-3. `cellad` verifies identity and issues none for people. The only
-   tokens it mints identify sandboxes.
-4. Permission is a decision from outside, and no decision is a
-   refusal. The built-in owner policy is a policy, not an allow-all.
-5. Every default is visible. Nothing the backend receives is absent
+1. The manifest is the only way to create a sandbox. Every surface, the
+   API, the command, and an importer, goes through one `Resolve`, and
+   the resolved manifest a caller reads back is what the data plane was
+   asked for, defaults included.
+2. Desired state is the control plane's; observed state is the data
+   plane's. No lifecycle decision reads the store for observed state,
+   and no observed state overwrites desired state.
+3. `cellad` verifies identity and issues none for people. The tokens it
+   mints identify sandboxes and environments.
+4. Permission is a decision from outside, and no decision is a refusal.
+   The built-in owner policy is a policy, not an allow-all.
+5. Every default is visible. Nothing the data plane receives is absent
    from the resolved manifest.
-6. No Latere hostname, namespace, or value anywhere but as a default
-   or an example. A fork's tag publishes under the fork's namespace.
+6. No Latere hostname, namespace, or value anywhere but as a default,
+   an example, or the API group. A fork's tag publishes under the
+   fork's namespace.
 7. The root packages own no policy and dial nothing.
-8. Every mutation and every exec emits one event; the payload names
-   the subject, the sandbox, the action, and never the content.
-9. A sandbox reaches the hosts its manifest names and no other, where
-   the backend can enforce it; a backend that cannot says so in its
-   capabilities and the resolved manifest carries the warning.
-10. One schema, one resolver, one meaning: two surfaces never accept
-    different subsets of `cella/v1`.
+8. Every mutation and every operation emits one event; the payload
+   names the subject, the object, the action, and never the content.
+9. A secret's value never enters a sandbox. A sandbox holds a
+   placeholder; the gateway substitutes it only toward a host in the
+   secret's own scope. Scope lives on the secret and no manifest widens
+   it.
+10. The boundary declared when a sandbox is created, its egress rules,
+    its secrets, its volumes, its spawn rights, is never widened by the
+    workload. A child's boundary is a subset of its parent's.
+11. The control plane never dials into a self-hosted data plane; the
+    worker connects outbound and claims.
+12. One schema, one resolver, one meaning: two surfaces never accept
+    different subsets of a kind.
 
 ## Not in this spec
 
-The schema fields ([[003-manifest-contract]]), the backend interface
+The schema fields ([[003-manifest-contract]]), the driver interface
 ([[004-runtime-backend-contract]]), the webhook payloads
 ([[006-identity]], [[007-admission]], [[009-events]]), the endpoint
-table ([[008-api]]), the threat model
-([[013-security-and-threat-model]]), and how a plane migrates onto the
-packages ([[016-building-a-plane]]).
+table ([[008-api]]), egress and secrets ([[018-egress-and-secrets]]),
+volumes ([[019-volumes]]), scheduling and sets
+([[020-scheduling-and-sets]]), workers ([[021-data-plane-workers]]),
+mesh and spawn ([[022-mesh-and-spawn]]), the threat model
+([[013-security-and-threat-model]]), and how a platform migrates onto
+the packages ([[016-building-a-plane]]).
 
 ## Acceptance criteria
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| The root packages import nothing under `internal/` and no package that dials: no `net/http` client, no database driver, no OIDC library | `TestRootPackagesDialNothing` over `go list -deps` of `./manifest/...`, `./runtime/...`, `./controller/...` | not built |
-| `./cmd/cellad`'s build list matches the `depcheck` allow list | the `depcheck` gate | passing for the scaffold's list |
-| No file in the tree names a Latere hostname outside a default or an example | `TestNoLatereHostnameOutsideDefaults` over `git ls-files` | not built |
+| The root packages import nothing under `internal/` and no package that dials: no `net/http` client, no database driver, no OIDC library | `TestRootPackagesDialNothing` over `go list -deps` | not built |
+| Each binary's build list matches its `depcheck` allow list | the `depcheck` gate | passing for the scaffold's list |
+| No file in the tree names a Latere hostname outside a default, an example, or the API group | `TestNoLatereHostnameOutsideDefaults` over `git ls-files` | not built |
 | A manifest applied through the API and one applied through an importer's call to `Resolve` produce byte-identical resolved manifests | conformance case of [[015-conformance-suite]] | not built |
+| A sandbox created on a directly driven environment and one on a worker's environment are indistinguishable through the API except by `status.environment` | conformance case run against both | not built, [[021-data-plane-workers]] |
 | `cellad` refuses to start with no issuer configured | `TestServeRefusesToStartWithoutAnIssuer` | not built, [[006-identity]] |
 | With the authorizer URL set and the endpoint down, every request is refused with `authorizer_unavailable` | conformance case | not built, [[006-identity]] |
-| After `cellad` restarts against a backend holding three sandboxes, `GET /v1/sandboxes` lists three before any apply | e2e tier of [[012-test-stubs-and-tiers]] | not built, [[010-state]] |
+| After `cellad` restarts with Postgres and the data plane has lost one of three sandboxes, `GET /v1/sandboxes` lists three and the lost one returns to `Running` with its volume | e2e tier of [[012-test-stubs-and-tiers]] | not built, [[010-state]] |
+| A canary secret value appears in no sandbox environment, file, event, or log across the e2e tier | `TestSecretValuesNeverEnterASandbox` | not built, [[018-egress-and-secrets]] |
+| A child spawned with one more allowed host than its parent is refused with `boundary_exceeded` | conformance case | not built, [[022-mesh-and-spawn]] |

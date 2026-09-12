@@ -7,7 +7,7 @@ depends_on:
   - specs/004-runtime-backend-contract.md
   - specs/006-identity.md
   - specs/008-api.md
-affects: [internal/auth/, internal/api/, runtime/, deploy/, SECURITY.md]
+affects: [internal/auth/, internal/api/, runtime/, egress/, cmd/cella-egress/, cmd/cella-worker/, deploy/, SECURITY.md]
 effort: medium
 created: 2026-09-12
 updated: 2026-09-12
@@ -33,15 +33,18 @@ ones that belonged to its identity and billing surfaces.
 
 ### Assets
 
-The host and the cluster the backend runs on. Other sandboxes. The
-credentials in a sandbox's `env`. The workload token. The operator's
-webhook secrets and token key. The events, which name who did what.
+The host and the cluster the data plane runs on. Other sandboxes. The
+values of every `Secret`. The workload token, the environment key, and
+the gateway's CA. The operator's webhook secrets, token key, and
+secrets KEK. Volumes and what they hold. The events, which name who did
+what.
 
 ### Adversaries
 
 | Adversary | Holds | Wants |
 |---|---|---|
-| a sandbox process | its own token, its env, network per its manifest | the host, another sandbox, a host its manifest did not name, a longer life |
+| a sandbox process | its own token, placeholders in its env, the gateway per its manifest | the host, another sandbox, a host its manifest did not name, a secret's value, a longer life, a child with a wider boundary |
+| a worker host | an environment key, the sandboxes it runs | another environment's sandboxes, the control plane's store, a secret bound for another environment |
 | an authenticated caller | a valid bearer | another subject's sandbox, a ceiling bypass, output it may not read |
 | a network position | the wire | a token, a webhook secret, a forged event |
 | a compromised webhook | the authorizer or admission endpoint | to allow everything or to run an image it chose |
@@ -52,7 +55,13 @@ webhook secrets and token key. The events, which name who did what.
 |---|---|---|
 | escape from a sandbox to the host | the k8s backend runs Pods as non-root with every capability dropped, a read-only root file system except the workspace and `/tmp`, `seccomp: RuntimeDefault`, no privilege escalation, no host namespaces, no service account token; podman runs rootless; the native backend confines only by directory and says so | 004 |
 | lateral movement between sandboxes | a NetworkPolicy per Pod denies ingress from other Pods and egress to the Pod network; the podman network is per sandbox | 004 |
-| egress to a host not in the manifest | the allow list is enforced where the backend can and reported as a warning where it cannot; `none` blocks all | 003, 004 |
+| egress to a host not in the manifest | the environment's rule admits only the gateway, DNS, and the control plane; the gateway refuses a CONNECT to a host off the allow list before any bytes flow; where a driver cannot enforce it, `EgressEnforced` is false and the resolved manifest warns | 004, 018 |
+| a secret's value in a sandbox | the sandbox holds a per-sandbox placeholder; the value is decrypted in the control plane only to be pushed to the gateway, substituted only toward the secret's own hosts, and never returned by any API | 018 |
+| a placeholder guessed or replayed toward another host | placeholders are random per sandbox; a placeholder sent off scope leaves verbatim as an inert string | 018 |
+| a workload widening its own boundary | the boundary fields narrow only after create; a workload token may not add a host or a secret; a child is a subset of its parent at resolve | 003, 018, 022 |
+| a runaway spawn tree | budget and depth debited atomically; a child's `ttl` clamped to its parent's; delete cascades | 022 |
+| a volume as an escape | no host path on k8s; a volume attaches only where the authorizer allows; read-only stays read-only in a child | 019, 022 |
+| a compromised worker | an environment key authorizes one environment's queue; operations carry only that environment's sandboxes; secret values cross to that environment's gateway only for sandboxes placed there; the control plane accepts no inbound from a worker | 021 |
 | a sandbox acting as its owner | the workload token's subject is the sandbox, the owner policy grants it read and exec on itself, and the authorizer sees `workload` set | 006 |
 | a token outliving its sandbox | the token's `exp` is the sandbox's expiry, and verification checks the index for `Deleting` | 006 |
 | a caller reaching another's sandbox | every route authorizes before it looks up; `not_found` and `forbidden` are the same 404 to a caller that is not the owner, so existence does not leak | 006, 008 |
@@ -69,8 +78,9 @@ webhook secrets and token key. The events, which name who did what.
 
 ### What is out of scope
 
-Kernel escapes the backend's runtime class does not prevent; an
-operator picks gVisor or Kata through a decorator. The security of the
+Kernel escapes the environment's isolation class does not prevent; an
+operator picks a `vm` class for a floor the container class cannot
+give. The security of the
 issuer and of the webhooks themselves. Secrets management beyond
 `env`; a plane brokers.
 
@@ -88,4 +98,7 @@ The deploy manifests that carry the Pod security fields
 | `GET` of another subject's sandbox is 404 and identical to a missing id | `TestForbiddenLooksLikeNotFound` | not built |
 | A canary env value and a canary token appear in no event, log line, or status body across the e2e tier | `TestNoSecretLeaks` grepping every capture | not built |
 | A YAML body with a billion-laughs alias chain is refused in under 100 ms | `TestYAMLBombIsRefused` | not built |
+| A canary secret value appears in no sandbox environment, file system, event, log, or API response across the e2e tier, and reaches the upstream only in the declared header | `TestSecretValuesNeverEnterASandbox` | not built |
+| A workload token that tries to add a host, mount a secret, or spawn past its budget is refused with the code named | `TestWorkloadCannotWiden` | not built |
+| A worker host with inbound refused runs the whole tier | `TestNoInboundToTheDataPlane` | not built |
 | Every control in the table names a test that exists in the tree | `TestThreatModelControlsHaveTests` reading this file | not built |

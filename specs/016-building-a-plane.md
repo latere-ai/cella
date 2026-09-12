@@ -49,13 +49,13 @@ service is not rewriting: the packages are what `cellad` is made of.
 
 ### Migrating an existing manifest
 
-A platform whose callers already write an older group name maps it at
-its own edge: accept the old `apiVersion`, rewrite it to `cella/v1`,
-drop or translate the fields the core does not have into annotations
-under the platform's prefix, and hand the result to `Resolve`. The
-resolved object it returns carries `cella/v1`, so callers learn the
-new name from every response. The core accepts one group and never
-carries an alias.
+A platform whose callers already write `cella.latere.ai/v1` keeps the
+group; the fields that named the platform's own services become the
+kinds the control plane now has (`Secret` for a vault entry, `Volume`
+for a persisted workspace) or annotations under the platform's prefix
+for what remains its own, and the platform's admission endpoint does
+the translation at its edge. The control plane accepts one schema and
+carries no alias for a field.
 
 ### Where each concern goes
 
@@ -64,7 +64,10 @@ carries an alias.
 | accounts and orgs | the issuer's claims, read by the authorizer | the platform's own middleware before `Resolve` |
 | plans and quotas | authorizer `limits`, admission ceilings | the platform's `Options.Ceilings` and its own count check |
 | image catalog | admission rewrites `spec.image` | an `AdmitFunc` in `Options` |
-| secret brokering | admission places a reference in `env`; a sidecar the k8s decorator adds resolves it | the same decorator, constructed in-process |
+| secrets | the `Secret` kind holds the value; the platform's authorizer decides `secret.mount`; its vault, if it keeps one, writes through `PUT /v1/secrets` | the same kind through the store the platform constructs |
+| persistence | the `Volume` kind; the platform's authorizer decides `volume.attach` | the same |
+| customer-hosted execution | an `Environment` per customer with a `cella-worker` on their side | the same, through `runtime/remote` |
+| rollouts and evaluations | `SandboxSet` through a `queued` environment | the same through `controller` |
 | audit and usage | the sink | the platform's own `events.Sink` implementation |
 | a console | reads `/v1` | reads the platform's own API |
 | multi-region | one `cellad` per region behind the platform's router | one controller per region |
@@ -94,5 +97,5 @@ Any platform's own migration plan.
 |---|---|---|
 | A twenty-line authorizer and admission endpoint from `docs/plane.md`, run beside `cellad`, pass the conformance suite's identity and resolve groups | `TestPlaneDocEndpointsConform` running the doc's code blocks | not built |
 | A server built from the packages in `examples/plane/` passes the conformance suite | `TestExamplePlaneConforms` | not built |
-| The example plane maps an older group name at its edge and the response carries `cella/v1` | `TestExamplePlaneMapsTheOldGroup` | not built |
+| The example plane translates a platform-specific field into a `Secret` and an annotation at its edge and the resolved manifest is what the conformance suite expects | `TestExamplePlaneTranslatesAtTheEdge` | not built |
 | Every row of the concerns table names a mechanism that exists in the tree | `TestConcernsTableIsGrounded` reading this file | not built |

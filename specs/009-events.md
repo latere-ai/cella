@@ -1,5 +1,5 @@
 ---
-title: "Events: one signed record per mutation and exec, to the operator's sink"
+title: "Events: one signed record per mutation and operation, to the operator's sink"
 status: drafted
 track: core
 depends_on:
@@ -59,9 +59,17 @@ platform.
 | `sandbox.attach` | a session ended | duration, bytes each way |
 | `sandbox.files` | a transfer ended | direction, paths, bytes |
 | `sandbox.token` | a token minted outside the projection | the token's `exp`; never the token |
+| `sandbox.recovered` | the controller recreated a lost sandbox from desired state | what was kept: volumes, workspace |
+| `sandbox.input`, `sandbox.screenshot` | a computer use operation ended | the event count, the geometry; never the text or the image |
+| `sandbox.spawned` | a child was created by a workload | the child's id, the budget left |
+| `secret.created`, `.updated`, `.deleted` | the `Secret` kind | the name, the version, the scope; never the value |
+| `volume.created`, `.attached`, `.detached`, `.snapshotted`, `.deleted` | the `Volume` kind | the sandbox id, the mode |
+| `set.created`, `.replica`, `.completed`, `.deleted` | the `SandboxSet` kind | the counts, the replica index and exit code |
+| `environment.registered`, `.offline`, `.keyed`, `.key_revoked` | the `Environment` kind | the worker count, the `jti` |
 
 `workload` is set when the subject is a sandbox. No event carries an
-environment value, a token, or a byte of a sandbox's output.
+environment value, a secret value, a placeholder, a token, an image, or
+a byte of a sandbox's output.
 
 ### Delivery
 

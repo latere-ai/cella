@@ -44,6 +44,12 @@ the core's and knows only the core's API.
 | `cella logs <name|id> [-f]` | the main process output | 0 |
 | `cella events <name|id> [-f]` | the journal | 0 |
 | `cella token <name|id>` | a workload token on stdout | 0 |
+| `cella port-forward <name|id> <local>:<port>` | a local listener onto a port inside, through `Dial` | 0 |
+| `cella screenshot <name|id> [-o file.png]`, `cella input <name|id> -f events.json` | the computer use operations | 0 |
+| `cella secret apply -f`, `cella secret ls`, `cella secret rm` | the `Secret` kind; `apply` reads the value from `-f` or `--value-from-env` and never echoes it | 0; 3 |
+| `cella volume apply -f`, `cella volume ls`, `cella volume snapshot` | the `Volume` kind | 0; 3 |
+| `cella set apply -f [-w]`, `cella set get`, `cella set stop` | the `SandboxSet` kind; `-w` waits for completion and prints the counts | 0; 3 |
+| `cella env ls`, `cella env key <name>` | the `Environment` kind; `key` prints the environment key once | 0; 3 |
 | `cella version` | client and, when reachable, server identity | 0 |
 
 Every command reads `CELLA_URL` and `CELLA_TOKEN`, or `--url` and

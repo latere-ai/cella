@@ -1,5 +1,5 @@
 ---
-title: "Identity: OIDC issuers, workload tokens, the authorizer webhook, the owner policy"
+title: "Identity: OIDC issuers, workload and environment tokens, the authorizer webhook, the owner policy"
 status: drafted
 track: core
 depends_on:
@@ -22,8 +22,9 @@ verified against the issuer's discovery document and key set, with no
 issuer-specific claim read beyond the standard ones. What: one `POST`
 per request to an authorizer endpoint the operator writes, with a
 built-in owner policy when none is configured. The only tokens
-`cellad` mints identify sandboxes, so a process inside one can call
-back with an identity that dies with it.
+`cellad` mints identify sandboxes and environments: a process inside a
+sandbox calls back with an identity that dies with it, and a worker on
+a self-hosted data plane registers with one an operator can revoke.
 
 The shape is Origo's, chosen so that a hosted platform, a company's
 Keycloak, and a laptop's stub issuer are the same code path.
@@ -61,7 +62,17 @@ At create the controller asks for a token for the sandbox:
 configured audience, `exp` = the sandbox's `expiresAt` or 24 hours,
 whichever is sooner, refreshed by the backend's projection before
 expiry; signed with `CELLA_TOKEN_KEY` (ECDSA P-256), `kid` the key's
-thumbprint. The public key set is served at
+thumbprint. The token carries `spawn: {budget, depth, mesh}` from the
+sandbox's desired state ([[022-mesh-and-spawn]]) and `environment`, as
+claims a gateway or a platform reads without a call; the control plane
+itself checks the store, since claims are a copy.
+
+An environment token is the same signature with `sub:
+environment:<name>`, no `exp`, and a `jti` in the revocation list of
+[[010-state]], minted by `POST /v1/environments/{name}/keys` and shown
+once ([[021-data-plane-workers]]). A worker presents it on its one
+outbound connection; it authorizes registration, claiming, and
+reporting for that environment and nothing else. The public key set is served at
 `/.well-known/jwks.json`, so a plane or a third service can verify a
 sandbox's identity without asking `cellad`. `cellad` verifies its own
 tokens the same way it verifies an issuer's, with one more check: the
@@ -101,7 +112,8 @@ Response, 200:
 authorizer can grant a sandbox less than its owner. `resource` is
 absent on `sandbox.list`. `limits` is optional and overrides the
 configured per-subject rate and the built-in count ceiling for this
-subject. Actions:
+subject; `max_priority` caps `scheduling.priority`
+([[020-scheduling-and-sets]]). Actions:
 
 | Action | On |
 |---|---|
@@ -112,6 +124,10 @@ subject. Actions:
 | `sandbox.delete` | `DELETE` |
 | `sandbox.exec` | `exec`, `attach`, file transfer |
 | `sandbox.token` | minting a workload token for a sandbox the caller owns |
+| `secret.create`, `secret.read`, `secret.update`, `secret.delete`, `secret.mount` | the `Secret` kind; `mount` is asked at resolve for every secret a manifest names, with the secret as the resource, so sharing is the authorizer's model ([[018-egress-and-secrets]]) |
+| `volume.create`, `volume.read`, `volume.update`, `volume.delete`, `volume.attach`, `volume.snapshot` | the `Volume` kind; `attach` asked at resolve ([[019-volumes]]) |
+| `set.create`, `set.read`, `set.delete` | the `SandboxSet` kind ([[020-scheduling-and-sets]]) |
+| `environment.create`, `environment.read`, `environment.update`, `environment.delete`, `environment.key`, `environment.use` | the `Environment` kind; `use` asked at resolve for the environment a manifest names, so a platform decides who may run where ([[021-data-plane-workers]]) |
 
 Rules: a non-200 response, a body that does not parse, and a timeout
 (`CELLA_AUTHORIZER_TIMEOUT`, default `3s`) are `authorizer_unavailable`,
@@ -126,12 +142,17 @@ availability is a readiness check.
 
 With `CELLA_AUTHORIZER_URL` unset:
 
-- a subject may `create`, and may `read`, `update`, `delete`, `exec`,
-  and `token` a sandbox whose `owner` is that subject;
-- `list` returns the subject's own sandboxes;
+- a subject may `create` any kind, and may `read`, `update`, `delete`,
+  `exec`, `token`, `mount`, `attach`, and `snapshot` an object whose
+  `owner` is that subject;
+- `list` returns the subject's own objects;
+- every subject may `use` the default environment; other environments
+  are admins' until an authorizer says otherwise;
 - a subject in `CELLA_ADMIN_SUBJECTS` may do all of the above on every
-  sandbox;
-- a sandbox may `read` and `exec` itself and nothing else.
+  object and may create, key, and delete environments;
+- a sandbox may `read` and `exec` itself, may `create` a child while
+  its spawn budget allows, and may `read` its descendants; nothing
+  else.
 
 This is a policy with tests, not the absence of one, and the log says
 `owner policy` at start so an operator knows which is in force.
@@ -161,5 +182,7 @@ the HTTP envelope of 401 and 403 ([[008-api]]).
 | After rotation, tokens signed by the previous key verify for the overlap and not after | `TestKeyRotationOverlap` | not built |
 | Authorizer down, timeout, 500, and a malformed body are each `authorizer_unavailable` and never an allow | `TestAuthorizerFailsClosed` | not built |
 | The authorizer receives every field of the request shape above for every action | `TestAuthorizerRequestShape` against the stub | not built |
-| The owner policy's four rules hold and a non-owner is `forbidden` | `TestOwnerPolicy` | not built |
-| A sandbox's token cannot delete the sandbox or read another | `TestWorkloadIsLeastPrivileged` | not built |
+| The owner policy's rules hold for every kind and a non-owner is `forbidden` | `TestOwnerPolicy`, table-driven over kinds and actions | not built |
+| A sandbox's token cannot delete the sandbox, read a sibling, or mount a secret its parent did not | `TestWorkloadIsLeastPrivileged` | not built |
+| An environment token registers and claims for its environment and is refused for any other route; a revoked one is refused at once | `TestEnvironmentToken` | not built |
+| Every action in the table reaches the authorizer with the object as resource, including `secret.mount`, `volume.attach`, and `environment.use` at resolve | `TestAuthorizerRequestShape` against the stub | not built |

@@ -47,21 +47,28 @@ Every entry either is in the tree or names the spec that builds it.
 ```
 cmd/cellad/             main: the subcommand dispatcher, configuration, listeners, run group
 cmd/cella/              main of the agent client, and nothing else (011)
-manifest/               the cella/v1 types, decoding, validation, defaulting, resolve (003)
-manifest/v1/            the Sandbox type and its status (003)
-runtime/                the Runtime interface, capabilities, the shared types (004)
-runtime/k8s/            Pod + PVC per sandbox (004)
+cmd/cella-worker/       main of the data plane worker (021)
+cmd/cella-egress/       main of the egress gateway (018)
+manifest/               decoding, validation, defaulting, resolve, the boundary check, for every kind (003)
+manifest/v1/            the Sandbox, Secret, Volume, SandboxSet, and Environment types (003, 018, 019, 020, 021)
+runtime/                the Driver interface, isolation classes, capabilities, the shared types (004)
+runtime/k8s/            Pod + PVC per sandbox; a runtime class for the vm class (004)
 runtime/podman/         container + volume per sandbox (004)
-runtime/native/         host directory + confined host process per sandbox (004)
-runtime/runtimetest/    the conformance suite a backend passes (004)
-controller/             reconcile, reaper, warm pool (005)
+runtime/vm/             a microVM per sandbox; a stub until its own spec (004)
+runtime/local/          an OS sandbox around a host process on the operator's machine (004)
+runtime/native/         host directory + process, no boundary; the suite's driver (004)
+runtime/remote/         every method as an operation a worker claims (004, 021)
+runtime/runtimetest/    the conformance suite a driver passes (004)
+controller/             desired to observed, phases, reaper, recovery, cascade, scheduler, sets (005, 020)
+egress/                 compiling a sandbox's secrets and rules into the gateway's map (018)
 internal/config/        typed configuration from the environment; every problem in one message
 internal/version/       build identity set by -ldflags
 internal/auth/          the verifier over the issuers, the workload token signer, the authorizer client, the owner policy (006)
 internal/admission/     the admission client, the built-in defaults and ceilings (007)
 internal/api/           the /v1 handlers, streams, the OpenAPI document (008)
 internal/events/        the signed sink client and the journal (009)
-internal/store/         the index, revocations, journal; memory and Postgres (010)
+internal/store/         desired and observed state, secret values, revocations, ledger, journal; memory and Postgres (010)
+internal/worker/        the claim loop and stream relay of cella-worker (021)
 internal/cellacli/      the cella command: flags, defaults, exit codes (011)
 internal/cellaclient/   the client of the /v1 API the command speaks (011)
 test/e2e/               cellad as a process against a backend (e2e build tag) (012)
@@ -102,7 +109,7 @@ listener and path by path on the public one.
 
 Readiness runs its checks with a 2 second budget: `draining` and
 `disk` (create and remove a file under `CELLA_DATA_DIR`) today, the
-backend's own check once [[004-runtime-backend-contract]] lands, and
+driver's own check once [[004-runtime-backend-contract]] lands, and
 the store's once [[010-state]] does. Shutdown on `SIGTERM` or `SIGINT`:
 readiness answers 503 at once, the process waits a 3 second drain
 delay, then closes the HTTP servers with a 60 second grace period, then
@@ -133,24 +140,35 @@ deployment that sets one before its spec lands is not refused.
 | Variable | Required | Default | Purpose |
 |---|---|---|---|
 | `CELLA_PUBLIC_ADDR`, `CELLA_INTERNAL_ADDR` | no | `:8080`, `:8081` | listen addresses; a test binds `127.0.0.1:0`; the two must differ unless both ask for port 0 |
-| `CELLA_DATA_DIR` | no | `/var/lib/cella` | local disk cellad keeps state on: the readiness write test, the native and podman workspaces (004); created at start |
-| `CELLA_RUNTIME` | no | `k8s` | the backend: `k8s`, `podman`, or `native` (004) |
-| `CELLA_PUBLIC_URL` | yes, from 006 | none | the absolute URL callers reach the public listener at; the issuer of workload tokens and the base of every URL in a response |
-| `CELLA_KUBECONFIG`, `CELLA_NAMESPACE` | 004 | in-cluster, `cella` | the cluster and namespace the k8s backend creates in |
-| `CELLA_PODMAN_SOCKET` | 004 | the user's default socket | the libpod API the podman backend drives |
-| `CELLA_POOL_SIZE` | 005 | `0` | warm sandboxes kept per default image; `0` disables the pool |
+| `CELLA_DATA_DIR` | no | `/var/lib/cella` | local disk cellad keeps state on: the readiness write test, the native and local drivers' sandboxes and volumes (004, 019); created at start |
+| `CELLA_RUNTIME` | no | `k8s` | the in-process driver of the default environment: `k8s`, `podman`, `native`, and from 004 `local`, `vm`, or `none` for a control plane that serves only workers |
+| `CELLA_PUBLIC_URL` | yes, from 006 | none | the absolute URL callers reach the public listener at; the issuer of workload and environment tokens and the base of every URL in a response |
+| `CELLA_KUBECONFIG`, `CELLA_NAMESPACE`, `CELLA_K8S_RUNTIME_CLASS` | 004 | in-cluster, `cella`, unset | the cluster and namespace the k8s driver creates in, and the runtime class that makes its isolation class `vm` |
+| `CELLA_PODMAN_SOCKET` | 004 | the user's default socket | the libpod API the podman driver drives |
+| `CELLA_LOCAL_SRT` | 004 | `srt` on `PATH` | the sandbox runtime binary the local driver confines a process with |
+| `CELLA_REAP_INTERVAL`, `CELLA_LOST_GRACE` | 005 | `30s`, `10m` | the reaper's tick and how long a sandbox is `Lost` before it is recovered or reaped |
+| `CELLA_POOL_SIZE` | 020 | `0` | warm sandboxes kept per default image on an environment with `Pool`; `0` disables the pool |
+| `CELLA_SECRETS_KEK` | yes when any Secret exists, from 018 | none | 32 bytes, base64, wrapping every secret's data key |
+| `CELLA_EGRESS_URL`, `CELLA_EGRESS_INGEST_TOKEN` | 018 | unset | the default environment's gateway as `cellad` reaches its ingest API, and the bearer it presents; both unset turns egress enforcement into a warning on the default environment |
+| `CELLA_EGRESS_SIDECAR` | 018 | unset | `1` runs the gateway as a per-Pod sidecar on k8s instead of one Deployment |
+| `CELLA_SOURCE_ALLOW` | 019 | unset | hosts a `Volume` archive source may be fetched from; unset refuses every archive |
+| `CELLA_ENVIRONMENT_OFFLINE` | 021 | `2m` | how long without a worker heartbeat before an environment is `Offline` |
 | `CELLA_OIDC_ISSUERS` | yes, from 006 | none | comma separated issuer URLs whose tokens are accepted |
 | `CELLA_OIDC_AUDIENCE` | 006 | `cella` | the audience a token must carry |
 | `CELLA_OIDC_INSECURE_ISSUERS` | 006 | unset | issuers from the list that may use `http://` on a host other than loopback; set by the test stubs, never in production |
 | `CELLA_TOKEN_KEY` | yes, from 006 | none | PEM-encoded ECDSA P-256 private key that signs workload tokens; required in every mode |
 | `CELLA_AUTHORIZER_URL`, `CELLA_AUTHORIZER_TOKEN` | 006 | unset | the operator's authorization endpoint and the bearer cellad sends it; unset selects the built-in owner policy; the URL without the token is a start-up failure |
+| `CELLA_AUTHORIZER_TIMEOUT`, `CELLA_AUTHORIZER_CACHE` | 006 | `3s`, `10s` | one decision's deadline and how long it is cached per subject, action, and resource |
+| `CELLA_TOKEN_KEY_OVERLAP` | 006 | `24h` | how long the previous signing key stays in the key set after a rotation |
 | `CELLA_ADMIN_SUBJECTS` | 006 | unset | comma separated subjects the built-in owner policy lets act on every sandbox; read and unused when an authorizer is set |
-| `CELLA_ADMISSION_URL`, `CELLA_ADMISSION_TOKEN` | 007 | unset | the operator's admission endpoint and its bearer; unset selects the built-in defaults and ceilings |
+| `CELLA_ADMISSION_URL`, `CELLA_ADMISSION_TOKEN`, `CELLA_ADMISSION_TIMEOUT` | 007 | unset, unset, `3s` | the operator's admission endpoint, its bearer, and one call's deadline; the URL unset selects the built-in defaults and ceilings |
+| `CELLA_MAX_SANDBOXES_PER_SUBJECT` | 007 | `0` | the count ceiling per subject; `0` is none |
 | `CELLA_DEFAULT_CPU`, `CELLA_DEFAULT_MEMORY`, `CELLA_DEFAULT_DISK` | 007 | `1`, `2Gi`, `10Gi` | the resources a manifest gets when it names none |
 | `CELLA_DEFAULT_AUTOSTOP`, `CELLA_DEFAULT_TTL`, `CELLA_DEFAULT_AUTODELETE` | 007 | `15m`, `24h`, `72h` | the lifecycle a manifest gets when it names none |
 | `CELLA_MAX_CPU`, `CELLA_MAX_MEMORY`, `CELLA_MAX_DISK`, `CELLA_MAX_TTL` | 007 | unset | ceilings a resolved manifest may not exceed; unset is no ceiling |
 | `CELLA_EVENTS_URL`, `CELLA_EVENTS_SECRET` | 009 | unset | the event sink and the HMAC key; events are off when the URL is unset; the URL without the secret is a start-up failure |
-| `CELLA_DB_URL` | 010 | unset | a Postgres URL; unset keeps the index in memory |
+| `CELLA_DB_URL`, `CELLA_DB_MAX_CONNS` | 010 | unset, `8` | a Postgres URL and the pool size; the URL unset keeps every state in memory and turns recovery off |
+| `CELLA_JOURNAL_CAP` | 010 | `1000` | events kept per object in the in-memory journal |
 | `CELLA_REQUESTS_PER_MINUTE` | 008 | `600` | requests one subject may send in a minute; `0` turns the limit off |
 | `CELLA_MAX_BODY_BYTES` | 008 | `65536` | the largest manifest body accepted |
 | `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_*` | 017 | unset | the standard OpenTelemetry exporter variables, read by `latere.ai/x/pkg/otel`; telemetry is off without the endpoint |
