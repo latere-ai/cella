@@ -51,7 +51,7 @@ later.
 | [002](002-repository-scaffold.md) | Repository scaffold: module, binary, configuration, gate, images, workflows | small | complete | - |
 | [003](003-manifest-contract.md) | Manifest contract: the Sandbox kind, decoding, validation, defaulting, resolve, the boundary check | large | validated | 001 |
 | [004](004-runtime-contract.md) | Runtime contract: the Driver interface, optional interfaces, isolation classes, capabilities, the six drivers, conformance | large | validated | 001, 003 |
-| [005](005-lifecycle-controller.md) | Lifecycle controller: desired to observed, phases, the reaper, recovery, cascade | medium | drafted | 003, 004 |
+| [005](005-lifecycle-controller.md) | Lifecycle controller: desired to observed, the phase machine, create and update, the reaper, recovery, cascade | large | validated | 003, 004 |
 | [006](006-identity.md) | Identity: OIDC issuers, workload and environment tokens, the authorizer webhook, the owner policy | medium | validated | 001, 002 |
 | [007](007-admission.md) | Admission: AdmitFunc, defaults and ceilings, named policies, the admission webhook, the count ceiling | small | validated | 003, 006 |
 | [008](008-api.md) | API: the /v1 kinds, streams, error envelope, OpenAPI document | large | drafted | 003, 005, 006, 007 |

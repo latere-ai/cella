@@ -153,7 +153,7 @@ deployment that sets one before its spec lands is not refused.
 | `CELLA_KUBECONFIG`, `CELLA_NAMESPACE`, `CELLA_K8S_RUNTIME_CLASS`, `CELLA_K8S_RUNTIME_CLASS_ISOLATION` | 004 | in-cluster, `cella`, unset, `container` | the cluster and namespace the k8s driver creates in, the runtime class every Pod gets, and the isolation class the operator declares that class provides (`container` or `vm`); never inferred |
 | `CELLA_PODMAN_SOCKET` | 004 | the user's default socket | the libpod API the podman driver drives |
 | `CELLA_LOCAL_SRT` | 004 | `srt` on `PATH` | the sandbox runtime binary the local driver confines a process with |
-| `CELLA_REAP_INTERVAL`, `CELLA_LOST_GRACE` | 005 | `30s`, `10m` | the reaper's tick and how long a sandbox is `Lost` before it is recovered or reaped |
+| `CELLA_REAP_INTERVAL`, `CELLA_LOST_GRACE`, `CELLA_RECOVERY_ATTEMPTS` | 005 | `30s`, `10m`, `5` | the reaper's tick; how long a sandbox is `Lost` without a durable store before it is reaped; how many recreations a durable one gets before `Failed` |
 | `CELLA_POOL_SIZE` | 020 | `0` | warm sandboxes kept per default image on an environment with `Pool`; `0` disables the pool |
 | `CELLA_SECRETS_KEK` | yes when any Secret exists, from 018 | none | 32 bytes, base64, wrapping every secret's data key |
 | `CELLA_EGRESS_URL`, `CELLA_EGRESS_INGEST_TOKEN` | 018 | unset | the default environment's gateway as `cellad` reaches its ingest API, and the bearer it presents; both unset turns egress enforcement into a warning on the default environment |
