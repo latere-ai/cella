@@ -93,7 +93,7 @@ type Options struct {
 	Store     Store      // desired and observed state, the ledger, leases; controller's own interface over 010
 	Drivers   Drivers    // the Driver for an environment id, and the environment's phase (021)
 	Tokens    Tokens     // Mint(ctx, sandbox) (token, jti, exp, error); Revoke(ctx, jti) (006)
-	Egress    Egress     // Compile and Push(ctx, environment, Map); Purge(ctx, environment, principal) (018)
+	Egress    Egress     // Compile; Send(ctx, environment, Map) waits for an acknowledgement; Purge(ctx, environment, principal) (018)
 	Secrets   Secrets    // Secret objects by id for Compile, values included, from the store (010)
 	Events    Events     // Emit(ctx, Event) (009)
 	Scheduler Scheduler  // Place(ctx, desired) (Placement, error); Release(ctx, id) (020)
@@ -127,7 +127,9 @@ running workload:
    resumes at step 3 when capacity is granted.
 3. `Egress.Compile` over the manifest and its `Secret` objects: mints
    the placeholders and produces the map ([[018-egress-and-secrets]]).
-   `Egress.Push` to the environment's gateway. Undo: `Purge`.
+   `Egress.Send` puts the map on the environment's sync stream and
+   waits for one gateway's acknowledgement ([[018-egress-and-secrets]]).
+   Undo: `Purge`, a purge message on the same stream.
 4. Attach every volume, the workspace volume first
    ([[019-volumes]]). Undo: detach in reverse.
 5. `Tokens.Mint`. Undo: `Revoke` the `jti`.

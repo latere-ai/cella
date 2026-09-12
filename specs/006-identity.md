@@ -111,8 +111,9 @@ checks: the `jti` is not in the revocation list, and the sandbox's
 desired state exists with a phase other than `Deleting`
 ([[010-state]]); a deleted sandbox's token is therefore refused by
 `cellad` at once. The gateway verifies offline and cannot see a
-delete: its bound is the token's `exp`, and `egress.purge`
-([[021-data-plane-workers]]) removes the sandbox's map at delete so a
+delete: its bound is the token's `exp`, and the purge on the gateway's
+sync stream ([[018-egress-and-secrets]]) removes the sandbox's map at
+delete so a
 still-valid token reaches a gateway that substitutes nothing for it.
 Without a durable store, desired state dies with the process and every
 workload token is refused after a restart, which is the same restart

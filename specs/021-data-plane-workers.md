@@ -152,7 +152,7 @@ queue's ordering ([[020-scheduling-and-sets]]).
 | Every driver method, issued through `runtime/remote`, executes on a worker running `native` and returns the same result as the direct call | `TestRemoteConformance` in `runtimetest` | not built |
 | An exec of 64 MiB output, an attach with resize, and a tar both ways stream through the worker's single connection without buffering | `TestRemoteStreams` | not built |
 | A dropped connection redelivers unacknowledged operations exactly once | `TestRedelivery` | not built |
-| `egress.push` lands the map on the worker's gateway and the value never appears in a control plane log or in the sandbox | `TestEgressPushCrossesOneHop` | not built |
+| A gateway on the worker's side receives the sandbox's map over its own stream with the same environment key, and the value never appears in a control plane log or in the sandbox | `TestEgressMapCrossesOneHop` | not built |
 | An environment with no heartbeat goes `Offline`, its running sandboxes go `Lost` after the grace, and recover when a worker returns | `TestOfflineAndRecovery` | not built |
 | A worker whose driver reports a different isolation than the environment declares is refused at registration | `TestIsolationMismatch` | not built |
 | The control plane makes no outbound connection to a worker's host during the whole e2e tier | `TestNoInboundToTheDataPlane` with a firewall on the worker's side | not built |
