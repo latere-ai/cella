@@ -185,7 +185,7 @@ Control frames are JSON:
 |---|---|---|
 | `hello {worker, versions}` | up, first | the registered worker id and the highest operation id it has acknowledged |
 | `heartbeat` | both | every 15 seconds |
-| `operation {id, type, sandbox, payload, desiredVersion}` | down | one driver call; the worker answers with a conflict when its observed state's version is not `desiredVersion` |
+| `operation {id, type, sandbox, payload, desiredVersion, traceparent}` | down | one driver call, carrying the W3C trace context the worker continues ([[017-observability]]); the worker answers with a conflict when its observed state's version is not `desiredVersion` |
 | `result {id, ok, value, error}` | up | the call's non-stream return, or a driver error in the driver's vocabulary |
 | `cancel {id}` | down | the caller went away; the worker cancels the operation's context |
 | `credit {id, bytes}` | both | flow control per operation: a side sends at most 8 MiB on an operation's sub-streams beyond what the other side has credited |

@@ -63,7 +63,7 @@ later.
 | [014](014-release-and-installation.md) | Release and installation: images, binaries, attestations, deploy manifests, cellad check, upgrades | medium | drafted | 002, 012, 015 |
 | [015](015-conformance-suite.md) | Conformance suite: the contract and the API as executable tests, against any server | large | drafted | 003, 008, 011 |
 | [016](016-building-a-plane.md) | Building a plane: how a platform composes the packages and the webhooks without a fork | small | drafted | 001, 004, 006, 007, 015 |
-| [017](017-observability.md) | Observability: metrics, traces, logs, alerts | small | drafted | 002, 005, 008 |
+| [017](017-observability.md) | Observability: one metric table across three roles, traces across the seam, redacted logs, alert rules | small | validated | 002, 005, 006, 008, 009, 010, 018, 020, 021 |
 | [018](018-egress-and-secrets.md) | Egress and secrets: the Secret kind, placeholders, the gateway as a data plane component, sync and telemetry, the boundary a workload cannot widen | large | validated | 003, 004, 006, 010 |
 | [019](019-volumes.md) | Volumes: the Volume kind, access and attachment, sources and fill, snapshots, the managed workspace | medium | validated | 003, 004, 005 |
 | [020](020-scheduling-and-sets.md) | Scheduling and sets: environment modes, capacity, the queue, preemption, pools, the SandboxSet kind for rollouts | large | validated | 003, 004, 005, 007, 010, 019 |
@@ -144,6 +144,9 @@ flowchart BT
   S016 --> S015
   S016 --> S004
   S017 --> S008
+  S017 --> S018
+  S017 --> S020
+  S017 --> S021
   S018 --> S004
   S018 --> S006
   S018 --> S010

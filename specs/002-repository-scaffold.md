@@ -60,6 +60,7 @@ runtime/remote/         every method as an operation a worker claims (004, 021)
 runtime/runtimetest/    the conformance suite a driver passes (004)
 controller/             desired to observed, phases, reaper, recovery, cascade, scheduler, sets (005, 020)
 egress/                 compiling a sandbox's secrets and rules into the gateway's map (018)
+internal/metrics/       the one registry and the table of 017
 internal/config/        typed configuration from the environment; every problem in one message
 internal/version/       build identity set by -ldflags
 internal/auth/          the verifier over the issuers, the workload token signer, the authorizer client, the owner policy (006)
@@ -76,7 +77,7 @@ internal/cellaclient/   the client of the /v1 API the command speaks (011)
 test/e2e/               cellad as a process against a backend (e2e build tag) (012)
 test/conformance/       the contract as an importable test package (015)
 test/stubs/             the stub issuer, authorizer, admission endpoint, sink, and upstream, and the cella-stubs binary (012)
-tools/                  generators and release scripts (002, 014)
+tools/                  generators and release scripts (002, 014); tools/rules prints the alert rules for promtool (017)
 deploy/                 kustomize base, examples, bootstrap (014)
 skills/cella/           the skill that teaches an agent the cella command (011)
 docs/                   for people who run cellad or build against it

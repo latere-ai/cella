@@ -68,8 +68,10 @@ test.
 `deploy/base`: Namespace-less Deployment (one replica; the Postgres
 lease of [[010-state]] permits more), Service, ServiceAccount with a
 Role limited to Pods, PVCs, NetworkPolicies, and Secrets in one
-namespace, NetworkPolicy for `cellad` itself, PodDisruptionBudget, and
-the Pod security fields of [[013-security-and-threat-model]].
+namespace, NetworkPolicy for `cellad` itself, PodDisruptionBudget, the
+Pod security fields of [[013-security-and-threat-model]], and beside
+the kustomization but outside it, `prometheusrule.yaml`, the alerts of
+[[017-observability]] for a cluster that has the operator's CRD.
 `deploy/bootstrap`: the Namespace and Secret templates for
 `CELLA_TOKEN_KEY` and the webhook secrets, applied by hand once.
 `deploy/examples/kind`, `deploy/examples/generic`: overlays an operator
