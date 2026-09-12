@@ -47,7 +47,7 @@ later.
 | # | Spec | Effort | Status | Builds on |
 |---|---|---|---|---|
 | [001](001-architecture.md) | Architecture: components, packages, planes, extension points, invariants | medium | drafted | - |
-| [002](002-repository-scaffold.md) | Repository scaffold: module, binary, configuration, gate, images, workflows | small | testing | - |
+| [002](002-repository-scaffold.md) | Repository scaffold: module, binary, configuration, gate, images, workflows | small | complete | - |
 | [003](003-manifest-contract.md) | Manifest contract: the cella/v1 Sandbox schema, decoding, validation, defaulting, resolve | medium | drafted | 001 |
 | [004](004-runtime-backend-contract.md) | Runtime backend contract: the Runtime interface, capabilities, k8s, podman, native, conformance | large | drafted | 001, 003 |
 | [005](005-lifecycle-controller.md) | Lifecycle controller: reconciliation, phases, the reaper, the warm pool | medium | drafted | 003, 004 |

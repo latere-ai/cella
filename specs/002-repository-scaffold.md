@@ -1,6 +1,6 @@
 ---
 title: "Repository scaffold: module, binary, configuration, quality gate, images, workflows"
-status: testing
+status: complete
 track: core
 depends_on: []
 affects: [cmd/cellad/, internal/config/, internal/version/, Makefile, .lateregate.yaml, Dockerfile, .github/workflows/, .githooks/, docs/]
@@ -31,12 +31,12 @@ anything else.
 
 ## Current state
 
-Built and staged. `cmd/cellad` serves the probes, `internal/config`
+Built and in the tree. `cmd/cellad` serves the probes, `internal/config`
 reads four variables, `internal/version` carries the build identity,
 `.lateregate.yaml` configures the shared gate pinned as a Go tool, and
 `.github/workflows/verify.yml` calls the shared pipeline. The gate
-passes locally. The state column of the acceptance table says which
-criteria wait on the first push to CI.
+passes locally and on the first push to `main`. This spec is complete
+as built; the Outcome records the one divergence.
 
 ## Design
 
@@ -216,5 +216,20 @@ page, which lands with the generator once the table has two owners.
 | Readiness fails once draining begins and when the data directory is unwritable | `TestReadinessFailsOnceDrainingBegins`, `TestDiskCheckReportsAnUnwritableDirectory` | passing |
 | An occupied address or an unwritable data directory is a start-up failure with the variable named | `TestOccupiedAddressExitsOne`, `TestUnwritableDataDirExitsOne` | passing |
 | Every package clears 90% coverage and every gate passes locally | `go tool lateregate` | passing |
-| The gate, the tidy check, and the image build pass on the first push to `main` | the `verify` workflow run | waits on the push |
-| The developer image runs `cellad -version` as a non-root user | the `image` job | waits on the push |
+| The gate, the tidy check, and the image build pass on the first push to `main` | the `verify` workflow run | passing, run 34710405564 |
+| The developer image runs `cellad -version` as a non-root user | the `image` job | passing, the same run |
+
+## Outcome
+
+Built on 2026-09-12 in four commits and proven by the first `verify`
+run on `main` (run id 34710405564, nineteen jobs green). One divergence
+from the first draft: the two listeners bind through
+`net.ListenConfig` with the run context rather than `net.Listen`, and
+the shutdown runs on `context.WithoutCancel` of the stop context, both
+because the shared linter's `noctx` and `contextcheck` rules refuse the
+bare forms. Two ":0" addresses are allowed for both listeners so the
+suite binds loopback without choosing ports; the equality rule applies
+to every other pair. Deferred as the spec says: the release pipeline
+and the deploy manifests to [[014-release-and-installation]], the stubs
+and the tiers to [[012-test-stubs-and-tiers]], the generated
+configuration page until the table has two owners.
