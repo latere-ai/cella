@@ -47,8 +47,6 @@ Every entry either is in the tree or names the spec that builds it.
 ```
 cmd/cellad/             main: the subcommand dispatcher, configuration, listeners, run group
 cmd/cella/              main of the agent client, and nothing else (011)
-cmd/cella-worker/       main of the data plane worker (021)
-cmd/cella-egress/       main of the egress gateway (018)
 manifest/               decoding, validation, defaulting, resolve, the boundary check, for every kind (003)
 manifest/v1/            the Sandbox, Secret, Volume, SandboxSet, and Environment types (003, 018, 019, 020, 021)
 runtime/                the Driver interface, isolation classes, capabilities, the shared types (004)
@@ -68,7 +66,10 @@ internal/admission/     the admission client, the built-in defaults and ceilings
 internal/api/           the /v1 handlers, streams, the OpenAPI document (008)
 internal/events/        the signed sink client and the journal (009)
 internal/store/         desired and observed state, secret values, revocations, ledger, journal; memory and Postgres (010)
-internal/worker/        the claim loop and stream relay of cella-worker (021)
+internal/serve/         the control plane role of cellad: wiring of the API, controller, store, and webhook clients (008)
+internal/worker/        the worker role of cellad: registration, the claim loop, the stream relay (021)
+internal/egressd/       the egress role of cellad: pkg/egress's gateway, CA, and ingest listener (018)
+internal/check/         the check role of cellad (014)
 internal/cellacli/      the cella command: flags, defaults, exit codes (011)
 internal/cellaclient/   the client of the /v1 API the command speaks (011)
 test/e2e/               cellad as a process against a backend (e2e build tag) (012)
@@ -123,11 +124,17 @@ serves.
 
 | Subcommand | Reads | Does | Spec |
 |---|---|---|---|
-| `serve` (default) | the whole table | the listeners and the controllers | this spec |
+| `serve` (default) | the whole table | the control plane: the listeners, the controller, the scheduler | this spec |
+| `worker` | `CELLA_URL`, `CELLA_ENVIRONMENT_KEY`, and the selected driver's variables; none of the control plane's | one registered environment's data plane: claims operations and runs a driver | 021 |
+| `egress` | `CELLA_EGRESS_*` and `CELLA_PUBLIC_URL` for the key set; none of the control plane's | the credential-substituting gateway | 018 |
 | `check` | the whole table | one line per requirement of the installation, exit 1 on any failure | 014 |
 
-An unknown subcommand is a usage error, exit 2. `check` is an unknown
-subcommand until [[014-release-and-installation]] lands.
+One binary, one image, one role per process: a Deployment selects the
+role by its args. Each role is a package under `internal/` with its own
+dependency allow list in the gate, so the binary carrying every role
+does not loosen what any one role may reach. An unknown subcommand is a
+usage error, exit 2. `worker`, `egress`, and `check` are unknown
+subcommands until their specs land.
 
 ### Configuration
 

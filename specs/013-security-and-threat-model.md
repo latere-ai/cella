@@ -7,7 +7,7 @@ depends_on:
   - specs/004-runtime-backend-contract.md
   - specs/006-identity.md
   - specs/008-api.md
-affects: [internal/auth/, internal/api/, runtime/, egress/, cmd/cella-egress/, cmd/cella-worker/, deploy/, SECURITY.md]
+affects: [internal/auth/, internal/api/, internal/egressd/, internal/worker/, runtime/, egress/, deploy/, SECURITY.md]
 effort: medium
 created: 2026-09-12
 updated: 2026-09-12

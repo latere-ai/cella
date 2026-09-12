@@ -1,12 +1,12 @@
 ---
-title: "Data plane workers: the Environment kind, registration, the operation queue, cella-worker, self-hosted sandboxes"
+title: "Data plane workers: the Environment kind, registration, the operation queue, the worker role, self-hosted sandboxes"
 status: drafted
 track: core
 depends_on:
   - specs/004-runtime-backend-contract.md
   - specs/006-identity.md
   - specs/018-egress-and-secrets.md
-affects: [manifest/v1/, runtime/remote/, cmd/cella-worker/, internal/worker/, internal/api/, internal/auth/]
+affects: [manifest/v1/, runtime/remote/, internal/worker/, internal/api/, internal/auth/]
 effort: large
 created: 2026-09-12
 updated: 2026-09-12
@@ -53,7 +53,7 @@ spec:
     queue: default
     image: ghcr.io/example/sandbox:1.4
   queues: [default, rollouts]
-  gateway: https://egress.eu.example.internal:3128   # the environment's cella-egress, as sandboxes reach it
+  gateway: https://egress.eu.example.internal:3128   # the environment's gateway, as sandboxes reach it
 status:
   phase: Ready                     # Pending | Ready | Degraded | Offline
   driver: k8s
@@ -74,12 +74,14 @@ returns.
 
 ### The worker
 
-`cella-worker` is one binary: it reads `CELLA_URL`,
+The `worker` role of `cellad` reads `CELLA_URL`,
 `CELLA_ENVIRONMENT_KEY`, and the driver's own variables, runs
 `Preflight`, registers (`POST /v1/environments/{name}/workers` with the
 driver's name, isolation, capabilities, and the host's capacity), and
 then loops: claim, execute, report. Several workers may serve one
-environment; each claims what it can and the queue is the arbiter.
+environment; each claims what it can and the queue is the arbiter. The
+role is `internal/worker`, with a dependency allow list that reaches
+the drivers and never the Postgres driver.
 
 The connection is one long-lived HTTP/2 stream per worker to
 `GET /v1/environments/{name}/operations?claim=1`, over which the control

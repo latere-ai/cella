@@ -66,7 +66,7 @@ carries no alias for a field.
 | image catalog | admission rewrites `spec.image` | an `AdmitFunc` in `Options` |
 | secrets | the `Secret` kind holds the value; the platform's authorizer decides `secret.mount`; its vault, if it keeps one, writes through `PUT /v1/secrets` | the same kind through the store the platform constructs |
 | persistence | the `Volume` kind; the platform's authorizer decides `volume.attach` | the same |
-| customer-hosted execution | an `Environment` per customer with a `cella-worker` on their side | the same, through `runtime/remote` |
+| customer-hosted execution | an `Environment` per customer with `cellad worker` on their side | the same, through `runtime/remote` |
 | rollouts and evaluations | `SandboxSet` through a `queued` environment | the same through `controller` |
 | audit and usage | the sink | the platform's own `events.Sink` implementation |
 | a console | reads `/v1` | reads the platform's own API |

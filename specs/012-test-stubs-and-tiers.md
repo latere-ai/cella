@@ -39,7 +39,7 @@ Not built. The shape is Origo's stubs, with an admission stub added.
 | authorizer | the contract of [[006-identity]] | allow everything, with `X-Stub-Deny: <action>` on the incoming request or a `-deny` flag to refuse; records every request for the suite to read back |
 | admission | the contract of [[007-admission]] | returns the manifest unchanged, or with a `-rewrite image=<ref>` applied, or refuses with `-refuse`; records requests |
 | sink | the contract of [[009-events]] | verifies the signature, stores events, serves them at `GET /events`, fails the first `-fail-first N` deliveries |
-| gateway | `cella-egress` itself, not a stub | the real gateway of [[018-egress-and-secrets]] on a loopback port with a generated CA, so the tiers prove substitution against the code that ships |
+| gateway | `cellad egress` itself, not a stub | the real gateway of [[018-egress-and-secrets]] on a loopback port with a generated CA, so the tiers prove substitution against the code that ships |
 | upstream | an HTTPS server the sandboxes reach | records every request's host, headers, query, and body, so a tier asserts what left the sandbox and what the gateway rewrote |
 
 Each stub is a package under `test/stubs/` with a handler and a test,
@@ -47,13 +47,13 @@ and `test/stubs/cmd/cella-stubs` serves them on four ports.
 
 ### make run
 
-Builds `cellad`, `cella-egress`, and `cella-stubs`, generates
+Builds `cellad` and `cella-stubs`, generates
 `CELLA_TOKEN_KEY` and `CELLA_SECRETS_KEK` under `out/` once, starts the
 stubs and the gateway on loopback ports derived from the checkout's
 directory name, starts `cellad` with the `local` driver where the
 sandbox runtime is installed and `native` otherwise, mints a token for
 subject `dev`, and prints `export CELLA_URL=... CELLA_TOKEN=...` and a
-`cella apply` line. `make run-worker` starts a `cella-worker` against
+`cella apply` line. `make run-worker` starts `cellad worker` against
 the same control plane with a second environment, so the self-hosted
 path is one command away. `make run-down` stops all of it.
 
@@ -64,7 +64,7 @@ path is one command away. `make run-down` stops all of it.
 | unit | none | any | Go | every push, the gate |
 | native e2e | `e2e` | `TestNative` | Go | every push, `make test-e2e` |
 | local | `e2e` | `TestLocal` | the sandbox runtime | every push on a runner that has it; skipped with the remediation printed otherwise |
-| worker | `e2e` | `TestWorker` | Go | every push: a `cella-worker` running `native` behind a firewall that refuses inbound, against the same `cellad` |
+| worker | `e2e` | `TestWorker` | Go | every push: `cellad worker` running `native` behind a firewall that refuses inbound, against the same control plane |
 | podman | `podman` | `TestPodman` | a Podman socket | every push on a runner with Podman |
 | kind | `e2e` | `TestCluster` | kind, kubectl | tags and dispatch |
 | conformance | none | `TestContract` | a server URL | against every tier's server ([[015-conformance-suite]]) |
@@ -72,8 +72,9 @@ path is one command away. `make run-down` stops all of it.
 Every tier starts its own `cellad` and stubs as processes and asserts
 through the API and the backend both; a native tier check that a
 directory exists, a kind tier check that a Pod has the label. The kind
-overlay under `deploy/examples/kind/` runs `cellad`, `cella-egress`,
-the stubs, Postgres, and a second node pool with a `cella-worker`, and
+overlay under `deploy/examples/kind/` runs `cellad serve`, `cellad
+egress`, the stubs, Postgres, and a second node pool with `cellad
+worker`, and
 `up.sh` loads the candidate images.
 
 ### CI

@@ -6,7 +6,7 @@ depends_on:
   - specs/003-manifest-contract.md
   - specs/004-runtime-backend-contract.md
   - specs/006-identity.md
-affects: [manifest/v1/, egress/, cmd/cella-egress/, internal/api/, internal/store/, runtime/]
+affects: [manifest/v1/, egress/, internal/egressd/, internal/api/, internal/store/, runtime/]
 effort: large
 created: 2026-09-12
 updated: 2026-09-12
@@ -27,7 +27,7 @@ widen either. This is the network boundary of the control plane, and
 the mechanism that makes "a sandbox reaches only the hosts its manifest
 names" a property rather than a policy.
 
-The gateway is `cella-egress`, built on `latere.ai/x/pkg/egress`, whose
+The gateway is the `egress` role of `cellad`, built on `latere.ai/x/pkg/egress`, whose
 substitution engine is a pure, exhaustively tested core with the
 CONNECT proxy and the certificate authority layered on top. This spec
 fixes the `Secret` kind, how a manifest's secrets and egress rules
@@ -166,11 +166,11 @@ self-hosted plane. `DELETE` purges on sandbox delete.
 
 ### The gateway
 
-`cella-egress` runs `pkg/egress.Gateway` with `pkg/egress.CA`: a
+`cellad egress` runs `pkg/egress.Gateway` with `pkg/egress.CA`: a
 CONNECT proxy that terminates TLS with a per-environment authority,
 authenticates the caller by the sandbox's workload token presented as
 proxy credentials (`pkg/egress.TokenAuth` against `cellad`'s key set,
-audience `cella-egress`), looks up the principal's map, and forwards.
+audience `cellad egress`), looks up the principal's map, and forwards.
 Placement per environment:
 
 | Environment | Gateway | Network rule |
@@ -227,8 +227,9 @@ state.
 
 `egress` at the module root holds `Compile`, `Map`, `Entry`, and the
 wire types shared with the gateway, and imports `manifest/v1` and
-`pkg/egress`. `cmd/cella-egress` is `pkg/egress.Gateway` plus
-configuration and the ingest listener. `internal/store` holds the
+`pkg/egress`. `internal/egressd` is the `egress` role of `cellad`:
+`pkg/egress.Gateway` plus configuration and the ingest listener, with
+its own dependency allow list in the gate. `internal/store` holds the
 encrypted values. Nothing else touches a value.
 
 ## Not in this spec

@@ -3,7 +3,7 @@ title: "Architecture: control plane and data plane, packages, extension points, 
 status: drafted
 track: core
 depends_on: []
-affects: [manifest/, runtime/, controller/, internal/, cmd/cellad/, cmd/cella/, cmd/cella-worker/, cmd/cella-egress/, docs/]
+affects: [manifest/, runtime/, controller/, egress/, internal/, cmd/cellad/, cmd/cella/, docs/]
 effort: medium
 created: 2026-09-12
 updated: 2026-09-12
@@ -80,11 +80,11 @@ flowchart TB
     K8s[k8s driver]
     Podman[podman driver]
     Native[native driver]
-    EG1[cella-egress gateway]
+    EG1[cellad egress: gateway]
   end
   subgraph dp2 [Data plane: self-hosted]
-    Worker[cella-worker: claims operations, runs a driver]
-    EG2[cella-egress gateway]
+    Worker[cellad worker: claims operations, runs a driver]
+    EG2[cellad egress: gateway]
   end
   CLI --> API
   Plat --> API
@@ -114,13 +114,26 @@ which kind of environment its sandbox landed on except by reading
 
 ### Components
 
-| Component | Runs where | Owns |
+Two binaries ship. `cellad` is the server side, one image, one role
+per process selected by subcommand; `cella` is the client, small and
+dependency-light because it runs where agents run.
+
+| Binary and role | Runs where | Owns |
 |---|---|---|
-| `cellad` | the control plane | the API, resolve, identity, scheduling, the controller, the store, the webhook clients, the event delivery |
-| `cella-worker` | a self-hosted data plane | one registered environment: claims operations for it and executes them with the driver its host has (k8s, podman, native) |
-| `cella-egress` | beside sandboxes in either data plane | the credential-substituting egress gateway: the only path from a sandbox to the network, with a per-sandbox map the control plane pushes |
+| `cellad serve` | the control plane | the API, resolve, identity, scheduling, the controller, the store, the webhook clients, the event delivery |
+| `cellad worker` | a self-hosted data plane | one registered environment: claims operations for it and executes them with the driver its host has (k8s, podman, local, native) |
+| `cellad egress` | beside sandboxes in either data plane | the credential-substituting egress gateway: the only path from a sandbox to the network, with a per-sandbox map the control plane pushes |
+| `cellad check` | wherever an installation is verified | one line per requirement, exit 1 on any failure |
 | `cella` | a shell or an agent | the client of the API |
-| `cella-stubs` | tests and `make run` | the stub issuer, authorizer, admission endpoint, and sink |
+| `cella-stubs` | tests and `make run` only, never a release artifact | the stub issuer, authorizer, admission endpoint, and sink |
+
+Each role is its own package under `internal/` (`internal/serve`,
+`internal/worker`, `internal/egressd`, `internal/check`), so the
+dependency gate holds one allow list per role even though one binary
+carries them: the egress role's build list reaches `pkg/egress` and the
+standard library and never the Postgres driver or the Kubernetes
+client. Splitting a role into a binary of its own later is a new
+`main` over an existing package.
 
 ### Packages
 
@@ -131,9 +144,9 @@ imported by others; everything else is `internal/`.
 |---|---|---|---|
 | `manifest`, `manifest/v1` | the `cella.latere.ai/v1` kinds, strict decoding, validation, defaulting, resolve, the boundary-subset check | a manifest the schema accepts today is accepted by every later `v1` build; new fields are optional; Go API additive within a module major | [[003-manifest-contract]] |
 | `runtime` | the `Driver` interface a data plane implements, its capabilities, the shared types | changes only with a module major | [[004-runtime-backend-contract]] |
-| `runtime/k8s`, `runtime/podman`, `runtime/native`, `runtime/remote`, `runtime/runtimetest` | the three drivers, the remote driver that queues for a worker, and the conformance suite a driver passes | a driver that passes `runtimetest` works under `controller` and under `cella-worker` | [[004-runtime-backend-contract]], [[021-data-plane-workers]] |
+| `runtime/k8s`, `runtime/podman`, `runtime/native`, `runtime/remote`, `runtime/runtimetest` | the three drivers, the remote driver that queues for a worker, and the conformance suite a driver passes | a driver that passes `runtimetest` works under `controller` and under `cellad worker` | [[004-runtime-backend-contract]], [[021-data-plane-workers]] |
 | `controller` | desired-to-observed reconciliation, the phase machine, the reaper, recovery, the scheduler and its strategies, sets | drives any conforming driver; owns no HTTP, no identity, no store implementation | [[005-lifecycle-controller]], [[020-scheduling-and-sets]] |
-| `egress` | compiling a sandbox's secrets and egress rules into the map the gateway consumes | none beyond the wire shape it shares with `cella-egress` | [[018-egress-and-secrets]] |
+| `egress` | compiling a sandbox's secrets and egress rules into the map the gateway consumes | none beyond the wire shape it shares with the `egress` role | [[018-egress-and-secrets]] |
 | `internal/api` | the `/v1` handlers, streams, the OpenAPI document | none | [[008-api]], [[023-computer-use-operations]] |
 | `internal/auth` | the OIDC verifier, workload and environment tokens, the authorizer client, the owner policy | none | [[006-identity]] |
 | `internal/admission`, `internal/events`, `internal/store`, `internal/config`, `internal/version`, `internal/cellacli`, `internal/worker` | as their specs say | none | [[007-admission]], [[009-events]], [[010-state]], [[002-repository-scaffold]], [[011-agent-client]], [[021-data-plane-workers]] |
@@ -203,7 +216,7 @@ sequenceDiagram
   participant S as scheduler
   participant K as controller
   participant R as driver
-  participant G as cella-egress
+  participant G as cellad egress
   participant E as sink
   C->>A: PUT /v1/sandboxes/{name} (manifest)
   A->>I: verify bearer against issuers
@@ -271,9 +284,10 @@ The build list of `./cmd/cellad` reaches the standard library,
 `latere.ai/x/pkg`, the Kubernetes client for the k8s driver, the Podman
 API client for the podman driver, the Postgres driver for the store,
 and the OpenTelemetry SDK, and nothing else: no cloud SDK, no web
-framework, no ORM. `./cmd/cella-worker` reaches the same minus the
-Postgres driver; `./cmd/cella-egress` reaches `latere.ai/x/pkg/egress`
-and the standard library. The `depcheck` gate holds each list, and a
+framework, no ORM. `./internal/egressd` reaches `latere.ai/x/pkg/egress` and the standard
+library; `./internal/worker` reaches the drivers and never the Postgres
+driver; `./cmd/cella` reaches the standard library and the error
+envelope. The `depcheck` gate holds each list, and a
 new entry is a row with a reason.
 
 ### Invariants

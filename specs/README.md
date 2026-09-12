@@ -67,7 +67,7 @@ later.
 | [018](018-egress-and-secrets.md) | Egress and secrets: the Secret kind, placeholders, the gateway, the boundary a workload cannot widen | large | drafted | 003, 004, 006 |
 | [019](019-volumes.md) | Volumes: the Volume kind, attachment, the workspace as a volume, what persists and how | medium | drafted | 003, 004 |
 | [020](020-scheduling-and-sets.md) | Scheduling and sets: strategies, queues, capacity, the SandboxSet kind for rollouts | large | drafted | 003, 005 |
-| [021](021-data-plane-workers.md) | Data plane workers: the Environment kind, registration, the operation queue, cella-worker | large | drafted | 004, 006, 018 |
+| [021](021-data-plane-workers.md) | Data plane workers: the Environment kind, registration, the operation queue, the worker role | large | drafted | 004, 006, 018 |
 | [022](022-mesh-and-spawn.md) | Mesh and spawn: peers that reach each other, sandboxes that create sandboxes, a fixed boundary | medium | drafted | 003, 006, 018 |
 | [023](023-computer-use-operations.md) | Computer use operations: display, screenshot, input, ports, browser-ready sandboxes | medium | drafted | 004, 008 |
 
@@ -165,6 +165,7 @@ exist; the `vm` driver has its own spec after this deck.
 | volumes are a kind, not a mount of a file plane | 019 | an application's state and a run's tools need storage with a life of its own; a remote mount under every run is a sync layer forever |
 | pools are one scheduling strategy among three | 020 | diverse environments cannot be kept warm economically; a rollout needs a queue and capacity, not a pool |
 | isolation is a class the environment declares: container, vm, process, none | 004 | a caller that needs a floor names it; the control plane never downgrades silently |
+| two shipped binaries: `cellad` with `serve`, `worker`, `egress`, `check` as roles, and a small `cella` client; stubs test-only | 001, 002 | one image for the server side, a dependency-light client where agents run, one allow list per role package so the merge loosens nothing |
 | fail closed on every webhook and in the provisioning order | 006, 007, 009, 018 | an unavailable decision that allowed, or a half-provisioned sandbox with egress, would make an outage a privilege escalation |
 | the owner policy exists | 006 | a laptop and a small team need no authorizer, and "no authorizer" must still be a policy with tests |
 | Postgres optional | 010 | one binary from a laptop to a replicated service; the difference is one variable |
