@@ -169,6 +169,7 @@ consumer names a need; it is not in any phase.
 | volumes are a kind, not a mount of a file plane | 019 | an application's state and a run's tools need storage with a life of its own; a remote mount under every run is a sync layer forever |
 | pools are one scheduling strategy among three | 020 | diverse environments cannot be kept warm economically; a rollout needs a queue and capacity, not a pool |
 | isolation is a class the environment declares: container, vm, process, none | 004 | a caller that needs a floor names it; the control plane never downgrades silently |
+| the `local` driver builds on `latere.ai/x/pkg/hostsandbox` (v0.60.1), extracted from its first consumer on 2026-09-12 | 004 | one srt renderer, deny table, preflight, and detached handle for both consumers; a fix lands once |
 | two shipped binaries: `cellad` with `serve`, `worker`, `egress`, `check` as roles, and a small `cella` client; stubs test-only | 001, 002 | one image for the server side, a dependency-light client where agents run, one allow list per role package so the merge loosens nothing |
 | fail closed on every webhook and in the provisioning order | 006, 007, 009, 018 | an unavailable decision that allowed, or a half-provisioned sandbox with egress, would make an outage a privilege escalation |
 | the owner policy exists | 006 | a laptop and a small team need no authorizer, and "no authorizer" must still be a policy with tests |
@@ -179,7 +180,6 @@ consumer names a need; it is not in any phase.
 
 | Question | Where | Owner |
 |---|---|---|
-| Extract the host sandbox's settings renderer, always-deny table, preflight, and detached handle from the sibling project into `latere.ai/x/pkg`, so `runtime/local` and that project share one implementation | 004 | the sibling project's owner, before phase 1 builds `local` |
 | The `vm` driver's substrate: a microVM driver of Cella's own, or the k8s runtime class alone; options and criteria in [[024-vm-driver]] | 024 | when a consumer names a need; not before the first release |
 
 ## Open source readiness

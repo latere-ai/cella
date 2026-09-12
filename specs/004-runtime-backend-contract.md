@@ -220,13 +220,19 @@ capability here and resolve says so; and TLS termination must be
 declared for the injected trust store to be read, with package indexes
 tunnelled because pip ignores every certificate variable.
 
-The parts that are not Cella's, the settings renderer, the deny table,
-the preflight, the detached handle, are a package with two consumers
-and belong in `latere.ai/x/pkg` once extracted; `runtime/local` here
-adds the `Driver` mapping, volumes as bind mounts under the data dir,
-and the gateway as the proxy the sandbox runtime allows. The extraction
-is a decision for the sibling project's owner and is recorded in the
-index's decisions table as open.
+The parts that are not Cella's are `latere.ai/x/pkg/hostsandbox`
+(v0.60.1): the stage vocabulary (`StageSpec`, `StageHandle`,
+`StageStatus`, `Path`, `Network`, `Capabilities`, the `Sandbox`
+interface), the srt settings renderer with its precedence rules and
+`AlwaysDenyRead`, the detached driver with its pid-and-start-time
+handle and status file, the preflight with per-platform remedies, and
+`hostsandboxtest.Run`, the contract suite every driver of that seam
+passes. `runtime/local` here adds the `Driver` mapping from
+`CreateSpec` to a `StageSpec`, volumes as bind mounts under the data
+dir, the workload token and CA as files in a readable path, the
+gateway as the one domain the sandbox runtime allows, and Cella's own
+`Alternative` text naming another environment. It passes both suites:
+`hostsandboxtest.Run` for the seam and `runtimetest` for the `Driver`.
 
 ### The native driver
 
