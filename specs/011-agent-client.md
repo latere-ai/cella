@@ -1,14 +1,21 @@
 ---
-title: "Agent client: the cella command and the skill"
-status: drafted
+title: "Agent client: the cella command, its client package, exit codes, output, the skill"
+status: validated
 track: core
 depends_on:
+  - specs/002-repository-scaffold.md
   - specs/003-manifest-contract.md
+  - specs/006-identity.md
   - specs/008-api.md
-affects: [cmd/cella/, internal/cellacli/, internal/cellaclient/, skills/cella/, docs/]
+  - specs/018-egress-and-secrets.md
+  - specs/019-volumes.md
+  - specs/020-scheduling-and-sets.md
+  - specs/021-data-plane-workers.md
+  - specs/023-computer-use-operations.md
+affects: [cmd/cella/, internal/cellacli/, internal/cellaclient/, skills/cella/, docs/cli.md, internal/config/]
 effort: medium
 created: 2026-09-12
-updated: 2026-09-12
+updated: 2026-09-13
 author: changkun
 ---
 
@@ -17,82 +24,197 @@ author: changkun
 ## Overview
 
 `cella` is one binary that speaks the `/v1` API from a shell or from an
-agent: apply a manifest, list, inspect, exec, attach, copy files, watch
-events. It has stable exit codes, JSON output on request, and a skill
-file that teaches an agent the command in a few hundred bytes. It is
+agent, including an agent running inside a sandbox: apply a manifest of
+any kind, list, inspect, exec, attach, forward a port, copy files,
+follow logs and events, take a screenshot, drive input, manage secrets,
+volumes, snapshots, sets, and environments. It has one exit-code
+scheme, JSON output that is the API's bytes, streams that are never
+buffered, and a skill file that teaches an agent the command. It is
 the client the conformance suite and the documentation use, so the API
 is never exercised only through `curl`.
 
 ## Current state
 
-Not built. A platform's own CLI may wrap or replace it; this one is
-the core's and knows only the core's API.
+Not built. A platform's own CLI may wrap or replace it; this one is the
+control plane's and knows only the control plane's API.
 
 ## Design
 
+### Reaching the control plane
+
+Every command reads `CELLA_URL` and one of `CELLA_TOKEN` or
+`CELLA_TOKEN_FILE`, overridable by `--url`, `--token`, `--token-file`,
+and nothing else from the environment: no config file and no login,
+because a token comes from the caller's issuer, or, inside a sandbox,
+from the projection. Inside a sandbox `CELLA_URL` is injected by the
+control plane ([[004-runtime-contract]]) and the token is at
+`/run/cella/token`, the default of `--token-file` when `CELLA_TOKEN` is
+unset; the file is read per request, never once at start, because the
+controller re-projects it before expiry and a `logs -f` must outlive
+one token. `internal/cellaclient` builds its transport with `Proxy: nil`
+and reads no proxy or trust-store variable, so a `cella` run inside a
+sandbox reaches `CELLA_URL` directly through the driver's rule rather
+than through the egress gateway, whose allow list has no entry for the
+control plane ([[018-egress-and-secrets]]).
+
 ### Commands
 
-| Command | Does | Exit |
-|---|---|---|
-| `cella apply -f sandbox.yaml [-w]` | `PUT` by `metadata.name`, or `POST` when absent; `-w` waits for `Running` | 0 applied; 3 refused with the code |
-| `cella get [name|id] [-o json|yaml|wide]` | one or the list | 0; 4 not found |
-| `cella delete <name|id>` | `DELETE` | 0; 4 |
-| `cella start`, `cella stop` | the verbs | 0; 5 phase conflict |
-| `cella exec <name|id> [-i] [-t] -- cmd args...` | the exec stream, stdin when `-i`, a PTY when `-t` | the command's own exit code; 6 when it could not start |
-| `cella attach <name|id>` | the PTY over the WebSocket, raw terminal | 0 |
-| `cella cp <src> <name>:<dest>`, `cella cp <name>:<src> <dest>` | tar in or out | 0; 6 |
-| `cella logs <name|id> [-f]` | the main process output | 0 |
-| `cella events <name|id> [-f]` | the journal | 0 |
-| `cella token <name|id>` | a workload token on stdout | 0 |
-| `cella port-forward <name|id> <local>:<port>` | a local listener onto a port inside, through `Dial` | 0 |
-| `cella screenshot <name|id> [-o file.png]`, `cella input <name|id> -f events.json` | the computer use operations | 0 |
-| `cella secret apply -f`, `cella secret ls`, `cella secret rm` | the `Secret` kind; `apply` reads the value from `-f` or `--value-from-env` and never echoes it | 0; 3 |
-| `cella volume apply -f`, `cella volume ls`, `cella volume snapshot` | the `Volume` kind | 0; 3 |
-| `cella set apply -f [-w]`, `cella set get`, `cella set stop` | the `SandboxSet` kind; `-w` waits for completion and prints the counts | 0; 3 |
-| `cella env ls`, `cella env key <name>` | the `Environment` kind; `key` prints the environment key once | 0; 3 |
-| `cella version` | client and, when reachable, server identity | 0 |
+One verb set for every kind. `<ref>` is a name or a prefixed id, with
+the alias rule of [[008-api]]. `<kind>` is `sandbox`, `secret`,
+`volume`, `set`, `environment`, singular or plural.
 
-Every command reads `CELLA_URL` and `CELLA_TOKEN`, or `--url` and
-`--token`, and nothing else from the environment; there is no config
-file and no login, because the token comes from the caller's issuer.
-Exit 1 is a server error, 2 a usage error, 7 the server unreachable.
-Errors print the API's `message` on stderr and the `code` and `detail`
-after it when `-v` is set.
+| Command | Route | Notes |
+|---|---|---|
+| `cella apply -f <file> [-w] [--if-match <etag>]` | `PUT /v1/<kinds>/{name}`; `POST /v1/sandboxes` for a `Sandbox` with no name | reads `apiVersion` and `kind` from the file; `-w` waits for `Running`, `Available`, `Ready`, or the set's `Succeeded`; a `version_conflict` is exit 5 |
+| `cella get <kind> [<ref>] [-o json|yaml|wide|name] [-l k=v]... [--phase] [--owner] [--environment] [--root <id>] [--limit n]` | `GET /v1/<kinds>[/{id}]` | one object or a list; a list follows `next` to the end unless `--limit` stops it |
+| `cella delete <kind> <ref>` | `DELETE` | 202 or 200 is exit 0 |
+| `cella start <ref>`, `cella stop <ref>` | `POST .../start`, `.../stop` | a sandbox; `cella stop set <ref>` is `POST /v1/sandboxsets/{id}/stop` |
+| `cella exec <ref> [-i] [-t] [--timeout d] -- <cmd> [args...]` | `POST .../exec` without `-i` or `-t`; the exec WebSocket with either | stdout and stderr to the caller's, the child's exit code as the exit |
+| `cella attach <ref> [-- <cmd>]` | the attach WebSocket | raw terminal, `SIGWINCH` to resize, restored on exit |
+| `cella port-forward <ref> <local>:<port>` | the dial WebSocket per accepted connection | binds `<local>` on loopback |
+| `cella cp <ref>:<src>... <dest>`, `cella cp <src>... <ref>:<dest>` | `GET .../files?path=` repeated; `PUT .../files?dest=` | tar streamed, no temporary file |
+| `cella logs <ref> [-f] [--since t] [--tail n]` | `GET .../logs` | |
+| `cella events <ref> [-f]`, `cella events --object <id> [-f]` | `GET /v1/sandboxes/{id}/events`; `GET /v1/events?object=` | any kind by id |
+| `cella egress <ref>` | `GET .../egress` | the gateway's records |
+| `cella token <ref>` | `POST .../token` | the token on stdout, nothing else |
+| `cella screenshot <ref> [-o file] [--format png|jpeg] [--scale s]` | `GET .../screenshot` | PNG bytes to the file or stdout |
+| `cella screen <ref> [--fps n]` | the screen WebSocket | frames as a PNG stream to stdout, for a viewer to read |
+| `cella input <ref> -f events.json` | `POST .../input` | |
+| `cella display <ref>` | `GET .../display` | |
+| `cella snapshot create <volume-ref>`, `list <volume-ref>`, `delete <volume-ref> <snp_ id>` | the snapshot routes | |
+| `cella env key create <ref>`, `revoke <ref> <jti>` | the key routes | the key on stdout once |
+| `cella version` | `GET /version` | client and, when reachable, server identity |
+
+`cella apply` of a `Secret` reads `spec.value` from the file, from
+`--value-from-env <NAME>`, or from `--value-file <path>`, and never
+writes it to stdout or stderr.
+
+### Exit codes
+
+One scheme, by the response's status class with named exceptions, so a
+code the client does not know still has an exit:
+
+| Exit | Outside `exec` | Under `exec` |
+|---|---|---|
+| 0 | success | the child exited 0 |
+| 1 to 124 | 1: a 5xx, including every `*_unavailable` | the child's own exit code; 124 is the server's timeout |
+| 2 | a usage error: flags, a file that does not parse | the same |
+| 3 | refused: 400, 401, 403, 413, 415, 422, 429 | as 125 |
+| 4 | 404 | as 125 |
+| 5 | 409, `version_conflict` and `phase_conflict` included | as 125 |
+| 7 | the server unreachable: dial, TLS, or timeout before a status | as 127 |
+| 125 | | any client-side failure that outside `exec` would be 1, 3, 4, or 5 |
+| 126 | | the command could not start: `capability_unsupported` for `-i` or `-t`, or an error frame before the first byte |
+| 127 | | the server unreachable |
+
+A refusal prints the API's `message` on stderr as one line; with `-v`
+the `code`, the `details`, and the request id follow on their own
+lines. A 429 prints `Retry-After` in the line. `CELLA_TOKEN` and the
+token file's contents reach no stdout or stderr byte, `-v` included.
+
+```
+$ cella get sandboxes
+NAME   PHASE    READY  IMAGE                          AGE  OWNER
+dev    Running  True   ghcr.io/example/sandbox:1.4    41m  https://login.example.com|alice
+$ cella apply -f sandbox.yaml
+This field cannot be changed after the object is created.
+$ cella apply -f sandbox.yaml -v
+This field cannot be changed after the object is created.
+code: immutable_field
+paths: spec.image
+request: req_01J9...
+```
 
 ### Output
 
-Human output is one line per object in `get` (name, phase, image, age,
-owner) and the object in YAML for one; `-o json` is the API's JSON
-unchanged, so `jq` works on it. Streams are never buffered.
+| Kind | Default columns | `wide` adds |
+|---|---|---|
+| Sandbox | `NAME`, `PHASE`, `READY`, `IMAGE`, `AGE`, `OWNER` | `ID`, `ENVIRONMENT`, `DRIVER`, `MESH`, `EXPIRES` |
+| Secret | `NAME`, `KIND`, `HOSTS`, `VERSION`, `MOUNTED`, `OWNER` | `ID`, `UPDATED` |
+| Volume | `NAME`, `PHASE`, `SIZE`, `ACCESS`, `ATTACHED`, `OWNER` | `ID`, `ENVIRONMENT`, `CLASS`, `SNAPSHOTS` |
+| SandboxSet | `NAME`, `PHASE`, `PENDING`, `RUNNING`, `SUCCEEDED`, `FAILED`, `OWNER` | `ID`, `ENVIRONMENT`, `PARALLELISM` |
+| Environment | `NAME`, `PHASE`, `MODE`, `DRIVER`, `WORKERS`, `USED` | `ID`, `ISOLATION`, `CAPACITY` |
 
-### The skill
+`-o name` prints `<kind>/<name>` per line. For one object `-o json`
+and `-o yaml` write the response body as received, never decoded and
+re-encoded, so field order and bytes are the API's; for a list that
+spanned pages, `items` of every page are concatenated into one
+envelope with `next` empty, and each item's bytes are unchanged.
+`-o yaml` for a list asks the server with `Accept`.
 
-`skills/cella/SKILL.md` with `name` and `description` frontmatter: the
-two variables, the four commands an agent needs (`apply`, `exec`, `cp`,
-`delete`), a minimal manifest, the exit codes, and how to read a
-refusal. The claim to check is that the file stays under 2 KiB and
-that an agent given only it completes the conformance suite's agent
-scenario.
+### Streams
+
+`exec` without `-i` or `-t` reads the framed response, writes channel
+1 to stdout and 2 to stderr as frames arrive, and exits with the exit
+frame; an error frame is exit 126 before any byte and 125 after. With
+`-i` or `-t` it opens the exec WebSocket, sends the request as the
+first text frame, pumps stdin, and exits with the `{"exit": n}` frame.
+`attach` puts the terminal in raw mode, restores it on any exit path,
+and sends `{"resize"}` on `SIGWINCH`. `port-forward` accepts on
+`<local>`, opens one `cella.dial.v1` WebSocket per connection, and
+copies bytes both ways. `cp` streams tar from `GET` to disk and from
+disk to `PUT` without a temporary file. `logs -f` and `events -f`
+write each line as it arrives. Nothing is buffered beyond one frame.
+
+### Client policy
+
+No retry, ever: a caller that wants one has the exit code. A 10 second
+deadline to the first response byte, none on a stream. Every request
+carries a fresh `X-Request-Id`, printed under `-v`, and
+`User-Agent: cella/<version>`. `RateLimit-Remaining` is not read;
+`Retry-After` is reported. On `unsupported_version` the refusal line is
+followed by the server's `/version`, so a caller sees the skew; a
+response carrying fields the client does not know is rendered without
+them, so a newer server is usable from an older client.
 
 ### The client package
 
-`internal/cellaclient` is the typed client the command uses, with one
-method per route and the exec and attach streams as `io.ReadWriteCloser`
-pairs. It is internal because an importer building on the packages has
+`internal/cellaclient` is the typed client the command uses, one method
+per route. Streams are typed: `Exec` returns `{Stdin io.WriteCloser,
+Stdout, Stderr io.Reader, Resize(cols, rows int) error, Wait(ctx)
+(int, error)}`, `Attach` the same with one output, `Dial` an
+`io.ReadWriteCloser`, `Screen` a channel of frames. The WebSocket
+client is the package's own RFC 6455 implementation over `net/http`'s
+hijack, so `./cmd/cella` reaches the standard library and
+`latere.ai/x/pkg/httpjson`'s envelope and nothing else, recorded as a
+`depcheck` row in `.lateregate.yaml` ([[002-repository-scaffold]]). The
+package is internal because an importer building on the packages has
 no HTTP hop; a platform with its own client generates one from the
 OpenAPI document.
+
+### The skill and the document
+
+`skills/cella/SKILL.md` has `name` and `description` frontmatter of at
+most 256 bytes together, the resident cost; the body teaches the two
+variables and the in-sandbox defaults, a minimal manifest, `apply`,
+`exec`, `cp`, `delete`, `get`, the exit table, and how to read a
+refusal with and without `-v`. The claim to test is reachability: an
+agent given only the skill completes the agent scenario of
+[[015-conformance-suite]]. `docs/cli.md` is the command table above in
+the user register, and a test holds it equal to the binary's `--help`.
 
 ## Not in this spec
 
 Distribution of the binary ([[014-release-and-installation]]); the
-scenario that drives it ([[015-conformance-suite]]).
+scenario that drives it ([[015-conformance-suite]]); the routes'
+semantics ([[008-api]]).
 
 ## Acceptance criteria
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| Every command in the table calls the route in its row and exits with the code in its row on the case named | `TestCommandTable` against a stub server | not built |
-| `cella exec` returns the command's own exit code and streams a 64 MiB output without buffering | `TestExecExitCodeAndStreaming` | not built |
-| `-o json` output is byte-identical to the API response | `TestJSONIsTheAPIs` | not built |
-| The built binary carries the exit codes through the process | `TestBinaryExitCodes` running `out/cella` | not built |
-| The skill file is under 2 KiB and names every command the agent scenario uses | `TestSkillIsSmallAndComplete` | not built |
+| Every command in the table calls the route in its row with the method, addressing, and flags named; `apply` dispatches on `kind` and sends `--if-match` | `TestCommandTable` against an `httptest` server | not built |
+| Every error code of [[008-api]] and every status class maps to the exit in the table, outside and under `exec`; an unknown code maps by class | `TestErrorsBecomeExits`, table-driven over every code | not built |
+| The built binary carries the exit codes through the process, and `exec` passes the child's code through unchanged for 0, 3, 7, and 124 | `TestBinaryExitCodes` running `out/cella` | not built |
+| With `HTTPS_PROXY` set to a refusing address, `cella` still reaches `CELLA_URL` | `TestClientIgnoresProxyVariables` | not built |
+| With `CELLA_TOKEN` unset and a token file that changes between two requests, each request sends the file's current bytes | `TestTokenFileIsReadPerRequest` | not built |
+| `CELLA_TOKEN`, the token file, and a secret's value reach no stdout or stderr byte, under `-v` included | `TestSecretsAreNeverWritten` with canaries | not built |
+| `-o json` and `-o yaml` for one object are byte-identical to the response; a two-page list is one envelope with every item's bytes unchanged and `next` empty | `TestOutputFidelity` | not built |
+| Each output row in the columns table renders as stated for each kind; `-o name` and `-o wide` do | `TestColumns` | not built |
+| `exec` writes channel 1 and 2 to the right descriptors as frames arrive, 64 MiB without buffering; `-i` pumps stdin; `attach` enters and restores raw mode and sends a resize; `port-forward` carries bytes both ways; `cp` streams both ways | `TestStreams` | not built |
+| A list follows `next` to the end and stops at `--limit`; every selector flag becomes its query parameter | `TestListPagingAndSelectors` | not built |
+| The three output examples above are what the binary prints | `TestExamplesAreExact` | not built |
+| `unsupported_version` prints the server identity after the refusal; unknown fields render without error | `TestVersionSkew` | not built |
+| The skill's frontmatter is under 256 bytes and an agent given only the skill completes the agent scenario | `TestSkillFrontmatterIsSmall`, [[015-conformance-suite]]'s agent case | not built |
+| `docs/cli.md` equals the binary's `--help` for every command | `TestCLIDocIsCurrent` | not built |
+| `./cmd/cella`'s build list is the standard library plus `pkg/httpjson` | the `depcheck` gate | not built |

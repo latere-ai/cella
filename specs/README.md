@@ -57,7 +57,7 @@ later.
 | [008](008-api.md) | API: the /v1 kinds, addressing and concurrency, streams, the error table, OpenAPI | large | validated | 003, 005, 006, 007, 010 |
 | [009](009-events.md) | Events: one signed record per mutation and operation, typed, ordered per object, to the operator's sink | small | validated | 005, 006, 010 |
 | [010](010-state.md) | State: desired and observed, the store contract, transactions, secret values, the journal, queues and operations, optional Postgres | large | validated | 003, 004, 005 |
-| [011](011-agent-client.md) | Agent client: the cella command and the skill | medium | drafted | 003, 008 |
+| [011](011-agent-client.md) | Agent client: the cella command, its client package, exit codes, output, the skill | medium | validated | 002, 003, 006, 008, 018, 019, 020, 021, 023 |
 | [012](012-test-stubs-and-tiers.md) | Test stubs and tiers: the stubs, the gateway, make run, the driver tiers, CI jobs | medium | drafted | 002, 006, 007, 009 |
 | [013](013-security-and-threat-model.md) | Security and threat model: what Cella protects, against whom, and how | medium | drafted | 001, 004, 006, 008 |
 | [014](014-release-and-installation.md) | Release and installation: images, binaries, attestations, deploy manifests, cellad check, upgrades | medium | drafted | 002, 012, 015 |
@@ -120,6 +120,11 @@ flowchart BT
   S009 --> S010
   S010 --> S005
   S011 --> S008
+  S011 --> S018
+  S011 --> S019
+  S011 --> S020
+  S011 --> S021
+  S011 --> S023
   S012 --> S007
   S012 --> S009
   S013 --> S008
@@ -151,8 +156,8 @@ flowchart BT
 | 1 | 003, 004 | every kind as code, the driver contract, the `native` and `local` drivers passing the conformance suite of 004 |
 | 2 | 005, 006, 007, 010 | a sandbox's lifecycle with desired and observed state, identity in and out, admission, recovery |
 | 3 | 008, 009, 018, 019 | the API, the events, the gateway with secrets, volumes: `cellad` creates a bounded sandbox from a manifest |
-| 4 | 011, 012, 017, 021 | the command, the stubs, `make run`, the tiers, the metrics, workers and self-hosted environments |
-| 5 | 020, 022, 023, 013 | the scheduler and sets, mesh and spawn, computer use, the threat model's controls tested |
+| 4 | 012, 017, 021 | the stubs, `make run`, the tiers, the metrics, workers and self-hosted environments |
+| 5 | 020, 022, 023, 013, 011 | the scheduler and sets, mesh and spawn, computer use, the threat model's controls tested, the command |
 | 6 | 015, 014, 016 | the contract as a suite, a release, an install document CI executes, the plane guide; the point at which a platform builds on it |
 
 The `k8s` and `podman` drivers land during phase 3 once the tiers

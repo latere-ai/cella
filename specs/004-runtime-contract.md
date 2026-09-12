@@ -206,7 +206,9 @@ driver's.
 Every driver projects into the sandbox, read-only: the workload token
 at `/run/cella/token` and the gateway's CA at
 `/run/cella/egress-ca.pem` ([[006-identity]],
-[[018-egress-and-secrets]]). `Change.Token` re-projects a token before
+[[018-egress-and-secrets]]), and sets `CELLA_URL` to the control
+plane's public URL, so a process inside reaches the API with the token
+beside it ([[011-agent-client]]). `Change.Token` re-projects a token before
 expiry without a restart; on k8s the projected Secret is updated, on
 podman and `local` the file is rewritten.
 

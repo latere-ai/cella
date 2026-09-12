@@ -160,7 +160,8 @@ deployment that sets one before its spec lands is not refused.
 | `CELLA_SECRETS_KEK` | yes when any Secret exists, from 018 | none | 32 bytes, base64, wrapping every secret's data key |
 | `CELLA_EGRESS_ACK_TIMEOUT` | 018 | `5s` | how long a create waits for one gateway of the environment to acknowledge the sandbox's map |
 | `CELLA_EGRESS_RECORDS_RETENTION`, `CELLA_EGRESS_RECORDS_CAP` | 018 | `168h`, `1000` | how long egress records stay in Postgres; how many the memory store keeps per sandbox |
-| `CELLA_URL`, `CELLA_ENVIRONMENT_KEY` | 018, 021 | none | read by the `worker` and `egress` roles: the control plane's public URL and the environment key that authenticates the role's one outbound stream |
+| `CELLA_URL`, `CELLA_ENVIRONMENT_KEY` | 018, 021 | none | read by the `worker` and `egress` roles: the control plane's public URL and the environment key that authenticates the role's one outbound stream; `CELLA_URL` is also what `cella` reads and what every sandbox is given (004, 011) |
+| `CELLA_TOKEN`, `CELLA_TOKEN_FILE` | 011 | unset, `/run/cella/token` | the bearer `cella` sends, or the file it reads per request when the variable is unset |
 | `CELLA_EGRESS_PROXY_ADDR`, `CELLA_EGRESS_REVERSE_ADDR`, `CELLA_EGRESS_CA_KEY` | 018 | `:3128`, `:8080`, none | the `egress` role's two doors and the PEM key of the certificate authority it terminates TLS with; the key is generated at first start when absent |
 | `CELLA_EVENTS_EGRESS` | 018 | unset | `1` delivers per-connection egress records to the sink as events; the journal and the metrics carry them regardless |
 | `CELLA_EGRESS_SIDECAR` | 018 | unset | `1` runs the gateway as a per-Pod sidecar on k8s instead of one Deployment |
@@ -196,7 +197,9 @@ deployment that sets one before its spec lands is not refused.
 pinned in `go.mod` with a `tool` directive, and `.lateregate.yaml`
 holds only what this repository chose: the spec vocabulary and required
 frontmatter, the empty hermetic allowance (cellad forks no binary of
-its own), the `depcheck` allow list of `./cmd/cellad`, and the licence.
+its own), the `depcheck` allow lists of `./cmd/cellad` and `./cmd/cella`
+(the standard library and `pkg/httpjson`, [[011-agent-client]]), and the
+licence.
 The git hooks are two-line shims that call the gate. A coverage
 exemption or a waiver is a line in that file with a reason, never a
 tag in the code.
