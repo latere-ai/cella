@@ -190,8 +190,11 @@ network whose only route is the gateway, and one network per mesh.
 ### The vm driver
 
 Room, not code, in the first release: the package exists with the
-interface stubbed and `Preflight` reporting not ready, and its spec is
-the microVM spec that follows this deck. What is fixed now: a `vm`
+interface stubbed and `Preflight` reporting not ready, and its design
+is held open in [[024-vm-driver]], which records the options (the
+Kubernetes runtime class alone, a microVM driver of Cella's own, or the
+first now and the second when a need names it) and the criteria. What
+is fixed now: a `vm`
 driver takes an OCI image or a root file system, boots a microVM per
 sandbox with one NIC routed to the gateway, exposes exec and attach
 through a guest agent over vsock, and attaches volumes as block devices
@@ -285,4 +288,4 @@ the worker and the queue ([[021-data-plane-workers]]); the gateway
 | On k8s with a runtime class configured, `Isolation()` reports `vm` and the Pod carries the class | `TestK8sRuntimeClass` | not built |
 | In `local`, a stage cannot read any path in the always-deny table, asserted per entry inside a real sandbox | `TestLocalDenyTable` | not built |
 | `Exec` streams a 64 MiB output without buffering and returns the exit code; `Dial` reaches a port inside | conformance cases `ExecStreams`, `DialReachesAPort` | not built |
-| `vm` exists, declares its class, and reports not ready with a message naming the spec that builds it | `TestVMIsAStub` | not built |
+| `vm` exists, declares its class, and reports not ready with a message naming [[024-vm-driver]] | `TestVMIsAStub` | not built |

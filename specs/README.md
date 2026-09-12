@@ -70,6 +70,7 @@ later.
 | [021](021-data-plane-workers.md) | Data plane workers: the Environment kind, registration, the operation queue, the worker role | large | drafted | 004, 006, 018 |
 | [022](022-mesh-and-spawn.md) | Mesh and spawn: peers that reach each other, sandboxes that create sandboxes, a fixed boundary | medium | drafted | 003, 006, 018 |
 | [023](023-computer-use-operations.md) | Computer use operations: display, screenshot, input, ports, browser-ready sandboxes | medium | drafted | 004, 008 |
+| [024](024-vm-driver.md) | VM driver: a hardware-isolated sandbox per environment; the design held open | large | vague | 004, 019 |
 
 ## Dependency graph
 
@@ -103,6 +104,7 @@ flowchart BT
   S021[021 workers]
   S022[022 mesh + spawn]
   S023[023 computer use]
+  S024[024 vm driver]
   S003 --> S001
   S004 --> S003
   S005 --> S004
@@ -133,6 +135,7 @@ flowchart BT
   S021 --> S018
   S022 --> S018
   S023 --> S008
+  S024 --> S019
 ```
 
 ## Build order
@@ -148,7 +151,8 @@ flowchart BT
 | 6 | 015, 014, 016 | the contract as a suite, a release, an install document CI executes, the plane guide; the point at which a platform builds on it |
 
 The `k8s` and `podman` drivers land during phase 3 once the tiers
-exist; the `vm` driver has its own spec after this deck.
+exist. The `vm` driver is [[024-vm-driver]], held at `vague` until a
+consumer names a need; it is not in any phase.
 
 ## Decisions across specs
 
@@ -176,7 +180,7 @@ exist; the `vm` driver has its own spec after this deck.
 | Question | Where | Owner |
 |---|---|---|
 | Extract the host sandbox's settings renderer, always-deny table, preflight, and detached handle from the sibling project into `latere.ai/x/pkg`, so `runtime/local` and that project share one implementation | 004 | the sibling project's owner, before phase 1 builds `local` |
-| The `vm` driver's substrate: a microVM driver of Cella's own, or the k8s runtime class alone in the first release | 004 | before phase 3 |
+| The `vm` driver's substrate: a microVM driver of Cella's own, or the k8s runtime class alone; options and criteria in [[024-vm-driver]] | 024 | when a consumer names a need; not before the first release |
 
 ## Open source readiness
 
