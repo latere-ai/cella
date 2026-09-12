@@ -152,8 +152,8 @@ The word for what turns a manifest into a running environment is
 | Package | Owns | Promise to an importer | Spec |
 |---|---|---|---|
 | `manifest`, `manifest/v1` | the `cella.latere.ai/v1` kinds, strict decoding, validation, defaulting, resolve, the boundary-subset check | a manifest the schema accepts today is accepted by every later `v1` build; new fields are optional; Go API additive within a module major | [[003-manifest-contract]] |
-| `runtime` | the `Driver` interface a data plane implements, its capabilities, the shared types | changes only with a module major | [[004-runtime-backend-contract]] |
-| `runtime/k8s`, `runtime/podman`, `runtime/vm`, `runtime/local`, `runtime/native`, `runtime/remote`, `runtime/runtimetest` | the six drivers, `vm` a stub until [[024-vm-driver]] decides, and the conformance suite a driver passes | a driver that passes `runtimetest` works under `controller` and under `cellad worker` | [[004-runtime-backend-contract]], [[021-data-plane-workers]] |
+| `runtime` | the `Driver` interface a data plane implements, its capabilities, the shared types | changes only with a module major | [[004-runtime-contract]] |
+| `runtime/k8s`, `runtime/podman`, `runtime/vm`, `runtime/local`, `runtime/native`, `runtime/remote`, `runtime/runtimetest` | the six drivers, `vm` a stub until [[024-vm-driver]] decides, and the conformance suite a driver passes | a driver that passes `runtimetest` works under `controller` and under `cellad worker` | [[004-runtime-contract]], [[021-data-plane-workers]] |
 | `controller` | desired-to-observed reconciliation, the phase machine, the reaper, recovery, the scheduler and its strategies, sets | drives any conforming driver; owns no HTTP, no identity, no store implementation | [[005-lifecycle-controller]], [[020-scheduling-and-sets]] |
 | `egress` | compiling a sandbox's secrets and egress rules into the map the gateway consumes | none beyond the wire shape it shares with the `egress` role | [[018-egress-and-secrets]] |
 | `internal/api` | the `/v1` handlers, streams, the OpenAPI document | none | [[008-api]], [[023-computer-use-operations]] |
@@ -213,7 +213,7 @@ the control plane through an extension point or the exported packages.
 | Admission webhook | on every apply, at stage 3 of [[003-manifest-contract]]'s resolve | [[007-admission]]; unavailability is a refusal | the built-in defaults and ceilings |
 | Event sink | after every mutation and every operation | [[009-events]]: signed `POST`, at-least-once, ordered per object | off |
 | Environments | registered by an operator; a worker connects | [[021-data-plane-workers]] | the one environment the in-process driver of `CELLA_RUNTIME` provides |
-| Driver decorators | at import time, by a platform that constructs a driver itself | [[004-runtime-backend-contract]] | none |
+| Driver decorators | at import time, by a platform that constructs a driver itself | [[004-runtime-contract]] | none |
 | Scheduling strategies | in `controller.Options` | [[020-scheduling-and-sets]] | `immediate`, `pooled`, `queued` |
 
 ### Flows
@@ -352,7 +352,7 @@ new entry is a row with a reason.
 ## Not in this spec
 
 The schema fields ([[003-manifest-contract]]), the driver interface
-([[004-runtime-backend-contract]]), the webhook payloads
+([[004-runtime-contract]]), the webhook payloads
 ([[006-identity]], [[007-admission]], [[009-events]]), the endpoint
 table ([[008-api]]), egress and secrets ([[018-egress-and-secrets]]),
 volumes ([[019-volumes]]), scheduling and sets

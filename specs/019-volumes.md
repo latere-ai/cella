@@ -4,7 +4,7 @@ status: drafted
 track: core
 depends_on:
   - specs/003-manifest-contract.md
-  - specs/004-runtime-backend-contract.md
+  - specs/004-runtime-contract.md
 affects: [manifest/v1/, runtime/, controller/, internal/api/, internal/store/]
 effort: medium
 created: 2026-09-12

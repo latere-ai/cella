@@ -3,7 +3,7 @@ title: "Data plane workers: the Environment kind, registration, the operation qu
 status: drafted
 track: core
 depends_on:
-  - specs/004-runtime-backend-contract.md
+  - specs/004-runtime-contract.md
   - specs/006-identity.md
   - specs/018-egress-and-secrets.md
 affects: [manifest/v1/, runtime/remote/, internal/worker/, internal/api/, internal/auth/]
@@ -134,7 +134,7 @@ may have none, and serve only workers.
 
 ## Not in this spec
 
-The drivers a worker runs ([[004-runtime-backend-contract]]); the
+The drivers a worker runs ([[004-runtime-contract]]); the
 queue's ordering ([[020-scheduling-and-sets]]).
 
 ## Acceptance criteria

@@ -3,7 +3,7 @@ title: "Computer use operations: display, screenshot, input, ports, browser-read
 status: drafted
 track: core
 depends_on:
-  - specs/004-runtime-backend-contract.md
+  - specs/004-runtime-contract.md
   - specs/008-api.md
 affects: [internal/api/, runtime/, manifest/v1/]
 effort: medium
@@ -83,7 +83,7 @@ combination is proven rather than described.
 
 ## Not in this spec
 
-The desktop's implementation per driver ([[004-runtime-backend-contract]]);
+The desktop's implementation per driver ([[004-runtime-contract]]);
 the `Ingress` decorator's shape ([[016-building-a-plane]]).
 
 ## Acceptance criteria

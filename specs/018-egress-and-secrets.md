@@ -4,7 +4,7 @@ status: drafted
 track: core
 depends_on:
   - specs/003-manifest-contract.md
-  - specs/004-runtime-backend-contract.md
+  - specs/004-runtime-contract.md
   - specs/006-identity.md
 affects: [manifest/v1/, egress/, internal/egressd/, internal/api/, internal/store/, runtime/]
 effort: large

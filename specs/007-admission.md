@@ -103,7 +103,7 @@ egress proxy resolves. None of these is the core's, and each is one
 
 ## Not in this spec
 
-The decorators the annotations drive ([[004-runtime-backend-contract]]);
+The decorators the annotations drive ([[004-runtime-contract]]);
 the stub admission endpoint ([[012-test-stubs-and-tiers]]).
 
 ## Acceptance criteria

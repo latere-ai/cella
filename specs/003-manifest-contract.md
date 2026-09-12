@@ -229,7 +229,7 @@ stored status into every response.
 | `id` | the stable identifier, a `sbx_` prefixed ULID ([[001-architecture]]), the key of every `/v1/sandboxes/{id}` path; `name` may be reused after delete, `id` never |
 | `phase` | `Pending`, `Queued`, `Starting`, `Running`, `Stopping`, `Stopped`, `Recovering`, `Deleting`, `Failed`, `Lost` ([[005-lifecycle-controller]]) |
 | `owner` | the subject that applied the manifest; for a spawned child, the root's owner |
-| `environment`, `driver`, `isolation` | where it runs, what runs it, and the isolation class ([[004-runtime-backend-contract]]) |
+| `environment`, `driver`, `isolation` | where it runs, what runs it, and the isolation class ([[004-runtime-contract]]) |
 | `parent`, `mesh`, `spawn` | the spawn tree position, the inherited mesh, the budget and what is used |
 | `conditions` | `Ready`, `WorkspaceReady`, `EgressEnforced`, `VolumesAttached`, `Scheduled`, `DisplayReady`, each with `status`, `reason`, `message`, `since` |
 | `secrets.mounted`, `.notInjectable` | which placeholders are in `env`; and which will leave the sandbox as inert strings, so the request goes out unauthenticated, because the secret was deleted or its scope no longer has a host the sandbox may reach |
@@ -376,15 +376,17 @@ The stages, in order, each one total before the next begins:
    template's `ttl`, `spawn.used` zero, and the template's environment
    ([[020-scheduling-and-sets]]).
 7. Capability check against the environment's `status.capabilities`,
-   one row per capability: `Display` and `Input` refuse `display`;
+   one row per capability a manifest field depends on: `Display` and
+   `Input` refuse `display`;
    `Ingress` refuses `expose: public`; `Mesh` refuses `mesh.enabled`
    and `expose: mesh`; `Volumes` refuses `volumes[]` and
    `workspace.source: volume`; `Persist` refuses `tier: persistent`;
    `Pool` refuses `strategy: pooled`; `OpenEgress` refuses `mode:
    open`; `Resize` refuses a `resources` change on update; `Egress`
    absent is a warning that `EgressEnforced` will be false. Refusals
-   are `capability_unsupported`; `Files` and `Detach` are not resolve
-   concerns.
+   are `capability_unsupported`. `Attach`, `Dial`, `Snapshots`, `Files`,
+   and `Detach` gate operations and routes ([[008-api]]), not manifest
+   fields, and are not resolve concerns.
 
 `Resolve` is deterministic: the same input, options, `Now`, `NewName`,
 and `Lookup` answers produce byte-identical output, which is what
@@ -489,7 +491,7 @@ mapping and user sentences of the errors ([[008-api]]).
 | Every immutable field changed on update is named in one `immutable_field` error; a workload widening each `narrow` field is `boundary_widened`; the owner widening the same is accepted | `TestImmutableFields`, `TestNarrowingIsForWorkloads` | not built |
 | Each of the nine boundary rules, violated one at a time against a parent, is `boundary_exceeded` naming the path; a conforming child passes; a child's default `ttl` is cut to the parent's remaining life | `TestBoundaryCheck`, table-driven over the nine rules | not built |
 | Ceilings refuse with the field and the ceiling; a ceiling of zero is no ceiling; `priority` above `Limits.MaxPriority` is `ceiling_exceeded` | `TestCeilings` | not built |
-| Each capability row of stage 7 refuses or warns as stated when the capability is absent and passes when present | `TestCapabilityRows`, table-driven over the eleven rows | not built |
+| Each capability row of stage 7 refuses or warns as stated when the capability is absent and passes when present | `TestCapabilityRows`, table-driven over every row | not built |
 | `status` on apply is ignored; `Resolve` returns an empty status but warnings | `TestStatusIsIgnoredOnApply` | not built |
 | `Resolve` on the same input, options, and lookup answers twice yields byte-identical JSON | `TestResolveIsDeterministic` | not built |
 | Every manifest in `testdata/v1/` resolves to its golden output | `TestGoldenCorpus` | not built |

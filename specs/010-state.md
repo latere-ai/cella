@@ -3,7 +3,7 @@ title: "State: desired and observed, the store, secret values, revocations, the 
 status: drafted
 track: core
 depends_on:
-  - specs/004-runtime-backend-contract.md
+  - specs/004-runtime-contract.md
   - specs/005-lifecycle-controller.md
 affects: [internal/store/, internal/config/, migrations/]
 effort: medium

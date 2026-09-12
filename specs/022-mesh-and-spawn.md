@@ -110,7 +110,7 @@ replica ([[020-scheduling-and-sets]]).
 
 ## Not in this spec
 
-The driver's mesh mechanics ([[004-runtime-backend-contract]]); the
+The driver's mesh mechanics ([[004-runtime-contract]]); the
 token's format ([[006-identity]]).
 
 ## Acceptance criteria

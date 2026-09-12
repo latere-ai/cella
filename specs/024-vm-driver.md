@@ -3,7 +3,7 @@ title: "VM driver: a hardware-isolated sandbox per environment; the design held 
 status: vague
 track: core
 depends_on:
-  - specs/004-runtime-backend-contract.md
+  - specs/004-runtime-contract.md
   - specs/019-volumes.md
 affects: [runtime/vm/, runtime/k8s/, internal/config/]
 effort: large
@@ -18,7 +18,7 @@ author: changkun
 
 Some workloads need a floor a container cannot give: code from an
 untrusted source, a tenant whose compliance regime names hardware
-isolation, a kernel the workload may modify. [[004-runtime-backend-contract]]
+isolation, a kernel the workload may modify. [[004-runtime-contract]]
 reserves the `vm` isolation class for them and fixes what any `vm`
 driver must do: one virtual machine per sandbox, an OCI image or a root
 file system as its disk, one network interface routed to the egress
@@ -37,7 +37,7 @@ Not built, and not scheduled. `runtime/vm` exists as a package whose
 asks for a `vm` environment is refused with a reason rather than a
 missing case. The `k8s` driver's runtime class path, which is the
 zero-code half of option A below, is part of
-[[004-runtime-backend-contract]] and is not waiting on this spec.
+[[004-runtime-contract]] and is not waiting on this spec.
 
 ## Design
 
@@ -111,7 +111,7 @@ must not need to tell, which option produced its VM.
 ## Not in this spec
 
 The `k8s` driver's runtime class support, which is
-[[004-runtime-backend-contract]]'s; any guest agent design, which is
+[[004-runtime-contract]]'s; any guest agent design, which is
 option B's own spec if chosen.
 
 ## Acceptance criteria

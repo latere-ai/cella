@@ -4,7 +4,7 @@ status: drafted
 track: core
 depends_on:
   - specs/001-architecture.md
-  - specs/004-runtime-backend-contract.md
+  - specs/004-runtime-contract.md
   - specs/006-identity.md
   - specs/007-admission.md
   - specs/015-conformance-suite.md

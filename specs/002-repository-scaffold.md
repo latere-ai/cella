@@ -86,7 +86,7 @@ specs/                  this deck
 
 `make run` builds the binary and runs it on loopback with the native
 backend selected and its state under `out/run/`. Until
-[[004-runtime-backend-contract]] lands the process serves the probes
+[[004-runtime-contract]] lands the process serves the probes
 and nothing else; once [[012-test-stubs-and-tiers]] lands, `make run`
 also starts the stub issuer, authorizer, and sink beside it and prints
 a token, so a clean clone applies its first manifest in one command.
@@ -110,7 +110,7 @@ listener and path by path on the public one.
 
 Readiness runs its checks with a 2 second budget: `draining` and
 `disk` (create and remove a file under `CELLA_DATA_DIR`) today, the
-driver's own check once [[004-runtime-backend-contract]] lands, and
+driver's own check once [[004-runtime-contract]] lands, and
 the store's once [[010-state]] does. Shutdown on `SIGTERM` or `SIGINT`:
 readiness answers 503 at once, the process waits a 3 second drain
 delay, then closes the HTTP servers with a 60 second grace period, then
@@ -150,7 +150,7 @@ deployment that sets one before its spec lands is not refused.
 | `CELLA_DATA_DIR` | no | `/var/lib/cella` | local disk cellad keeps state on: the readiness write test, the native and local drivers' sandboxes and volumes (004, 019); created at start |
 | `CELLA_RUNTIME` | no | `k8s` | the in-process driver of the default environment: `k8s`, `podman`, `native`, and from 004 `local`, `vm`, or `none` for a control plane that serves only workers |
 | `CELLA_PUBLIC_URL` | yes, from 006 | none | the absolute URL callers reach the public listener at; the issuer of workload and environment tokens and the base of every URL in a response |
-| `CELLA_KUBECONFIG`, `CELLA_NAMESPACE`, `CELLA_K8S_RUNTIME_CLASS` | 004 | in-cluster, `cella`, unset | the cluster and namespace the k8s driver creates in, and the runtime class that makes its isolation class `vm` |
+| `CELLA_KUBECONFIG`, `CELLA_NAMESPACE`, `CELLA_K8S_RUNTIME_CLASS`, `CELLA_K8S_RUNTIME_CLASS_ISOLATION` | 004 | in-cluster, `cella`, unset, `container` | the cluster and namespace the k8s driver creates in, the runtime class every Pod gets, and the isolation class the operator declares that class provides (`container` or `vm`); never inferred |
 | `CELLA_PODMAN_SOCKET` | 004 | the user's default socket | the libpod API the podman driver drives |
 | `CELLA_LOCAL_SRT` | 004 | `srt` on `PATH` | the sandbox runtime binary the local driver confines a process with |
 | `CELLA_REAP_INTERVAL`, `CELLA_LOST_GRACE` | 005 | `30s`, `10m` | the reaper's tick and how long a sandbox is `Lost` before it is recovered or reaped |
