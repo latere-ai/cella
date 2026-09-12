@@ -45,6 +45,7 @@ as built; the Outcome records the one divergence.
 Every entry either is in the tree or names the spec that builds it.
 
 ```
+api/                    openapi.yaml, generated from the kinds, the routes, and the error table; embedded (008)
 cmd/cellad/             main: the subcommand dispatcher, configuration, listeners, run group
 cmd/cella/              main of the agent client, and nothing else (011)
 manifest/               decoding, validation, defaulting, resolve, the boundary check, for every kind (003)
@@ -178,7 +179,9 @@ deployment that sets one before its spec lands is not refused.
 | `CELLA_JOURNAL_CAP` | 010 | `1000` | events kept per object in the in-memory journal |
 | `CELLA_JOURNAL_RETENTION` | 010 | `720h` | how long acknowledged or dropped events stay in the Postgres journal |
 | `CELLA_REQUESTS_PER_MINUTE` | 008 | `600` | requests one subject may send in a minute; `0` turns the limit off |
-| `CELLA_MAX_BODY_BYTES` | 008 | `65536` | the largest manifest body accepted |
+| `CELLA_MAX_BODY_BYTES` | 008 | `65536` | the largest manifest or JSON body accepted |
+| `CELLA_MAX_UPLOAD_BYTES` | 008 | `1Gi` | the largest tar upload accepted |
+| `CELLA_UNAUTHENTICATED_REQUESTS_PER_MINUTE` | 008 | `60` | requests one client address may send before authentication in a minute |
 | `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_*` | 017 | unset | the standard OpenTelemetry exporter variables, read by `latere.ai/x/pkg/otel`; telemetry is off without the endpoint |
 
 ### The gate

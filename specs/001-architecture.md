@@ -289,7 +289,8 @@ below says so.
 
 Every object has a stable id, a ULID with a kind prefix: `sbx_` for a
 sandbox, `sec_` a secret, `vol_` a volume, `set_` a set, `env_` an
-environment, `msh_` a mesh, `evt_` an event, `op_` a worker operation.
+environment, `msh_` a mesh, `evt_` an event, `op_` a worker operation,
+`req_` a request.
 The id is the key of every `/v1/<kind>/{id}` path, the value after the
 colon in a token subject (`sandbox:sbx_...`), and the `cella.latere.ai/id`
 label; a name may be reused after delete, an id never.

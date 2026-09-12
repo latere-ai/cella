@@ -64,7 +64,7 @@ what.
 | a compromised worker | an environment key authorizes one environment's queue; operations carry only that environment's sandboxes; secret values cross to that environment's gateway only for sandboxes placed there; the control plane accepts no inbound from a worker | 021 |
 | a sandbox acting as its owner | the workload token's subject is the sandbox, the owner policy grants it read and exec on itself, and the authorizer sees `workload` set | 006 |
 | a token outliving its sandbox | the token's `exp` is the sandbox's expiry, and verification checks the index for `Deleting` | 006 |
-| a caller reaching another's sandbox | every route authorizes before it looks up; `not_found` and `forbidden` are the same 404 to a caller that is not the owner, so existence does not leak | 006, 008 |
+| a caller reaching another's sandbox | every item route reads, authorizes, then acts; a deny on the caller's own action is 403, and a refused reference at resolve is the same `not_found` as a missing one, so a manifest cannot probe for another's secrets, volumes, or environments | 006, 008 |
 | an allow without a decision | the authorizer and admission clients fail closed on every non-200 and every timeout | 006, 007 |
 | a forged or replayed event | HMAC over timestamp and body; the sink refuses a timestamp older than 5 minutes | 009 |
 | a webhook that rewrites the manifest past a ceiling | the built-in ceilings apply after the webhook | 007 |
@@ -95,7 +95,7 @@ The deploy manifests that carry the Pod security fields
 |---|---|---|
 | A Pod the k8s driver creates has every field of the escape control set | `TestPodSecurityFields` over the rendered Pod, and the kind tier's `TestClusterPodIsConfined` running `id`, `cat /proc/1/status`, and a mount attempt | not built |
 | A sandbox cannot reach another sandbox's IP or the Pod network | `TestClusterNoLateralMovement` | not built |
-| `GET` of another subject's sandbox is 404 and identical to a missing id | `TestForbiddenLooksLikeNotFound` | not built |
+| A manifest naming another subject's secret, volume, or environment is `not_found`, identical to a missing one | `TestRefusedReferencesLookMissing` | not built |
 | A canary env value and a canary token appear in no event, log line, or status body across the e2e tier | `TestNoSecretLeaks` grepping every capture | not built |
 | A YAML body with a billion-laughs alias chain is refused in under 100 ms | `TestYAMLBombIsRefused` | not built |
 | A canary secret value appears in no sandbox environment, file system, event, log, or API response across the e2e tier, and reaches the upstream only in the declared header | `TestSecretValuesNeverEnterASandbox` | not built |
