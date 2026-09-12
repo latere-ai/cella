@@ -10,12 +10,17 @@ yet; the first one is `v0.1.0`.
 
 What Cella protects, against whom, and how each threat is answered is
 written down in the [threat model](specs/013-security-and-threat-model.md),
-so a reviewer can check the design rather than take it on faith. The
-properties the design commits to: every `/v1` request carries a token
-from an issuer the operator listed and is authorized before a sandbox is
-looked up; a decision the authorizer cannot give is a refusal, never an
-allow; a sandbox reaches only the hosts its manifest names; a workload
-token identifies one sandbox and dies with it.
+where every control names the test that proves it, so a reviewer can
+check the design rather than take it on faith. The commitments the
+design makes: every `/v1` request carries a token from an issuer the
+operator listed or one the control plane minted, and nothing acts
+before the authorizer has decided, with a refused object answering
+exactly as a missing one; a decision the authorizer cannot give is a
+refusal, never an allow; a sandbox reaches the network only through
+its egress gateway, which admits what its manifest's mode and host
+lists allow, on every environment that enforces egress; a workload
+token identifies one sandbox and is refused by the control plane once
+that sandbox is gone.
 
 Dependencies are checked for known vulnerabilities on every push. A
 release will carry an SPDX bill of materials for the module graph and one

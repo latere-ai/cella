@@ -241,7 +241,7 @@ Every Pod carries the security baseline of
 | `securityContext.seccompProfile.type` | `RuntimeDefault` |
 | `securityContext.allowPrivilegeEscalation` | `false` |
 | `securityContext.privileged` | `false` |
-| `hostNetwork`, `hostPID`, `hostIPC` | `false` |
+| `hostNetwork`, `hostPID`, `hostIPC`, `shareProcessNamespace` | `false` |
 | `automountServiceAccountToken` | `false` |
 | the token and CA projected volume, the labels and annotations above, the NetworkPolicy | present |
 
@@ -410,7 +410,7 @@ requests ([[023-computer-use-operations]]); the microVM driver's design
 | `podman` passes it in the podman tier; `k8s` against kind; `remote` through a worker running `native` | `TestPodmanConformance`, `TestClusterConformance`, `TestWorkerConformance` | not built |
 | A driver that declares a capability without its interface, or one the suite finds not to hold, fails | `TestConformanceCatchesAFalseCapability` with two lying wrappers | not built |
 | Every stamped label value is a legal Kubernetes label value and every key a legal key, for an owner with `@` and a user label with a `/` | `TestStampedIdentityIsLegal` | not built |
-| A decorator that removes the token mount, sets `privileged`, adds `hostNetwork`, or mounts a service account token is refused with `decorator_violation` naming the field | `TestDecoratorCannotWeakenTheBaseline`, table-driven over the baseline | not built |
+| A decorator that removes the token mount, sets `privileged`, adds `hostNetwork` or `shareProcessNamespace`, or mounts a service account token is refused with `decorator_violation` naming the field | `TestDecoratorCannotWeakenTheBaseline`, table-driven over the baseline | not built |
 | With `CELLA_K8S_RUNTIME_CLASS_ISOLATION=vm`, `Isolation()` is `vm` and the Pod carries the class; unset, `container` regardless of the class name | `TestK8sIsolationIsDeclared` | not built |
 | `Ingress` is declared only with an `Exposer` installed, and a `public` port then has a URL that answers | `TestIngressNeedsAnExposer`, e2e `IngressURL` | not built |
 | In `local`, a stage cannot read any path in the always-deny table, asserted per entry inside a real sandbox; `workspace.path` is rewritten with a warning; `Attach` and stdin are `capability_unsupported` | `TestLocalDenyTable`, `TestLocalPathRewrite`, `TestLocalRefusesAttach` | not built |

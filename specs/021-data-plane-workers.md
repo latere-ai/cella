@@ -157,8 +157,12 @@ the lesser of the two ([[020-scheduling-and-sets]]).
 
 ### The worker
 
-`cellad worker` reads `CELLA_URL`, `CELLA_ENVIRONMENT_KEY`, the
-driver's own variables, and `CELLA_RUNTIME` for which driver to run;
+`cellad worker` reads `CELLA_URL`, which must be `https://` unless it
+is a loopback address or `CELLA_INSECURE_CONTROL_PLANE=1` is set, a
+hatch the stubs use and no deployment does, the same rule the gateway
+and the client apply ([[018-egress-and-secrets]], [[011-agent-client]]);
+`CELLA_ENVIRONMENT_KEY`; the driver's own variables; and
+`CELLA_RUNTIME` for which driver to run;
 runs `Preflight`; registers; and opens one WebSocket to
 `GET /v1/environments/{id}/operations`, subprotocol `cella.worker.v1`
 ([[008-api]]), with the environment key as bearer and its worker id in
@@ -260,4 +264,5 @@ connection ([[012-test-stubs-and-tiers]]).
 | A dropped connection redelivers unacknowledged operations exactly once to a live worker after the lease | `TestRedelivery` | not built |
 | An environment with no heartbeat goes `Offline`, its running sandboxes are held `Lost`, and recover when a worker returns | `TestOfflineAndRecovery` | not built |
 | The control plane makes no outbound connection to a worker's host during the whole worker and kind tiers | `TestNoInboundToTheDataPlane`, run as [[012-test-stubs-and-tiers]]'s `TestWorkerNoInbound` and `TestClusterWorkerNoInbound` | not built |
+| A non-loopback `http://` `CELLA_URL` is refused at start unless the hatch is set | `TestControlPlaneURLRule` | not built |
 | Every variable this spec names is in [[002-repository-scaffold]]'s table with the same default | `TestConfigTableAgrees` | not built |

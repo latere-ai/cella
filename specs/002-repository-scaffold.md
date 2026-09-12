@@ -161,6 +161,7 @@ deployment that sets one before its spec lands is not refused.
 | `CELLA_EGRESS_ACK_TIMEOUT` | 018 | `5s` | how long a create waits for one gateway of the environment to acknowledge the sandbox's map |
 | `CELLA_EGRESS_RECORDS_RETENTION`, `CELLA_EGRESS_RECORDS_CAP` | 018 | `168h`, `1000` | how long egress records stay in Postgres; how many the memory store keeps per sandbox |
 | `CELLA_URL`, `CELLA_ENVIRONMENT_KEY` | 018, 021 | none | read by the `worker` and `egress` roles: the control plane's public URL and the environment key that authenticates the role's one outbound stream; `CELLA_URL` is also what `cella` reads and what every sandbox is given (004, 011) |
+| `CELLA_INSECURE_CONTROL_PLANE` | 021 | unset | `1` admits a non-loopback `http://` `CELLA_URL` for the worker, the gateway, and the client; set by the stubs only |
 | `CELLA_TOKEN`, `CELLA_TOKEN_FILE` | 011 | unset, `/run/cella/token` | the bearer `cella` sends, or the file it reads per request when the variable is unset |
 | `CELLA_EGRESS_PROXY_ADDR`, `CELLA_EGRESS_REVERSE_ADDR`, `CELLA_EGRESS_CA_KEY` | 018 | `:3128`, `:8080`, none | the `egress` role's two doors and the PEM key of the certificate authority it terminates TLS with; the key is generated at first start when absent |
 | `CELLA_EGRESS_CA_BUNDLE` | 012 | unset | PEM authorities the gateway trusts beside the system roots when it dials an upstream; unset in production, the tiers set it to the upstream stub's |
