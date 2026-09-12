@@ -181,7 +181,7 @@ caller may narrow, only a non-workload actor may widen); `stopped`
 | `network.egress.mode` | enum | `allowlist` when any host is set or any secret is mounted, else `open` | narrow | `none` blocks egress; `allowlist` admits `allowedHosts` and every mounted secret's hosts through the gateway; `open` admits everything but `deniedHosts`; DNS and the control plane are admitted by the driver's rule in every mode. Order for narrowing: `open` > `allowlist` > `none`. The environment's `capabilities.egress` list must contain the mode |
 | `network.egress.allowedHosts` | []string | empty | narrow | host patterns under the host rule below; with any mode but `allowlist` is `exclusive_fields`; narrowing removes entries |
 | `network.egress.deniedHosts` | []string | empty | narrow | host patterns; with any mode but `open` is `exclusive_fields`; a denied host wins over a mounted secret's scope; narrowing adds entries |
-| `network.ports[]` | list | empty | no | each `{name, port, expose}`; `name` a DNS-1123 label, unique; `port` 1 to 65535, unique; `expose` is `none` (default), `mesh` (needs `mesh.enabled` and `Mesh`), or `public` (needs `Ingress`) |
+| `network.ports[]` | list | empty | no | each `{name, port, expose}`; `name` a DNS-1123 label, unique; `port` 1 to 65535, unique; `expose` is `none` (default), `mesh` (needs `Mesh` and membership: `mesh.enabled` on a root, an inherited `status.mesh` on a child, else `invalid_field`), or `public` (needs `Ingress`) |
 | `mesh.enabled` | bool | `false` | no | joins a mesh; needs `Mesh`; a spawned child inherits the parent's mesh and may not set this field |
 | `mesh.spawn.budget`, `.depth` | int | `0`, `0` | narrow | children this sandbox may create in total and generations below it; does not require `mesh.enabled`; a child's values are at most the parent's remaining budget and depth minus one |
 | `scheduling.priority` | int | `0` | no | higher runs first in a queue; above `Limits.MaxPriority` is `ceiling_exceeded` |
@@ -224,7 +224,7 @@ stored status into every response.
 | `phase` | `Pending`, `Queued`, `Starting`, `Running`, `Stopping`, `Stopped`, `Recovering`, `Deleting`, `Failed`, `Lost` ([[005-lifecycle-controller]]) |
 | `owner` | the subject that applied the manifest; for a spawned child, the root's owner |
 | `environment`, `driver`, `isolation` | where it runs, what runs it, and the isolation class ([[004-runtime-contract]]) |
-| `parent`, `mesh`, `spawn` | the spawn tree position, the inherited mesh, the budget and what is used |
+| `parent`, `root`, `mesh`, `spawn` | the spawn tree position: the parent's id and the root's, or empty and the sandbox's own id for a root; the inherited or minted mesh; the budget and what is used ([[022-mesh-and-spawn]]) |
 | `set` | `{name, index}` for a `SandboxSet` replica ([[020-scheduling-and-sets]]); absent otherwise |
 | `conditions` | `Ready`, `WorkspaceReady`, `EgressEnforced`, `VolumesAttached`, `Scheduled`, `DisplayReady`, each with `status`, `reason`, `message`, `since` |
 | `secrets.mounted`, `.notInjectable` | which placeholders are in `env`; and which will leave the sandbox as inert strings, so the request goes out unauthenticated, because the secret was deleted or its scope no longer has a host the sandbox may reach |
@@ -362,14 +362,16 @@ The stages, in order, each one total before the next begins:
    and `workspace.volume` name only volumes the parent mounts, with no
    read-only attachment of the parent's made read-write; (5)
    `resources` do not exceed the parent's; (6) `ttl` does not end
-   after `Parent.status.expiresAt`; (7) `spawn.budget` is
-   at most the parent's `budget - used - 1` and `spawn.depth` at most
-   the parent's `depth - 1`; (8) `environment` is the parent's; (9)
-   `mesh.enabled` is unset, since the mesh is inherited. A set's
-   replicas are checked against the set's template as `Parent`, with
-   a synthetic status of `expiresAt` from the set's creation and the
-   template's `ttl`, `spawn.used` zero, and the template's environment
-   ([[020-scheduling-and-sets]]).
+   after `Parent.status.expiresAt`; (7) the parent has `depth > 0`,
+   `spawn.budget` is at most the parent's `budget - used - 1` and
+   `spawn.depth` at most the parent's `depth - 1`, both zero when
+   absent; (8) `environment` is the parent's; (9) `mesh.enabled` is
+   unset, since the mesh is inherited. A set's replicas are checked
+   against the set's template as `Parent`, reading the rules as
+   [[020-scheduling-and-sets]] says. On an update of a sandbox with
+   live descendants, the same rules run with the updated sandbox as
+   their parent, and a descendant left outside is `boundary_exceeded`
+   naming it ([[022-mesh-and-spawn]]).
 7. Capability check against the environment's `status.capabilities`,
    one row per capability a manifest field depends on: `Display` and
    `Input` refuse `display`;

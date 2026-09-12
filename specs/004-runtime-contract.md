@@ -149,7 +149,7 @@ type Capabilities struct {
 | Capability | k8s | podman | vm | local | native | remote |
 |---|---|---|---|---|---|---|
 | Egress | `none, allowlist, open`: NetworkPolicy to the gateway, DNS, `cellad` only | `none, allowlist, open`: per-sandbox network, gateway the only route | `none, allowlist, open`: one NIC routed to the gateway | `none, allowlist`: the OS sandbox's allow-only proxy refuses a wildcard, so `open` is not listed | empty; `EgressEnforced` false | the worker's |
-| Mesh | yes: a policy selecting peers by mesh label, a headless Service per mesh for `<port>.<sandbox>.mesh` | yes: one network per mesh with the engine's DNS | as k8s | no | no | the worker's |
+| Mesh | yes: a policy selecting peers by mesh label, a headless Service per mesh with each Pod's `hostname` and `subdomain` set so `<sandbox-name>.mesh` resolves through the installation's DNS rewrite | yes: one network per mesh with `<name>.mesh` as the container's alias | as k8s | no | no | the worker's |
 | Ingress | only when an `Exposer` decorator is installed; `false` otherwise | no | as k8s | no | no | the worker's |
 | Volumes | yes: PVCs | yes: named volumes | yes: block devices or virtiofs | yes: directories under the data dir, granted as readable or writable paths | yes: directories | the worker's |
 | Snapshots | where the cluster has the VolumeSnapshot API | by copy | yes | by copy | by copy | the worker's |
