@@ -53,7 +53,7 @@ platform.
 |---|---|---|
 | `sandbox.created` | `Create` accepted | the resolved manifest |
 | `sandbox.updated` | an update applied | the changed paths and new values |
-| `sandbox.started`, `.stopped`, `.deleted` | the transition completed | `reason`: `request`, `autoStop`, `expired`, `autoDelete`, `lost`, `failed`, `parent`, `preempted` |
+| `sandbox.started`, `.stopped`, `.deleted` | the transition completed | `reason`: `request`, `autoStop`, `expired`, `autoDelete`, `exited`, `lost`, `failed`, `parent`, `preempted` |
 | `sandbox.failed`, `sandbox.lost` | the controller observed it | the backend's condition |
 | `sandbox.exec` | a command ended | command, exit code, duration; never stdin or output |
 | `sandbox.attach` | a session ended | duration, bytes each way |
@@ -65,7 +65,7 @@ platform.
 | `sandbox.spawned` | a child was created by a workload | the child's id, the budget left |
 | `secret.created`, `.updated`, `.deleted` | the `Secret` kind | the name, the version, the scope; never the value |
 | `volume.created`, `.updated`, `.attached`, `.detached`, `.snapshotted`, `.failed`, `.deleted` | the `Volume` kind ([[019-volumes]]) | the sandbox id and mode for attach and detach; the reason for `failed`; the snapshot id |
-| `set.created`, `.replica`, `.completed`, `.deleted` | the `SandboxSet` kind | the counts, the replica index and exit code |
+| `set.created`, `.replica`, `.collect_failed`, `.completed`, `.stopped`, `.deleted` | the `SandboxSet` kind ([[020-scheduling-and-sets]]) | the counts, the replica index and exit code |
 | `environment.registered`, `.offline`, `.keyed`, `.key_revoked` | the `Environment` kind | the worker count, the `jti` |
 
 `workload` is set when the subject is a sandbox. No event carries an

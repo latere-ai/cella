@@ -66,7 +66,7 @@ later.
 | [017](017-observability.md) | Observability: metrics, traces, logs, alerts | small | drafted | 002, 005, 008 |
 | [018](018-egress-and-secrets.md) | Egress and secrets: the Secret kind, placeholders, the gateway as a data plane component, sync and telemetry, the boundary a workload cannot widen | large | validated | 003, 004, 006, 010 |
 | [019](019-volumes.md) | Volumes: the Volume kind, access and attachment, sources and fill, snapshots, the managed workspace | medium | validated | 003, 004, 005 |
-| [020](020-scheduling-and-sets.md) | Scheduling and sets: environment modes, queues, capacity, pools, the SandboxSet kind for rollouts | large | drafted | 003, 005 |
+| [020](020-scheduling-and-sets.md) | Scheduling and sets: environment modes, capacity, the queue, preemption, pools, the SandboxSet kind for rollouts | large | validated | 003, 004, 005, 007, 010, 019 |
 | [021](021-data-plane-workers.md) | Data plane workers: the Environment kind, registration, the operation queue, the worker role | large | drafted | 004, 006, 018 |
 | [022](022-mesh-and-spawn.md) | Mesh and spawn: peers that reach each other, sandboxes that create sandboxes, a fixed boundary | medium | drafted | 003, 006, 018 |
 | [023](023-computer-use-operations.md) | Computer use operations: display, screenshot, input, ports, browser-ready sandboxes | medium | drafted | 004, 008 |
@@ -133,7 +133,9 @@ flowchart BT
   S018 --> S006
   S018 --> S010
   S019 --> S005
-  S020 --> S005
+  S020 --> S007
+  S020 --> S010
+  S020 --> S019
   S021 --> S018
   S022 --> S018
   S023 --> S008
@@ -148,8 +150,8 @@ flowchart BT
 | 1 | 003, 004 | every kind as code, the driver contract, the `native` and `local` drivers passing the conformance suite of 004 |
 | 2 | 005, 006, 007, 010 | a sandbox's lifecycle with desired and observed state, identity in and out, admission, recovery |
 | 3 | 008, 009, 018, 019 | the API, the events, the gateway with secrets, volumes: `cellad` creates a bounded sandbox from a manifest |
-| 4 | 011, 012, 017, 020 | the command, the stubs, `make run`, the tiers, the metrics, the scheduler and sets |
-| 5 | 021, 022, 023, 013 | workers and self-hosted environments, mesh and spawn, computer use, the threat model's controls tested |
+| 4 | 011, 012, 017, 021 | the command, the stubs, `make run`, the tiers, the metrics, workers and self-hosted environments |
+| 5 | 020, 022, 023, 013 | the scheduler and sets, mesh and spawn, computer use, the threat model's controls tested |
 | 6 | 015, 014, 016 | the contract as a suite, a release, an install document CI executes, the plane guide; the point at which a platform builds on it |
 
 The `k8s` and `podman` drivers land during phase 3 once the tiers

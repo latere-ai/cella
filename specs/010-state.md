@@ -221,10 +221,12 @@ events at process end, which the start-up log says.
 `queue` rows are `sandbox_id`, `environment`, `queue`, `priority`,
 `subject`, `enqueued_at`. `Dequeue` orders as
 [[020-scheduling-and-sets]] says and runs under the `scheduler`
-lease. Capacity in use is never stored: it is the sum of the resolved
-resources of desired sandboxes on the environment whose status phase
-is `Pending`, `Starting`, `Running`, `Stopping`, or `Recovering`, so a
-restart cannot double count.
+lease. Capacity in use is never stored: `cpu`, `memory`, and `sandboxes` are
+the sum over desired sandboxes on the environment whose status phase
+is `Pending`, `Starting`, `Running`, `Stopping`, or `Recovering`, and
+`disk` the sum over those and `Stopped` and `Failed` as well, since a
+stopped sandbox's storage stays on the substrate
+([[020-scheduling-and-sets]]); a restart cannot double count.
 
 ### Operations and workers
 

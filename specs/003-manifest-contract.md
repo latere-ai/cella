@@ -185,7 +185,7 @@ caller may narrow, only a non-workload actor may widen); `stopped`
 | `mesh.enabled` | bool | `false` | no | joins a mesh; needs `Mesh`; a spawned child inherits the parent's mesh and may not set this field |
 | `mesh.spawn.budget`, `.depth` | int | `0`, `0` | narrow | children this sandbox may create in total and generations below it; does not require `mesh.enabled`; a child's values are at most the parent's remaining budget and depth minus one |
 | `scheduling.priority` | int | `0` | no | higher runs first in a queue; above `Limits.MaxPriority` is `ceiling_exceeded` |
-| `scheduling.queue` | string | the environment's `spec.defaults.queue` | no | one of the environment's `spec.queues`, else `invalid_field` |
+| `scheduling.queue` | string | the environment's `spec.scheduling.defaultQueue` | no | one of the environment's `spec.scheduling.queues`, else `invalid_field` |
 | `scheduling.startDeadline` | duration | none | no | queued this long without starting: `Failed` with reason `StartDeadline` |
 | `scheduling.preemptible` | bool | `false` | no | may be stopped to make room for a higher priority |
 | `lifecycle.autoStop` | duration | `Defaults.AutoStop` | yes | Go syntax, positive, or `never`; when `ttl` is a duration, `autoStop` must not exceed it (`invalid_field`) |
@@ -225,6 +225,7 @@ stored status into every response.
 | `owner` | the subject that applied the manifest; for a spawned child, the root's owner |
 | `environment`, `driver`, `isolation` | where it runs, what runs it, and the isolation class ([[004-runtime-contract]]) |
 | `parent`, `mesh`, `spawn` | the spawn tree position, the inherited mesh, the budget and what is used |
+| `set` | `{name, index}` for a `SandboxSet` replica ([[020-scheduling-and-sets]]); absent otherwise |
 | `conditions` | `Ready`, `WorkspaceReady`, `EgressEnforced`, `VolumesAttached`, `Scheduled`, `DisplayReady`, each with `status`, `reason`, `message`, `since` |
 | `secrets.mounted`, `.notInjectable` | which placeholders are in `env`; and which will leave the sandbox as inert strings, so the request goes out unauthenticated, because the secret was deleted or its scope no longer has a host the sandbox may reach |
 | `volumes[]` | `{name, volume, attached}` per mount |

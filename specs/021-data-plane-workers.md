@@ -47,7 +47,7 @@ metadata:
 spec:
   mode: worker                     # inprocess | worker
   isolation: container             # what the driver provides; refused at registration if the worker reports otherwise
-  capacity: {cpu: "512", memory: 2Ti, disk: 20Ti, sandboxes: 400}   # or auto
+  capacity: {cpu: "512", memory: 2Ti, disk: 20Ti, sandboxes: 400}   # or auto: k8s allocatable minus CELLA_CAPACITY_HEADROOM (020)
   scheduling:
     mode: queued                   # direct | queued; a manifest never chooses
     queues: [default, rollouts]
@@ -55,6 +55,8 @@ spec:
   pool:
     size: 4                        # 0 disables; needs the Pool capability
     image: ghcr.io/example/sandbox:1.4
+    resources: {cpu: "1", memory: 2Gi, disk: 10Gi}   # the entries' shape; a create matches on image, resources, display
+    display: null
   workspaceClass: ""               # the storage class of every managed workspace; the driver's default when empty
   gateway: egress.eu.example.internal   # the environment's gateway host, as sandboxes reach it; CreateSpec.Egress.GatewayURL is built from it (018)
 status:

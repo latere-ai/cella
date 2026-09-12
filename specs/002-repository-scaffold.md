@@ -156,6 +156,7 @@ deployment that sets one before its spec lands is not refused.
 | `CELLA_LOCAL_SRT` | 004 | `srt` on `PATH` | the sandbox runtime binary the local driver confines a process with |
 | `CELLA_REAP_INTERVAL`, `CELLA_LOST_GRACE`, `CELLA_RECOVERY_ATTEMPTS` | 005 | `30s`, `10m`, `5` | the reaper's tick; how long a sandbox is `Lost` without a durable store before it is reaped; how many recreations a durable one gets before `Failed` |
 | `CELLA_POOL_SIZE`, `CELLA_POOL_IMAGE`, `CELLA_SCHEDULING_MODE` | 020, 021 | `0`, unset, `direct` | the default environment's `spec.pool.size`, `spec.pool.image`, and `spec.scheduling.mode`; every other environment declares its own |
+| `CELLA_SCHEDULE_INTERVAL`, `CELLA_CAPACITY_HEADROOM`, `CELLA_MAX_PREEMPTIONS`, `CELLA_MAX_SET_REPLICAS` | 020 | `5s`, `0.1`, `3`, `4096` | the scheduler loop's tick; the fraction an `auto` capacity keeps free; how often one sandbox may be preempted; the largest set |
 | `CELLA_SECRETS_KEK` | yes when any Secret exists, from 018 | none | 32 bytes, base64, wrapping every secret's data key |
 | `CELLA_EGRESS_ACK_TIMEOUT` | 018 | `5s` | how long a create waits for one gateway of the environment to acknowledge the sandbox's map |
 | `CELLA_EGRESS_RECORDS_RETENTION`, `CELLA_EGRESS_RECORDS_CAP` | 018 | `168h`, `1000` | how long egress records stay in Postgres; how many the memory store keeps per sandbox |
