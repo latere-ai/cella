@@ -49,7 +49,7 @@ later.
 |---|---|---|---|---|
 | [001](001-architecture.md) | Architecture: control plane and data plane, packages, extension points, invariants | medium | validated | - |
 | [002](002-repository-scaffold.md) | Repository scaffold: module, binary, configuration, gate, images, workflows | small | complete | - |
-| [003](003-manifest-contract.md) | Manifest contract: the Sandbox kind, decoding, validation, defaulting, resolve, the boundary check | large | drafted | 001 |
+| [003](003-manifest-contract.md) | Manifest contract: the Sandbox kind, decoding, validation, defaulting, resolve, the boundary check | large | validated | 001 |
 | [004](004-runtime-backend-contract.md) | Runtime contract: the Driver interface, isolation classes, capabilities, six drivers, conformance | large | drafted | 001, 003 |
 | [005](005-lifecycle-controller.md) | Lifecycle controller: desired to observed, phases, the reaper, recovery, cascade | medium | drafted | 003, 004 |
 | [006](006-identity.md) | Identity: OIDC issuers, workload and environment tokens, the authorizer webhook, the owner policy | medium | drafted | 001, 002 |

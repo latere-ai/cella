@@ -99,9 +99,13 @@ of [[003-manifest-contract]].
 
 ### Capabilities
 
+`Capabilities` is declared in `manifest/v1`, because an `Environment`
+carries it in its status, and aliased here so the two never disagree.
+
 ```go
 type Capabilities struct {
-	Egress   bool // the egress rule is enforced, not advisory
+	Egress     bool // the egress rule is enforced, not advisory
+	OpenEgress bool // mode open is expressible; false where the substrate is allow-only (local)
 	Mesh     bool // peers in one mesh reach each other's mesh ports and nothing else does
 	Ingress  bool // a public port gets an endpoint
 	Volumes  bool // Volume objects attach and detach
@@ -118,6 +122,7 @@ type Capabilities struct {
 | Capability | k8s | podman | vm | local | native | remote |
 |---|---|---|---|---|---|---|
 | Egress | yes: NetworkPolicy to the gateway, DNS, `cellad` only | yes: per-sandbox network, gateway the only route | yes: the VM's single NIC routes to the gateway | yes: the OS sandbox's allow-only proxy | no; warning | the worker's driver's |
+| OpenEgress | yes | yes | yes | no: the sandbox runtime refuses a wildcard, so `mode: open` is refused at resolve | yes, unenforced | the worker's |
 | Mesh | yes: a policy selecting peers by mesh label | yes: one network per mesh | yes, as k8s | no | no | the worker's |
 | Ingress | yes, through an Ingress or Gateway API decorator | no | as k8s | no | no | the worker's |
 | Volumes | yes: PVCs | yes: named volumes | yes: block devices or virtiofs | yes: host directories under the data dir, bind-mounted read-only or read-write | yes: directories | the worker's |

@@ -91,10 +91,11 @@ Rules:
   start-up failure when absent and any secret exists). Rotation of the
   KEK rewraps every data key in one migration and never rewrites a
   value.
-- `scope.hosts` is required and non-empty. Exact names or one leading
-  `*.` wildcard; an IP literal, a loopback, link-local, or private
-  range is refused with `invalid_field`, so a secret cannot be aimed at
-  the cluster. There is no "any host" scope, because a value sent
+- `scope.hosts` is required and non-empty, under the host rule of
+  [[003-manifest-contract]]: exact names or one leading `*.` wildcard
+  matched by `hostmatch`, normalized the same way, with IP literals,
+  single labels, and loopback, link-local, or private ranges refused
+  with `invalid_field`, so a secret cannot be aimed at the cluster. There is no "any host" scope, because a value sent
   anywhere is a value the sandbox effectively holds.
 - `inject` names exactly one place. `basic` expects `value` as
   `user:pass` and the gateway base64-encodes it; `raw` writes the value
@@ -131,8 +132,10 @@ The environment also carries the gateway's address in `HTTP_PROXY`,
 `HTTPS_PROXY`, `NO_PROXY` and their lowercase forms, and the gateway's
 CA in the trust-store variables `SSL_CERT_FILE`, `NODE_EXTRA_CA_CERTS`,
 `REQUESTS_CA_BUNDLE`, `GIT_SSL_CAINFO`, `CURL_CA_BUNDLE`, with the CA
-file projected read-only at `/run/cella/egress-ca.pem`. These keys are
-reserved ([[003-manifest-contract]]). A program that ignores them
+file projected read-only at `/run/cella/egress-ca.pem`. `egress`
+exports this list as `ReservedEnv`; `manifest` holds a copy and
+`TestReservedKeysMatchTheGateway` asserts they are equal
+([[003-manifest-contract]]). A program that ignores them
 reaches nothing, because the environment's network rule admits only
 the gateway, DNS, and the control plane.
 

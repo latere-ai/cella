@@ -65,15 +65,13 @@ any other, with three additions:
 1. Identity sees `workload` set and the authorizer decides
    `sandbox.create` for the sandbox as subject; the built-in owner
    policy allows it when the budget allows.
-2. Resolve runs with `Options.Parent` set to the parent's resolved
-   manifest, and the boundary check of [[003-manifest-contract]] holds
-   the child to it: egress mode at least as strict; allowed hosts and
-   secrets subsets of the parent's; volumes among the parent's with no
-   read-only attachment made read-write; resources at most the
-   parent's; `ttl` not beyond the parent's `expiresAt`; spawn budget
-   and depth within the parent's remainder; `environment` the
-   parent's; `mesh.enabled` unset. A violation is `boundary_exceeded`
-   naming every path.
+2. Resolve runs with `Options.Parent` set to the parent's desired spec
+   and current status, and the nine numbered rules of
+   [[003-manifest-contract]]'s stage 6 hold the child to it. A
+   violation is `boundary_exceeded` naming every path. A child that
+   names no `ttl` gets the lesser of the default and the parent's
+   remaining life; one that names a longer `ttl` or a later `deadline`
+   is refused.
 3. The controller debits the parent's budget and creates the child in
    one act against the store, so two concurrent spawns cannot both
    take the last unit; the child's `status.parent` is set, its `owner`
@@ -86,8 +84,9 @@ the control plane still checks the store, since claims are a copy.
 ### Cascade
 
 Deleting a sandbox deletes its descendants, breadth first, and emits
-one event per sandbox with `reason: parent`. A child's `ttl` never
-outlives its parent, so nothing survives its root by accident. A
+one event per sandbox with `reason: parent`. A child never
+expires after its parent, by the boundary rule, so nothing survives its
+root by accident. A
 parent that is `Stopped` leaves its children running; a parent that is
 `Lost` and recovers keeps its children, because their desired state
 names it by id and the id is stable.
@@ -120,8 +119,8 @@ token's format ([[006-identity]]).
 |---|---|---|
 | Two members of one mesh reach each other's `mesh` ports by name; a non-member cannot reach them; a `none`-exposed port is reachable by neither | e2e `TestMeshReachability` on k8s and podman | not built |
 | A child spawned with the parent's exact boundary is created with `status.parent`, the parent's mesh, and the root's owner | `TestSpawnInheritance` | not built |
-| Each of the nine boundary rules, violated one at a time, is `boundary_exceeded` naming the path | `TestSpawnBoundary`, table-driven | not built |
+| Each of the nine boundary rules of [[003-manifest-contract]], violated one at a time through the spawn path, is `boundary_exceeded` naming the path | `TestSpawnBoundary`, table-driven over the same nine | not built |
 | Two concurrent spawns against a budget of one yield one child and one `spawn_budget_exhausted` | `TestBudgetIsAtomic` | not built |
 | A grandchild under depth 2 resolves to `spawn.budget: 0` and its own spawn is refused | `TestDepth` | not built |
-| Deleting the root deletes every descendant with `reason: parent`; a child's `ttl` beyond the parent's expiry is clamped | `TestCascade` | not built |
+| Deleting the root deletes every descendant with `reason: parent`; a child with no `ttl` expires no later than its parent | `TestCascade` | not built |
 | The workload token's `spawn` claims equal the store's values at mint and are not trusted over the store at check | `TestClaimsAreACopy` | not built |

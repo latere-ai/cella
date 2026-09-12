@@ -83,7 +83,9 @@ labelled `cella.latere.ai/pool: "true"`. A `pooled` create whose
 resolved shape (image, resources, tier, egress mode, display) matches
 an entry adopts it: the driver applies the caller's labels, env,
 volumes, secrets map, and token through `Update`, and the pool
-refills. Adoption is exclusive in the driver, proved by the
+refills. In manifest terms adoption is a create, not an update: the
+`Change` the driver receives carries fields [[003-manifest-contract]]
+marks immutable, because the object never existed for the caller. Adoption is exclusive in the driver, proved by the
 conformance case `AdoptIsExclusive`. A pool never serves a create the
 authorizer refused, because the authorizer decides before the
 scheduler is asked.
@@ -122,9 +124,11 @@ status:
 ```
 
 Each replica is an ordinary `Sandbox` owned by the set, resolved from
-`template` with its variant applied and the boundary check run against
-the template as the parent, so a variant cannot widen what the template
-declared. `parallelism` bounds the set's own concurrency inside the
+`template` with its variant applied and the boundary check of
+[[003-manifest-contract]] run against the template as `Parent`, with a
+synthetic status (`expiresAt` from the set's creation and the
+template's `ttl`, `spawn.used` zero, the template's environment), so a
+variant cannot widen what the template declared. `parallelism` bounds the set's own concurrency inside the
 queue's capacity. `completion.command` runs through `Exec` once the
 replica is `Running` and its exit code decides `Succeeded` or `Failed`;
 `collect.paths` are exported as a tar into the results volume under

@@ -37,12 +37,16 @@ become one step behind one contract.
 
 With `CELLA_ADMISSION_URL` unset, the step is:
 
-1. `Defaults` from `CELLA_DEFAULT_*`, applied by stage 2 of `Resolve`.
+1. `Defaults` from `CELLA_DEFAULT_*`, applied by stage 2 of `Resolve`:
+   the `manifest.Defaults` fields `CPU`, `Memory`, `Disk`, `AutoStop`,
+   `TTL`, `AutoDelete` map one to one onto the six variables of
+   [[002-repository-scaffold]]; `manifest.Ceilings` fields `CPU`,
+   `Memory`, `Disk`, `TTL` onto the four `CELLA_MAX_*`.
 2. `spec.policy`, when set, must name one of the built-in policies:
-   `default` (no change) or `restricted` (`network.mode: allowlist`
+   `default` (no change) or `restricted` (`network.egress.mode: allowlist`
    with the manifest's hosts, `user` forced to non-root when unset,
    `display` refused). An unknown name is `admission_refused`.
-3. `Ceilings` from `CELLA_MAX_*`, checked by stage 4.
+3. `Ceilings` from `CELLA_MAX_*`, checked by stage 5.
 4. A count ceiling: `CELLA_MAX_SANDBOXES_PER_SUBJECT` (default `0`, no
    ceiling), or the authorizer's `limits.max_sandboxes` when present,
    refused with `quota_exceeded`.
