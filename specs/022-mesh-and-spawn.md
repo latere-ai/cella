@@ -70,8 +70,7 @@ any other, with three additions:
    [[003-manifest-contract]]'s stage 6 hold the child to it. A
    violation is `boundary_exceeded` naming every path. A child that
    names no `ttl` gets the lesser of the default and the parent's
-   remaining life; one that names a longer `ttl` or a later `deadline`
-   is refused.
+   remaining life; one that names a longer `ttl` is refused.
 3. The controller debits the parent's budget and creates the child in
    one act against the store, so two concurrent spawns cannot both
    take the last unit; the child's `status.parent` is set, its `owner`

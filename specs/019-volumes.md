@@ -29,8 +29,8 @@ land.
 
 ## Current state
 
-Not built. The hosted platform persists a workspace by tier and has no
-caller-declarable attachment; the mount of a remote file plane it once
+Not built. The hosted platform persisted a workspace by a tier field
+and had no caller-declarable attachment; the mount of a remote file plane it once
 planned is withdrawn. This spec puts persistence where the caller can
 see and name it.
 
@@ -98,14 +98,16 @@ data can be moved under a new sandbox without a restart of the volume.
 
 ### The workspace
 
-The workspace is a volume the controller manages for the sandbox: on
-`tier: ephemeral` it is created with the sandbox and deleted with it;
-on `tier: persistent` it survives `Stop` and is deleted with the
-sandbox. `workspace.source: volume` replaces the managed one with a
-caller's `Volume`, which then outlives the sandbox by its own rules.
-This is how a lost sandbox recovers with its work intact
-([[005-lifecycle-controller]]): the desired state names the volume and
-the volume is still there.
+Every sandbox has a managed workspace: a volume the controller creates
+with the sandbox at `workspace.path`, sized by `resources.disk`, on the
+environment's workspace storage class ([[021-data-plane-workers]]). It
+lives exactly as long as the sandbox object: `Stop` keeps it, `Delete`
+removes it, and recovery reattaches it where the driver still holds it.
+`workspace.source: volume` replaces the managed one with a caller's
+`Volume`, which then outlives the sandbox by its own rules. There is
+one way to keep files beyond a sandbox, and it is a `Volume`; how
+cheap or fast the managed workspace is belongs to the operator's
+storage class, never to a field a caller sets.
 
 ### Snapshots
 

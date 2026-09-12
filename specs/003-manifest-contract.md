@@ -16,7 +16,7 @@ author: changkun
 ## Overview
 
 The manifest is the contract. A caller describes the environment it
-wants in one document, `apiVersion: cella.latere.ai/v1`, `kind:
+wants in one document, `apiVersion: cella.latere.ai/v1beta1`, `kind:
 Sandbox`, and every surface of the system, the API, the `cella`
 command, and a platform importing the packages, hands that document to
 one function, `Resolve`, and gets back the fully defaulted, validated
@@ -48,7 +48,7 @@ selector are; and `status` is part of the contract.
 ### The object
 
 ```yaml
-apiVersion: cella.latere.ai/v1
+apiVersion: cella.latere.ai/v1beta1
 kind: Sandbox
 metadata:
   name: dev                       # optional; generated when absent
@@ -63,7 +63,6 @@ spec:
   args: []
   workdir: /workspace                  # default: workspace.path
   user: "1000"                         # optional; the image's user when absent
-  tier: ephemeral                      # ephemeral | persistent
   resources:
     cpu: "1"                           # Kubernetes quantity syntax
     memory: 2Gi
@@ -93,7 +92,7 @@ spec:
   network:
     egress:
       mode: allowlist                  # open | allowlist | none
-      allowedHosts: ["pypi.org", "*.pythonhosted.org"]   # plus every mounted secret's hosts
+      allowedHosts: ["pypi.org", "*.pythonhosted.org"]   # plus every mounted secret's hosts; deniedHosts with mode open
     ports:                             # what may be reached inside (023)
       - name: web
         port: 8080
@@ -103,20 +102,18 @@ spec:
     spawn:
       budget: 4                        # children this sandbox may create in total
       depth: 2                         # generations below this one
-  scheduling:                          # when and where (020)
-    strategy: queued                   # immediate | pooled | queued
+  scheduling:                          # on a queued environment only (020)
     priority: 0
     queue: default
     startDeadline: 10m                 # queued only
     preemptible: false
   lifecycle:
     autoStop: 15m                      # idle this long: stopped
-    ttl: 24h                           # this old: deleted; or `never`; exclusive with deadline
+    ttl: 24h                           # this old: deleted; or `never`
     autoDelete: 72h                    # stopped this long: deleted
   display:
     width: 1280                        # a GUI desktop; capability-gated (023)
     height: 800
-  policy: restricted                   # a named policy the admission step resolves
 status:                                # written by the server, ignored on apply
   id: sbx_01J9ZK2P7Q8R9S0T1U2V3W4X5Y
   phase: Running
@@ -146,9 +143,9 @@ status:                                # written by the server, ignored on apply
   warnings: []
 ```
 
-The example is a manifest `Resolve` accepts on an environment with
-`Egress`, `Mesh`, `Volumes`, `Display`, and `Persist`; the acceptance
-criteria hold it to that.
+The example is a manifest `Resolve` accepts on a queued environment
+whose capabilities include `allowlist` egress, `Mesh`, `Volumes`, and
+`Display`; the acceptance criteria hold it to that.
 
 ### Fields
 
@@ -172,32 +169,29 @@ caller may narrow, only a non-workload actor may widen); `stopped`
 | `command`, `args` | []string | the image's | no | `args` without `command` appends to the image's entrypoint |
 | `workdir` | string | `workspace.path` | no | absolute path |
 | `user` | string | the image's | no | a uid, `uid:gid`, or a name |
-| `tier` | enum | `ephemeral` | ephemeral to persistent only | `persistent` keeps the workspace across stop and start and needs `Persist`; `ephemeral` loses it at stop |
 | `resources.cpu`, `.memory`, `.disk` | quantity | `Defaults.CPU`, `.Memory`, `.Disk` | yes, with `Resize` | Kubernetes quantity syntax, decimal (`500m`, `2`) and binary SI (`2Gi`), parsed by the package's own parser; `disk` sizes the workspace volume |
 | `workspace.path` | string | `/workspace` | no | absolute; not under `/run/cella`; may not equal or nest with a `volumes[].path` (`path_conflict`) |
 | `workspace.source` | enum | `empty` | no | `empty`, `git`, or `volume` |
 | `workspace.git.url`, `.ref` | string | none; url required for `git` | no | `https://` or `ssh://`; a branch, tag, or commit |
 | `workspace.git.secret` | string | none | no | a `Secret` name whose scope covers the clone URL's host; the URL must be `https://`, because the gateway substitutes into HTTP and an ssh clone carries none (`secret_out_of_scope` otherwise) |
-| `workspace.volume` | string | none; required for `volume` | no | a `Volume` name attached read-write at `workspace.path`; `tier` must be `persistent` |
+| `workspace.volume` | string | none; required for `volume` | no | a `Volume` name attached read-write at `workspace.path` in place of the managed workspace, so the files outlive the sandbox ([[019-volumes]]) |
 | `volumes[]` | list | empty | stopped, `Volumes` | each `{name, path, volume, readOnly}`; `name` a DNS-1123 label, unique; `path` absolute, unique, not equal to or nested with another mount or `/run/cella`; `volume` a `Volume` the caller may attach, in the same environment; a read-write attach of a `single` volume attached read-write elsewhere is `volume_busy` |
 | `env` | map | empty | no | keys POSIX names; values up to 32 KiB total; a key in the reserved set below is `reserved_prefix` |
 | `secrets[]` | list | empty | narrow | each `{name, env}`; `name` a `Secret` the caller may mount; `env` a POSIX name not in `env`, not reserved, not another entry's `env`, and not equal to any entry's `<env>_HEADER` or `<env>_QUERY`; two entries whose secrets scope one host are `secret_host_conflict` |
-| `network.egress.mode` | enum | `allowlist` when any host is set or any secret is mounted, else `open` | narrow | `none` blocks egress; `allowlist` admits the listed hosts, every mounted secret's hosts, and DNS; `open` admits everything through the gateway with substitution still scoped. Order for narrowing: `open` > `allowlist` > `none`. `open` needs `OpenEgress` |
-| `network.egress.allowedHosts` | []string | empty | narrow | host patterns under the host rule below; with `mode: open` is `exclusive_fields` |
+| `network.egress.mode` | enum | `allowlist` when any host is set or any secret is mounted, else `open` | narrow | `none` blocks egress; `allowlist` admits `allowedHosts`, every mounted secret's hosts, and DNS; `open` admits everything but `deniedHosts`, through the gateway, with substitution still scoped. Order for narrowing: `open` > `allowlist` > `none`. The environment's `capabilities.egress` list must contain the mode |
+| `network.egress.allowedHosts` | []string | empty | narrow | host patterns under the host rule below; with any mode but `allowlist` is `exclusive_fields`; narrowing removes entries |
+| `network.egress.deniedHosts` | []string | empty | narrow | host patterns; with any mode but `open` is `exclusive_fields`; a denied host wins over a mounted secret's scope; narrowing adds entries |
 | `network.ports[]` | list | empty | no | each `{name, port, expose}`; `name` a DNS-1123 label, unique; `port` 1 to 65535, unique; `expose` is `none` (default), `mesh` (needs `mesh.enabled` and `Mesh`), or `public` (needs `Ingress`) |
 | `mesh.enabled` | bool | `false` | no | joins a mesh; needs `Mesh`; a spawned child inherits the parent's mesh and may not set this field |
 | `mesh.spawn.budget`, `.depth` | int | `0`, `0` | narrow | children this sandbox may create in total and generations below it; does not require `mesh.enabled`; a child's values are at most the parent's remaining budget and depth minus one |
-| `scheduling.strategy` | enum | the environment's `spec.defaults.strategy` | no | `immediate`, `pooled` (needs `Pool`), or `queued` |
 | `scheduling.priority` | int | `0` | no | higher runs first in a queue; above `Limits.MaxPriority` is `ceiling_exceeded` |
 | `scheduling.queue` | string | the environment's `spec.defaults.queue` | no | one of the environment's `spec.queues`, else `invalid_field` |
-| `scheduling.startDeadline` | duration | none | no | with `strategy: queued` only, else `exclusive_fields`; queued this long without starting: `Failed` with reason `StartDeadline` |
+| `scheduling.startDeadline` | duration | none | no | queued this long without starting: `Failed` with reason `StartDeadline` |
 | `scheduling.preemptible` | bool | `false` | no | may be stopped to make room for a higher priority |
 | `lifecycle.autoStop` | duration | `Defaults.AutoStop` | yes | Go syntax, positive, or `never`; when `ttl` is a duration, `autoStop` must not exceed it (`invalid_field`) |
-| `lifecycle.ttl` | duration or `never` | `Defaults.TTL`, or for a spawned child the lesser of that and the time to `Parent.status.expiresAt` | yes | from `createdAt`; exclusive with `deadline` |
-| `lifecycle.deadline` | RFC 3339 | none | yes | absolute; after `Now` at apply; exclusive with `ttl` |
+| `lifecycle.ttl` | duration or `never` | `Defaults.TTL`, or for a spawned child the lesser of that and the time to `Parent.status.expiresAt` | yes | from `createdAt` |
 | `lifecycle.autoDelete` | duration | `Defaults.AutoDelete` | yes | from `stoppedAt`; `never` disables |
 | `display.width`, `.height` | int | none | no | both or neither; 320 to 7680 and 240 to 4320; needs `Display` |
-| `policy` | string | none | no | a name the admission step resolves; unknown names are `admission_refused` |
 
 The host rule, shared with `Secret.spec.scope.hosts`
 ([[018-egress-and-secrets]]) and with the gateway: a pattern is an
@@ -235,7 +229,7 @@ stored status into every response.
 | `secrets.mounted`, `.notInjectable` | which placeholders are in `env`; and which will leave the sandbox as inert strings, so the request goes out unauthenticated, because the secret was deleted or its scope no longer has a host the sandbox may reach |
 | `volumes[]` | `{name, volume, attached}` per mount |
 | `ports[]` | `{name, port, state, url}`; `state` is `listening` or `closed` ([[023-computer-use-operations]]); `url` set for `expose: public` |
-| `createdAt`, `startedAt`, `stoppedAt`, `lastActivityAt`, `expiresAt` | RFC 3339; `expiresAt` is the earlier of the TTL and the deadline, written by the controller |
+| `createdAt`, `startedAt`, `stoppedAt`, `lastActivityAt`, `expiresAt` | RFC 3339; `expiresAt` is `createdAt` plus `ttl`, written by the controller; absent for `never` |
 | `warnings` | sentences in the user register about what the environment could not honour |
 
 A manifest that carries `status` on apply is accepted and the field
@@ -252,7 +246,7 @@ every kind.
   type is decoded as JSON.
 - YAML is one document. A second document is `multi_document`.
 - Unknown fields anywhere are `unknown_field` with the path.
-- `apiVersion` other than `cella.latere.ai/v1` is `unsupported_version`;
+- `apiVersion` other than `cella.latere.ai/v1beta1` is `unsupported_version`;
   an unknown `kind` is `unsupported_kind`. Both are checked before
   anything else, so a caller learns the version problem first.
 - Durations are Go syntax or `never`; quantities are the Kubernetes
@@ -329,8 +323,8 @@ The stages, in order, each one total before the next begins:
    or lookups (syntax, enums, ranges, reserved names, exclusive pairs,
    path collisions, port uniqueness, the host rule).
 2. Defaulting: every absent field with a default is set from
-   `Defaults`, from the environment's `spec.defaults` (strategy,
-   queue), and for a child from `Parent`. `network.egress.mode` is
+   `Defaults`, from the environment's `spec.scheduling.defaultQueue`,
+   and for a child from `Parent`. `network.egress.mode` is
    inferred. `workdir` from `workspace.path`. `metadata.name` from
    `NewName` when absent.
 3. Admission: `Admit` receives the defaulted object and returns the
@@ -357,8 +351,7 @@ The stages, in order, each one total before the next begins:
    where a wider allow list is one not contained in the old under the
    host rule, a looser mode is one earlier in the order, an added
    secret is one not in the old list, and a larger budget or depth is
-   larger); the tier rule; `deadline` after `Now`; `autoStop` against
-   `ttl`.
+   larger); `autoStop` against `ttl`.
 6. Boundary check, when `Parent` is set, nine rules, any violation
    `boundary_exceeded` with every offending path: (1) `egress.mode` is
    at least as strict as the parent's; (2) `allowedHosts` is contained
@@ -366,8 +359,8 @@ The stages, in order, each one total before the next begins:
    `secrets[]` names only secrets the parent mounts; (4) `volumes[]`
    and `workspace.volume` name only volumes the parent mounts, with no
    read-only attachment of the parent's made read-write; (5)
-   `resources` do not exceed the parent's; (6) `ttl` or `deadline`
-   does not end after `Parent.status.expiresAt`; (7) `spawn.budget` is
+   `resources` do not exceed the parent's; (6) `ttl` does not end
+   after `Parent.status.expiresAt`; (7) `spawn.budget` is
    at most the parent's `budget - used - 1` and `spawn.depth` at most
    the parent's `depth - 1`; (8) `environment` is the parent's; (9)
    `mesh.enabled` is unset, since the mesh is inherited. A set's
@@ -380,10 +373,11 @@ The stages, in order, each one total before the next begins:
    `Input` refuse `display`;
    `Ingress` refuses `expose: public`; `Mesh` refuses `mesh.enabled`
    and `expose: mesh`; `Volumes` refuses `volumes[]` and
-   `workspace.source: volume`; `Persist` refuses `tier: persistent`;
-   `Pool` refuses `strategy: pooled`; `OpenEgress` refuses `mode:
-   open`; `Resize` refuses a `resources` change on update; `Egress`
-   absent is a warning that `EgressEnforced` will be false. Refusals
+   `workspace.source: volume`; `Resize` refuses a `resources` change on
+   update; `capabilities.egress` refuses an `egress.mode` it does not
+   list, and an empty list is a warning that `EgressEnforced` will be
+   false; an environment whose `spec.scheduling.mode` is `direct`
+   refuses every `scheduling` field. Refusals
    are `capability_unsupported`. `Attach`, `Dial`, `Snapshots`, `Files`,
    and `Detach` gate operations and routes ([[008-api]]), not manifest
    fields, and are not resolve concerns.
@@ -409,13 +403,13 @@ status, and its `TestErrorTable` asserts every code here has one.
 |---|---|
 | `unsupported_media_type` | the content type is not JSON or YAML |
 | `multi_document` | more than one YAML document |
-| `unsupported_version` | `apiVersion` is not `cella.latere.ai/v1` |
+| `unsupported_version` | `apiVersion` is not `cella.latere.ai/v1beta1` |
 | `unsupported_kind` | `kind` is not one the server serves |
 | `unknown_field` | a field the schema does not have |
 | `missing_field` | a required field is absent |
 | `invalid_field` | a value fails its syntax, enum, range, or host rule; the YAML limits |
 | `reserved_prefix` | a label, annotation, or env key under a reserved prefix or equal to a reserved name |
-| `exclusive_fields` | `ttl` with `deadline`; `allowedHosts` with `mode: open`; `startDeadline` without `queued` |
+| `exclusive_fields` | `allowedHosts` without `mode: allowlist`; `deniedHosts` without `mode: open` |
 | `path_conflict` | two mounts at one path, or a mount under another |
 | `not_found` | a named `Environment`, `Secret`, or `Volume` the actor cannot see |
 | `secret_host_conflict` | two mounted secrets scope one host |
@@ -436,7 +430,7 @@ no budget left at create; `Resolve` never emits it.
 
 ### Schema evolution
 
-- Within `cella.latere.ai/v1`, a change adds an optional field with a
+- Within `cella.latere.ai/v1beta1`, a change adds an optional field with a
   default that preserves the previous behaviour, or adds an enum value.
   A field never changes type or meaning, and is never removed.
 - A manifest accepted by stages 1 and 2 of one `v1` build is accepted

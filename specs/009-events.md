@@ -53,7 +53,7 @@ platform.
 |---|---|---|
 | `sandbox.created` | `Create` accepted | the resolved manifest |
 | `sandbox.updated` | an update applied | the changed paths and new values |
-| `sandbox.started`, `.stopped`, `.deleted` | the transition completed | `reason`: `request`, `autoStop`, `ttl`, `deadline`, `autoDelete`, `lost`, `failed` |
+| `sandbox.started`, `.stopped`, `.deleted` | the transition completed | `reason`: `request`, `autoStop`, `expired`, `autoDelete`, `lost`, `failed`, `parent`, `preempted` |
 | `sandbox.failed`, `sandbox.lost` | the controller observed it | the backend's condition |
 | `sandbox.exec` | a command ended | command, exit code, duration; never stdin or output |
 | `sandbox.attach` | a session ended | duration, bytes each way |

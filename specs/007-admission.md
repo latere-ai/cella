@@ -1,5 +1,5 @@
 ---
-title: "Admission: AdmitFunc, defaults and ceilings, named policies, the admission webhook, the count ceiling"
+title: "Admission: AdmitFunc, defaults and ceilings, the admission webhook, the count ceiling"
 status: validated
 track: core
 depends_on:
@@ -18,7 +18,7 @@ author: changkun
 
 Stage 3 of `Resolve` ([[003-manifest-contract]]) hands the defaulted
 manifest to an admission function that may change it or refuse it.
-Built in, the function resolves the two named policies. Configured, it
+Built in, the function is the identity. Configured, it
 is one `POST` per apply to an endpoint the operator writes, which is
 where a platform puts its image catalog, its policy profiles, its plan
 shapes, and the secrets its runtime brokers. The control plane learns
@@ -74,23 +74,17 @@ onto [[002-repository-scaffold]]'s variables: `Defaults.CPU`,
 `.Memory`, `.Disk`, `.AutoStop`, `.TTL`, `.AutoDelete` from the six
 `CELLA_DEFAULT_*`; `Ceilings.CPU`, `.Memory`, `.Disk`, `.TTL` from the
 four `CELLA_MAX_*`. Precedence for an absent field at stage 2: the
-environment's `spec.defaults` (`strategy` and `queue`; its `image` is
-the pool's, [[020-scheduling-and-sets]], and no manifest field reads
-it) before `CELLA_DEFAULT_*`. Stage 5 runs after stage 3, so `Ceilings`
+environment's `spec.scheduling.defaultQueue` before `CELLA_DEFAULT_*`
+([[020-scheduling-and-sets]]). Stage 5 runs after stage 3, so `Ceilings`
 apply to the admission output; there is no second check, and a webhook
 cannot raise a value above them.
 
 ### The built-in step
 
-With `CELLA_ADMISSION_URL` unset, `Admit` resolves `spec.policy`:
-`default` changes nothing; `restricted` sets `network.egress.mode:
-allowlist` and refuses `open` (`admission_refused`, path
-`spec.network.egress.mode`), sets `user: "65534:65534"` when unset,
-and refuses `display` (`admission_refused`, path `spec.display`). Any
-other name is `admission_refused`. With a webhook configured, the two
-built-in names still resolve first and any other value passes through
-to the webhook untouched, so a platform's names never collide with
-the core's.
+With `CELLA_ADMISSION_URL` unset, `Admit` is the identity. The core
+carries no named policies: a platform expresses profiles through its
+webhook, keyed off the labels a manifest carries, so one mechanism
+serves every policy and the schema carries no field for it.
 
 ### The webhook
 
@@ -191,8 +185,8 @@ so every rule above is drivable.
 | Criterion | Test that proves it | State |
 |---|---|---|
 | A nil `AdmitFunc` is the identity; `Defaults` and `Ceilings` apply with and without a webhook | `TestDefaultsAndCeilingsApplyRegardless` | not built |
-| The environment's `spec.defaults` win over `CELLA_DEFAULT_*` for `strategy` and `queue`; a caller's value wins over both | `TestDefaultsPrecedence` | not built |
-| `restricted` forces the allow list, refuses `open` and `display` with the paths named, and sets the uid when unset; an unknown name is `admission_refused` without a webhook and passes through with one | `TestNamedPolicies` | not built |
+| The environment's `defaultQueue` wins over `CELLA_DEFAULT_*`; a caller's value wins over both | `TestDefaultsPrecedence` | not built |
+| With no webhook, `Admit` returns its input unchanged | `TestBuiltInAdmitIsIdentity` | not built |
 | The webhook receives every field of the request shape, `workload` and `parent` set for a spawn, `set` for a replica | `TestAdmissionRequestShape` against the stub | not built |
 | The webhook's returned manifest is what the driver gets; an absent `manifest` leaves the input unchanged; warnings land in `status.warnings` | `TestWebhookOutputIsWhatRuns` | not built |
 | A webhook that returns an unknown field is `invalid_field`; one that changes `kind`, or `image` on update, is `admission_refused` naming the path; one that pins `image` at create passes | `TestWebhookOutputIsValidated` with `-fail-mode unknown-field`, `change-kind`, `-rewrite` | not built |

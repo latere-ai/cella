@@ -48,11 +48,14 @@ spec:
   mode: worker                     # inprocess | worker
   isolation: container             # what the driver provides; refused at registration if the worker reports otherwise
   capacity: {cpu: "512", memory: 2Ti, disk: 20Ti, sandboxes: 400}   # or auto
-  defaults:
-    strategy: queued
-    queue: default
+  scheduling:
+    mode: queued                   # direct | queued; a manifest never chooses
+    queues: [default, rollouts]
+    defaultQueue: default
+  pool:
+    size: 4                        # 0 disables; needs the Pool capability
     image: ghcr.io/example/sandbox:1.4
-  queues: [default, rollouts]
+  workspaceClass: ""               # the storage class of every managed workspace; the driver's default when empty
   gateway: https://egress.eu.example.internal:3128   # the environment's gateway, as sandboxes reach it
 status:
   id: env_01J9...
@@ -73,7 +76,7 @@ holds several so each worker carries its own ([[006-identity]]). The
 operator puts it on the worker's
 host. An environment with no worker heartbeat for
 `CELLA_ENVIRONMENT_OFFLINE` (default `2m`) is `Offline`: new sandboxes
-for it queue or fail by their strategy, running ones are `Lost` after
+for it queue or fail by its mode, running ones are `Lost` after
 the grace of [[005-lifecycle-controller]] and recovered when a worker
 returns.
 

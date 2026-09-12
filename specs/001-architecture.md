@@ -17,7 +17,7 @@ author: changkun
 Cella is an open source control plane for sandboxes: the environments
 agents and workloads run in. It owns a declarative contract for such an
 environment, a manifest in the shape of a Kubernetes object under the
-API group `cella.latere.ai/v1`, the API that creates, drives, and
+API group `cella.latere.ai/v1beta1`, the API that creates, drives, and
 observes it, the scheduling that decides when and where it runs, and
 the boundary the environment lives inside: what it may reach, what
 credentials it may use, what it may spawn. It does not own the
@@ -66,7 +66,7 @@ flowchart TB
     API["/v1 API: sandboxes, secrets, volumes, sets, environments"]
     Resolve[manifest resolve]
     Auth[identity: OIDC verify, workload tokens]
-    Sched[scheduler inside the controller: immediate, pooled, queued]
+    Sched[scheduler inside the controller: direct or queued per environment, pools]
     Ctl[controller: desired to observed]
     Store[(store: desired state, index, journal)]
   end
@@ -151,7 +151,7 @@ The word for what turns a manifest into a running environment is
 
 | Package | Owns | Promise to an importer | Spec |
 |---|---|---|---|
-| `manifest`, `manifest/v1` | the `cella.latere.ai/v1` kinds, strict decoding, validation, defaulting, resolve, the boundary-subset check | a manifest the schema accepts today is accepted by every later `v1` build; new fields are optional; Go API additive within a module major | [[003-manifest-contract]] |
+| `manifest`, `manifest/v1` | the `cella.latere.ai/v1beta1` kinds, strict decoding, validation, defaulting, resolve, the boundary-subset check | a manifest the schema accepts today is accepted by every later `v1` build; new fields are optional; Go API additive within a module major | [[003-manifest-contract]] |
 | `runtime` | the `Driver` interface a data plane implements, its capabilities, the shared types | changes only with a module major | [[004-runtime-contract]] |
 | `runtime/k8s`, `runtime/podman`, `runtime/vm`, `runtime/local`, `runtime/native`, `runtime/remote`, `runtime/runtimetest` | the six drivers, `vm` a stub until [[024-vm-driver]] decides, and the conformance suite a driver passes | a driver that passes `runtimetest` works under `controller` and under `cellad worker` | [[004-runtime-contract]], [[021-data-plane-workers]] |
 | `controller` | desired-to-observed reconciliation, the phase machine, the reaper, recovery, the scheduler and its strategies, sets | drives any conforming driver; owns no HTTP, no identity, no store implementation | [[005-lifecycle-controller]], [[020-scheduling-and-sets]] |
@@ -183,7 +183,7 @@ both.
 | `SandboxSet` | many sandboxes from one template with per-replica variants and a completion policy; the unit an RL rollout or an evaluation asks for | [[020-scheduling-and-sets]] |
 | `Environment` | a registered data plane: driven directly or by a worker; capacity, capabilities, labels | [[021-data-plane-workers]] |
 
-Every kind is one object under `apiVersion: cella.latere.ai/v1` with
+Every kind is one object under `apiVersion: cella.latere.ai/v1beta1` with
 `metadata`, `spec`, and `status`, decoded and resolved by the same
 package and served by the same API grammar.
 
@@ -214,7 +214,7 @@ the control plane through an extension point or the exported packages.
 | Event sink | after every mutation and every operation | [[009-events]]: signed `POST`, at-least-once, ordered per object | off |
 | Environments | registered by an operator; a worker connects | [[021-data-plane-workers]] | the one environment the in-process driver of `CELLA_RUNTIME` provides |
 | Driver decorators | at import time, by a platform that constructs a driver itself | [[004-runtime-contract]] | none |
-| Scheduling strategies | in `controller.Options` | [[020-scheduling-and-sets]] | `immediate`, `pooled`, `queued` |
+| Scheduling | on the `Environment`: `direct` or `queued`, an optional pool | [[020-scheduling-and-sets]] | `direct`, no pool |
 
 ### Flows
 
@@ -241,7 +241,7 @@ sequenceDiagram
   M->>D: admit(manifest)
   M->>M: validate, ceilings, boundary subset of parent (spawn)
   A->>K: desired state written to the store
-  K->>S: place (strategy, environment, capacity)
+  K->>S: place (environment mode, pool, capacity)
   S-->>K: now, from pool, or queued
   K->>G: push the sandbox's credential map
   Note over K,R: then volumes, then Create, with the driver's rule before its workload (018)
@@ -280,7 +280,7 @@ and a lost object is reported and reaped, which the start-up log says.
 
 ### Naming
 
-`cella.latere.ai/v1` is the API group and version. Kubernetes asks only
+`cella.latere.ai/v1beta1` is the API group and version. Kubernetes asks only
 that a group be a DNS subdomain and validates nothing about who owns
 it; every project outside the core groups uses its own domain, and
 this is Latere's open source project. The group is therefore the one

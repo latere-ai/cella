@@ -53,7 +53,7 @@ later.
 | [004](004-runtime-contract.md) | Runtime contract: the Driver interface, optional interfaces, isolation classes, capabilities, the six drivers, conformance | large | validated | 001, 003 |
 | [005](005-lifecycle-controller.md) | Lifecycle controller: desired to observed, the phase machine, create and update, the reaper, recovery, cascade | large | validated | 003, 004 |
 | [006](006-identity.md) | Identity: OIDC issuers, workload and environment tokens, the authorizer webhook, the owner policy | medium | validated | 001, 002 |
-| [007](007-admission.md) | Admission: AdmitFunc, defaults and ceilings, named policies, the admission webhook, the count ceiling | small | validated | 003, 006 |
+| [007](007-admission.md) | Admission: AdmitFunc, defaults and ceilings, the admission webhook, the count ceiling | small | validated | 003, 006 |
 | [008](008-api.md) | API: the /v1 kinds, addressing and concurrency, streams, the error table, OpenAPI | large | validated | 003, 005, 006, 007, 010 |
 | [009](009-events.md) | Events: one signed record per mutation and operation, to the operator's sink | small | drafted | 005, 006 |
 | [010](010-state.md) | State: desired and observed, the store contract, transactions, secret values, the journal, queues and operations, optional Postgres | large | validated | 003, 004, 005 |
@@ -66,7 +66,7 @@ later.
 | [017](017-observability.md) | Observability: metrics, traces, logs, alerts | small | drafted | 002, 005, 008 |
 | [018](018-egress-and-secrets.md) | Egress and secrets: the Secret kind, placeholders, the gateway, the boundary a workload cannot widen | large | drafted | 003, 004, 006 |
 | [019](019-volumes.md) | Volumes: the Volume kind, attachment, the workspace as a volume, what persists and how | medium | drafted | 003, 004 |
-| [020](020-scheduling-and-sets.md) | Scheduling and sets: strategies, queues, capacity, the SandboxSet kind for rollouts | large | drafted | 003, 005 |
+| [020](020-scheduling-and-sets.md) | Scheduling and sets: environment modes, queues, capacity, pools, the SandboxSet kind for rollouts | large | drafted | 003, 005 |
 | [021](021-data-plane-workers.md) | Data plane workers: the Environment kind, registration, the operation queue, the worker role | large | drafted | 004, 006, 018 |
 | [022](022-mesh-and-spawn.md) | Mesh and spawn: peers that reach each other, sandboxes that create sandboxes, a fixed boundary | medium | drafted | 003, 006, 018 |
 | [023](023-computer-use-operations.md) | Computer use operations: display, screenshot, input, ports, browser-ready sandboxes | medium | drafted | 004, 008 |
@@ -160,7 +160,7 @@ consumer names a need; it is not in any phase.
 | Decision | Where | Why |
 |---|---|---|
 | a control plane, not a sandbox: the data plane is a driver in-process or a worker that connects outbound | 001, 021 | the open component is the contract and the decisions; where sandboxes run is the operator's, including their own infrastructure |
-| `cella.latere.ai/v1` as the API group | 001, 003 | Kubernetes asks only that a group be a DNS subdomain and every non-core project uses its own; this is Latere's open source project, and the group is the one place the name appears |
+| `cella.latere.ai/v1beta1` as the API group and version | 001, 003 | Kubernetes asks only that a group be a DNS subdomain and every non-core project uses its own; this is Latere's open source project, and the group is the one place the name appears |
 | the whole control plane is public and one installation is Latere's | 001 | Origo showed the shape; policy leaves through webhooks, not through a private directory |
 | exported packages and a binary | 001 | a platform migrates by import first and by process split later, without a rewrite between |
 | desired state in the store, observed state in the driver | 001, 005, 010 | a durable store recovers a sandbox the data plane lost; a rebuildable index survives a store the operator lost; neither failure takes a tenant's environment |
@@ -168,7 +168,9 @@ consumer names a need; it is not in any phase.
 | two secrets on one host are refused, placeholders are random per sandbox | 018 | the two defects the reference designs collapsed into silence or made guessable |
 | the boundary declared at the root bounds every descendant, as a subset check at resolve | 003, 022 | spawn and sets are safe only if a child cannot ask for one more host |
 | volumes are a kind, not a mount of a file plane | 019 | an application's state and a run's tools need storage with a life of its own; a remote mount under every run is a sync layer forever |
-| pools are one scheduling strategy among three | 020 | diverse environments cannot be kept warm economically; a rollout needs a queue and capacity, not a pool |
+| scheduling is the environment's: `direct` or `queued`, an optional pool; a manifest never chooses | 020, 021 | when and where to run is an operator's capacity decision; a pool is a transparent acceleration, and diverse environments cannot be kept warm economically |
+| `v1beta1` until the schema settles | 003 | the kinds may still change field by field before a `v1` promise binds importers |
+| one way per thing: no `tier` beside `Volume`, no `deadline` beside `ttl`, no `policy` beside labels and admission, no `OpenEgress` beside the egress mode list | 003, 004, 007, 019 | an overlapping pair is two rules to keep consistent and two ways for a reader to be wrong |
 | isolation is a class the environment declares: container, vm, process, none | 004 | a caller that needs a floor names it; the control plane never downgrades silently |
 | the `local` driver builds on `latere.ai/x/pkg/hostsandbox` (v0.60.1), extracted from its first consumer on 2026-09-12 | 004 | one srt renderer, deny table, preflight, and detached handle for both consumers; a fix lands once |
 | two shipped binaries: `cellad` with `serve`, `worker`, `egress`, `check` as roles, and a small `cella` client; stubs test-only | 001, 002 | one image for the server side, a dependency-light client where agents run, one allow list per role package so the merge loosens nothing |

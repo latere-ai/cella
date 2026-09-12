@@ -49,7 +49,7 @@ service is not rewriting: the packages are what `cellad` is made of.
 
 ### Migrating an existing manifest
 
-A platform whose callers already write `cella.latere.ai/v1` keeps the
+A platform whose callers already write `cella.latere.ai/v1beta1` keeps the
 group; the fields that named the platform's own services become the
 kinds the control plane now has (`Secret` for a vault entry, `Volume`
 for a persisted workspace) or annotations under the platform's prefix

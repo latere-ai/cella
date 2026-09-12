@@ -44,7 +44,7 @@ here for the first time.
 ```mermaid
 stateDiagram-v2
   [*] --> Pending: apply accepted (API)
-  Pending --> Queued: strategy queued, no capacity (scheduler)
+  Pending --> Queued: queued environment, no capacity (scheduler)
   Queued --> Pending: capacity granted (scheduler)
   Queued --> Failed: startDeadline, reason StartDeadline (scheduler)
   Pending --> Failed: create failed, reason CreateFailed or NoCapacity (controller, scheduler)
@@ -53,11 +53,11 @@ stateDiagram-v2
   Starting --> Failed: terminal error, reason DriverFailed (watch)
   Starting --> Lost: object gone (watch)
   Running --> Failed: main process exited or killed, reason Exited or OOMKilled (watch)
-  Running --> Stopping: Stop (API), autoStop (reaper), preemption on persistent (scheduler)
+  Running --> Stopping: Stop (API), autoStop (reaper), preemption (scheduler)
   Stopping --> Stopped: (watch)
   Stopped --> Starting: Start (API)
   Stopped --> Queued: requeue after preemption, Scheduled Preempted (scheduler)
-  Running --> Deleting: Delete (API), expired (reaper), preemption on ephemeral (scheduler), parent deleted (cascade)
+  Running --> Deleting: Delete (API), expired (reaper), parent deleted (cascade)
   Stopped --> Deleting: Delete (API), autoDelete or expired (reaper), parent deleted (cascade)
   Pending --> Deleting: Delete (API), parent deleted (cascade)
   Queued --> Deleting: Delete (API), parent deleted (cascade)
@@ -75,10 +75,9 @@ stateDiagram-v2
 
 Every edge names its trigger and its owner. `Delete` is accepted in
 every phase and moves the sandbox to `Deleting` at once, which is
-what [[008-api]] returns. A transition the driver does not support for
-the sandbox's tier is a refusal at the API: `Stop` on `ephemeral` is
-`Delete` in effect and the API says so with `tier_ephemeral`; `Start`
-on `Failed` is `phase_conflict`. `Queued` and `Recovering` are the
+what [[008-api]] returns. `Start` on `Failed` is `phase_conflict`.
+`Stop` keeps the managed workspace and every attached volume; nothing
+is lost until `Delete`. `Queued` and `Recovering` are the
 controller's; a driver never reports them. Every terminal transition
 emits one event of [[009-events]] with its reason, whoever wrote it.
 
@@ -183,7 +182,7 @@ a value of `never` disables its rule.
 |---|---|---|
 | expired | `now >= expiresAt` | Delete, reason `expired` |
 | autoDelete | `Stopped` and `now >= stoppedAt + autoDelete` | Delete, reason `autoDelete` |
-| autoStop | `Running` and `now >= lastActivityAt + autoStop` | Stop on `persistent`, Delete on `ephemeral`, reason `autoStop` |
+| autoStop | `Running` and `now >= lastActivityAt + autoStop` | Stop, reason `autoStop` |
 | lost | `Lost` | when desired state is durable, `Recovering`; otherwise, after `LostGrace`, `Deleting` with reason `lost` |
 | token | a live sandbox whose token has passed two thirds of its lifetime | `Tokens.Mint`, `Driver.Update` with `Change.Token`, `Tokens.Revoke` of the previous `jti`, in one act ([[006-identity]]) |
 
@@ -206,9 +205,9 @@ observed does not, and the environment is `Ready`. The controller
 recreates the sandbox by the create order from step 3, with the same
 id, name, labels, and annotations, a newly minted token with the
 previous `jti` revoked, the map re-pushed, and every volume
-reattached. A persistent workspace or a `Volume` that still exists
-keeps its files; an ephemeral workspace is empty again and
-`WorkspaceReady` says `Recreated`. A volume that no longer exists ends
+reattached. The managed workspace and every `Volume` that still exists keep their
+files; where the driver could not keep the managed workspace of a lost
+object, it is empty again and `WorkspaceReady` says `Recreated`. A volume that no longer exists ends
 recovery in `Failed` with `VolumesAttached: False` naming it and
 reason `VolumeMissing`. Attempts back off from 30 seconds doubling to
 8 minutes; after `RecoveryAttempts` the sandbox is `Failed` with
@@ -267,7 +266,7 @@ store behind `Store` ([[010-state]]); the token's shape
 | An errored `List` rebuilds nothing | `TestListErrorIsNotEmpty` | not built |
 | A token past two thirds of its life is re-minted, re-projected, and the old `jti` revoked in one act | `TestTokenReprojection` under a fake clock | not built |
 | `Touch` reaches the driver at most once per interval per sandbox | `TestTouchCoalesces` | not built |
-| A `Lost` sandbox with Postgres recovers with the same id, a new token, the old `jti` revoked, and its persistent volume's files; an ephemeral workspace is `Recreated`; a missing volume is `Failed VolumeMissing`; exhausted attempts are `Failed RecoveryExhausted` with the stated backoff | `TestRecovery`, four cases | not built |
+| A `Lost` sandbox with Postgres recovers with the same id, a new token, the old `jti` revoked, and its volumes' files; a managed workspace the driver lost is `Recreated`; a missing volume is `Failed VolumeMissing`; exhausted attempts are `Failed RecoveryExhausted` with the stated backoff | `TestRecovery`, four cases | not built |
 | Without a durable store a lost sandbox is `Deleting` after the grace with reason `lost` | `TestLostWithoutAStoreIsReaped` | not built |
 | Deleting a root deletes descendants deepest first with reason `parent`, then the root; volumes are detached, `retain: false` volumes with no other attachment deleted, `retain: true` kept; the map is purged and the `jti` revoked | `TestCascade` | not built |
 | Each `Event` type has its phase effect; `relist` and a closed channel rebuild the environment's observed state and resume | `TestWatchEvents`, `TestWatchResumesAfterRelist` | not built |

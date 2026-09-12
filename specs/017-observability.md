@@ -39,7 +39,7 @@ metrics.
 |---|---|---|
 | `cella_requests_total` | counter | `route`, `status`, `code` |
 | `cella_request_duration_seconds` | histogram | `route` |
-| `cella_sandboxes` | gauge | `phase`, `tier`, `backend` |
+| `cella_sandboxes` | gauge | `phase`, `environment`, `driver` |
 | `cella_sandbox_create_duration_seconds` | histogram | `backend`, `pool` (`hit`, `miss`) |
 | `cella_reaper_actions_total` | counter | `rule`, `action` |
 | `cella_pool_size` | gauge | `state` (`ready`, `filling`) |

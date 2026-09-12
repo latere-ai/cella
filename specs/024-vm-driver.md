@@ -121,4 +121,4 @@ option B's own spec if chosen.
 | `runtime/vm` exists, reports `Isolation() == vm`, and `Preflight` returns a not-ready error whose message names this spec | `TestVMIsAStub` | not built |
 | A manifest naming an environment of the `vm` class whose driver is the stub is refused at resolve with `capability_unsupported` and the not-ready reason, not with a missing case | `TestVMStubRefusesAtResolve` | not built |
 | The decision, once taken, is recorded in this spec's Outcome with the criterion that decided it, and the spec moves to `drafted` with the chosen option's design | review | open |
-| Whichever option is built passes the conformance suite with `Egress`, `Volumes`, and `Persist` declared | `runtimetest` | not built |
+| Whichever option is built passes the conformance suite with `allowlist` egress and `Volumes` declared | `runtimetest` | not built |

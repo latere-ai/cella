@@ -1,5 +1,5 @@
 ---
-title: "Scheduling and sets: strategies, queues, capacity, the SandboxSet kind for rollouts"
+title: "Scheduling and sets: environment modes, queues, capacity, pools, the SandboxSet kind for rollouts"
 status: drafted
 track: core
 depends_on:
@@ -38,17 +38,22 @@ is keeping the wrong thing warm.
 
 ## Design
 
-### Strategies
+### Scheduling is the environment's
 
-| Strategy | On create | On no capacity | Suits |
+An `Environment` runs in one of two modes, declared in
+`spec.scheduling.mode` ([[021-data-plane-workers]]):
+
+| Mode | On create | On no capacity | Suits |
 |---|---|---|---|
-| `immediate` | the controller calls `Create` at once | `Failed` with reason `NoCapacity`, at once | a caller that has its own retry, or a platform that fronts the queue itself |
-| `pooled` | a pool entry matching the shape is adopted; else the slow path | as `immediate` | interactive agents on a known image |
-| `queued` | the sandbox enters a queue of its environment and starts when capacity allows | waits until `startDeadline`, then `Failed` with `StartDeadline` | rollouts, evaluations, batch work |
+| `direct` | the controller calls `Create` at once | `Failed` with reason `NoCapacity` | a laptop, a small team, a platform that fronts its own queue |
+| `queued` | the sandbox enters one of the environment's queues and starts when capacity allows | waits until `startDeadline`, then `Failed` with `StartDeadline` | rollouts, evaluations, batch work, any shared cluster |
 
-The strategy is `spec.scheduling.strategy`, defaulted by the
-environment. `status.phase` is `Queued` while waiting, with
-`conditions[Scheduled]` carrying the position and the reason.
+A manifest never chooses the mode. On a `queued` environment it may
+set `scheduling.priority`, `.queue`, `.startDeadline`, and
+`.preemptible`; on a `direct` one every `scheduling` field is
+`capability_unsupported` ([[003-manifest-contract]]). `status.phase` is
+`Queued` while waiting, with `conditions[Scheduled]` carrying the
+position and the reason.
 
 ### Capacity
 
@@ -67,28 +72,29 @@ One queue per name per environment, `default` when unnamed. Ordering
 is by `priority` descending, then by a fair share across subjects
 (the subject with the smallest running resource sum goes first), then
 by arrival. `preemptible: true` marks a running sandbox that the
-scheduler may `Stop` on a `persistent` tier or `Delete` on `ephemeral`
-to admit a higher priority when nothing else fits; the preempted one
+scheduler may `Stop` to admit a higher priority when nothing else fits; the preempted one
 returns to the queue with `conditions[Scheduled]: Preempted` and its
 place by its own priority. A subject's `limits.max_priority` from the
 authorizer caps what it may ask.
 
 ### Pools
 
-A pool is a strategy's detail, not the controller's centre. With
-`CELLA_POOL_SIZE` above zero on an environment with `Pool`, the
-controller keeps that many sandboxes created from the environment's
-default image with the default resources and no owner, in `Running`,
-labelled `cella.latere.ai/pool: "true"`. A `pooled` create whose
-resolved shape (image, resources, tier, egress mode, display) matches
-an entry adopts it: the driver applies the caller's labels, env,
-volumes, secrets map, and token through `Update`, and the pool
-refills. In manifest terms adoption is a create, not an update: the
-`Change` the driver receives carries fields [[003-manifest-contract]]
-marks immutable, because the object never existed for the caller. Adoption is exclusive in the driver, proved by the
-conformance case `AdoptIsExclusive`. A pool never serves a create the
-authorizer refused, because the authorizer decides before the
-scheduler is asked.
+A pool is the environment's acceleration of either mode, never a
+caller's choice. With `spec.pool.size` above zero on an environment
+whose driver declares `Pool`, the controller keeps that many sandboxes
+created from `spec.pool.image` with the environment's default resources
+and no owner, in `Running`, labelled `cella.latere.ai/pool: "true"`. A
+create whose resolved shape (image, resources, egress mode, display)
+matches an entry adopts it: the driver applies the caller's labels,
+env, volumes, secrets map, and token through `Update` with `Adopt`,
+and the pool refills. In manifest terms adoption is a create, not an
+update: the `Change` the driver receives carries fields
+[[003-manifest-contract]] marks immutable, because the object never
+existed for the caller. A create that matches nothing goes the slow
+path of its mode. Adoption is exclusive in the driver, proved by the
+conformance case `PrewarmAndAdoptIsExclusive`. A pool never serves a
+create the authorizer refused, because the authorizer decides before
+the scheduler is asked.
 
 ### The SandboxSet kind
 
@@ -101,7 +107,7 @@ spec:
   replicas: 256
   parallelism: 32                  # at most this many Running at once
   completions: 256                 # done when this many finished; default replicas
-  template:                        # a Sandbox spec; scheduling.strategy defaults to queued
+  template:                        # a Sandbox spec; the set's environment must be queued
     image: ghcr.io/example/swe-env:2.1
     resources: {cpu: "2", memory: 4Gi}
     scheduling: {queue: rollouts, priority: 5, preemptible: true}
@@ -160,11 +166,11 @@ routes for sets ([[008-api]]); capacity reporting by a worker
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| `immediate` fails at once without capacity; `queued` waits and starts when capacity frees; `startDeadline` fails it with the reason | `TestStrategies` under a fake clock | not built |
+| A `direct` environment fails at once without capacity; a `queued` one waits and starts when capacity frees; `startDeadline` fails it with the reason | `TestModes` under a fake clock | not built |
 | Queue order is priority, then fair share, then arrival, proved with three subjects and mixed priorities | `TestQueueOrder` | not built |
 | A preemptible running sandbox is stopped for a higher priority and requeued with `Preempted`; a non-preemptible one is not | `TestPreemption` | not built |
 | Capacity is released at `Stopped`, `Failed`, and `Deleting`, and never double counted across a restart | `TestCapacityAccounting` | not built |
-| Two concurrent pooled creates matching one entry yield one adoption and one slow path | `TestAdoptIsExclusive` | not built |
+| Two concurrent creates matching one pool entry yield one adoption and one slow path | `TestAdoptIsExclusive` | not built |
 | A pool never serves a create the authorizer refused | `TestPoolIsBehindTheAuthorizer` | not built |
 | A set of 64 with parallelism 8 runs at most 8 at once, collects every replica's paths into the results volume under its index, and reports the counts | `TestSetRunsToCompletion` on the native driver | not built |
 | A variant that widens the template's boundary is `boundary_exceeded` at set apply, naming the index | `TestVariantsCannotWiden` | not built |

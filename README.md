@@ -45,7 +45,7 @@ component you run.
 
 ## How it works
 
-- **One manifest, one meaning.** `apiVersion: cella.latere.ai/v1`,
+- **One manifest, one meaning.** `apiVersion: cella.latere.ai/v1beta1`,
   `kind: Sandbox`, and beside it `Secret`, `Volume`, `SandboxSet`, and
   `Environment`. Every surface, the API, the `cella` command, and a
   platform importing the packages, resolves a manifest through one
@@ -68,7 +68,7 @@ component you run.
   the results.
 
 ```yaml
-apiVersion: cella.latere.ai/v1
+apiVersion: cella.latere.ai/v1beta1
 kind: Sandbox
 metadata:
   name: dev
@@ -114,7 +114,7 @@ to apply the manifest above with.
 - Six drivers, an isolation class each, and the conformance suite a
   seventh must pass.
 - A lifecycle: create, start, stop, delete, idle auto-stop, TTL,
-  deadline, recovery from desired state, cascade over a spawn tree.
+  recovery from desired state, cascade over a spawn tree.
 - An egress gateway that substitutes credentials by destination and
   never lets a value into a sandbox.
 - Volumes with a life of their own, and a workspace that is one.

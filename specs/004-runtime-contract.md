@@ -100,7 +100,7 @@ without the other:
 | `Display` | `DisplayDriver` | `Display(ctx, id) (Geometry, error)`, `Screenshot(ctx, id, ScreenshotRequest) (io.ReadCloser, error)`, `Screen(ctx, id, fps int) (<-chan Frame, error)` |
 | `Input` | `InputDriver` | `Input(ctx, id, []InputEvent) error` |
 | `Pool` | none | `CreateSpec.Prewarm` and adoption through `Update` are accepted |
-| `Egress`, `OpenEgress`, `Mesh`, `Ingress`, `Resize`, `Persist`, `Files`, `Detach` | none | declarations about what the core methods enforce |
+| `Egress`, `Mesh`, `Ingress`, `Resize`, `Files`, `Detach` | none | declarations about what the core methods enforce |
 
 ### Types
 
@@ -110,9 +110,9 @@ Every type is in `runtime`; the enumerations and `Capabilities` are in
 | Type | Fields |
 |---|---|
 | `Ref` | `ID string`, the `sbx_` id every other call takes |
-| `CreateSpec` | `ID`, `Name`, `Owner`, `Image`, `Command`, `Args`, `Workdir`, `User`, `Tier`, `Resources{CPU, Memory, Disk}`, `Workspace{Path, Source, Git{URL, Ref, TokenEnv}, VolumeID}`, `Volumes []Mount{Name, VolumeID, Path, ReadOnly}`, `Env map[string]string` (placeholders already in it), `Egress{Mode, AllowedHosts, GatewayURL, CAPEM}`, `Ports []Port{Name, Port, Expose}`, `Mesh{ID, Enabled}`, `Parent`, `Labels map[string]string` (the user's), `Token []byte` (the workload token to project), `Lifecycle{AutoStop, TTL, Deadline, AutoDelete}`, `Display *Geometry`, `Prewarm bool` |
-| `Change` | pointers, nil meaning unchanged: `Labels`, `Annotations`, `Lifecycle`, `Egress{Mode, AllowedHosts}`, `Tier`, `Resources`, `Volumes []Mount` (the full desired list; the driver attaches and detaches the difference, while `Stopped`), `Env`, `Token []byte` (a re-projection before expiry), `Adopt *Adoption{Owner, Name, Labels, Env, Volumes, Token, Egress}` (turns a prewarmed entry into the caller's sandbox in one call, exclusively) |
-| `State` | `ID`, `Name`, `Owner`, `Phase`, `Isolation`, `Labels` (the user's), `Tier`, `MeshID`, `Parent`, `Pool bool`, `Resources` (granted), `Volumes []VolumeAttachment{Name, VolumeID, Attached bool}`, `Ports []PortState{Name, Port, State}` (`listening` or `closed`, probed by the driver at inspect), `Conditions []Condition` (the driver's: `Ready`, `WorkspaceReady`, `EgressEnforced`, `VolumesAttached`, `DisplayReady`), `CreatedAt`, `StartedAt`, `StoppedAt`, `LastActivityAt`, `ExpiresAt`, `AutoStop`, `AutoDelete` |
+| `CreateSpec` | `ID`, `Name`, `Owner`, `Image`, `Command`, `Args`, `Workdir`, `User`, `Resources{CPU, Memory, Disk}`, `Workspace{Path, Source, Git{URL, Ref, TokenEnv}, VolumeID}`, `Volumes []Mount{Name, VolumeID, Path, ReadOnly}`, `Env map[string]string` (placeholders already in it), `Egress{Mode, AllowedHosts, DeniedHosts, GatewayURL, CAPEM}`, `Ports []Port{Name, Port, Expose}`, `Mesh{ID, Enabled}`, `Parent`, `Labels map[string]string` (the user's), `Token []byte` (the workload token to project), `Lifecycle{AutoStop, TTL, AutoDelete}`, `Display *Geometry`, `Prewarm bool` |
+| `Change` | pointers, nil meaning unchanged: `Labels`, `Annotations`, `Lifecycle`, `Egress{Mode, AllowedHosts, DeniedHosts}`, `Resources`, `Volumes []Mount` (the full desired list; the driver attaches and detaches the difference, while `Stopped`), `Env`, `Token []byte` (a re-projection before expiry), `Adopt *Adoption{Owner, Name, Labels, Env, Volumes, Token, Egress}` (turns a prewarmed entry into the caller's sandbox in one call, exclusively) |
+| `State` | `ID`, `Name`, `Owner`, `Phase`, `Isolation`, `Labels` (the user's), `MeshID`, `Parent`, `Pool bool`, `Resources` (granted), `Volumes []VolumeAttachment{Name, VolumeID, Attached bool}`, `Ports []PortState{Name, Port, State}` (`listening` or `closed`, probed by the driver at inspect), `Conditions []Condition` (the driver's: `Ready`, `WorkspaceReady`, `EgressEnforced`, `VolumesAttached`, `DisplayReady`), `CreatedAt`, `StartedAt`, `StoppedAt`, `LastActivityAt`, `ExpiresAt`, `AutoStop`, `AutoDelete` |
 | `Filter` | `Owner`, `Phase`, `MeshID`, `Parent`, `Pool *bool`, `IDs []string`; selects on the label half of the stamped identity only, so it is what a substrate can answer without reading every object |
 | `Event` | `Type` (`added`, `modified`, `deleted`, `lost`, `relist`), `State` (the observed state after the change; empty for `relist`, which tells the consumer to `List`) |
 | `ExecRequest` | `Command []string`, `Env`, `Workdir`, `Stdin io.Reader` (needs `Attach`; nil otherwise), `TTY bool` (needs `Attach`), `Timeout` |
@@ -130,8 +130,7 @@ Every type is in `runtime`; the enumerations and `Capabilities` are in
 ```go
 // In manifest/v1; runtime.Capabilities = v1.Capabilities.
 type Capabilities struct {
-	Egress     bool `json:"egress"`     // the egress rule is enforced, not advisory
-	OpenEgress bool `json:"openEgress"` // mode open is expressible; false where the substrate is allow-only
+	Egress     []EgressMode `json:"egress"` // the modes enforced: none, allowlist, open; empty means the rule is advisory
 	Mesh       bool `json:"mesh"`       // peers in one mesh reach each other's mesh ports and nothing else does
 	Ingress    bool `json:"ingress"`    // a public port gets an endpoint
 	Volumes    bool `json:"volumes"`    // Volume objects are created, attached, detached, deleted
@@ -141,7 +140,6 @@ type Capabilities struct {
 	Display    bool `json:"display"`    // a GUI desktop can be attached (023)
 	Input      bool `json:"input"`      // keyboard and pointer events are accepted (023)
 	Resize     bool `json:"resize"`     // resources change on a running sandbox
-	Persist    bool `json:"persist"`    // tier persistent survives Stop
 	Pool       bool `json:"pool"`       // Prewarm and Adopt are accepted (020)
 	Files      bool `json:"files"`      // ExportTar and ImportTar work while Stopped
 	Detach     bool `json:"detach"`     // a driver built in another process recovers a sandbox from its record alone
@@ -150,8 +148,7 @@ type Capabilities struct {
 
 | Capability | k8s | podman | vm | local | native | remote |
 |---|---|---|---|---|---|---|
-| Egress | yes: NetworkPolicy to the gateway, DNS, `cellad` only | yes: per-sandbox network, gateway the only route | yes: one NIC routed to the gateway | yes: the OS sandbox's allow-only proxy, the gateway its one domain | no; `EgressEnforced` false | the worker's |
-| OpenEgress | yes | yes | yes | no: the sandbox runtime refuses a wildcard | yes, unenforced | the worker's |
+| Egress | `none, allowlist, open`: NetworkPolicy to the gateway, DNS, `cellad` only | `none, allowlist, open`: per-sandbox network, gateway the only route | `none, allowlist, open`: one NIC routed to the gateway | `none, allowlist`: the OS sandbox's allow-only proxy refuses a wildcard, so `open` is not listed | empty; `EgressEnforced` false | the worker's |
 | Mesh | yes: a policy selecting peers by mesh label, a headless Service per mesh for `<port>.<sandbox>.mesh` | yes: one network per mesh with the engine's DNS | as k8s | no | no | the worker's |
 | Ingress | only when an `Exposer` decorator is installed; `false` otherwise | no | as k8s | no | no | the worker's |
 | Volumes | yes: PVCs | yes: named volumes | yes: block devices or virtiofs | yes: directories under the data dir, granted as readable or writable paths | yes: directories | the worker's |
@@ -161,7 +158,6 @@ type Capabilities struct {
 | Display | yes: an Xvfb sidecar | yes: in-container | yes | no | no | the worker's |
 | Input | as Display | as Display | as Display | no | no | the worker's |
 | Resize | CPU and memory in place where the cluster allows | CPU and memory | memory balloon | no | no | the worker's |
-| Persist | yes | yes | yes | yes | yes | the worker's |
 | Pool | yes | no | yes | no | no | the worker's |
 | Files | yes, through a helper Pod | yes, through the volume | yes | yes | yes | the worker's |
 | Detach | no | no | no | yes: the handle is a pid, a start time, and a log path | yes: a pid and a record | no |
@@ -184,7 +180,7 @@ not:
 
 | As labels (selectable) | As annotations (read back, not selectable) |
 |---|---|
-| `id`, `name`, `tier`, `mesh`, `parent`, `pool` | `owner`, `created-at`, `started-at`, `stopped-at`, `last-activity-at`, `expires-at`, `auto-stop`, `auto-delete`, and the user's labels as `label.<key>` |
+| `id`, `name`, `mesh`, `parent`, `pool` | `owner`, `created-at`, `started-at`, `stopped-at`, `last-activity-at`, `expires-at`, `auto-stop`, `auto-delete`, and the user's labels as `label.<key>` |
 
 The reaper of [[005-lifecycle-controller]] reads every instant and
 duration it needs from this record, so it runs from the substrate
@@ -323,8 +319,8 @@ nothing, so `workspace.path` and every `volumes[].path` are rewritten
 to their host paths under the data dir with a warning naming both; it
 launches detached stages and has no PTY, stdin, or port seam, so
 `Attach`, `Dial`, and `Exec` with stdin or a TTY are refused with
-`capability_unsupported`; it is allow-only, so `mode: open` is refused
-at resolve. `hostsandbox.Capabilities` is that package's own type and
+`capability_unsupported`; it is allow-only, so its `egress` list omits `open` and `mode: open` is
+refused at resolve. `hostsandbox.Capabilities` is that package's own type and
 is not this spec's `Capabilities`; the driver reads it at `Preflight`
 and maps it.
 
@@ -364,7 +360,7 @@ is skipped and reported:
 | `CreateInspectDelete` | the phases `Pending` to `Running` to `Deleting`, and `Inspect` after delete is not found |
 | `ListReadsIdentityBack` | three sandboxes created, a fresh driver lists three with labels and annotations as written |
 | `FilterSelectsOnLabels` | each `Filter` field narrows the list |
-| `StopStartKeepsPersistentLosesEphemeral` | the workspace after stop and start, by tier |
+| `StopStartKeepsTheWorkspace` | the managed workspace and every attached volume survive stop and start |
 | `UpdateEveryMutableField` | each `Change` field lands and is read back |
 | `ExecStreamsAndExits` | exit codes 0 and 3; the first stdout byte arrives before the command writes its last (the command writes, sleeps, writes); 64 MiB of output completes with the driver process's resident set growing by less than 16 MiB |
 | `LogsFollow` | lines written after `Logs` opened arrive with `Follow` |
@@ -408,7 +404,7 @@ requests ([[023-computer-use-operations]]); the microVM driver's design
 | Criterion | Test that proves it | State |
 |---|---|---|
 | `native` passes the whole conformance suite in the unit suite | `TestNativeConformance` | not built |
-| `local` passes it on a machine with the sandbox runtime installed, with `Attach`, `Dial`, `OpenEgress`, `Mesh`, `Display`, `Input`, `Resize`, `Pool` skipped as undeclared, and is skipped whole with the remediation printed where the runtime is absent | `TestLocalConformance` | not built |
+| `local` passes it on a machine with the sandbox runtime installed, with `Attach`, `Dial`, `Mesh`, `Display`, `Input`, `Resize`, `Pool` and the `open` egress case skipped as undeclared, and is skipped whole with the remediation printed where the runtime is absent | `TestLocalConformance` | not built |
 | `podman` passes it in the podman tier; `k8s` against kind; `remote` through a worker running `native` | `TestPodmanConformance`, `TestK8sConformance`, `TestRemoteConformance` | not built |
 | A driver that declares a capability without its interface, or one the suite finds not to hold, fails | `TestConformanceCatchesAFalseCapability` with two lying wrappers | not built |
 | Every stamped label value is a legal Kubernetes label value and every key a legal key, for an owner with `@` and a user label with a `/` | `TestStampedIdentityIsLegal` | not built |
