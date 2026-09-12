@@ -75,7 +75,7 @@ internal/cellacli/      the cella command: flags, defaults, exit codes (011)
 internal/cellaclient/   the client of the /v1 API the command speaks (011)
 test/e2e/               cellad as a process against a backend (e2e build tag) (012)
 test/conformance/       the contract as an importable test package (015)
-test/stubs/             the stub issuer, authorizer, admission, and sink (012)
+test/stubs/             the stub issuer, authorizer, admission endpoint, sink, and upstream, and the cella-stubs binary (012)
 tools/                  generators and release scripts (002, 014)
 deploy/                 kustomize base, examples, bootstrap (014)
 skills/cella/           the skill that teaches an agent the cella command (011)
@@ -163,6 +163,8 @@ deployment that sets one before its spec lands is not refused.
 | `CELLA_URL`, `CELLA_ENVIRONMENT_KEY` | 018, 021 | none | read by the `worker` and `egress` roles: the control plane's public URL and the environment key that authenticates the role's one outbound stream; `CELLA_URL` is also what `cella` reads and what every sandbox is given (004, 011) |
 | `CELLA_TOKEN`, `CELLA_TOKEN_FILE` | 011 | unset, `/run/cella/token` | the bearer `cella` sends, or the file it reads per request when the variable is unset |
 | `CELLA_EGRESS_PROXY_ADDR`, `CELLA_EGRESS_REVERSE_ADDR`, `CELLA_EGRESS_CA_KEY` | 018 | `:3128`, `:8080`, none | the `egress` role's two doors and the PEM key of the certificate authority it terminates TLS with; the key is generated at first start when absent |
+| `CELLA_EGRESS_CA_BUNDLE` | 012 | unset | PEM authorities the gateway trusts beside the system roots when it dials an upstream; unset in production, the tiers set it to the upstream stub's |
+| `CELLA_TEST_URL`, `CELLA_TEST_TOKEN` | 012 | unset | what the conformance and kind tiers read; printed by the kind overlay's `up.sh` |
 | `CELLA_EVENTS_EGRESS` | 018 | unset | `1` delivers per-connection egress records to the sink as events; the journal and the metrics carry them regardless |
 | `CELLA_EGRESS_SIDECAR` | 018 | unset | `1` runs the gateway as a per-Pod sidecar on k8s instead of one Deployment |
 | `CELLA_SOURCE_ALLOW`, `CELLA_MAX_SOURCE_BYTES`, `CELLA_MAX_VOLUME_SIZE` | 019 | unset, `10Gi`, unset | hosts a `Volume` archive source may be fetched from, re-applied to redirects (unset refuses every archive); the most an archive fetch downloads; the largest `Volume.spec.size` (unset is no ceiling) |
