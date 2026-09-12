@@ -168,7 +168,8 @@ deployment that sets one before its spec lands is not refused.
 | `CELLA_EVENTS_EGRESS` | 018 | unset | `1` delivers per-connection egress records to the sink as events; the journal and the metrics carry them regardless |
 | `CELLA_EGRESS_SIDECAR` | 018 | unset | `1` runs the gateway as a per-Pod sidecar on k8s instead of one Deployment |
 | `CELLA_SOURCE_ALLOW`, `CELLA_MAX_SOURCE_BYTES`, `CELLA_MAX_VOLUME_SIZE` | 019 | unset, `10Gi`, unset | hosts a `Volume` archive source may be fetched from, re-applied to redirects (unset refuses every archive); the most an archive fetch downloads; the largest `Volume.spec.size` (unset is no ceiling) |
-| `CELLA_ENVIRONMENT_OFFLINE` | 021 | `2m` | how long without a worker heartbeat before an environment is `Offline` |
+| `CELLA_ENVIRONMENT_OFFLINE` | 021 | `2m` | how long without a worker heartbeat, or with the in-process driver not ready, before an environment is `Offline` |
+| `CELLA_DEFAULT_ENVIRONMENT`, `CELLA_CAPACITY`, `CELLA_GATEWAY` | 021 | `default`, `auto` on k8s, unset | the name of the default environment; the seed of its `spec.capacity` and `spec.gateway` at first start, with `CELLA_SCHEDULING_MODE` and `CELLA_POOL_*` seeding the rest |
 | `CELLA_OIDC_ISSUERS` | yes, from 006 | none | comma separated issuer URLs whose tokens are accepted |
 | `CELLA_OIDC_AUDIENCE` | 006 | `cella` | the audience a caller token must contain; the tokens cellad mints carry it |
 | `CELLA_OIDC_INSECURE_ISSUERS` | 006 | unset | issuers from the list that may use `http://` on a host other than loopback; set by the test stubs, never in production |

@@ -87,7 +87,7 @@ no valid RSA block is a start-up failure.
 | `sub` | `sandbox:<sbx_ id>` | `environment:<env_ id>` |
 | `aud` | `[CELLA_OIDC_AUDIENCE]` | `[CELLA_OIDC_AUDIENCE]` |
 | `exp` | the sandbox's `expiresAt` or 24 hours from mint, whichever is sooner | `CELLA_ENVIRONMENT_KEY_TTL` (default `8760h`) from mint |
-| `jti` | a ULID; the key of a revocation | a ULID; the key of a revocation and of `DELETE /v1/environments/{name}/keys/{jti}` |
+| `jti` | a ULID; the key of a revocation | a ULID; the key of a revocation and of `DELETE /v1/environments/{id}/keys/{jti}` |
 | `environment` | the `env_` id the sandbox runs in | absent |
 | `spawn` | `{budget, depth, mesh}` from desired state at mint, a copy the control plane never trusts over the store ([[022-mesh-and-spawn]]) | absent |
 
@@ -117,7 +117,7 @@ Without a durable store, desired state dies with the process and every
 workload token is refused after a restart, which is the same restart
 that reaps the sandboxes ([[010-state]]).
 
-Environment keys: `POST /v1/environments/{name}/keys` mints one, shown
+Environment keys: `POST /v1/environments/{id}/keys` mints one, shown
 once, and an environment may hold several so that each worker on it
 carries its own; `DELETE .../keys/{jti}` revokes one. A key authorizes
 registration, claiming, and reporting for its environment and is
@@ -217,9 +217,9 @@ the log says `owner policy` at start:
   `update`, `delete`, `exec`, `token`, `mount`, `attach`, and
   `snapshot` an object whose `owner` is that subject;
 - `list` returns the subject's own objects;
-- every subject may `use` the environment named `default`
-  ([[021-data-plane-workers]]); every other environment is admins'
-  only;
+- every subject may `use` the default environment, the one
+  `CELLA_DEFAULT_ENVIRONMENT` names ([[021-data-plane-workers]]);
+  every other environment is admins' only;
 - a subject in `CELLA_ADMIN_SUBJECTS`, matched on the rendered subject
   string, may do all of the above on every object and may create, key,
   update, and delete environments;

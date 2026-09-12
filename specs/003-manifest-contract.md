@@ -164,7 +164,7 @@ caller may narrow, only a non-workload actor may widen); `stopped`
 
 | Field | Type | Default | Mutable | Rule |
 |---|---|---|---|---|
-| `environment` | string | the default environment | no | the name of a registered `Environment` the caller may use; `Lookup.Environment` answers `not_found` otherwise |
+| `environment` | string | the environment `CELLA_DEFAULT_ENVIRONMENT` names ([[021-data-plane-workers]]) | no | the name of a registered `Environment` the caller may use; `Lookup.Environment` answers `not_found` otherwise |
 | `image` | string | none, required | no | an OCI reference: registry optional, repository, tag or digest optional; the driver resolves `latest`; on a `native` environment, a local root file system or a command |
 | `command`, `args` | []string | the image's | no | `args` without `command` appends to the image's entrypoint |
 | `workdir` | string | `workspace.path` | no | absolute path |
