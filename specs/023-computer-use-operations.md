@@ -58,6 +58,13 @@ batch at most 256 events, so a driver receives only what a desktop can
 do. Every batch emits one `sandbox.input` event with the count and
 never the text.
 
+### Events
+
+Each screenshot emits `sandbox.screenshot` with the geometry and
+format, each input batch `sandbox.input` with the count, and each
+screen session `sandbox.screen` on close, never the text or the frames
+([[009-events]]).
+
 ### Ports
 
 `spec.network.ports[]` declares what runs inside. Three ways to reach

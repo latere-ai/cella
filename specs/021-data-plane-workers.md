@@ -126,6 +126,12 @@ the worker never mints one. The gateway on the worker's side verifies
 the same tokens against `cellad`'s key set over the worker's outbound
 route.
 
+### Events
+
+The kind emits `environment.created`, `.updated`, `.registered` (a
+worker's first heartbeat), `.offline`, `.keyed`, `.key_revoked`, and
+`.deleted` ([[009-events]]).
+
 ### What the control plane keeps
 
 Desired state for every sandbox on every environment, so a worker that

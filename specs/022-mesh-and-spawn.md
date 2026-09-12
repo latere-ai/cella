@@ -80,6 +80,12 @@ The workload token carries `spawn: {budget, depth, mesh}` as claims so
 the gateway and a platform can read a sandbox's rights without a call;
 the control plane still checks the store, since claims are a copy.
 
+### Events
+
+A successful spawn emits `sandbox.spawned` on the parent with the
+child's id and the budget left ([[009-events]]); the child's own
+`sandbox.created` follows.
+
 ### Cascade
 
 Deleting a sandbox deletes its descendants, breadth first, and emits

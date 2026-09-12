@@ -55,7 +55,7 @@ later.
 | [006](006-identity.md) | Identity: OIDC issuers, workload and environment tokens, the authorizer webhook, the owner policy | medium | validated | 001, 002 |
 | [007](007-admission.md) | Admission: AdmitFunc, defaults and ceilings, the admission webhook, the count ceiling | small | validated | 003, 006 |
 | [008](008-api.md) | API: the /v1 kinds, addressing and concurrency, streams, the error table, OpenAPI | large | validated | 003, 005, 006, 007, 010 |
-| [009](009-events.md) | Events: one signed record per mutation and operation, to the operator's sink | small | drafted | 005, 006 |
+| [009](009-events.md) | Events: one signed record per mutation and operation, typed, ordered per object, to the operator's sink | small | validated | 005, 006, 010 |
 | [010](010-state.md) | State: desired and observed, the store contract, transactions, secret values, the journal, queues and operations, optional Postgres | large | validated | 003, 004, 005 |
 | [011](011-agent-client.md) | Agent client: the cella command and the skill | medium | drafted | 003, 008 |
 | [012](012-test-stubs-and-tiers.md) | Test stubs and tiers: the stubs, the gateway, make run, the driver tiers, CI jobs | medium | drafted | 002, 006, 007, 009 |
@@ -117,6 +117,7 @@ flowchart BT
   S008 --> S010
   S009 --> S005
   S009 --> S006
+  S009 --> S010
   S010 --> S005
   S011 --> S008
   S012 --> S007

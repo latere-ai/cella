@@ -232,6 +232,12 @@ when `completions` can no longer be reached; `Stopped` after `POST
 until they are; every other replica is deleted. Deleting a set deletes
 its replicas.
 
+### Events
+
+The set emits `set.created`, `set.replica` per replica that ends with
+its index, sandbox, phase, and exit code, `set.collect_failed`,
+`set.completed`, `set.stopped`, and `set.deleted` ([[009-events]]).
+
 ### Results collection
 
 When a replica ends, the controller runs `ExportTar` over
