@@ -80,7 +80,8 @@ what [[008-api]] returns. `Start` on `Failed` is `phase_conflict`.
 `Stop` keeps the managed workspace and every attached volume; nothing
 is lost until `Delete`. `Queued` and `Recovering` are the
 controller's; a driver never reports them. Every terminal transition
-emits one event of [[009-events]] with its reason, whoever wrote it.
+emits one event of [[009-events]] with a reason from that spec's one
+enum, whoever wrote it.
 
 ### The contract
 
@@ -183,10 +184,10 @@ a value of `never` disables its rule.
 
 | Rule | Condition | Action |
 |---|---|---|
-| expired | `now >= expiresAt` | Delete, reason `expired` |
-| autoDelete | `Stopped` and `now >= stoppedAt + autoDelete` | Delete, reason `autoDelete` |
-| autoStop | `Running` and `now >= lastActivityAt + autoStop` | Stop, reason `autoStop` |
-| lost | `Lost` | when desired state is durable, `Recovering`; otherwise, after `LostGrace`, `Deleting` with reason `lost` |
+| expired | `now >= expiresAt` | Delete, reason `Expired` |
+| autoDelete | `Stopped` and `now >= stoppedAt + autoDelete` | Delete, reason `AutoDelete` |
+| autoStop | `Running` and `now >= lastActivityAt + autoStop` | Stop, reason `AutoStop` |
+| lost | `Lost` | when desired state is durable, `Recovering`; otherwise, after `LostGrace`, `Deleting` with reason `Lost` |
 | token | a live sandbox whose token has passed two thirds of its lifetime | `Tokens.Mint`, `Driver.Update` with `Change.Token`, `Tokens.Revoke` of the previous `jti`, in one act ([[006-identity]]) |
 
 For an environment that is not `Ready`, nothing is rebuilt and no rule
@@ -217,13 +218,13 @@ reason `VolumeMissing`. Attempts back off from 30 seconds doubling to
 reason `RecoveryExhausted`. Success emits `sandbox.recovered` with
 what was kept. Without a durable store, desired state dies with the
 process, and a lost sandbox passes through `Deleting` after the grace
-with reason `lost`; the start-up log says the control plane runs
+with reason `Lost`; the start-up log says the control plane runs
 without recovery.
 
 ### Cascade
 
 Deleting a sandbox deletes its descendants first, deepest generation
-first, then the sandbox, each with reason `parent` on the descendants
+first, then the sandbox, each with reason `Parent` on the descendants
 and the request's reason on the root, so no descendant outlives its
 parent and no parent is gone while a child still runs. A child is
 always on the parent's environment ([[003-manifest-contract]], rule
@@ -270,7 +271,7 @@ store behind `Store` ([[010-state]]); the token's shape
 | A token past two thirds of its life is re-minted, re-projected, and the old `jti` revoked in one act | `TestTokenReprojection` under a fake clock | not built |
 | `Touch` reaches the driver at most once per interval per sandbox | `TestTouchCoalesces` | not built |
 | A `Lost` sandbox with Postgres recovers with the same id, a new token, the old `jti` revoked, and its volumes' files; a managed workspace the driver lost is `Recreated`; a missing volume is `Failed VolumeMissing`; exhausted attempts are `Failed RecoveryExhausted` with the stated backoff | `TestRecovery`, four cases | not built |
-| Without a durable store a lost sandbox is `Deleting` after the grace with reason `lost` | `TestLostWithoutAStoreIsReaped` | not built |
-| Deleting a root deletes descendants deepest first with reason `parent`, then the root; volumes are detached, `retain: false` volumes with no other attachment deleted, `retain: true` kept; the map is purged and the `jti` revoked | `TestCascade` | not built |
+| Without a durable store a lost sandbox is `Deleting` after the grace with reason `Lost` | `TestLostWithoutAStoreIsReaped` | not built |
+| Deleting a root deletes descendants deepest first with reason `Parent`, then the root; volumes are detached, `retain: false` volumes with no other attachment deleted, `retain: true` kept; the map is purged and the `jti` revoked | `TestCascade` | not built |
 | Each `Event` type has its phase effect; `relist` and a closed channel rebuild the environment's observed state and resume | `TestWatchEvents`, `TestWatchResumesAfterRelist` | not built |
 | `controller` imports nothing under `internal/` | `TestControllerImports` | not built |

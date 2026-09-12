@@ -117,7 +117,7 @@ spec:
 status:                                # written by the server, ignored on apply
   id: sbx_01J9ZK2P7Q8R9S0T1U2V3W4X5Y
   phase: Running
-  owner: alice@example.com
+  owner: https://login.example.com|alice
   environment: default
   driver: k8s
   isolation: container

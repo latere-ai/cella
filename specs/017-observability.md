@@ -40,7 +40,7 @@ metrics.
 | `cella_requests_total` | counter | `route`, `status`, `code` |
 | `cella_request_duration_seconds` | histogram | `route` |
 | `cella_sandboxes` | gauge | `phase`, `environment`, `driver` |
-| `cella_sandbox_create_duration_seconds` | histogram | `backend`, `pool` (`hit`, `miss`) |
+| `cella_sandbox_create_duration_seconds` | histogram | `driver`, `pool` (`hit`, `miss`) |
 | `cella_reaper_actions_total` | counter | `rule`, `action` |
 | `cella_pool_size` | gauge | `state` (`ready`, `filling`) |
 | `cella_webhook_duration_seconds` | histogram | `webhook` (`authorizer`, `admission`, `sink`), `outcome` |
@@ -58,7 +58,7 @@ above exists and nothing else does, so the table is the reference.
 
 One span per request, named by route, carrying the subject hash, the
 sandbox id, and the request id; child spans for the authorizer call,
-the admission call, the backend call, and the store. A stream's span
+the admission call, the driver call, and the store. A stream's span
 covers its open, not its life. The `X-Request-Id` is the trace's
 correlation and appears in every log line of the request.
 
@@ -67,7 +67,7 @@ correlation and appears in every log line of the request.
 `slog` through the OTel bridge, JSON on stderr, one line per request
 at `INFO` with route, status, code, duration, subject hash, and sandbox
 id; `WARN` for a webhook failure and a dropped event; `ERROR` for a
-backend call that failed. `env` values, tokens, and `Authorization`
+driver call that failed. `env` values, tokens, and `Authorization`
 headers are redacted by a handler that runs before any exporter.
 
 ### Alerts
