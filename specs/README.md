@@ -61,7 +61,7 @@ later.
 | [012](012-test-stubs-and-tiers.md) | Test stubs and tiers: the stubs, the bootstrap of make run, the driver tiers, the kind overlay, CI jobs | medium | validated | 002, 004, 006, 007, 009, 010, 018, 021 |
 | [013](013-security-and-threat-model.md) | Security and threat model: assets, adversaries, every control with its test, what is out of scope | medium | validated | 001, 003, 004, 006, 007, 008, 009, 010, 011, 018, 019, 021, 022, 023 |
 | [014](014-release-and-installation.md) | Release and installation: images, binaries, attestations, deploy manifests, cellad check, upgrades | medium | drafted | 002, 012, 015 |
-| [015](015-conformance-suite.md) | Conformance suite: the contract and the API as executable tests, against any server | large | drafted | 003, 008, 011 |
+| [015](015-conformance-suite.md) | Conformance suite: the API contract as executable cases against any server, with a report | large | validated | 003, 004, 005, 006, 008, 009, 011, 012, 018, 019, 020, 021, 023 |
 | [016](016-building-a-plane.md) | Building a plane: how a platform composes the packages and the webhooks without a fork | small | drafted | 001, 004, 006, 007, 015 |
 | [017](017-observability.md) | Observability: one metric table across three roles, traces across the seam, redacted logs, alert rules | small | validated | 002, 005, 006, 008, 009, 010, 018, 020, 021 |
 | [018](018-egress-and-secrets.md) | Egress and secrets: the Secret kind, placeholders, the gateway as a data plane component, sync and telemetry, the boundary a workload cannot widen | large | validated | 003, 004, 006, 010 |
@@ -141,6 +141,12 @@ flowchart BT
   S014 --> S012
   S014 --> S015
   S015 --> S011
+  S015 --> S012
+  S015 --> S018
+  S015 --> S019
+  S015 --> S020
+  S015 --> S021
+  S015 --> S023
   S016 --> S015
   S016 --> S004
   S017 --> S008

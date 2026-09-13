@@ -215,6 +215,6 @@ semantics ([[008-api]]).
 | A list follows `next` to the end and stops at `--limit`; every selector flag becomes its query parameter | `TestListPagingAndSelectors` | not built |
 | The three output examples above are what the binary prints | `TestExamplesAreExact` | not built |
 | `unsupported_version` prints the server identity after the refusal; unknown fields render without error | `TestVersionSkew` | not built |
-| The skill's frontmatter is under 256 bytes and an agent given only the skill completes the agent scenario | `TestSkillFrontmatterIsSmall`, [[015-conformance-suite]]'s agent case | not built |
+| The skill's frontmatter is under 256 bytes and an agent given only the skill completes the agent scenario | `TestSkillFrontmatterIsSmall`, conformance case `case011AgentScenario` | not built |
 | `docs/cli.md` equals the binary's `--help` for every command | `TestCLIDocIsCurrent` | not built |
 | `./cmd/cella`'s build list is the standard library plus `pkg/httpjson` | the `depcheck` gate | not built |

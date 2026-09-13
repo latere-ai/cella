@@ -74,7 +74,7 @@ internal/egressd/       the egress role of cellad: pkg/egress's gateway, CA, and
 internal/check/         the check role of cellad (014)
 internal/cellacli/      the cella command: flags, defaults, exit codes (011)
 internal/cellaclient/   the client of the /v1 API the command speaks (011)
-test/e2e/               cellad as a process against a backend (e2e build tag) (012)
+test/e2e/               cellad as a process against a driver (e2e build tag) (012)
 test/conformance/       the contract as an importable test package (015)
 test/stubs/             the stub issuer, authorizer, admission endpoint, sink, and upstream, and the cella-stubs binary (012)
 tools/                  generators and release scripts (002, 014); tools/rules prints the alert rules for promtool (017)
@@ -87,7 +87,7 @@ specs/                  this deck
 ### Local run
 
 `make run` builds the binary and runs it on loopback with the native
-backend selected and its state under `out/run/`. Until
+driver selected and its state under `out/run/`. Until
 [[004-runtime-contract]] lands the process serves the probes
 and nothing else; once [[012-test-stubs-and-tiers]] lands, `make run`
 also starts the stub issuer, authorizer, and sink beside it and prints
@@ -167,6 +167,7 @@ deployment that sets one before its spec lands is not refused.
 | `CELLA_EGRESS_PROXY_ADDR`, `CELLA_EGRESS_REVERSE_ADDR`, `CELLA_EGRESS_CA_KEY` | 018 | `:3128`, `:8080`, none | the `egress` role's two doors and the PEM key of the certificate authority it terminates TLS with; the key is generated at first start when absent |
 | `CELLA_EGRESS_CA_BUNDLE` | 012 | unset | PEM authorities the gateway trusts beside the system roots when it dials an upstream; unset in production, the tiers set it to the upstream stub's |
 | `CELLA_TEST_URL`, `CELLA_TEST_TOKEN` | 012 | unset | what the conformance and kind tiers read; printed by the kind overlay's `up.sh` |
+| `CELLA_TEST_DRIFT_DEFAULT` | 015 | unset | a field whose default resolves one unit off, so a test proves the conformance suite notices; empty in every deployment |
 | `CELLA_EVENTS_EGRESS` | 018 | unset | `1` delivers per-connection egress records to the sink as events; the journal and the metrics carry them regardless |
 | `CELLA_EGRESS_SIDECAR` | 018 | unset | `1` runs the gateway as a per-Pod sidecar on k8s instead of one Deployment |
 | `CELLA_SOURCE_ALLOW`, `CELLA_MAX_SOURCE_BYTES`, `CELLA_MAX_VOLUME_SIZE` | 019 | unset, `10Gi`, unset | hosts a `Volume` archive source may be fetched from, re-applied to redirects (unset refuses every archive); the most an archive fetch downloads; the largest `Volume.spec.size` (unset is no ceiling) |
@@ -224,7 +225,7 @@ markers, checked by a test in that spec.
 tag, and on demand: the `gate` job calls
 `latere-ai/ci/.github/workflows/lateregate.yml@v1` on hosted runners,
 `tidy` checks `go mod tidy -diff`, and `image` builds the developer
-image and asks it for its version. The tiers that need a backend beside
+image and asks it for its version. The tiers that need a driver beside
 them join in [[012-test-stubs-and-tiers]]; the release pipeline is
 [[014-release-and-installation]]'s. Every third-party action is pinned
 by commit with its version in a comment.
@@ -246,7 +247,7 @@ conventions an agent working in the tree follows.
 
 The release pipeline, the deploy manifests, and the install document
 ([[014-release-and-installation]]); the stubs and the tiers that need a
-backend ([[012-test-stubs-and-tiers]]); the generated configuration
+driver ([[012-test-stubs-and-tiers]]); the generated configuration
 page, which lands with the generator once the table has two owners.
 
 ## Acceptance criteria
