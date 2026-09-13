@@ -216,6 +216,7 @@ consumer names a need; it is not in any phase.
 |---|---|---|
 | The `vm` driver's substrate: a microVM driver of Cella's own, or the k8s runtime class alone; options and criteria in [[024-vm-driver]] | 024 | when a consumer names a need; not before the first release |
 | `pkg/egress` additions [[018-egress-and-secrets]] needs before the gateway role is built: a dependency-free `placeholder` subpackage; a per-principal policy gate (mode, allow, deny, ports) evaluated before a CONNECT completes; per-entry `inject` placement; `Registry` replace-all for an authoritative snapshot; the reverse-door handler and the outbound sync client, which the sibling application platform's gateway can then share | 018 | before phase 3 builds the gateway |
+| `latere.ai/x/pkg/authz` [[006-identity]]: the shared request envelope, client, decision cache, one-retry rule, owner-policy frame, stub authorizer, and authorizer conformance test, agreed with the sibling open cores; `cellad` adds only its action vocabulary and `resource` shapes. The gate's `identity:` waivers for `verifier` and `authorizer` (until 2026-12-31) hold until the package lands and phase 2 builds identity through it | 006 | before phase 2 builds identity |
 
 ## Open source readiness
 
