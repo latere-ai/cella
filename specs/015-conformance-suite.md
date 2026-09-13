@@ -61,7 +61,7 @@ type Config struct {
 
 	QueuedEnvironment string // a queued environment; empty skips sets
 	WorkerEnvironment string // an environment served by a worker; empty skips indistinguishability
-	AuthorizerControl string // the stub authorizer's control URL; empty skips the deny and unavailable cases
+	AuthorizerControl string // the stub authorizer's control URL; empty skips the deny, retry, probe, and unavailable cases
 
 	Skip []string // group or case names to skip, reported as skipped by request
 }
@@ -99,7 +99,7 @@ silently.
 | decode | every refusal code of decoding, version before kind, unknown fields at depth, the two content types, 415 and 406 | `POST /v1/sandboxes`, `PUT /v1/sandboxes/{name}`; `unsupported_media_type`, `not_acceptable`, `multi_document`, `unsupported_version`, `unsupported_kind`, `unknown_field`, `body_too_large` | 003, 008 |
 | resolve | defaults returned, immutability, narrowing, ceilings, `If-Match` and `version_conflict`, and determinism: one manifest applied by `POST`, its generated name read, the identical manifest applied by `PUT` to that name, the two bodies equal with `status` stripped | the same routes; `immutable_field`, `boundary_widened`, `ceiling_exceeded`, `version_conflict`, `name_taken` | 003, 008 |
 | lifecycle | the transitions reachable through the API and their refusals; `Delete` in every phase | `start`, `stop`, `DELETE`; `phase_conflict` | 005, 008 |
-| identity | `unauthenticated`; `forbidden` on an own action; `not_found` through a refused reference; a workload token's scope; under `AuthorizerControl`, a deny and every unavailability mode refusing every request | every route; `unauthenticated`, `forbidden`, `not_found`, `authorizer_unavailable` | 001, 006 |
+| identity | `unauthenticated`; `forbidden` on an own action; `not_found` through a refused reference; a workload token's scope; under `AuthorizerControl`, a deny and every unavailability mode refusing every request, a `conn-drop` retried once and no other mode retried, and the probe id denied | every route; `unauthenticated`, `forbidden`, `not_found`, `authorizer_unavailable` | 001, 006 |
 | list | the envelope, paging, `?limit=300` as `invalid_field`, every selector, `?owner=` as admin intersected with the filter, `?root=` | `GET /v1/<kinds>` | 008 |
 | streams | exec framing and exit codes with and without stdin, attach round trip and resize, dial, tar both ways, logs with `follow`, the capability gates | the stream routes; `capability_unsupported` | 004, 008 |
 | errors | every code of [[008-api]]'s table the suite can provoke arrives with its status and its fixed sentence; the two public documents need no bearer | every route | 008 |
