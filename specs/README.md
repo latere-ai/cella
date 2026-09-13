@@ -60,7 +60,7 @@ later.
 | [011](011-agent-client.md) | Agent client: the cella command, its client package, exit codes, output, the skill | medium | validated | 002, 003, 006, 008, 018, 019, 020, 021, 023 |
 | [012](012-test-stubs-and-tiers.md) | Test stubs and tiers: the stubs, the bootstrap of make run, the driver tiers, the kind overlay, CI jobs | medium | validated | 002, 004, 006, 007, 009, 010, 018, 021 |
 | [013](013-security-and-threat-model.md) | Security and threat model: assets, adversaries, every control with its test, what is out of scope | medium | validated | 001, 003, 004, 006, 007, 008, 009, 010, 011, 018, 019, 021, 022, 023 |
-| [014](014-release-and-installation.md) | Release and installation: images, binaries, attestations, deploy manifests, cellad check, upgrades | medium | drafted | 002, 012, 015 |
+| [014](014-release-and-installation.md) | Release and installation: images, binaries, attestations, deploy manifests, cellad check, upgrades | medium | validated | 002, 012, 015 |
 | [015](015-conformance-suite.md) | Conformance suite: the API contract as executable cases against any server, with a report | large | validated | 003, 004, 005, 006, 008, 009, 011, 012, 018, 019, 020, 021, 023 |
 | [016](016-building-a-plane.md) | Building a plane: how a platform composes the packages and the webhooks without a fork | small | drafted | 001, 004, 006, 007, 015 |
 | [017](017-observability.md) | Observability: one metric table across three roles, traces across the seam, redacted logs, alert rules | small | validated | 002, 005, 006, 008, 009, 010, 018, 020, 021 |
