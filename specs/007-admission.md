@@ -144,7 +144,10 @@ Rules:
   `admission_unavailable`, 503, and never a pass: connection refused, a
   TLS failure, a non-200 status, a body that does not parse, a body
   without `allow`, a body over the cap, and a timeout of
-  `CELLA_ADMISSION_TIMEOUT` (default `3s`). There is no retry. An
+  `CELLA_ADMISSION_TIMEOUT` (default `3s`). There is no retry: admission
+  may rewrite the manifest, so a resend could apply a mutation twice,
+  where the authorizer of [[006-identity]] is a pure read and retries
+  once on a pre-response connection failure. An
   `http://` URL is refused at start unless it is on a loopback
   address; `CELLA_ADMISSION_URL` without `CELLA_ADMISSION_TOKEN` is a
   start-up failure.
