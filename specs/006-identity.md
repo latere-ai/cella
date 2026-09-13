@@ -1,6 +1,6 @@
 ---
 title: "Identity: OIDC issuers, workload and environment tokens, the authorizer webhook, the owner policy"
-status: drafted
+status: validated
 track: core
 depends_on:
   - specs/001-architecture.md
@@ -33,12 +33,10 @@ authorization vocabulary with a subject string and an HTTP decision,
 so that a hosted platform, a company's own issuer, and a laptop's stub
 issuer are one code path.
 
-Amended on 2026-09-13 by the family decision "one platform over open
-cores" (latere-ai/specs, `decisions/2026-09-13-one-platform-open-cores.md`):
+Amended on 2026-09-13 by the decision "one platform over open cores":
 the claims forwarded, the cache and retry rules, the verifier, the
 subject string and the probe id are one contract shared by the three
 open cores, Cella, Lux and Origo, so one authorizer serves all three.
-The status returns to drafted for the review to pass again.
 
 ## Design
 
@@ -135,7 +133,7 @@ refused on every other route.
 
 ### The authorizer
 
-```
+```http
 POST {CELLA_AUTHORIZER_URL}
 Authorization: Bearer {CELLA_AUTHORIZER_TOKEN}
 Content-Type: application/json
@@ -181,8 +179,10 @@ Response, 200:
 }
 ```
 
-`ttl` is optional, the seconds this allow may be cached, default
-`CELLA_AUTHORIZER_CACHE`, capped at `600`. `limits` is optional and
+`ttl` is optional, the seconds this allow may be cached, capped at
+`600`; an absent `ttl` means the default `CELLA_AUTHORIZER_CACHE`, and
+an explicit `0` means this allow is not cached and every call
+revalidates. `limits` is optional and
 every field in it is optional: an absent field means the configured
 value. `requests_per_minute` overrides
 `CELLA_REQUESTS_PER_MINUTE` for this subject ([[008-api]]);
@@ -194,11 +194,12 @@ labels named.
 
 Rules:
 
-- A decision is any of the three actions' outcomes. Everything else is
+- A decision is an allow or a deny. Everything else is
   `authorizer_unavailable`, 503, and never an allow: connection
   refused, a TLS failure, a non-200 status, a body that does not
   parse, a body without `allow`, and a timeout of
-  `CELLA_AUTHORIZER_TIMEOUT` (default `5s`). The call is retried once
+  `CELLA_AUTHORIZER_TIMEOUT` (default `5s`), which bounds each attempt,
+  so the retry below makes the worst case twice that. The call is retried once
   when the connection failed before a response line arrived, a refused
   or reset connection or a dial timeout, and never on a non-200, a
   timeout after the request was sent, or a body that does not parse. An
@@ -290,7 +291,7 @@ the HTTP envelope of 401 and 403 ([[008-api]]); the revocation store
 | A workload token is refused by `cellad` after its sandbox is deleted and after its `jti` is revoked; a recovered sandbox's new token verifies and the old `jti` is revoked | `TestWorkloadTokenLifecycle` | not built |
 | A token is re-minted and re-projected at two thirds of its lifetime | `TestTokenReprojection` under a fake clock | not built |
 | An environment key registers and claims for its environment, is refused on every other route, and is refused at once after `DELETE .../keys/{jti}`; two keys on one environment work independently | `TestEnvironmentKeys` | not built |
-| Every failure mode in the rules list is `authorizer_unavailable` and never an allow; a connection failure before a response line is retried once and nothing else is | `TestAuthorizerFailsClosed`, table-driven over seven modes; `TestAuthorizerRetriesOnlyBeforeAResponseLine` | not built |
+| Every failure mode in the rules list is `authorizer_unavailable` and never an allow, and unavailability fails the request without flipping readiness; a connection failure before a response line is retried once and nothing else is | `TestAuthorizerFailsClosed`, table-driven over six modes; `TestAuthorizerRetriesOnlyBeforeAResponseLine` | not built |
 | Every action in the table reaches the authorizer with the resource shape in its row, `workload` set for a sandbox caller, `issuer` and `sub` apart, and every claim of the token in `claims` verbatim | `TestAuthorizerRequestShapes` against the stub | not built |
 | A deny on an own action is `forbidden`; a deny through `Lookup` is `not_found` and identical to a missing object | `TestDenyMapping` | not built |
 | The cache serves a second identical decision without a call, expires an allow at the answer's `ttl` and at the `600s` cap, a deny at `5s`, never caches unavailability, and keys `create` and `list` without a resource id | `TestDecisionCache` | not built |
