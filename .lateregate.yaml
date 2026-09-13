@@ -63,6 +63,9 @@ identity:
   audience: cella
   config_prefix: CELLA
   api_group: cella.latere.ai
+  # The default audience of the open core, verified only where the core is
+  # self-hosted; the hosted plane is latere-ai/sandbox, audience sandboxd.
+  reached_by: self-hosted
   waive:
     verifier:
       until: 2026-12-31
