@@ -56,3 +56,17 @@ depcheck:
 license:
   spdx: Apache-2.0
   holder: Latere AI
+
+# The identity shape of the family: specs/infrastructure/identity.md in latere-ai/specs
+identity:
+  role: core
+  audience: cella
+  config_prefix: CELLA
+  api_group: cella.latere.ai
+  waive:
+    verifier:
+      until: 2026-12-31
+      reason: spec 006 builds identity in phase 2 through authkit/jwt
+    authorizer:
+      until: 2026-12-31
+      reason: pkg/authz lands with the family's id-03 and spec 006 adopts it in phase 2
