@@ -62,7 +62,7 @@ later.
 | [013](013-security-and-threat-model.md) | Security and threat model: assets, adversaries, every control with its test, what is out of scope | medium | validated | 001, 003, 004, 006, 007, 008, 009, 010, 011, 018, 019, 021, 022, 023 |
 | [014](014-release-and-installation.md) | Release and installation: images, binaries, attestations, deploy manifests, cellad check, upgrades | medium | validated | 002, 012, 015 |
 | [015](015-conformance-suite.md) | Conformance suite: the API contract as executable cases against any server, with a report | large | validated | 003, 004, 005, 006, 008, 009, 011, 012, 018, 019, 020, 021, 023 |
-| [016](016-building-a-plane.md) | Building a plane: how a platform composes the packages and the webhooks without a fork | small | drafted | 001, 004, 006, 007, 015 |
+| [016](016-building-a-plane.md) | Building a plane: how a platform composes the packages and the webhooks without a fork | small | validated | 001, 004, 006, 007, 015 |
 | [017](017-observability.md) | Observability: one metric table across three roles, traces across the seam, redacted logs, alert rules | small | validated | 002, 005, 006, 008, 009, 010, 018, 020, 021 |
 | [018](018-egress-and-secrets.md) | Egress and secrets: the Secret kind, placeholders, the gateway as a data plane component, sync and telemetry, the boundary a workload cannot widen | large | validated | 003, 004, 006, 010 |
 | [019](019-volumes.md) | Volumes: the Volume kind, access and attachment, sources and fill, snapshots, the managed workspace | medium | validated | 003, 004, 005 |

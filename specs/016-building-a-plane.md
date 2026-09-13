@@ -1,6 +1,6 @@
 ---
 title: "Building a plane: how a platform composes the packages and the webhooks without a fork"
-status: drafted
+status: validated
 track: core
 depends_on:
   - specs/001-architecture.md
@@ -8,10 +8,10 @@ depends_on:
   - specs/006-identity.md
   - specs/007-admission.md
   - specs/015-conformance-suite.md
-affects: [docs/plane.md, manifest/, runtime/, controller/]
+affects: [docs/plane.md, manifest/, runtime/, controller/, egress/, examples/plane/]
 effort: small
 created: 2026-09-12
-updated: 2026-09-12
+updated: 2026-09-13
 author: changkun
 ---
 
@@ -64,11 +64,11 @@ carries no alias for a field.
 | accounts and orgs | the issuer's claims, read by the authorizer | the platform's own middleware before `Resolve` |
 | plans and quotas | authorizer `limits`, admission ceilings | the platform's `Options.Ceilings` and its own count check |
 | image catalog | admission rewrites `spec.image` | an `AdmitFunc` in `Options` |
-| secrets | the `Secret` kind holds the value; the platform's authorizer decides `secret.mount`; its vault, if it keeps one, writes through `PUT /v1/secrets` | the same kind through the store the platform constructs |
+| secrets | the `Secret` kind holds the value; the platform's authorizer decides `secret.mount`; its vault, if it keeps one, writes through `PUT /v1/secrets/{name}` | the same kind through the store the platform constructs |
 | persistence | the `Volume` kind; the platform's authorizer decides `volume.attach` | the same |
-| customer-hosted execution | an `Environment` per customer with `cellad worker` on their side | the same, through `runtime/remote` |
+| customer-hosted execution | an `Environment` per customer with `cellad worker` on their side | the `runtime/remote` driver an `Environment{mode: worker}` gets, with the platform supplying the operations queue and worker stream ([[021-data-plane-workers]]) or running `cellad` for that environment |
 | rollouts and evaluations | `SandboxSet` through a `queued` environment | the same through `controller` |
-| audit and usage | the sink | the platform's own `events.Sink` implementation |
+| audit and usage | the sink | the platform's own `controller.Events` implementation |
 | a console | reads `/v1` | reads the platform's own API |
 | multi-region | one `cellad` per region behind the platform's router | one controller per region |
 
@@ -84,8 +84,13 @@ binaries, or the deploy manifests beyond a release.
 ### The document
 
 `docs/plane.md` is this spec in the user register: the two doors, a
-minimal authorizer in twenty lines, a minimal admission endpoint, the
-sink, the migration recipe, and the conformance command.
+minimal authorizer in twenty lines built on `latere.ai/x/pkg/authz`'s
+request envelope and owner-policy frame so it denies the reserved probe
+id [[006-identity]] requires and passes `cellad check`, a minimal
+admission endpoint, the sink, the migration recipe, and the conformance
+command. A platform writes to the shared authorizer contract rather than
+reinventing the envelope; `cellad` adds only its action vocabulary and
+resource shapes ([[006-identity]]).
 
 ## Not in this spec
 
@@ -95,7 +100,7 @@ Any platform's own migration plan.
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| A twenty-line authorizer and admission endpoint from `docs/plane.md`, run beside `cellad`, pass the conformance suite's identity and resolve groups | `TestPlaneDocEndpointsConform` running the doc's code blocks | not built |
+| A twenty-line authorizer and admission endpoint from `docs/plane.md`, built on `latere.ai/x/pkg/authz` and run beside `cellad`, deny the reserved probe id and pass the conformance suite's identity and resolve groups | `TestPlaneDocEndpointsConform` running the doc's code blocks against the shared contract | not built |
 | A server built from the packages in `examples/plane/` passes the conformance suite | `TestExamplePlaneConforms` | not built |
 | The example plane translates a platform-specific field into a `Secret` and an annotation at its edge and the resolved manifest is what the conformance suite expects | `TestExamplePlaneTranslatesAtTheEdge` | not built |
 | Every row of the concerns table names a mechanism that exists in the tree | `TestConcernsTableIsGrounded` reading this file | not built |
