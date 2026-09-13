@@ -80,8 +80,10 @@ starts from. Every overlay renders in CI.
 ### cellad check
 
 Reads the whole configuration and prints one line per requirement:
-issuer discovery reachable, token key parses, authorizer and admission
-and sink answer a probe, backend reachable with the permissions the
+issuer discovery reachable, token key parses, the authorizer denies the
+reserved probe id `sbx_00000000000000000000000000` ([[006-identity]]) so
+an allow fails the line as an endpoint that does not read the request,
+admission and sink answer a probe, backend reachable with the permissions the
 Role grants (a dry-run Pod create), Postgres reachable and at the
 binary's schema, data directory writable. Exit 1 on any failure. The
 install document ends with it.
