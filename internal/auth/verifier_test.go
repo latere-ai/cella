@@ -277,13 +277,14 @@ func hs256(t *testing.T, iss, sub string) string {
 	return signing + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
-// tamper flips the last character of a token's signature.
+// tamper flips the first character of a token's signature, which every
+// bit of reaches the verification.
 func tamper(token string) string {
-	last := token[len(token)-1]
-	if last == 'A' {
-		return token[:len(token)-1] + "B"
+	i := strings.LastIndex(token, ".") + 1
+	if token[i] == 'A' {
+		return token[:i] + "B" + token[i+1:]
 	}
-	return token[:len(token)-1] + "A"
+	return token[:i] + "A" + token[i+1:]
 }
 
 func claimSegment(t *testing.T, iss, sub string) string {
