@@ -1,6 +1,6 @@
 ---
 title: "Identity: OIDC issuers, workload and environment tokens, the authorizer webhook, the owner policy"
-status: validated
+status: in-progress
 track: core
 depends_on:
   - specs/001-architecture.md
@@ -8,7 +8,7 @@ depends_on:
 affects: [authorizer/, internal/auth/, internal/config/, internal/api/, test/stubs/]
 effort: medium
 created: 2026-09-12
-updated: 2026-09-16
+updated: 2026-09-17
 author: changkun
 ---
 
