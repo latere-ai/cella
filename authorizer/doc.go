@@ -25,12 +25,13 @@
 // caller's.
 //
 // An endpoint written on latere.ai/x/pkg/authz/server answers every
-// action of the table from one Decider, with one exception the scaffold
-// makes by name: authz.IsList routes an action whose name ends in .list
-// to a Lister. Cella's five list actions are a decision like any other,
+// action of the table from one Decider. The scaffold routes to a Lister
+// only the actions an endpoint names in server.Options.PageActions, and
+// Cella names none: its five list actions are a decision like any other,
 // an allow whose optional filter narrows the page to owners and labels
-// (spec 006), so an endpoint that serves them supplies a Lister that
-// writes that decision rather than a page of its own.
+// (spec 006). authz.IsList reads the verb and routes nothing, so an
+// endpoint that serves the five writes that decision from the same
+// Decider as the other twenty-seven.
 //
 // An allow may carry ceilings. WireLimits is the limits object as the
 // answer renders it, so an endpoint writes the type cellad decodes:

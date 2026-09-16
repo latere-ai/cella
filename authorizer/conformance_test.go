@@ -121,7 +121,6 @@ func newEndpoint(t *testing.T) *httptest.Server {
 		Bearer:     bearer,
 		Vocabulary: authorizer.Vocabulary(),
 		Decider:    ownerPolicy{},
-		Lister:     ownerPolicy{},
 	})
 	s := httptest.NewServer(h)
 	t.Cleanup(s.Close)
@@ -130,9 +129,9 @@ func newEndpoint(t *testing.T) *httptest.Server {
 
 // ownerPolicy is the whole decider: the owner policy's frame from the
 // shared contract, over the owner the resource carries, with the create
-// action of the request's own kind. It answers Cella's five list actions
-// too, because the scaffold routes an action by the .list suffix and
-// Cella's list answer is a decision with a filter rather than a page.
+// action of the request's own kind. Cella names no page action, so the
+// five list actions reach it like every other row and answer a decision
+// whose filter narrows the page to the caller's own objects.
 type ownerPolicy struct{}
 
 func (ownerPolicy) Decide(_ context.Context, req authz.Request) (authz.Decision, error) {
@@ -143,21 +142,13 @@ func (ownerPolicy) Decide(_ context.Context, req authz.Request) (authz.Decision,
 		obj = authz.Object{Exists: true, Owner: owner}
 	}
 	d := p.Decide(req, obj)
+	if authz.IsList(req.Action) {
+		d = authz.Decision{Allow: true, Filter: &authz.Filter{Owners: []string{req.Subject}}}
+	}
 	if d.Allow {
 		d.Limits = grant(1200, 10, 5)
 	}
 	return d, nil
-}
-
-// List answers a list action. The answer is written as it stands, so the
-// allow and the filter are the endpoint's own JSON and not the
-// scaffold's decision writer.
-func (ownerPolicy) List(_ context.Context, req authz.Request) (any, error) {
-	return map[string]any{
-		"allow":  true,
-		"limits": grant(1200, 10, 5),
-		"filter": authz.Filter{Owners: []string{req.Subject}},
-	}, nil
 }
 
 // grant renders the three ceilings of spec 006 the way an endpoint does.
