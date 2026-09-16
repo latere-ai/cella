@@ -66,6 +66,8 @@ identity:
   # The default audience of the open core, verified only where the core is
   # self-hosted; the hosted plane is latere-ai/sandbox, audience sandboxd.
   reached_by: self-hosted
+  # Access is by role: the roles rule runs, and it is one way once set.
+  roles_only: true
   waive:
     verifier:
       until: 2026-12-31
