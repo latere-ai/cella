@@ -68,7 +68,3 @@ identity:
   reached_by: self-hosted
   # Access is by role: the roles rule runs, and it is one way once set.
   roles_only: true
-  waive:
-    verifier:
-      until: 2026-12-31
-      reason: spec 006 builds identity in phase 2 through authkit/jwt
