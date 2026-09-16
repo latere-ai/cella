@@ -5,10 +5,10 @@ track: core
 depends_on:
   - specs/001-architecture.md
   - specs/002-repository-scaffold.md
-affects: [internal/auth/, internal/config/, internal/api/, test/stubs/]
+affects: [authorizer/, internal/auth/, internal/config/, internal/api/, test/stubs/]
 effort: medium
 created: 2026-09-12
-updated: 2026-09-13
+updated: 2026-09-16
 author: changkun
 ---
 
@@ -28,7 +28,8 @@ a self-hosted data plane registers with one an operator can revoke.
 
 ## Current state
 
-Not built. The design replaces a shared identity type aliased into an
+Not built, apart from the vocabulary package the 2026-09-16 amendment
+below names. The design replaces a shared identity type aliased into an
 authorization vocabulary with a subject string and an HTTP decision,
 so that a hosted platform, a company's own issuer, and a laptop's stub
 issuer are one code path.
@@ -37,6 +38,37 @@ Amended on 2026-09-13 by the decision "one platform over open cores":
 the claims forwarded, the cache and retry rules, the verifier, the
 subject string and the probe id are one contract shared by the three
 open cores, Cella, Lux and Origo, so one authorizer serves all three.
+
+Amended on 2026-09-16 by the identity leaf "one authorizer library",
+which names the library and the vocabulary's home. The library is
+`latere.ai/x/pkg/authz` at v0.70.0: the envelope, the client with its
+cache and retry, the owner policy's frame, `authz.Vocabulary`, the stub
+of `authz/stub`, the conformance suite of `authz/conformance`, and the
+endpoint scaffold of `authz/server`. The vocabulary's home is
+`cella/authorizer`, an importable package at this module's root beside
+`lux/authorizer`: the thirty-two actions of the resource table below,
+each a constant with the resource kind it acts on, `Vocabulary()` as
+`authz.Vocabulary`, and `WireLimits`/`DecodeLimits` over the three
+figures of the `limits` object. It is built, and its proofs are that the
+table matches this spec's, that the shared stub told the vocabulary
+passes `conformance.Run` driven from it, and that an endpoint written on
+`authz/server` with the owner policy behind it passes the same run.
+
+Everything else in this spec is unbuilt and stays this spec's: the
+`CELLA_*` configuration, the verifier over the issuers, the tokens
+`cellad` mints, the client and the guard that ask the endpoint, the
+cache, the owner policy's own rows, and the stub of
+[[012-test-stubs-and-tiers]]. The vocabulary package adds no variable,
+renames none, and dials nothing.
+
+One note the resource table below does not carry. `authz.IsList` routes
+an action to an endpoint's `Lister` by the `.list` suffix in its name,
+which the five list actions here already have. Cella's list answer is
+not a page of its own, though: it is a decision, an allow whose optional
+`filter` narrows the page to owners and labels, as the response below
+shows. An endpoint built on `authz/server` therefore answers the five
+through a `Lister` that writes that decision, and `cellad` reads it as
+one.
 
 ## Design
 
