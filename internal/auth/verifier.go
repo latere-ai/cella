@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -82,16 +83,17 @@ type VerifierOptions struct {
 const DefaultFetchTimeout = 10 * time.Second
 
 // Verifier verifies a bearer against the listed issuers and against
-// cellad's own key set. One validator per issuer, because an issuer's
-// key set is its own; the local issuer has one per configured key, which
-// is how a two-key rotation verifies both while the operator holds the
-// overlap.
+// cellad's own key set. The listed issuers are one validator holding the
+// list, each issuer answering for its own tokens alone, and cellad's own
+// issuer is a second holding every key of CELLA_TOKEN_KEY under its kid,
+// which is how a two-key rotation verifies both while the operator holds
+// the overlap.
 type Verifier struct {
 	audience    string
 	issuers     []string
-	validators  map[string]*jwt.Validator
+	validator   *jwt.Validator
 	localIssuer string
-	local       []*jwt.Validator
+	local       *jwt.Validator
 }
 
 // NewVerifier reads every issuer's discovery document and key set and
@@ -119,46 +121,44 @@ func NewVerifier(ctx context.Context, o VerifierOptions) (*Verifier, error) {
 	if timeout <= 0 {
 		timeout = DefaultFetchTimeout
 	}
-	v := &Verifier{
-		audience:    o.Audience,
-		validators:  make(map[string]*jwt.Validator, len(o.Issuers)),
-		localIssuer: strings.TrimRight(o.LocalIssuer, "/"),
-	}
+	v := &Verifier{audience: o.Audience, localIssuer: strings.TrimRight(o.LocalIssuer, "/")}
 	for _, raw := range o.Issuers {
 		iss := strings.TrimRight(raw, "/")
-		if _, dup := v.validators[iss]; dup {
+		if slices.Contains(v.issuers, iss) {
 			return nil, fmt.Errorf("CELLA_OIDC_ISSUERS lists %s twice", iss)
 		}
-		jwksURI, err := discover(ctx, client, iss, timeout)
-		if err != nil {
+		if err := discover(ctx, client, iss, timeout); err != nil {
 			return nil, err
 		}
 		v.issuers = append(v.issuers, iss)
-		v.validators[iss] = jwt.New(jwt.Config{
-			JWKSURL:    jwksURI,
-			Issuer:     iss,
-			Audiences:  []string{o.Audience},
-			CacheTTL:   o.CacheTTL,
-			HTTPClient: client,
-			// Spec 006 names exactly what refuses a caller's token, and
-			// an age is not among it: the issuer sets exp, and a caller
-			// that wants a long-lived credential gets one from its
-			// issuer. The size bound stays the shared package's.
-			MaxTokenAge: -1,
-		})
 	}
-	for _, key := range o.LocalKeys {
+	v.validator = jwt.New(jwt.Config{
+		Issuers:    v.issuers,
+		Audiences:  []string{o.Audience},
+		CacheTTL:   o.CacheTTL,
+		HTTPClient: client,
+		// Spec 006 names exactly what refuses a caller's token, and an
+		// age is not among it: the issuer sets exp, and a caller that
+		// wants a long-lived credential gets one from its issuer. The
+		// size bound stays the shared package's.
+		MaxTokenAge: -1,
+	})
+	if len(o.LocalKeys) > 0 {
 		if v.localIssuer == "" {
 			return nil, errors.New("CELLA_TOKEN_KEY holds a key while CELLA_PUBLIC_URL is unset, so a token cellad minted would name no issuer")
 		}
-		v.local = append(v.local, jwt.New(jwt.Config{
+		set := make([]jwt.LocalKey, len(o.LocalKeys))
+		for i, key := range o.LocalKeys {
+			set[i] = jwt.LocalKey{KeyID: Thumbprint(key), Key: key}
+		}
+		v.local = jwt.New(jwt.Config{
 			LocalIssuer: v.localIssuer,
-			LocalKey:    key,
+			LocalKeys:   set,
 			Audiences:   []string{o.Audience},
 			// An environment key lives CELLA_ENVIRONMENT_KEY_TTL, a year
 			// by default, so its exp is its bound and its age is not.
 			MaxTokenAge: -1,
-		}))
+		})
 	}
 	return v, nil
 }
@@ -197,11 +197,10 @@ func (v *Verifier) Verify(raw string) (Caller, error) {
 	if v.localIssuer != "" && iss == v.localIssuer {
 		return v.verifyMinted(raw, claims)
 	}
-	validator, listed := v.validators[iss]
-	if !listed {
+	if !slices.Contains(v.issuers, iss) {
 		return Caller{}, refuse(CodeUnauthenticated, "the token names the issuer %s, which CELLA_OIDC_ISSUERS does not list", strconv.Quote(iss))
 	}
-	c, err := validator.Validate(raw)
+	c, err := v.validator.Validate(raw)
 	if err != nil {
 		return Caller{}, refuse(CodeUnauthenticated, "issuer %s: %s: %v", iss, jwt.ReasonOf(err), err)
 	}
@@ -214,26 +213,20 @@ func (v *Verifier) Verify(raw string) (Caller, error) {
 	return Caller{Subject: authz.Subject(iss, c.Sub), Issuer: iss, Sub: c.Sub, Claims: claims}, nil
 }
 
-// verifyMinted checks a token cellad signed against the configured keys
-// in turn. Every key of CELLA_TOKEN_KEY is in the set, so a token signed
-// by the predecessor verifies until the operator removes its block; the
-// first key signs. A refusal that is not about the signature is the one
-// reported, because it is the one that holds for every key.
+// verifyMinted checks a token cellad signed. Every key of
+// CELLA_TOKEN_KEY is in the local set under its own kid, so a token
+// signed by the predecessor verifies until the operator removes its
+// block, and a kid the set does not hold is refused rather than tried
+// against every key the node holds.
 func (v *Verifier) verifyMinted(raw string, claims map[string]any) (Caller, error) {
-	if len(v.local) == 0 {
+	if v.local == nil {
 		return Caller{}, refuse(CodeUnauthenticated, "the token names cellad as its issuer, and CELLA_TOKEN_KEY holds no key to check it against")
 	}
-	var refusal error
-	for _, validator := range v.local {
-		c, err := validator.Validate(raw)
-		if err == nil {
-			return Caller{Subject: c.Sub, Issuer: v.localIssuer, Sub: c.Sub, Claims: claims, Minted: true}, nil
-		}
-		if refusal == nil || jwt.ReasonOf(refusal) == jwt.ReasonBadSignature {
-			refusal = err
-		}
+	c, err := v.local.Validate(raw)
+	if err != nil {
+		return Caller{}, refuse(CodeUnauthenticated, "cellad's own token: %s: %v", jwt.ReasonOf(err), err)
 	}
-	return Caller{}, refuse(CodeUnauthenticated, "cellad's own token: %s: %v", jwt.ReasonOf(refusal), refusal)
+	return Caller{Subject: c.Sub, Issuer: v.localIssuer, Sub: c.Sub, Claims: claims, Minted: true}, nil
 }
 
 // discovery is the part of an OpenID Connect discovery document cellad
@@ -243,23 +236,25 @@ type discovery struct {
 	JWKSURI string `json:"jwks_uri"`
 }
 
-// discover reads one issuer's discovery document and its key set and
-// returns the jwks_uri the validator will refresh from. Every refusal
-// names the variable, the issuer and what was wrong with it.
-func discover(ctx context.Context, client *http.Client, iss string, timeout time.Duration) (string, error) {
+// discover is spec 006's start-up rule, and only that: cellad refuses to
+// start when an issuer is unreachable, names another issuer, names no
+// jwks_uri, or publishes no key the two algorithms could use. The
+// validator discovers and refreshes the same document on its own
+// afterwards, so nothing here is kept.
+func discover(ctx context.Context, client *http.Client, iss string, timeout time.Duration) error {
 	var doc discovery
 	if err := fetchJSON(ctx, client, iss+"/.well-known/openid-configuration", timeout, &doc); err != nil {
-		return "", fmt.Errorf("CELLA_OIDC_ISSUERS: issuer %s: %w", iss, err)
+		return fmt.Errorf("CELLA_OIDC_ISSUERS: issuer %s: %w", iss, err)
 	}
 	if got := strings.TrimRight(doc.Issuer, "/"); got != iss {
-		return "", fmt.Errorf("CELLA_OIDC_ISSUERS: issuer %s: the discovery document names the issuer %s, so the tokens it signs would carry another iss", iss, strconv.Quote(doc.Issuer))
+		return fmt.Errorf("CELLA_OIDC_ISSUERS: issuer %s: the discovery document names the issuer %s, so the tokens it signs would carry another iss", iss, strconv.Quote(doc.Issuer))
 	}
 	if doc.JWKSURI == "" {
-		return "", fmt.Errorf("CELLA_OIDC_ISSUERS: issuer %s: the discovery document names no jwks_uri", iss)
+		return fmt.Errorf("CELLA_OIDC_ISSUERS: issuer %s: the discovery document names no jwks_uri", iss)
 	}
 	var set keySet
 	if err := fetchJSON(ctx, client, doc.JWKSURI, timeout, &set); err != nil {
-		return "", fmt.Errorf("CELLA_OIDC_ISSUERS: issuer %s: key set: %w", iss, err)
+		return fmt.Errorf("CELLA_OIDC_ISSUERS: issuer %s: key set: %w", iss, err)
 	}
 	usable := 0
 	for _, k := range set.Keys {
@@ -268,9 +263,9 @@ func discover(ctx context.Context, client *http.Client, iss string, timeout time
 		}
 	}
 	if usable == 0 {
-		return "", fmt.Errorf("CELLA_OIDC_ISSUERS: issuer %s: the key set at %s holds %d key(s) and none of them is an RS256 or an ES256 key", iss, doc.JWKSURI, len(set.Keys))
+		return fmt.Errorf("CELLA_OIDC_ISSUERS: issuer %s: the key set at %s holds %d key(s) and none of them is an RS256 or an ES256 key", iss, doc.JWKSURI, len(set.Keys))
 	}
-	return doc.JWKSURI, nil
+	return nil
 }
 
 // keySet and key are the shape of a JWKS as far as the start-up check
