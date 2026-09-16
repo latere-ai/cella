@@ -95,6 +95,14 @@ func (p *OwnerPolicy) Authorize(_ context.Context, req authz.Request) (authz.Dec
 	return frame.Decide(req, object(req.Resource)), nil
 }
 
+// Decide is the same answer under the name latere.ai/x/pkg/authz/server
+// calls a decider by, so the policy cellad runs in process is also the
+// endpoint an operator serves from it, with no second implementation
+// between the two.
+func (p *OwnerPolicy) Decide(ctx context.Context, req authz.Request) (authz.Decision, error) {
+	return p.Authorize(ctx, req)
+}
+
 // isDefault reports whether the resource is the environment
 // CELLA_DEFAULT_ENVIRONMENT names, by the name an operator wrote or by
 // the id the control plane gave it.

@@ -169,6 +169,15 @@ func (v *Verifier) Issuers() []string { return append([]string(nil), v.issuers..
 // Audience is the aud a token must carry to be accepted.
 func (v *Verifier) Audience() string { return v.audience }
 
+// Authenticator is the listed issuers' validator behind the family's
+// authkit.Authenticator, which is the shape latere.ai/x/pkg/authkit's
+// conformance suite drives: one verified token, one identity, and no
+// call to an issuer beyond its discovery document and its key set. It
+// is the validator cellad runs, not a second one built for a test.
+func (v *Verifier) Authenticator() *jwt.Authenticator {
+	return jwt.NewAuthenticator(v.validator)
+}
+
 // Authenticate reads the bearer of a request and verifies it. A request
 // with no bearer is unauthenticated: there is no anonymous access and no
 // API key.
