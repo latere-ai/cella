@@ -70,6 +70,3 @@ identity:
     verifier:
       until: 2026-12-31
       reason: spec 006 builds identity in phase 2 through authkit/jwt
-    authorizer:
-      until: 2026-12-31
-      reason: pkg/authz lands with the shared authorizer contract and spec 006 adopts it in phase 2
