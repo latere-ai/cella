@@ -53,6 +53,9 @@ type Config struct {
 	DataDir string
 	// Runtime is the backend cellad drives, one of Runtimes.
 	Runtime string
+	// Identity is spec 006's half: the issuers, the audience, the signing
+	// keys, the authorizer, and the owner policy's admins.
+	Identity
 }
 
 // Load reads every variable through getenv and returns the configuration,
@@ -64,7 +67,7 @@ func Load(getenv Getenv) (Config, error) {
 		DataDir:      withDefault(getenv("CELLA_DATA_DIR"), DefaultDataDir),
 		Runtime:      withDefault(getenv("CELLA_RUNTIME"), DefaultRuntime),
 	}
-	var problems []string
+	problems := c.loadIdentity(getenv)
 	if err := checkAddr(c.PublicAddr); err != nil {
 		problems = append(problems, "CELLA_PUBLIC_ADDR "+err.Error())
 	}

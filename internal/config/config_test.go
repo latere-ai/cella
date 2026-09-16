@@ -12,39 +12,48 @@ func env(m map[string]string) Getenv {
 	return func(k string) string { return m[k] }
 }
 
+// scaffold is the half of Config spec 002 owns, taken apart so that a
+// test of the listeners compares the listeners. Config itself carries
+// the parsed keys of spec 006 and is not comparable.
+type scaffold struct{ PublicAddr, InternalAddr, DataDir, Runtime string }
+
+func scaffoldOf(c Config) scaffold {
+	return scaffold{c.PublicAddr, c.InternalAddr, c.DataDir, c.Runtime}
+}
+
 func TestLoadAppliesEveryDefault(t *testing.T) {
-	c, err := Load(env(nil))
+	c, err := Load(env(identity(t, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := Config{PublicAddr: ":8080", InternalAddr: ":8081", DataDir: "/var/lib/cella", Runtime: "k8s"}
-	if c != want {
-		t.Fatalf("Load() = %+v, want %+v", c, want)
+	want := scaffold{":8080", ":8081", "/var/lib/cella", "k8s"}
+	if got := scaffoldOf(c); got != want {
+		t.Fatalf("Load() = %+v, want %+v", got, want)
 	}
 }
 
 func TestLoadReadsEveryVariable(t *testing.T) {
-	c, err := Load(env(map[string]string{
+	c, err := Load(env(identity(t, map[string]string{
 		"CELLA_PUBLIC_ADDR":   "127.0.0.1:9000",
 		"CELLA_INTERNAL_ADDR": "127.0.0.1:9001",
 		"CELLA_DATA_DIR":      "/tmp/cella",
 		"CELLA_RUNTIME":       "native",
-	}))
+	})))
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := Config{PublicAddr: "127.0.0.1:9000", InternalAddr: "127.0.0.1:9001", DataDir: "/tmp/cella", Runtime: "native"}
-	if c != want {
-		t.Fatalf("Load() = %+v, want %+v", c, want)
+	want := scaffold{"127.0.0.1:9000", "127.0.0.1:9001", "/tmp/cella", "native"}
+	if got := scaffoldOf(c); got != want {
+		t.Fatalf("Load() = %+v, want %+v", got, want)
 	}
 }
 
 func TestLoadReportsEveryProblemInOneSortedMessage(t *testing.T) {
-	_, err := Load(env(map[string]string{
+	_, err := Load(env(identity(t, map[string]string{
 		"CELLA_RUNTIME":       "docker",
 		"CELLA_PUBLIC_ADDR":   "nope",
 		"CELLA_INTERNAL_ADDR": "nope",
-	}))
+	})))
 	if err == nil {
 		t.Fatal("Load() accepted a bad runtime and two bad addresses")
 	}
@@ -65,7 +74,7 @@ func TestLoadReportsEveryProblemInOneSortedMessage(t *testing.T) {
 }
 
 func TestLoadTreatsBlankAsUnset(t *testing.T) {
-	c, err := Load(env(map[string]string{"CELLA_RUNTIME": "  ", "CELLA_DATA_DIR": ""}))
+	c, err := Load(env(identity(t, map[string]string{"CELLA_RUNTIME": "  ", "CELLA_DATA_DIR": ""})))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,14 +84,14 @@ func TestLoadTreatsBlankAsUnset(t *testing.T) {
 }
 
 func TestLoadRefusesOneSocketForBothListeners(t *testing.T) {
-	_, err := Load(env(map[string]string{"CELLA_PUBLIC_ADDR": "127.0.0.1:9000", "CELLA_INTERNAL_ADDR": "127.0.0.1:9000"}))
+	_, err := Load(env(identity(t, map[string]string{"CELLA_PUBLIC_ADDR": "127.0.0.1:9000", "CELLA_INTERNAL_ADDR": "127.0.0.1:9000"})))
 	if err == nil || !strings.Contains(err.Error(), "must differ from CELLA_PUBLIC_ADDR; both are 127.0.0.1:9000") {
 		t.Fatalf("err = %v", err)
 	}
 }
 
 func TestLoadAllowsPortZeroOnBothListeners(t *testing.T) {
-	if _, err := Load(env(map[string]string{"CELLA_PUBLIC_ADDR": "127.0.0.1:0", "CELLA_INTERNAL_ADDR": "127.0.0.1:0"})); err != nil {
+	if _, err := Load(env(identity(t, map[string]string{"CELLA_PUBLIC_ADDR": "127.0.0.1:0", "CELLA_INTERNAL_ADDR": "127.0.0.1:0"}))); err != nil {
 		t.Fatal(err)
 	}
 }

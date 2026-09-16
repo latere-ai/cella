@@ -59,7 +59,7 @@ func TestSubcommandSplitsAroundTheFirstBareWord(t *testing.T) {
 
 func TestBadConfigurationExitsOneWithOneLine(t *testing.T) {
 	var errOut bytes.Buffer
-	code := run(t.Context(), nil, env(map[string]string{"CELLA_RUNTIME": "docker"}), io.Discard, &errOut)
+	code := run(t.Context(), nil, env(identity(t, map[string]string{"CELLA_RUNTIME": "docker"})), io.Discard, &errOut)
 	if code != 1 {
 		t.Fatalf("exit %d", code)
 	}
@@ -70,11 +70,11 @@ func TestBadConfigurationExitsOneWithOneLine(t *testing.T) {
 
 func TestUnwritableDataDirExitsOne(t *testing.T) {
 	var errOut bytes.Buffer
-	code := run(t.Context(), nil, env(map[string]string{
+	code := run(t.Context(), nil, env(identity(t, map[string]string{
 		"CELLA_DATA_DIR":      "/dev/null/cella",
 		"CELLA_PUBLIC_ADDR":   "127.0.0.1:0",
 		"CELLA_INTERNAL_ADDR": "127.0.0.1:0",
-	}), io.Discard, &errOut)
+	})), io.Discard, &errOut)
 	if code != 1 || !strings.Contains(errOut.String(), "CELLA_DATA_DIR") {
 		t.Fatalf("exit %d, stderr %q", code, errOut.String())
 	}
@@ -91,11 +91,11 @@ func TestOccupiedAddressExitsOne(t *testing.T) {
 		{"internal", "127.0.0.1:0", ln.Addr().String()},
 	} {
 		var errOut bytes.Buffer
-		code := run(t.Context(), nil, env(map[string]string{
+		code := run(t.Context(), nil, env(identity(t, map[string]string{
 			"CELLA_DATA_DIR":      t.TempDir(),
 			"CELLA_PUBLIC_ADDR":   tc.public,
 			"CELLA_INTERNAL_ADDR": tc.internal,
-		}), io.Discard, &errOut)
+		})), io.Discard, &errOut)
 		if code != 1 || !strings.Contains(errOut.String(), "address already in use") {
 			t.Fatalf("%s: exit %d, stderr %q", tc.name, code, errOut.String())
 		}
@@ -131,12 +131,12 @@ func startServe(t *testing.T) (publicURL, internalURL string, stop func() int) {
 	var errOut bytes.Buffer
 	codec := make(chan int, 1)
 	go func() {
-		codec <- run(ctx, nil, env(map[string]string{
+		codec <- run(ctx, nil, env(identity(t, map[string]string{
 			"CELLA_DATA_DIR":      t.TempDir(),
 			"CELLA_PUBLIC_ADDR":   "127.0.0.1:0",
 			"CELLA_INTERNAL_ADDR": "127.0.0.1:0",
 			"CELLA_RUNTIME":       "native",
-		}), &out, &errOut)
+		})), &out, &errOut)
 	}()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
