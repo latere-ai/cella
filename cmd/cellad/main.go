@@ -25,6 +25,7 @@ import (
 
 	"latere.ai/x/pkg/health"
 
+	"latere.ai/x/cella/internal/auth"
 	"latere.ai/x/cella/internal/config"
 	"latere.ai/x/cella/internal/version"
 )
@@ -94,6 +95,24 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		return fail(stderr, fmt.Errorf("CELLA_DATA_DIR: %w", err))
 	}
 
+	// Identity comes up before the listeners, so a deployment whose
+	// issuer or signing key is wrong fails to start rather than binding
+	// a port and refusing every request (spec 006).
+	identity, err := auth.Start(ctx, auth.Options{
+		Issuers:            cfg.OIDCIssuers,
+		Audience:           cfg.OIDCAudience,
+		PublicURL:          cfg.PublicURL,
+		TokenKeys:          cfg.TokenKeys,
+		AuthorizerURL:      cfg.AuthorizerURL,
+		AuthorizerToken:    cfg.AuthorizerToken,
+		AuthorizerTimeout:  cfg.AuthorizerTimeout,
+		AdminSubjects:      cfg.AdminSubjects,
+		DefaultEnvironment: cfg.DefaultEnvironment,
+	})
+	if err != nil {
+		return fail(stderr, err)
+	}
+
 	draining := make(chan struct{})
 	probes := health.Handler(health.Options{
 		Ready:     health.Checks(health.Check{Name: "draining", Run: notDraining(draining)}, health.Check{Name: "disk", Run: diskWritable(cfg.DataDir)}),
@@ -107,6 +126,10 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	for _, p := range []string{"/livez", "/readyz", "/version"} {
 		public.Handle("GET "+p, probes)
 	}
+	// The key set every workload token and environment key verifies
+	// against, so a platform or a third service trusts a sandbox without
+	// asking cellad (spec 006).
+	public.Handle("GET "+auth.JWKSPath, identity.Signer.JWKS())
 	public.HandleFunc("GET /{$}", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = fmt.Fprintln(w, version.String())
@@ -122,8 +145,8 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		_ = publicLn.Close()
 		return fail(stderr, fmt.Errorf("CELLA_INTERNAL_ADDR: %w", err))
 	}
-	_, _ = fmt.Fprintf(stdout, "cellad: %s listening public=%s internal=%s runtime=%s\n",
-		version.Version, publicLn.Addr(), internalLn.Addr(), cfg.Runtime)
+	_, _ = fmt.Fprintf(stdout, "cellad: %s listening public=%s internal=%s runtime=%s issuers=%d authorizer=%s\n",
+		version.Version, publicLn.Addr(), internalLn.Addr(), cfg.Runtime, len(cfg.OIDCIssuers), identity.Mode)
 
 	servers := []*http.Server{
 		{Handler: public, ReadHeaderTimeout: 10 * time.Second},
