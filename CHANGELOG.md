@@ -6,6 +6,20 @@ refused before it is pushed.
 
 ## Unreleased
 
+- The vocabulary an authorization endpoint for Cella speaks is an
+  importable package, `latere.ai/x/cella/authorizer`. Write the endpoint
+  `CELLA_AUTHORIZER_URL` points at in Go and take the thirty-two actions
+  of the identity spec's table as constants, the resource kind each one
+  acts on from `Kind`, the whole table from `Vocabulary()`, and the three
+  ceilings an allow may carry from `WireLimits`, rather than keeping a
+  copy of the strings. The envelope on the wire is
+  `latere.ai/x/pkg/authz`'s, and so are the stub and the conformance
+  suite an endpoint passes; an endpoint built on
+  `latere.ai/x/pkg/authz/server` with nothing behind it but a decider
+  passes that suite with this vocabulary. `cellad` asks no authorizer
+  yet: the configuration, the client and the guard are the identity
+  spec's and are not built.
+
 - The repository: the `cellad` binary serving its probes on two listeners,
   typed configuration from `CELLA_*` variables, the quality gate, and the
   design specs. Nothing creates a sandbox yet; the specs say what will.
