@@ -6,6 +6,42 @@ refused before it is pushed.
 
 ## Unreleased
 
+- A personal access key can now be narrower than the person who holds
+  it, and `cellad` holds it to that. When you create a key you choose
+  what it may do: read these two sandboxes, run anything in this
+  environment, and nothing else. Those grants ride on every token the
+  key mints, and `cellad` applies them on top of the answer its
+  authorizer already gave. A key narrowed to some sandboxes is refused
+  everywhere else, and the refusal names the reason `grant`.
+
+  A grant only ever takes away. It cannot reach a sandbox you could not
+  reach yourself, because the authorizer answers first and the grants
+  narrow that answer: a key on an object you do not own reaches nothing,
+  and a key can never do more than you can. A token that is not from a
+  personal access key is unaffected, whatever it carries.
+
+  Two things to know before you point a narrowed key at `cellad`. A key
+  that carries no grants at all is refused everywhere: the grants are
+  what a key may do, so a key that says nothing may do nothing. And a
+  narrowed key reaching a service that does not read grants is refused
+  at the door with a 401 rather than quietly given the person's full
+  reach; `cellad` reads them, so a key narrowed for Cella works against
+  Cella.
+
+- `cellad` reads every issuer's keys into its verifier at start, so the
+  first request after a start waits for no fetch. It already read them
+  to check the issuer; now it keeps them. An issuer that answers that
+  check and then stops answering refuses the start, naming
+  `CELLA_OIDC_ISSUERS`, which is the same rule as before: at start every
+  issuer answers, or `cellad` does not start.
+
+- `latere.ai/x/cella/authorizer` publishes a heading for each resource
+  kind beside the table, read with `Vocabulary().Label(kind)`:
+  Sandboxes, Secrets, Volumes, Sandbox sets, Environments. Anything that
+  offers a person a choice of what a key may do groups the actions by
+  kind and takes the heading from here, rather than spelling
+  `SandboxSet` at somebody.
+
 - A caller's token is refused once it is more than 24 hours old, even
   when its `exp` is still in the future, so a caller that works for days
   re-mints at its own issuer instead of holding one token. A token that

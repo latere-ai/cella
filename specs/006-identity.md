@@ -66,6 +66,90 @@ Environment keys are not bounded by age, because one lives
 `CELLA_ENVIRONMENT_KEY_TTL`, a year by default, and its `exp` is its
 bound. Nothing else in this spec changes.
 
+Amended on 2026-09-17 by the identity leaf "PAT scopes"
+(infrastructure/identity id-13), which narrows a credential below the
+person who holds it. A personal access token carries the grants its
+holder chose as RFC 9396's `authorization_details`, one entry per pair
+of an action and a resource selector, and an action is named from a
+published vocabulary: `cella:sandbox.read` is one of Cella's. Both
+halves below are within this spec's published design rather than beside
+it. The decision point is still the seam this spec draws, the envelope
+is still every claim of the verified token verbatim, and the vocabulary
+is still the table below.
+
+**The door reads the claim.** `jwt.Config.ReadsGrants` is a service's
+promise that the restriction is applied somewhere, and a validator with
+it false refuses a token carrying grants with `grants_unread`: a claim
+that says what a credential may *not* do widens that credential when it
+is ignored, and a refusal is visible where an ignored restriction is
+not. `cellad` sets it on the validator for the listed issuers, which is
+the one that sees a person's token. The validator for the tokens
+`cellad` mints is left alone: no token `cellad` signs carries a
+`token_use`, so none of them is a personal access token and there is no
+grant on that path to read.
+
+**The decision point applies it.** The answer is the decision point's
+own decision and the grants, intersected:
+
+```
+allow(req) = decide(req) AND ( token_use(req) != pat
+                               OR EXISTS g in G(req) : covers(g, req) )
+
+covers(g, req) = "cella:" + req.action in g.actions
+                 AND ( g.identifier = "" OR g.identifier = req.resource.id )
+```
+
+The conjunction turns an allow into a deny and never a deny into an
+allow. The role is the ceiling, and a grant is a restriction and never
+authority: a grant naming a sandbox the person does not own still
+reaches nothing, because `decide` answers first. `authz.Restrict` is
+that function, written once in `latere.ai/x/pkg/authz`, and `cellad`
+takes it rather than writing a second. An operator's endpoint on
+`authz/server` applies it to whatever its `Decider` returned, with no
+option to switch it off. The owner policy runs in this process with no
+endpoint in front of it, so the policy calls `Restrict` on its own
+decision, over the claims the envelope already carried verbatim: a
+request built with empty claims would restrict nothing, which is why
+`Envelope` forwards the token as it came and a test pins that it does.
+
+The deny's reason is `grant`, which a caller reads as the developer
+detail of the 403 a refused action answers, or of the 404 a refused
+lookup answers. A personal access token carrying no grant at all is
+denied too: the claim is a restriction, so an absent one is not full
+authority, and auth writes a grant list onto every key rather than
+leaving one empty.
+
+`authz/conformance` drives the rule as case A13 under `WithVocabulary`,
+and this repository runs it twice, for a reason the scaffold makes
+necessary. `authz/server` narrows whatever its decider returned, so a
+suite driven through the scaffold passes whether or not the policy
+narrows anything; the second run serves the owner policy over the
+contract's wire and the bearer alone, and reads the policy's own
+answer. That is the run that holds the promise `ReadsGrants` makes.
+
+`Vocabulary()` also carries a heading per resource kind now, read
+through `Vocabulary.Label`: Sandboxes, Secrets, Volumes, Sandbox sets,
+Environments. A key's grant picker groups by kind, because an action
+acts on exactly one kind and `set.*` is why the grouping is the kind
+and not the action's prefix, and it names each group from this table
+rather than from a word of its own. `SandboxSet` is a type name and not
+a heading.
+
+One thing here is pkg v0.75.0's and not id-13's. `jwt.Validator.Warm`
+reads every configured issuer's key set once. `cellad` already reads
+each one at start and refuses to start when one does not answer, but
+the validator holds its own cache and that check filled none of it, so
+the first request a node ever served paid for a discovery document and
+a key set on the request path. The cache is warmed at start now,
+through the same client, and a set that does not answer there is
+refused the way the start-up check's is: one rule, and at start every
+issuer answers or `cellad` does not start.
+
+Nothing else in this spec changes. The resource table, the subjects,
+the tokens `cellad` mints and the owner policy's own rows are
+unchanged: the grants narrow the answer the policy gives and rewrite
+none of it.
+
 Built on 2026-09-17, on pkg v0.72.0: the `CELLA_*` configuration, the
 verifier over the issuers, the signer and the key set at
 `/.well-known/jwks.json`, the client and the guard that ask the
