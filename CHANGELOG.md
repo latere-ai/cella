@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.1.0 - 2026-09-17
+
 - A personal access key can now be narrower than the person who holds
   it, and `cellad` holds it to that. When you create a key you choose
   what it may do: read these two sandboxes, run anything in this
