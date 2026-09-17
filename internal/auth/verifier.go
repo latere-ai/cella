@@ -137,11 +137,14 @@ func NewVerifier(ctx context.Context, o VerifierOptions) (*Verifier, error) {
 		Audiences:  []string{o.Audience},
 		CacheTTL:   o.CacheTTL,
 		HTTPClient: client,
-		// Spec 006 names exactly what refuses a caller's token, and an
-		// age is not among it: the issuer sets exp, and a caller that
-		// wants a long-lived credential gets one from its issuer. The
-		// size bound stays the shared package's.
-		MaxTokenAge: -1,
+		// The family's age bound, one rule across the three cores and
+		// spec 006's amendment of 2026-09-17: a caller's token is
+		// refused once its iat is older than jwt.DefaultMaxTokenAge, a
+		// day, whatever exp it carries, so a caller that wants a
+		// longer-lived credential re-mints it at its issuer. Origo
+		// names the same figure and Lux inherits it. The size bound
+		// stays the shared package's.
+		MaxTokenAge: jwt.DefaultMaxTokenAge,
 	})
 	if len(o.LocalKeys) > 0 {
 		if v.localIssuer == "" {
@@ -155,8 +158,10 @@ func NewVerifier(ctx context.Context, o VerifierOptions) (*Verifier, error) {
 			LocalIssuer: v.localIssuer,
 			LocalKeys:   set,
 			Audiences:   []string{o.Audience},
-			// An environment key lives CELLA_ENVIRONMENT_KEY_TTL, a year
-			// by default, so its exp is its bound and its age is not.
+			// The other half of the same decision: cellad's own tokens
+			// carry no age bound, because an environment key lives
+			// CELLA_ENVIRONMENT_KEY_TTL, a year by default, and its exp
+			// is therefore its bound.
 			MaxTokenAge: -1,
 		})
 	}

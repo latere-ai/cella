@@ -56,6 +56,20 @@ func newSigner(t *testing.T, ks ...*rsa.PrivateKey) *auth.Signer {
 	return s
 }
 
+// newSignerMintingAt builds a signer over the first key whose clock
+// reads at, so a test can mint a token that is already old.
+func newSignerMintingAt(t *testing.T, at time.Time) *auth.Signer {
+	t.Helper()
+	s, err := auth.NewSigner(auth.SignerOptions{
+		Issuer: publicURL, Audience: audience, Keys: []*rsa.PrivateKey{key(t, 1)},
+		Now: func() time.Time { return at },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
 // TestWorkloadTokenIsVerifiable is spec 006's row: a workload token
 // verifies with a generic JWT library against /.well-known/jwks.json,
 // and its kid is the RFC 7638 thumbprint. The check here uses the

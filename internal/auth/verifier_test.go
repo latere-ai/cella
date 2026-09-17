@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"latere.ai/x/pkg/authkit/issuertest"
+	"latere.ai/x/pkg/authkit/jwt"
 
 	"latere.ai/x/cella/internal/auth"
 )
@@ -73,6 +74,10 @@ func TestVerifierRefusals(t *testing.T) {
 		token: rsa.Mint(issuertest.Claims{Sub: "alice", Omit: []string{"exp"}}),
 		want:  "expired",
 	}, {
+		name:  "a token minted more than a day ago",
+		token: rsa.Mint(issuertest.Claims{Sub: "alice", Iat: time.Now().Add(-25 * time.Hour).Unix(), Exp: time.Now().Add(time.Hour).Unix()}),
+		want:  ": " + string(jwt.ReasonTooOld) + ":",
+	}, {
 		name:  "a token not yet valid",
 		token: rsa.Mint(issuertest.Claims{Sub: "alice", Nbf: time.Now().Add(time.Hour).Unix()}),
 		want:  "nbf",
@@ -129,38 +134,59 @@ func TestVerifierRefusals(t *testing.T) {
 	}
 }
 
-// TestALongLivedIssuerTokenIsAccepted pins a deliberate departure from
-// the shared verifier's default. latere.ai/x/pkg/authkit/jwt refuses a
-// token whose iat is more than a day old whatever exp it carries; spec
-// 006 names exactly what refuses a caller's token and an age is not
-// among it, and says outright that a caller who wants a long-lived
-// credential gets one from its issuer. The bound is therefore turned off
-// for a listed issuer's tokens, and exp alone decides.
-//
-// The size bound stays the shared package's, and the bound is off for
-// cellad's own tokens too, because an environment key lives a year.
-func TestALongLivedIssuerTokenIsAccepted(t *testing.T) {
+// TestTokenAgeIsBoundedForIssuersAndNotForEnvironmentKeys is the
+// family's age bound, which spec 006's amendment of 2026-09-17 names.
+// A listed issuer's token is refused once its iat is older than
+// jwt.DefaultMaxTokenAge, a day, whatever exp it carries, which is the
+// rule Origo and Lux run too; a caller that wants a longer-lived
+// credential re-mints it at its issuer. An environment key is bounded
+// by exp alone, because it lives CELLA_ENVIRONMENT_KEY_TTL, a year by
+// default, and a worker holds it for that long.
+func TestTokenAgeIsBoundedForIssuersAndNotForEnvironmentKeys(t *testing.T) {
 	s := issuertest.New(t, issuertest.WithDefaultAudience(audience))
 	v := newVerifier(t, s.URL())
-	token := s.Mint(issuertest.Claims{
+
+	fresh := s.Mint(issuertest.Claims{
 		Sub: "alice",
-		Iat: time.Now().Add(-90 * 24 * time.Hour).Unix(),
+		Iat: time.Now().Add(-time.Hour).Unix(),
 		Exp: time.Now().Add(90 * 24 * time.Hour).Unix(),
 	})
-	c, err := v.Verify(token)
+	c, err := v.Verify(fresh)
 	if err != nil {
-		t.Fatalf("a token issued three months ago and good for three more was refused: %v", err)
+		t.Fatalf("a token minted an hour ago and good for three months was refused: %v", err)
 	}
 	if c.Sub != "alice" {
 		t.Errorf("the caller is %q", c.Sub)
 	}
-	stale := s.Mint(issuertest.Claims{
+
+	old := s.Mint(issuertest.Claims{
 		Sub: "alice",
-		Iat: time.Now().Add(-90 * 24 * time.Hour).Unix(),
-		Exp: time.Now().Add(-time.Minute).Unix(),
+		Iat: time.Now().Add(-25 * time.Hour).Unix(),
+		Exp: time.Now().Add(90 * 24 * time.Hour).Unix(),
 	})
-	if _, err := v.Verify(stale); err == nil {
-		t.Error("exp decides, and a token past it was accepted")
+	_, err = v.Verify(old)
+	if err == nil {
+		t.Fatal("a token minted 25 hours ago was accepted, and the bound is a day")
+	}
+	if want := ": " + string(jwt.ReasonTooOld) + ":"; !strings.Contains(err.Error(), want) {
+		t.Errorf("Verify() = %v, want a refusal naming %q", err, want)
+	}
+	if code := auth.CodeOf(err); code != auth.CodeUnauthenticated {
+		t.Errorf("Verify() refused with %q, want %q", code, auth.CodeUnauthenticated)
+	}
+
+	signer := newSignerMintingAt(t, time.Now().Add(-30*24*time.Hour))
+	local := verifierFor(t, signer)
+	envKey, err := signer.MintEnvironmentKey("env_01J9", 8760*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	worker, err := local.Verify(envKey.Value)
+	if err != nil {
+		t.Fatalf("an environment key minted 30 days ago and good for eleven months was refused: %v", err)
+	}
+	if id, ok := worker.Environment(); !ok || id != "env_01J9" {
+		t.Errorf("the caller reads as environment %q %v", id, ok)
 	}
 }
 
