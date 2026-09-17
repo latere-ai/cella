@@ -129,6 +129,41 @@ func TestVerifierRefusals(t *testing.T) {
 	}
 }
 
+// TestALongLivedIssuerTokenIsAccepted pins a deliberate departure from
+// the shared verifier's default. latere.ai/x/pkg/authkit/jwt refuses a
+// token whose iat is more than a day old whatever exp it carries; spec
+// 006 names exactly what refuses a caller's token and an age is not
+// among it, and says outright that a caller who wants a long-lived
+// credential gets one from its issuer. The bound is therefore turned off
+// for a listed issuer's tokens, and exp alone decides.
+//
+// The size bound stays the shared package's, and the bound is off for
+// cellad's own tokens too, because an environment key lives a year.
+func TestALongLivedIssuerTokenIsAccepted(t *testing.T) {
+	s := issuertest.New(t, issuertest.WithDefaultAudience(audience))
+	v := newVerifier(t, s.URL())
+	token := s.Mint(issuertest.Claims{
+		Sub: "alice",
+		Iat: time.Now().Add(-90 * 24 * time.Hour).Unix(),
+		Exp: time.Now().Add(90 * 24 * time.Hour).Unix(),
+	})
+	c, err := v.Verify(token)
+	if err != nil {
+		t.Fatalf("a token issued three months ago and good for three more was refused: %v", err)
+	}
+	if c.Sub != "alice" {
+		t.Errorf("the caller is %q", c.Sub)
+	}
+	stale := s.Mint(issuertest.Claims{
+		Sub: "alice",
+		Iat: time.Now().Add(-90 * 24 * time.Hour).Unix(),
+		Exp: time.Now().Add(-time.Minute).Unix(),
+	})
+	if _, err := v.Verify(stale); err == nil {
+		t.Error("exp decides, and a token past it was accepted")
+	}
+}
+
 // TestVerifierForwardsEveryClaimVerbatim: the claims reach the caller as
 // the token carried them, the ones the control plane has no type for
 // included, because the authorizer is what reads them.

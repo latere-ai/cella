@@ -100,14 +100,15 @@ cella cp dev:/workspace/out ./out
 ## Try it
 
 ```sh
-CELLA_OIDC_ISSUERS=https://login.example.com make run   # cellad on loopback
-make                                                    # the quality gate
+CELLA_OIDC_ISSUERS=<your issuer url> make run   # cellad on loopback
+make                                            # the quality gate
 ```
 
 Today `make run` serves the probes at `http://127.0.0.1:8081/readyz` and
 the key set at `http://127.0.0.1:8080/.well-known/jwks.json`. It needs
-an issuer, because `cellad` verifies every caller; it generates the
-signing key once under `out/run/` and keeps it. Once the stubs of the
+an issuer that answers, because `cellad` reads its discovery document
+and its key set before it listens; it generates the signing key once
+under `out/run/` and keeps it. Once the stubs of the
 [test stubs spec](specs/012-test-stubs-and-tiers.md) land, `make run`
 starts an issuer of its own and needs nothing from you. Once the drivers
 and the API land it starts the egress gateway, the authorizer, and the
