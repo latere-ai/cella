@@ -47,11 +47,28 @@ depcheck:
   packages:
     latere.ai/x/cella/cmd/cellad:
       decision: >-
-        the server reaches latere.ai/x/pkg and the standard library; the
-        Kubernetes client joins the list with spec 004 and nothing
+        the server reaches latere.ai/x/pkg and the standard library, and
+        the OpenTelemetry SDK with what it pulls in, which joined with
+        spec 006 through the tracing transport the verifier and the
+        authorizer client dial with; the Kubernetes client joins the list
+        with spec 004, the Postgres driver with spec 010, and nothing
         else does without a row here (spec 001)
       allow:
         latere.ai/x/pkg: the shared library every Latere service is built on (spec 002)
+        go.opentelemetry.io: >-
+          the OpenTelemetry SDK spec 001 admits, reached through
+          latere.ai/x/pkg/otel by the identity of spec 006: every
+          outbound client this repository builds is instrumented
+        google.golang.org/grpc: the OTLP exporters' transport, a dependency of the OpenTelemetry SDK
+        google.golang.org/protobuf: the OTLP wire format, a dependency of the OpenTelemetry SDK
+        google.golang.org/genproto: the OTLP status types, a dependency of the OpenTelemetry SDK
+        golang.org/x: the Go project's extended library, a dependency of the OpenTelemetry SDK and gRPC
+        github.com/grpc-ecosystem/grpc-gateway: the OTLP HTTP exporters' dependency
+        github.com/go-logr: the OpenTelemetry SDK's logging seam
+        github.com/google/uuid: request ids in latere.ai/x/pkg/httpjson
+        github.com/felixge/httpsnoop: the response recorder of the SDK's HTTP instrumentation
+        github.com/cespare/xxhash: a hash the OpenTelemetry SDK's metric pipeline uses
+        github.com/cenkalti/backoff: the OTLP exporters' retry
 
 license:
   spdx: Apache-2.0

@@ -104,7 +104,7 @@ func NewSigner(o SignerOptions) (*Signer, error) {
 		s.kids = append(s.kids, kid)
 		set.Keys = append(set.Keys, publicKey{
 			Kty: "RSA", Use: "sig", Alg: "RS256", Kid: kid,
-			N: b64(k.PublicKey.N.Bytes()), E: b64(big.NewInt(int64(k.PublicKey.E)).Bytes()),
+			N: b64(k.N.Bytes()), E: b64(big.NewInt(int64(k.E)).Bytes()),
 		})
 	}
 	raw, err := json.Marshal(set)
