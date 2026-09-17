@@ -17,6 +17,7 @@ import (
 
 	"latere.ai/x/pkg/authkit/issuertest"
 	"latere.ai/x/pkg/authkit/jwt"
+	"latere.ai/x/pkg/authz"
 
 	"latere.ai/x/cella/internal/auth"
 )
@@ -378,4 +379,64 @@ func segment(t *testing.T, v any) string {
 		t.Fatal(err)
 	}
 	return base64.RawURLEncoding.EncodeToString(raw)
+}
+
+// pat is a personal access token of a listed issuer, narrowed to one
+// action on one sandbox: the credential class in token_use and the
+// grants its holder chose in RFC 9396's authorization_details.
+func pat(iss *issuertest.Server, grants ...map[string]any) string {
+	claims := map[string]any{"token_use": "pat"}
+	if grants != nil {
+		claims["authorization_details"] = grants
+	}
+	return iss.Mint(issuertest.Claims{Sub: "alice", Extra: claims})
+}
+
+// grant is one authorization_details entry, as auth mints it.
+func grant(action, kind, id string) map[string]any {
+	return map[string]any{
+		"type": "latere-authz", "actions": []any{action},
+		"datatypes": []any{kind}, "locations": []any{"https://api.latere.ai"},
+		"identifier": id,
+	}
+}
+
+// TestVerifierReadsTheGrantsAPersonalAccessTokenCarries is id-13 at
+// cellad's door. A personal access token is narrower than the person who
+// holds it, and the claim says what the credential may *not* do, so a
+// validator that does not read it grants more than its holder asked for.
+// latere.ai/x/pkg/authkit/jwt refuses such a token with grants_unread
+// until the service promises to read it, and cellad promises: the
+// intersection is applied at the decision point, which is what
+// TestOwnerPolicyNarrowsByTheGrants holds it to.
+//
+// The claims reach the authorizer verbatim, so the grants a decision
+// point reads are the ones the issuer signed.
+func TestVerifierReadsTheGrantsAPersonalAccessTokenCarries(t *testing.T) {
+	iss := issuertest.New(t, issuertest.WithDefaultAudience(audience))
+	v := newVerifier(t, iss.URL())
+
+	c, err := v.Verify(pat(iss, grant("cella:sandbox.read", "Sandbox", "sbx_01J9")))
+	if err != nil {
+		t.Fatalf("a personal access token carrying its grants was refused: %v", err)
+	}
+	if use := c.Claims["token_use"]; use != "pat" {
+		t.Errorf("the caller's claims carry token_use %v; the credential class reaches the decision point verbatim", use)
+	}
+	grants, err := authz.ParseGrants(c.Claims)
+	if err != nil {
+		t.Fatalf("the claims the verifier handed on are no grants: %v", err)
+	}
+	if len(grants) != 1 || len(grants[0].Actions) != 1 ||
+		grants[0].Actions[0] != "cella:sandbox.read" || grants[0].Identifier != "sbx_01J9" {
+		t.Fatalf("the decision point reads %+v; it reads the grant the issuer signed", grants)
+	}
+
+	// A personal access token with no grants at all is a token nobody
+	// wrote a grant for. The door does not refuse it, because there is no
+	// claim to leave unread; the decision point denies it, which is
+	// TestOwnerPolicyDeniesAGrantlessPAT.
+	if _, err := v.Verify(pat(iss)); err != nil {
+		t.Errorf("a personal access token carrying no grants was refused at the door: %v", err)
+	}
 }

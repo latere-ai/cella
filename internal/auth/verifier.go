@@ -149,6 +149,19 @@ func NewVerifier(ctx context.Context, o VerifierOptions) (*Verifier, error) {
 		// can read is not an age within the bound.
 		MaxTokenAge:     jwt.DefaultMaxTokenAge,
 		RequireIssuedAt: true,
+		// A personal access token is narrower than the person who holds
+		// it (infrastructure/identity id-13), and the grants its holder
+		// chose ride on it as RFC 9396's authorization_details. The claim
+		// says what the credential may not do, so a service that reads
+		// the token and applies nothing grants more than its holder asked
+		// for, silently; the shared validator therefore refuses such a
+		// token with grants_unread until the service promises to read it.
+		// cellad promises, and the promise is kept at the decision point:
+		// the owner policy intersects its own answer with the grants, and
+		// an operator's endpoint on latere.ai/x/pkg/authz/server does the
+		// same with no code of its own. The conformance run is what turns
+		// the promise from trust into evidence.
+		ReadsGrants: true,
 	})
 	if len(o.LocalKeys) > 0 {
 		if v.localIssuer == "" {
@@ -165,7 +178,9 @@ func NewVerifier(ctx context.Context, o VerifierOptions) (*Verifier, error) {
 			// The other half of the same decision: cellad's own tokens
 			// carry no age bound, because an environment key lives
 			// CELLA_ENVIRONMENT_KEY_TTL, a year by default, and its exp
-			// is therefore its bound.
+			// is therefore its bound. No token cellad mints carries a
+			// token_use, so none of them is a personal access token and
+			// there is no grant on this path to read.
 			MaxTokenAge: -1,
 		})
 	}
