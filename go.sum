@@ -89,7 +89,7 @@ google.golang.org/protobuf v1.36.11 h1:fV6ZwhNocDyBLK0dj+fg8ektcVegBBuEolpbTQyBN
 google.golang.org/protobuf v1.36.11/go.mod h1:HTf+CrKn2C3g5S8VImy6tdcUvCska2kB7j23XfzDpco=
 gopkg.in/yaml.v3 v3.0.1 h1:fxVm/GzAzEWqLHuvctI91KS9hhNmmWOoWu0XTYJS7CA=
 gopkg.in/yaml.v3 v3.0.1/go.mod h1:K4uyk7z7BCEPqu6E+C64Yfv1cQ7kz7rIZviUmN+EgEM=
-latere.ai/x/ci-gate v0.35.0 h1:+77pIwTeuFYPJK0NOemP0mdgXLY+y16mFeyay65v/X0=
-latere.ai/x/ci-gate v0.35.0/go.mod h1:kg1CjxG++fy21VRkwTQSzW4JgGwjOFSeisERzZfarWo=
+latere.ai/x/ci-gate v0.39.0 h1:xsvNt693Lp9c/mI1h4HKSLgnDKs8JpvsHZIfcP+3hY8=
+latere.ai/x/ci-gate v0.39.0/go.mod h1:kg1CjxG++fy21VRkwTQSzW4JgGwjOFSeisERzZfarWo=
 latere.ai/x/pkg v0.74.0 h1:gMrrbQevsQMQe3CB19rK3kxpkN9kMdSdtNw5stKiaHQ=
 latere.ai/x/pkg v0.74.0/go.mod h1:HF1vVVfYz0gjgO3eguVaUna1YtS1BfjcmSWNIoh1x/I=
