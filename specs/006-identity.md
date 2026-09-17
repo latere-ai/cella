@@ -54,21 +54,51 @@ table matches this spec's, that the shared stub told the vocabulary
 passes `conformance.Run` driven from it, and that an endpoint written on
 `authz/server` with the owner policy behind it passes the same run.
 
-Everything else in this spec is unbuilt and stays this spec's: the
-`CELLA_*` configuration, the verifier over the issuers, the tokens
-`cellad` mints, the client and the guard that ask the endpoint, the
-cache, the owner policy's own rows, and the stub of
-[[012-test-stubs-and-tiers]]. The vocabulary package adds no variable,
-renames none, and dials nothing.
+Built on 2026-09-17, on pkg v0.72.0: the `CELLA_*` configuration, the
+verifier over the issuers, the signer and the key set at
+`/.well-known/jwks.json`, the client and the guard that ask the
+endpoint, the owner policy's own rows, and the node wiring that brings
+the three up before the listeners. `CELLA_OIDC_ISSUERS` is
+`jwt.Config.Issuers` and `CELLA_TOKEN_KEY` is `jwt.Config.LocalKeys`,
+both of which pkg added for this spec; the cache, the retry and the
+failure rules are `authz.Client`'s and nothing here restates them. The
+gate's `verifier` waiver is gone: `go tool lateregate identity` prints
+`PASS verifier` and `PASS authorizer` with no waiver, and `cellad`
+reaches the OpenTelemetry SDK, which spec 001 admits and the gate's
+`depcheck` rows now record.
 
-One note the resource table below does not carry. `authz.IsList` routes
-an action to an endpoint's `Lister` by the `.list` suffix in its name,
-which the five list actions here already have. Cella's list answer is
-not a page of its own, though: it is a decision, an allow whose optional
+The conformance tier runs `authkit/conformance` against the
+authenticator `cellad` runs and `authz/conformance` against both the
+stub of `authz/stub` and the owner policy served through
+`authz/server`; `CELLA_TEST_AUTHORIZER_URL` and
+`CELLA_TEST_AUTHORIZER_TOKEN` point the second half at a deployed
+endpoint, which is what a release run sets. Those two names are the
+tiers' and belong in [[012-test-stubs-and-tiers]]'s table.
+
+What is left of this spec waits on other specs rather than on a
+decision, and the acceptance table says which per row: the revocation
+list and the sandbox phase a workload token is checked against
+([[010-state]]), the re-mint and the projection at two thirds of a
+lifetime ([[005-lifecycle-controller]], [[004-runtime-contract]]), the
+routes an environment key authorizes ([[008-api]],
+[[021-data-plane-workers]]), the ceilings an allow overrides
+([[007-admission]], [[008-api]], [[003-manifest-contract]]), the
+`cellad check` subcommand ([[014-release-and-installation]]), and the
+stub of [[012-test-stubs-and-tiers]]. The resource builders are
+`internal/auth`'s for now rather than the vocabulary package's, because
+the fields of an object are [[003-manifest-contract]]'s types and the
+published package promises what an endpoint imports: the action and its
+kind.
+
+One note the resource table below does not carry. Cella's list answer is
+not a page of its own: it is a decision, an allow whose optional
 `filter` narrows the page to owners and labels, as the response below
-shows. An endpoint built on `authz/server` therefore answers the five
-through a `Lister` that writes that decision, and `cellad` reads it as
-one.
+shows. On pkg v0.70.0 the scaffold of `authz/server` routed every action
+whose name ends in `.list` to a `Lister`, which is a page; v0.70.1
+corrected that, and an endpoint now names the actions whose answer is a
+page in `server.Options.PageActions`. Cella names none, so one `Decider`
+answers all thirty-two rows and writes the filter itself. `authz.IsList`
+reads the verb and routes nothing.
 
 ## Design
 
@@ -255,11 +285,16 @@ Rules:
   revocation at the authorizer therefore takes effect within the
   allow's `ttl`, which the authorizer chooses, and which is the
   accepted cost of an attach's per-message checks not each dialing.
-- The resource id `sbx_00000000000000000000000000` is reserved as a
-  probe: every authorizer denies it for every subject and every action,
-  and `cellad check` ([[014-release-and-installation]]) sends it and
-  reads an allow as an endpoint that does not read the request. The
-  owner policy denies it too.
+- The reserved probe id is the shared contract's, `authz.ProbeID`, the
+  one string every core in the family sends: every authorizer denies it
+  for every subject and every action, and `cellad check`
+  ([[014-release-and-installation]]) sends it and reads an allow as an
+  endpoint that does not read the request. The owner policy denies it
+  too. Corrected on 2026-09-17: this spec named a Cella-shaped id,
+  `sbx_00000000000000000000000000`, which nothing in the shared contract
+  knows. One probe id is what lets one check command read one answer
+  from an endpoint that serves several cores, so the id is the
+  package's, not a product's.
 - The envelope, the client, the cache, the retry, the owner policy's
   frame, the stub authorizer, and the conformance test an authorizer
   passes are `latere.ai/x/pkg/authz`, shared with the sibling open
@@ -288,7 +323,11 @@ the log says `owner policy` at start:
 - a sandbox may `read` and `exec` itself, may `read` any sandbox whose
   `parent` chain reaches it (decided from `resource.parent` and
   `resource.root`, both in the request), may `create` a child, and
-  nothing else; its `list` returns its descendants.
+  nothing else; its `list` returns its descendants. That last narrowing
+  is the API's own, from the `workload` member of the request: the
+  contract's `filter` names owners and labels, and a descendant shares
+  neither with its root, so the decision is an allow with no filter and
+  [[008-api]] pages the tree.
 
 With an authorizer set, `CELLA_ADMIN_SUBJECTS` is read and unused.
 Every kind carries an `owner`, the rendered subject that applied it,
@@ -313,21 +352,21 @@ the HTTP envelope of 401 and 403 ([[008-api]]); the revocation store
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| A token from a listed issuer with the right audience is accepted, signed `RS256` or `ES256`; wrong issuer, wrong audience, expired, unsigned, an algorithm outside the two, and a `sub` with a reserved prefix are each `unauthenticated` | `TestVerifierRefusals`, table-driven | not built |
-| The same `sub` from two listed issuers is two subjects; an admin entry matches one and not the other | `TestSubjectsAreIssuerQualified` | not built |
-| An unreachable issuer at start is a start-up failure; one that fails later is served from the cached key set | `TestIssuerAtStartAndLater` | not built |
-| A non-loopback `http://` issuer or authorizer is refused at start unless listed insecure; an authorizer URL without a token is a start-up failure | `TestInsecureAndIncompleteEndpoints` | not built |
-| `cellad` refuses to start with no issuer or with a `CELLA_TOKEN_KEY` holding no RSA key | `TestServeRefusesToStartWithoutIdentity` | not built |
-| A workload token verifies with a generic JWT library against `/.well-known/jwks.json`; its `kid` is the RFC 7638 thumbprint | `TestWorkloadTokenIsVerifiable` | not built |
-| With two PEM blocks, tokens signed by the second still verify; after the block is removed they do not; the first block signs | `TestKeyRotationByConfiguration` | not built |
-| A workload token is refused by `cellad` after its sandbox is deleted and after its `jti` is revoked; a recovered sandbox's new token verifies and the old `jti` is revoked | `TestWorkloadTokenLifecycle` | not built |
-| A token is re-minted and re-projected at two thirds of its lifetime | `TestTokenReprojection` under a fake clock | not built |
-| An environment key registers and claims for its environment, is refused on every other route, and is refused at once after `DELETE .../keys/{jti}`; two keys on one environment work independently | `TestEnvironmentKeys` | not built |
-| Every failure mode in the rules list is `authorizer_unavailable` and never an allow, and unavailability fails the request without flipping readiness; a connection failure before a response line is retried once and nothing else is | `TestAuthorizerFailsClosed`, table-driven over six modes; `TestAuthorizerRetriesOnlyBeforeAResponseLine` | not built |
-| Every action in the table reaches the authorizer with the resource shape in its row, `workload` set for a sandbox caller, `issuer` and `sub` apart, and every claim of the token in `claims` verbatim | `TestAuthorizerRequestShapes` against the stub | not built |
-| A deny on an own action is `forbidden`; a deny through `Lookup` is `not_found` and identical to a missing object | `TestDenyMapping` | not built |
-| The cache serves a second identical decision without a call, expires an allow at the answer's `ttl` and at the `600s` cap, a deny at `5s`, never caches unavailability, and keys `create` and `list` without a resource id | `TestDecisionCache` | not built |
-| The probe id is denied by the stub authorizer and by the owner policy for every subject and action, and `cellad check` reports an authorizer that allows it | `TestProbeIdIsAlwaysDenied` | not built |
-| `limits` override the rate limit, the count ceiling, and the priority cap; `filter` narrows a list | `TestLimitsAndFilter` | not built |
-| The owner policy's rules hold for every kind and action, including that only an admin creates an environment and only the default environment is usable by a non-admin | `TestOwnerPolicy`, table-driven | not built |
-| A sandbox's token reads and execs itself, reads its descendants, cannot read a sibling or delete itself, and cannot mount a secret its parent did not | `TestWorkloadIsLeastPrivileged` | not built |
+| A token from a listed issuer with the right audience is accepted, signed `RS256` or `ES256`; wrong issuer, wrong audience, expired, unsigned, an algorithm outside the two, and a `sub` with a reserved prefix are each `unauthenticated` | `TestVerifierRefusals`, table-driven | built |
+| The same `sub` from two listed issuers is two subjects; an admin entry matches one and not the other | `TestSubjectsAreIssuerQualified` | built |
+| An unreachable issuer at start is a start-up failure; one that fails later is served from the cached key set | `TestIssuerAtStartAndLater` | built |
+| A non-loopback `http://` issuer or authorizer is refused at start unless listed insecure; an authorizer URL without a token is a start-up failure | `TestInsecureAndIncompleteEndpoints` | built |
+| `cellad` refuses to start with no issuer or with a `CELLA_TOKEN_KEY` holding no RSA key | `TestServeRefusesToStartWithoutIdentity` | built |
+| A workload token verifies with a generic JWT library against `/.well-known/jwks.json`; its `kid` is the RFC 7638 thumbprint | `TestWorkloadTokenIsVerifiable` | built |
+| With two PEM blocks, tokens signed by the second still verify; after the block is removed they do not; the first block signs | `TestKeyRotationByConfiguration` | built |
+| A workload token is refused by `cellad` after its sandbox is deleted and after its `jti` is revoked; a recovered sandbox's new token verifies and the old `jti` is revoked | `TestWorkloadTokenLifecycle` | not built: the phase check and the revocation list are the store's ([[010-state]]) and the recovery is the controller's ([[005-lifecycle-controller]]); the verifier and the signer wait for them |
+| A token is re-minted and re-projected at two thirds of its lifetime | `TestTokenReprojection` under a fake clock | not built: the re-mint is the controller's ([[005-lifecycle-controller]]) and the projection the driver's ([[004-runtime-contract]]) |
+| An environment key registers and claims for its environment, is refused on every other route, and is refused at once after `DELETE .../keys/{jti}`; two keys on one environment work independently | `TestEnvironmentKeys` | built in part: a key is minted, verified, and read back as its environment's, and two on one environment are two jtis; the routes are [[008-api]]'s and [[021-data-plane-workers]]'s and the revocation list is [[010-state]]'s |
+| Every failure mode in the rules list is `authorizer_unavailable` and never an allow, and unavailability fails the request without flipping readiness; a connection failure before a response line is retried once and nothing else is | `TestAuthorizerFailsClosed`, table-driven over six modes; `TestAuthorizerRetriesOnlyBeforeAResponseLine` | built |
+| Every action in the table reaches the authorizer with the resource shape in its row, `workload` set for a sandbox caller, `issuer` and `sub` apart, and every claim of the token in `claims` verbatim | `TestAuthorizerRequestShapes` against the stub | built in part: every row's shape holds and `workload` carries the caller's sandbox id; its `parent`, `root`, `mesh` and `spawn` are the store's ([[010-state]], [[022-mesh-and-spawn]]) |
+| A deny on an own action is `forbidden`; a deny through `Lookup` is `not_found` and identical to a missing object | `TestDenyMapping` | built: the two codes hold at the guard; the 403 and the 404 they render as are [[008-api]]'s |
+| The cache serves a second identical decision without a call, expires an allow at the answer's `ttl` and at the `600s` cap, a deny at `5s`, never caches unavailability, and keys `create` and `list` without a resource id | `TestDecisionCache` | built |
+| The probe id is denied by the stub authorizer and by the owner policy for every subject and action, and `cellad check` reports an authorizer that allows it | `TestProbeIdIsAlwaysDenied` | built in part: the stub and the owner policy deny it for every subject and action, and the client reads an allow as a misconfiguration; the `cellad check` subcommand is [[014-release-and-installation]]'s |
+| `limits` override the rate limit, the count ceiling, and the priority cap; `filter` narrows a list | `TestLimitsAndFilter` | not built: the three figures and the filter are decoded and carried, and there is no rate limit ([[008-api]]), no count ceiling ([[007-admission]]) and no `Resolve` ([[003-manifest-contract]]) to override yet |
+| The owner policy's rules hold for every kind and action, including that only an admin creates an environment and only the default environment is usable by a non-admin | `TestOwnerPolicy`, table-driven | built |
+| A sandbox's token reads and execs itself, reads its descendants, cannot read a sibling or delete itself, and cannot mount a secret its parent did not | `TestWorkloadIsLeastPrivileged` | built |
