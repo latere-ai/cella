@@ -8,11 +8,12 @@ refused before it is pushed.
 
 - A caller's token is refused once it is more than 24 hours old, even
   when its `exp` is still in the future, so a caller that works for days
-  re-mints at its own issuer instead of holding one token. This is the
-  same rule Origo and Lux apply, one age bound across the three. The
-  keys `cellad` mints for environments are unaffected: one lives
-  `CELLA_ENVIRONMENT_KEY_TTL`, a year by default, and its `exp` is its
-  only bound.
+  re-mints at its own issuer instead of holding one token. A token that
+  does not say when it was minted, carrying no `iat`, is refused for the
+  same reason. This is the same rule Origo and Lux apply, one age bound
+  across the three. The keys `cellad` mints for environments are
+  unaffected: one lives `CELLA_ENVIRONMENT_KEY_TTL`, a year by default,
+  and its `exp` is its only bound.
 - `cellad` knows who is calling. `CELLA_OIDC_ISSUERS` lists the OpenID
   Connect issuers you trust, any of them; at start `cellad` reads each
   one's discovery document and key set and refuses to start when one does

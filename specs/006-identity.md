@@ -60,6 +60,8 @@ bound, the `MaxTokenAge` default of `latere.ai/x/pkg/authkit/jwt`, 24
 hours. A caller's token whose `iat` is older than that is refused
 whatever `exp` it carries, so the list below of what refuses a caller's
 token gains the age; Origo names the same figure and Lux inherits it.
+A token that stamps no `iat` is refused for the same reason, because an
+age no one can read is not an age within the bound.
 Environment keys are not bounded by age, because one lives
 `CELLA_ENVIRONMENT_KEY_TTL`, a year by default, and its `exp` is its
 bound. Nothing else in this spec changes.
@@ -138,8 +140,8 @@ issuer that goes away later degrades to refusing new keys rather than
 every request. A request's bearer is accepted when it is a JWS signed
 `RS256` or `ES256` by a listed issuer's key, `iss` matches, `aud` contains
 `CELLA_OIDC_AUDIENCE` (default `cella`), `exp` is in the future,
-`nbf` if present is past, and `iat` is less than 24 hours old
-(amended 2026-09-17). Every claim of the verified token is handed
+`nbf` if present is past, and `iat` is present and less than 24 hours
+old (amended 2026-09-17). Every claim of the verified token is handed
 to the authorizer verbatim in `claims`, and none is interpreted by the
 control plane: an issuer's organisation, role, or group claims mean
 something to the authorizer that reads them and nothing to `cellad`.
@@ -365,7 +367,7 @@ the HTTP envelope of 401 and 403 ([[008-api]]); the revocation store
 | Criterion | Test that proves it | State |
 |---|---|---|
 | A token from a listed issuer with the right audience is accepted, signed `RS256` or `ES256`; wrong issuer, wrong audience, expired, unsigned, an algorithm outside the two, and a `sub` with a reserved prefix are each `unauthenticated` | `TestVerifierRefusals`, table-driven | built |
-| A listed issuer's token whose `iat` is more than 24 hours old is `unauthenticated` with the reason `iat`, whatever `exp` it carries, and an environment key 30 days old with `exp` in the future is accepted | `TestTokenAgeIsBoundedForIssuersAndNotForEnvironmentKeys`; the age row of `TestVerifierRefusals` | built |
+| A listed issuer's token whose `iat` is more than 24 hours old is `unauthenticated` with the reason `iat`, whatever `exp` it carries, a token that stamps no `iat` is refused for the same reason, and an environment key 30 days old with `exp` in the future is accepted | `TestTokenAgeIsBoundedForIssuersAndNotForEnvironmentKeys`; the two age rows of `TestVerifierRefusals` | built |
 | The same `sub` from two listed issuers is two subjects; an admin entry matches one and not the other | `TestSubjectsAreIssuerQualified` | built |
 | An unreachable issuer at start is a start-up failure; one that fails later is served from the cached key set | `TestIssuerAtStartAndLater` | built |
 | A non-loopback `http://` issuer or authorizer is refused at start unless listed insecure; an authorizer URL without a token is a start-up failure | `TestInsecureAndIncompleteEndpoints` | built |

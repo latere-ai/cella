@@ -128,9 +128,9 @@ names another issuer, or publishes no RS256 or ES256 key, so a wrong
 issuer is a deployment you fix rather than a log you read later. A
 bearer is accepted when a listed issuer signed it, its `aud` contains
 `CELLA_OIDC_AUDIENCE`, it has not expired, and it was minted less than
-24 hours ago: a token older than that is refused however long its `exp`
-runs, so a caller re-mints at its issuer rather than holding one token
-for a month. Nothing else about the token is interpreted. A subject is
+24 hours ago: a token older than that, or one that does not say when it
+was minted, is refused however long its `exp` runs, so a caller re-mints
+at its issuer rather than holding one token for a month. Nothing else about the token is interpreted. A subject is
 the issuer and the `sub` claim joined, `https://login.example.com|alice`,
 so two issuers that agree on a `sub` are two different subjects, and
 every claim of the token reaches your authorizer exactly as it arrived.
