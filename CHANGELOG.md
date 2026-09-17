@@ -6,16 +6,24 @@ refused before it is pushed.
 
 ## Unreleased
 
+- A caller's token is refused once it is more than 24 hours old, even
+  when its `exp` is still in the future, so a caller that works for days
+  re-mints at its own issuer instead of holding one token. This is the
+  same rule Origo and Lux apply, one age bound across the three. The
+  keys `cellad` mints for environments are unaffected: one lives
+  `CELLA_ENVIRONMENT_KEY_TTL`, a year by default, and its `exp` is its
+  only bound.
 - `cellad` knows who is calling. `CELLA_OIDC_ISSUERS` lists the OpenID
   Connect issuers you trust, any of them; at start `cellad` reads each
   one's discovery document and key set and refuses to start when one does
   not answer, names another issuer, or publishes no `RS256` or `ES256`
   key. A bearer is accepted when a listed issuer signed it, its `aud`
-  contains `CELLA_OIDC_AUDIENCE` (default `cella`), and it has not
-  expired; nothing else about it is interpreted. A subject is the issuer
-  and the `sub` joined, `https://login.example.com|alice`, so two issuers
-  that agree on a `sub` are two subjects, and every claim of the token
-  reaches your authorizer verbatim. There is no anonymous access and no
+  contains `CELLA_OIDC_AUDIENCE` (default `cella`), it has not expired,
+  and it was minted less than 24 hours ago; nothing else about it is
+  interpreted. A subject is the issuer and the `sub` joined,
+  `https://login.example.com|alice`, so two issuers that agree on a `sub`
+  are two subjects, and every claim of the token reaches your authorizer
+  verbatim. There is no anonymous access and no
   API key.
 - `cellad` signs the identities it hands out. `CELLA_TOKEN_KEY` is one or
   two PEM RSA private keys of at least 2048 bits: the first signs a

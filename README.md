@@ -119,7 +119,7 @@ with.
 
 `cellad` knows who is calling and asks somebody else what they may do.
 There is no anonymous access and no API key: a caller that wants a
-long-lived credential gets one from its own issuer.
+long-lived credential keeps one at its own issuer and re-mints it.
 
 **Who.** `CELLA_OIDC_ISSUERS` lists the OpenID Connect issuers you
 trust, any of them. At start `cellad` reads each one's discovery
@@ -127,13 +127,15 @@ document and key set and refuses to start when one does not answer,
 names another issuer, or publishes no RS256 or ES256 key, so a wrong
 issuer is a deployment you fix rather than a log you read later. A
 bearer is accepted when a listed issuer signed it, its `aud` contains
-`CELLA_OIDC_AUDIENCE`, and it has not expired. Nothing else about the
-token is interpreted. A subject is the issuer and the `sub` claim
-joined, `https://login.example.com|alice`, so two issuers that agree on
-a `sub` are two different subjects, and every claim of the token reaches
-your authorizer exactly as it arrived. An organisation, role, or group
-claim means whatever your authorizer decides it means, and nothing to
-`cellad`.
+`CELLA_OIDC_AUDIENCE`, it has not expired, and it was minted less than
+24 hours ago: a token older than that is refused however long its `exp`
+runs, so a caller re-mints at its issuer rather than holding one token
+for a month. Nothing else about the token is interpreted. A subject is
+the issuer and the `sub` claim joined, `https://login.example.com|alice`,
+so two issuers that agree on a `sub` are two different subjects, and
+every claim of the token reaches your authorizer exactly as it arrived.
+An organisation, role, or group claim means whatever your authorizer
+decides it means, and nothing to `cellad`.
 
 **What.** `CELLA_AUTHORIZER_URL` points at an endpoint you write.
 `cellad` POSTs the subject, its claims, an action, and the object to it,
