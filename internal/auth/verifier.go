@@ -143,8 +143,12 @@ func NewVerifier(ctx context.Context, o VerifierOptions) (*Verifier, error) {
 		// day, whatever exp it carries, so a caller that wants a
 		// longer-lived credential re-mints it at its issuer. Origo
 		// names the same figure and Lux inherits it. The size bound
-		// stays the shared package's.
-		MaxTokenAge: jwt.DefaultMaxTokenAge,
+		// stays the shared package's. RequireIssuedAt makes the bound
+		// one rule rather than a claim a token may drop: a caller's
+		// token that stamps no iat is refused, because an age no one
+		// can read is not an age within the bound.
+		MaxTokenAge:     jwt.DefaultMaxTokenAge,
+		RequireIssuedAt: true,
 	})
 	if len(o.LocalKeys) > 0 {
 		if v.localIssuer == "" {

@@ -78,6 +78,10 @@ func TestVerifierRefusals(t *testing.T) {
 		token: rsa.Mint(issuertest.Claims{Sub: "alice", Iat: time.Now().Add(-25 * time.Hour).Unix(), Exp: time.Now().Add(time.Hour).Unix()}),
 		want:  ": " + string(jwt.ReasonTooOld) + ":",
 	}, {
+		name:  "a token that stamps no iat at all",
+		token: rsa.Mint(issuertest.Claims{Sub: "alice", Omit: []string{"iat"}}),
+		want:  ": " + string(jwt.ReasonTooOld) + ":",
+	}, {
 		name:  "a token not yet valid",
 		token: rsa.Mint(issuertest.Claims{Sub: "alice", Nbf: time.Now().Add(time.Hour).Unix()}),
 		want:  "nbf",
@@ -141,7 +145,9 @@ func TestVerifierRefusals(t *testing.T) {
 // rule Origo and Lux run too; a caller that wants a longer-lived
 // credential re-mints it at its issuer. An environment key is bounded
 // by exp alone, because it lives CELLA_ENVIRONMENT_KEY_TTL, a year by
-// default, and a worker holds it for that long.
+// default, and a worker holds it for that long. A caller's token that
+// stamps no iat is refused for the same reason the bound exists: an age
+// no one can read is not an age within it.
 func TestTokenAgeIsBoundedForIssuersAndNotForEnvironmentKeys(t *testing.T) {
 	s := issuertest.New(t, issuertest.WithDefaultAudience(audience))
 	v := newVerifier(t, s.URL())
@@ -173,6 +179,15 @@ func TestTokenAgeIsBoundedForIssuersAndNotForEnvironmentKeys(t *testing.T) {
 	}
 	if code := auth.CodeOf(err); code != auth.CodeUnauthenticated {
 		t.Errorf("Verify() refused with %q, want %q", code, auth.CodeUnauthenticated)
+	}
+
+	none := s.Mint(issuertest.Claims{Sub: "alice", Omit: []string{"iat"}})
+	_, err = v.Verify(none)
+	if err == nil {
+		t.Fatal("a token that stamps no iat was accepted, and an age no one can read is not an age within the bound")
+	}
+	if want := ": " + string(jwt.ReasonTooOld) + ":"; !strings.Contains(err.Error(), want) {
+		t.Errorf("Verify() = %v, want a refusal naming %q", err, want)
 	}
 
 	signer := newSignerMintingAt(t, time.Now().Add(-30*24*time.Hour))
