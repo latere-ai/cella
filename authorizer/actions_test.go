@@ -166,3 +166,43 @@ func actionsOfSpec006(t *testing.T) []authz.Action {
 	}
 	return out
 }
+
+// TestEveryKindReadsAsAHeading: a resource kind is a type name, and a
+// person picking what a personal access token may do reads a heading
+// (infrastructure/identity id-13). The picker groups by kind and names
+// each group with the vocabulary's own label, so Cella declares one per
+// kind and no console hard-codes a word of it. "SandboxSet" is the row
+// that makes the point: it is a type name and not a heading.
+func TestEveryKindReadsAsAHeading(t *testing.T) {
+	v := Vocabulary()
+	want := map[string]string{
+		KindSandbox:     "Sandboxes",
+		KindSecret:      "Secrets",
+		KindVolume:      "Volumes",
+		KindSandboxSet:  "Sandbox sets",
+		KindEnvironment: "Environments",
+	}
+	kinds := v.Kinds()
+	if len(kinds) != len(want) {
+		t.Fatalf("the vocabulary names %d kinds, %v; spec 006's table has %d", len(kinds), kinds, len(want))
+	}
+	for _, kind := range kinds {
+		if got := v.Label(kind); got != want[kind] {
+			t.Errorf("Label(%q) = %q, want %q", kind, got, want[kind])
+		}
+	}
+}
+
+// TestTheLabelsAreTheVocabularysOwn: every consumer reads the same
+// headings, and a consumer that edits the map it was handed edits
+// nothing here.
+func TestTheLabelsAreTheVocabularysOwn(t *testing.T) {
+	first := Vocabulary()
+	edited := first.WithLabels(map[string]string{KindSandbox: "Boxes"})
+	if got := edited.Label(KindSandbox); got != "Boxes" {
+		t.Fatalf("a consumer's own labels did not take: Label(%q) = %q", KindSandbox, got)
+	}
+	if got := Vocabulary().Label(KindSandbox); got != "Sandboxes" {
+		t.Errorf("a consumer's copy changed the published table: Label(%q) = %q", KindSandbox, got)
+	}
+}

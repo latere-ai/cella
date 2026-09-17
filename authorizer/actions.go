@@ -113,14 +113,31 @@ var table = []authz.Action{
 	{Name: ActionEnvironmentUse, Kind: KindEnvironment},
 }
 
+// labels is the name a person reads for each resource kind. A kind is a
+// type name, and a person choosing what a personal access token may do
+// picks a function under a heading (infrastructure/identity id-13): the
+// picker groups by kind, because an action acts on exactly one kind and
+// that grouping is the only correct one, and it names each group with
+// the label here rather than with a word of its own. "SandboxSet" is the
+// row that makes the point, and set.* is why the grouping is the kind
+// and not the action's prefix.
+var labels = map[string]string{
+	KindSandbox:     "Sandboxes",
+	KindSecret:      "Secrets",
+	KindVolume:      "Volumes",
+	KindSandboxSet:  "Sandbox sets",
+	KindEnvironment: "Environments",
+}
+
 // Vocabulary is Cella's action table as the shared contract reads it:
 // the client refuses an action outside it before the wire, the endpoint
 // scaffold of latere.ai/x/pkg/authz/server answers a 400 for one, and
-// the conformance suite drives a case per row. The value is a fresh copy
-// each call, so a caller that sorts or appends to it changes nothing
-// here.
+// the conformance suite drives a case per row, and a picker reads the
+// heading of each kind off Label. The value is a fresh copy each call,
+// so a caller that sorts or appends to it, or declares labels of its
+// own, changes nothing here.
 func Vocabulary() authz.Vocabulary {
-	return authz.Vocabulary{Core: Core, Actions: slices.Clone(table)}
+	return authz.Vocabulary{Core: Core, Actions: slices.Clone(table)}.WithLabels(labels)
 }
 
 // Actions lists every action of the vocabulary, in the table's order.
