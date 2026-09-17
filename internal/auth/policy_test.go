@@ -388,3 +388,24 @@ func TestGrantsNarrowNothingButAPAT(t *testing.T) {
 		t.Fatalf("a token carrying no claim at all was narrowed: %+v", d)
 	}
 }
+
+// TestAClaimNobodyCanParseIsADeny: the owner policy is also the endpoint
+// a self-hoster serves from it, where the claims are whatever the calling
+// enforcement point sent rather than what cellad's own verifier passed. A
+// claim that does not read as grants is a deny, and not an error: an
+// error is a decision point that produced no decision, which a core reads
+// as an outage, and there is no outage here. There is a credential whose
+// reach nobody can read, and the closed answer is the only safe one.
+func TestAClaimNobodyCanParseIsADeny(t *testing.T) {
+	d, err := policy().Authorize(t.Context(), authz.Request{
+		Subject: bob, Action: authorizer.ActionSandboxRead,
+		Resource: auth.Sandbox{ID: "sbx_01J9", Owner: bob}.Resource(),
+		Claims:   map[string]any{"token_use": "pat", "authorization_details": "nope"},
+	})
+	if err != nil {
+		t.Fatalf("the policy answered an error, which a core reads as an authorizer outage: %v", err)
+	}
+	if d.Allow || d.Reason != authz.ReasonGrant {
+		t.Fatalf("the answer is %+v, want a %q deny", d, authz.ReasonGrant)
+	}
+}

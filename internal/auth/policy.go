@@ -69,15 +69,31 @@ type OwnerPolicy struct {
 // verbatim: a request built with empty claims restricts nothing, which is
 // why Envelope carries the claims as they came.
 func (p *OwnerPolicy) Authorize(_ context.Context, req authz.Request) (authz.Decision, error) {
+	return p.restrict(p.decide(req), req), nil
+}
+
+// restrict is the intersection itself, the same shape the scaffold of
+// latere.ai/x/pkg/authz/server applies to its own decider's answer.
+//
+// A claim that does not read as grants is a deny and not an error: an
+// error is a decision point that produced no decision, which a core reads
+// as an outage at the authorizer, and there is no outage. There is a
+// credential whose reach nobody can read, and the closed answer is the
+// only safe one. cellad's own verifier refuses such a token at the door,
+// so one that reaches here came through an endpoint an operator serves
+// from this policy.
+func (p *OwnerPolicy) restrict(d authz.Decision, req authz.Request) authz.Decision {
+	if !d.Allow {
+		// A deny keeps the reason the policy gave it. There is nothing
+		// for the grants to narrow, and the policy's reason is the one
+		// worth reading.
+		return d
+	}
 	grants, err := authz.ParseGrants(req.Claims)
 	if err != nil {
-		// A claim nobody can parse is a deny, and the same deny the
-		// scaffold writes: the verifier at cellad's door refuses a token
-		// whose grants do not read, so one that reached here arrived
-		// another way and the closed answer is the only safe one.
-		return authz.Decision{Reason: authz.ReasonGrant}, nil
+		return authz.Decision{Reason: authz.ReasonGrant}
 	}
-	return authz.Restrict(authorizer.Core, p.decide(req), req, grants), nil
+	return authz.Restrict(authorizer.Core, d, req, grants)
 }
 
 // decide is the policy's own answer, before the grants narrow it: the

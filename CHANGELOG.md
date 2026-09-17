@@ -28,6 +28,17 @@ refused before it is pushed.
   reach; `cellad` reads them, so a key narrowed for Cella works against
   Cella.
 
+  **If you run your own authorizer endpoint, read this one.** From this
+  version a narrowed key reaches `cellad`, and `cellad` asks your
+  endpoint what the caller may do. An endpoint written on
+  `latere.ai/x/pkg/authz/server` applies the grants for you: bump the
+  package to v0.75.0 or later and there is nothing else to do. An
+  endpoint that does neither answers about the person and not about the
+  key, and gives a narrowed key the person's full reach. Point
+  `CELLA_TEST_AUTHORIZER_URL` at your endpoint and run the conformance
+  suite to see which one yours is. The built-in owner policy, which is
+  what you run with `CELLA_AUTHORIZER_URL` unset, applies them already.
+
 - `cellad` reads every issuer's keys into its verifier at start, so the
   first request after a start waits for no fetch. It already read them
   to check the issuer; now it keeps them. An issuer that answers that
