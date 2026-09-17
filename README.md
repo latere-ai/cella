@@ -21,10 +21,12 @@ control plane that platform is built on, and anyone can run it.
 ## Status
 
 Design. The specs are written and the repository passes its quality
-gate. `cellad` serves its probes and creates nothing yet; the
-[build order](specs/README.md#build-order) says what lands when. The
-schema below may still change before the first tagged release, and the
-CHANGELOG names every change to it.
+gate. `cellad` serves its probes, verifies a caller against the issuers
+you list, signs the identities it hands to sandboxes and workers, and
+asks your authorizer or its own owner policy what a caller may do. It
+creates nothing yet; the [build order](specs/README.md#build-order) says
+what lands when. The schema below may still change before the first
+tagged release, and the CHANGELOG names every change to it.
 
 ## The problem
 
@@ -98,14 +100,89 @@ cella cp dev:/workspace/out ./out
 ## Try it
 
 ```sh
-make run   # cellad on loopback with the native driver
-make       # the quality gate
+CELLA_OIDC_ISSUERS=https://login.example.com make run   # cellad on loopback
+make                                                    # the quality gate
 ```
 
-Today `make run` serves the probes at `http://127.0.0.1:8081/readyz`.
-Once the drivers and the API land it starts the egress gateway, the
-stub issuer, authorizer, and sink beside the server and prints a token
-to apply the manifest above with.
+Today `make run` serves the probes at `http://127.0.0.1:8081/readyz` and
+the key set at `http://127.0.0.1:8080/.well-known/jwks.json`. It needs
+an issuer, because `cellad` verifies every caller; it generates the
+signing key once under `out/run/` and keeps it. Once the stubs of the
+[test stubs spec](specs/012-test-stubs-and-tiers.md) land, `make run`
+starts an issuer of its own and needs nothing from you. Once the drivers
+and the API land it starts the egress gateway, the authorizer, and the
+sink beside the server and prints a token to apply the manifest above
+with.
+
+## Identity
+
+`cellad` knows who is calling and asks somebody else what they may do.
+There is no anonymous access and no API key: a caller that wants a
+long-lived credential gets one from its own issuer.
+
+**Who.** `CELLA_OIDC_ISSUERS` lists the OpenID Connect issuers you
+trust, any of them. At start `cellad` reads each one's discovery
+document and key set and refuses to start when one does not answer,
+names another issuer, or publishes no RS256 or ES256 key, so a wrong
+issuer is a deployment you fix rather than a log you read later. A
+bearer is accepted when a listed issuer signed it, its `aud` contains
+`CELLA_OIDC_AUDIENCE`, and it has not expired. Nothing else about the
+token is interpreted. A subject is the issuer and the `sub` claim
+joined, `https://login.example.com|alice`, so two issuers that agree on
+a `sub` are two different subjects, and every claim of the token reaches
+your authorizer exactly as it arrived. An organisation, role, or group
+claim means whatever your authorizer decides it means, and nothing to
+`cellad`.
+
+**What.** `CELLA_AUTHORIZER_URL` points at an endpoint you write.
+`cellad` POSTs the subject, its claims, an action, and the object to it,
+and reads back an allow or a deny, with optional ceilings and, on a
+list, a filter. An allow is cached for the `ttl` your endpoint chooses,
+a deny for five seconds, and anything that is not a decision fails the
+request rather than allowing it. Write the endpoint in Go against
+[`latere.ai/x/cella/authorizer`](authorizer), which publishes the
+thirty-two actions and the ceilings so you keep no copy of the strings.
+
+With `CELLA_AUTHORIZER_URL` unset, `cellad` runs its own owner policy:
+you may create anything but an environment, you may act on what you own,
+a list returns your own objects, and `CELLA_ADMIN_SUBJECTS` names the
+subjects who may act on everything and who alone make environments. A
+sandbox's own identity is least privileged: it reads and execs itself,
+reads the tree below it, creates a child, and nothing else.
+
+**What cellad signs.** `CELLA_TOKEN_KEY` is one or two PEM RSA keys. The
+first signs the identity every sandbox gets at `/run/cella/token` and
+the keys your self-hosted workers register with; every key is published
+at `/.well-known/jwks.json`, so anything can verify a sandbox's identity
+offline with a stock JWT library. Rotation is yours: put a new key in
+front, and take the old block out once the tokens it signed have
+expired.
+
+```sh
+openssl genrsa -out token.pem 2048
+
+CELLA_OIDC_ISSUERS=https://login.example.com \
+CELLA_PUBLIC_URL=https://cella.example.com \
+CELLA_TOKEN_KEY="$(cat token.pem)" \
+CELLA_ADMIN_SUBJECTS='https://login.example.com|alice' \
+  cellad
+```
+
+| Variable | Required | Default | |
+|---|---|---|---|
+| `CELLA_OIDC_ISSUERS` | yes | | issuer URLs whose tokens are accepted, comma separated |
+| `CELLA_PUBLIC_URL` | yes | | where callers reach the public listener; the issuer of the tokens `cellad` signs |
+| `CELLA_TOKEN_KEY` | yes | | one or two PEM RSA private keys of at least 2048 bits; the first signs, all are published |
+| `CELLA_OIDC_AUDIENCE` | | `cella` | the `aud` a caller's token must contain |
+| `CELLA_OIDC_INSECURE_ISSUERS` | | | issuers from the list that may use `http://` off a loopback address; for a local issuer, never for a deployment |
+| `CELLA_AUTHORIZER_URL`, `CELLA_AUTHORIZER_TOKEN` | | | your authorization endpoint and the bearer `cellad` sends it; the URL unset selects the owner policy, and the URL without the token is a start-up failure |
+| `CELLA_AUTHORIZER_TIMEOUT`, `CELLA_AUTHORIZER_CACHE` | | `5s`, `60s` | one decision's deadline, and how long an allow that names no `ttl` is held |
+| `CELLA_ADMIN_SUBJECTS` | | | rendered subjects the owner policy lets act on everything; read and unused with an authorizer set |
+| `CELLA_ENVIRONMENT_KEY_TTL` | | `8760h` | how long a worker's environment key lives |
+
+The [repository scaffold spec](specs/002-repository-scaffold.md) is the
+whole table, identity and everything else; the
+[identity spec](specs/006-identity.md) is why each rule is what it is.
 
 ## What you get
 

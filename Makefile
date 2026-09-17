@@ -40,10 +40,22 @@ build:
 # selected because it needs no cluster and no container engine. Spec 004
 # gives the backend its meaning; until then the process serves the probes.
 RUN_DIR = $(CURDIR)/$(OUT_DIR)/run
+# Run the server on loopback. cellad verifies a token from an issuer you
+# list, so CELLA_OIDC_ISSUERS names one; the stub issuer that makes this
+# self-contained is the test stubs spec's and is not built. The signing
+# key is generated once under out/run/ and kept, so a restart does not
+# invalidate the tokens of the last one.
 run: build
 	@mkdir -p $(RUN_DIR)
+	@test -s $(RUN_DIR)/token.pem || openssl genrsa -out $(RUN_DIR)/token.pem 2048 2>/dev/null
+	@test -n "$(CELLA_OIDC_ISSUERS)" || { \
+		echo "make run needs CELLA_OIDC_ISSUERS=<issuer url>: cellad verifies every caller"; \
+		echo "and there is no anonymous access. An http:// issuer off loopback also needs"; \
+		echo "CELLA_OIDC_INSECURE_ISSUERS."; exit 1; }
 	CELLA_DATA_DIR=$(RUN_DIR) CELLA_RUNTIME=native \
 	CELLA_PUBLIC_ADDR=127.0.0.1:8080 CELLA_INTERNAL_ADDR=127.0.0.1:8081 \
+	CELLA_PUBLIC_URL=http://127.0.0.1:8080 \
+	CELLA_TOKEN_KEY="$$(cat $(RUN_DIR)/token.pem)" \
 		$(OUT_DIR)/$(SERVICE)
 
 fmt:
