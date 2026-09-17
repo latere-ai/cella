@@ -207,6 +207,7 @@ consumer names a need; it is not in any phase.
 | two shipped binaries: `cellad` with `serve`, `worker`, `egress`, `check` as roles, and a small `cella` client; stubs test-only | 001, 002 | one image for the server side, a dependency-light client where agents run, one allow list per role package so the merge loosens nothing |
 | fail closed on every webhook and in the provisioning order | 006, 007, 009, 018 | an unavailable decision that allowed, or a half-provisioned sandbox with egress, would make an outage a privilege escalation |
 | the owner policy exists | 006 | a laptop and a small team need no authorizer, and "no authorizer" must still be a policy with tests |
+| identity is the shared libraries', not Cella's: the verifier is `latere.ai/x/pkg/authkit/jwt`, the envelope, client, cache, retry, owner-policy frame, stub and conformance suite are `latere.ai/x/pkg/authz`, and `cellad` adds its action vocabulary and its `resource` shapes and nothing else | 006 | one implementation of the wire across the sibling open cores, so an endpoint written for one answers another; the gate's `verifier` waiver is gone and `identity` passes with none |
 | Postgres optional | 010 | one binary from a laptop to a replicated service; the difference is one variable |
 | Apache-2.0 | LICENSE | a contract others implement wants the patent grant; the sibling open cores carry the same licence |
 
@@ -216,7 +217,6 @@ consumer names a need; it is not in any phase.
 |---|---|---|
 | The `vm` driver's substrate: a microVM driver of Cella's own, or the k8s runtime class alone; options and criteria in [[024-vm-driver]] | 024 | when a consumer names a need; not before the first release |
 | `pkg/egress` additions [[018-egress-and-secrets]] needs before the gateway role is built: a dependency-free `placeholder` subpackage; a per-principal policy gate (mode, allow, deny, ports) evaluated before a CONNECT completes; per-entry `inject` placement; `Registry` replace-all for an authoritative snapshot; the reverse-door handler and the outbound sync client, which the sibling application platform's gateway can then share | 018 | before phase 3 builds the gateway |
-| `latere.ai/x/pkg/authz` [[006-identity]]: the shared request envelope, client, decision cache, one-retry rule, owner-policy frame, stub authorizer, and authorizer conformance test, agreed with the sibling open cores; `cellad` adds only its action vocabulary and `resource` shapes. The gate's `identity:` waivers for `verifier` and `authorizer` (until 2026-12-31) hold until the package lands and phase 2 builds identity through it | 006 | before phase 2 builds identity |
 
 ## Open source readiness
 
