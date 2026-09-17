@@ -6,6 +6,7 @@ package auth
 import (
 	"context"
 	"crypto/rsa"
+	"errors"
 	"net/http"
 	"time"
 
@@ -93,6 +94,9 @@ func Start(ctx context.Context, o Options) (*Identity, error) {
 		// an authorizer set it is read and unused.
 		id.Authorizer = NewAuthorizer(&OwnerPolicy{Admins: o.AdminSubjects, DefaultEnvironment: o.DefaultEnvironment})
 		return id, nil
+	}
+	if o.AuthorizerToken == "" {
+		return nil, errors.New("CELLA_AUTHORIZER_TOKEN is unset while CELLA_AUTHORIZER_URL is set, and the endpoint requires a bearer")
 	}
 	asking, err := NewClient(ClientOptions{
 		URL: o.AuthorizerURL, Token: o.AuthorizerToken, HTTP: client,
