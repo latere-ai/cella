@@ -13,6 +13,8 @@ import (
 	"encoding/pem"
 	"io"
 	"maps"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -192,5 +194,31 @@ func startServeWithLog(t *testing.T, extra map[string]string) (publicURL, intern
 			t.Fatalf("serve never reported its listeners; stdout %q", out.String())
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// TestAnUnreachableAuthorizerIsNotAReadinessCheck is spec 006's rule
+// that availability is not readiness: an endpoint that does not answer
+// fails the requests that need a decision, and does not take the replica
+// out of rotation. The node starts against a dead endpoint, because
+// nothing dials it until a request needs a decision.
+func TestAnUnreachableAuthorizerIsNotAReadinessCheck(t *testing.T) {
+	dead := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	url := dead.URL
+	dead.Close()
+
+	publicURL, internalURL, out, stop := startServeWithLog(t, map[string]string{
+		"CELLA_AUTHORIZER_URL":   url,
+		"CELLA_AUTHORIZER_TOKEN": "a-bearer",
+	})
+	defer stop()
+
+	if got := out(); !strings.Contains(got, "authorizer=authorizer") {
+		t.Errorf("the node logged %q; an endpoint was configured", got)
+	}
+	for _, base := range []string{publicURL, internalURL} {
+		if code, body := get(t, base+"/readyz"); code != 200 || body != "ok\n" {
+			t.Errorf("GET %s/readyz = %d %q; a flapping endpoint fails requests, not replicas", base, code, body)
+		}
 	}
 }
