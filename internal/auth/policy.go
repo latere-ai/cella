@@ -53,24 +53,53 @@ type OwnerPolicy struct {
 
 // Authorize answers one request, so the owner policy and an operator's
 // endpoint are one seam to everything above.
+//
+// The answer is the policy's own decision intersected with the grants the
+// caller's token carries (infrastructure/identity id-13). A personal
+// access token is narrower than the person who holds it: the policy says
+// what the person may do, and authz.Restrict removes what the credential
+// was not granted. The conjunction turns an allow into a deny and never a
+// deny into an allow, so a grant is a restriction and never authority,
+// and a token of any other credential class is decided by the policy
+// alone. An operator's endpoint on latere.ai/x/pkg/authz/server applies
+// the same function to whatever its decider returned; cellad reaches this
+// policy through no endpoint, so the intersection is here.
+//
+// Restrict reads the grants off req.Claims, which is the caller's token
+// verbatim: a request built with empty claims restricts nothing, which is
+// why Envelope carries the claims as they came.
 func (p *OwnerPolicy) Authorize(_ context.Context, req authz.Request) (authz.Decision, error) {
+	grants, err := authz.ParseGrants(req.Claims)
+	if err != nil {
+		// A claim nobody can parse is a deny, and the same deny the
+		// scaffold writes: the verifier at cellad's door refuses a token
+		// whose grants do not read, so one that reached here arrived
+		// another way and the closed answer is the only safe one.
+		return authz.Decision{Reason: authz.ReasonGrant}, nil
+	}
+	return authz.Restrict(authorizer.Core, p.decide(req), req, grants), nil
+}
+
+// decide is the policy's own answer, before the grants narrow it: the
+// rows of spec 006 in front of the shared frame.
+func (p *OwnerPolicy) decide(req authz.Request) authz.Decision {
 	kind := authorizer.Kind(req.Action)
 	switch {
 	case strings.EqualFold(req.Resource.ID, authz.ProbeID):
-		return authz.Decision{Reason: authz.ReasonProbe}, nil
+		return authz.Decision{Reason: authz.ReasonProbe}
 	case req.Subject == "":
-		return authz.Decision{Reason: authz.ReasonAnonymous}, nil
+		return authz.Decision{Reason: authz.ReasonAnonymous}
 	case kind == "" || kind != req.Resource.Kind:
-		return authz.Decision{Reason: ReasonUnknownAction}, nil
+		return authz.Decision{Reason: ReasonUnknownAction}
 	}
 
 	// A token cellad minted is not a person, and the rows that follow are
 	// about people and the objects they own.
 	if id, ok := strings.CutPrefix(req.Subject, SandboxPrefix); ok && id != "" {
-		return workloadDecision(req, id), nil
+		return workloadDecision(req, id)
 	}
 	if _, ok := strings.CutPrefix(req.Subject, EnvironmentPrefix); ok {
-		return authz.Decision{Reason: ReasonWorkerKey}, nil
+		return authz.Decision{Reason: ReasonWorkerKey}
 	}
 
 	admin := slices.Contains(p.Admins, req.Subject)
@@ -79,20 +108,20 @@ func (p *OwnerPolicy) Authorize(_ context.Context, req authz.Request) (authz.Dec
 		// to key, to change, to remove, and theirs alone to use.
 		if kind == authorizer.KindEnvironment {
 			if req.Action != authorizer.ActionEnvironmentUse || !p.isDefault(req.Resource) {
-				return authz.Decision{Reason: ReasonAdminOnly}, nil
+				return authz.Decision{Reason: ReasonAdminOnly}
 			}
-			return authz.Decision{Allow: true}, nil
+			return authz.Decision{Allow: true}
 		}
 	}
 	if authz.IsList(req.Action) {
 		if admin {
-			return authz.Decision{Allow: true}, nil
+			return authz.Decision{Allow: true}
 		}
 		// A list is an allow the filter narrows to the caller's own.
-		return authz.Decision{Allow: true, Filter: &authz.Filter{Owners: []string{req.Subject}}}, nil
+		return authz.Decision{Allow: true, Filter: &authz.Filter{Owners: []string{req.Subject}}}
 	}
 	frame := authz.Policy{Admins: p.Admins, Create: createAction(kind)}
-	return frame.Decide(req, object(req.Resource)), nil
+	return frame.Decide(req, object(req.Resource))
 }
 
 // Decide is the same answer under the name latere.ai/x/pkg/authz/server

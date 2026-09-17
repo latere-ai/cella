@@ -552,3 +552,84 @@ func hijack(t *testing.T, w http.ResponseWriter) {
 	}
 	_ = conn.Close()
 }
+
+// patClaims is a verified personal access token's claims as the verifier
+// hands them on: the credential class, and one grant naming one action on
+// one sandbox.
+var patClaims = map[string]any{
+	"token_use": "pat",
+	"authorization_details": []any{map[string]any{
+		"type": "latere-authz", "actions": []any{"cella:sandbox.read"},
+		"datatypes": []any{"Sandbox"}, "locations": []any{"https://api.latere.ai"},
+		"identifier": "sbx_01J9GRANTED",
+	}},
+}
+
+// TestEnvelopeCarriesTheCredentialsClaims is id-13's A18 at cellad's
+// policy enforcement point. The grants are read off the envelope, so a
+// request built with empty claims restricts nothing and fails open at the
+// one layer the refusal at the door was meant to close. Envelope is the
+// only place cellad builds a request, and it forwards the token verbatim:
+// what an operator's endpoint reads, and what the owner policy reads, is
+// what the issuer signed.
+func TestEnvelopeCarriesTheCredentialsClaims(t *testing.T) {
+	req := auth.Envelope(caller(alice, "alice", patClaims), info,
+		authorizer.ActionSandboxRead, auth.Sandbox{ID: "sbx_01J9GRANTED", Owner: alice}.Resource())
+	if use := req.Claims["token_use"]; use != "pat" {
+		t.Errorf("the envelope carries token_use %v; the credential class reaches the decision point", use)
+	}
+	grants, err := authz.ParseGrants(req.Claims)
+	if err != nil {
+		t.Fatalf("the envelope's claims are no grants: %v", err)
+	}
+	if len(grants) != 1 || len(grants[0].Actions) != 1 || grants[0].Actions[0] != "cella:sandbox.read" {
+		t.Fatalf("the decision point reads %+v off the envelope; it reads the grant the token carries", grants)
+	}
+}
+
+// TestAGrantThatCoversNothingRefusesTheCaller: the deny the intersection
+// writes is the refusal a caller is answered with, and its reason is
+// "grant". A deny on the request's own action is forbidden; one on an
+// object reached through a lookup is not_found, so a refused object and a
+// missing one stay one answer for a narrowed key too.
+func TestAGrantThatCoversNothingRefusesTheCaller(t *testing.T) {
+	a := auth.NewAuthorizer(&auth.OwnerPolicy{Admins: []string{alice}})
+	granted := auth.Sandbox{ID: "sbx_01J9GRANTED", Owner: alice}.Resource()
+	elsewhere := auth.Sandbox{ID: "sbx_01J9ELSEWHERE", Owner: alice}.Resource()
+
+	if _, err := a.Decide(t.Context(), caller(alice, "alice", patClaims), info,
+		authorizer.ActionSandboxRead, granted); err != nil {
+		t.Fatalf("the action the key's own grant names was refused: %v", err)
+	}
+	for _, tc := range []struct {
+		name string
+		ask  func() error
+		want auth.Code
+	}{{
+		name: "a decision on an action the key was not granted",
+		ask: func() error {
+			_, err := a.Decide(t.Context(), caller(alice, "alice", patClaims), info,
+				authorizer.ActionSandboxDelete, granted)
+			return err
+		},
+		want: auth.CodeForbidden,
+	}, {
+		name: "a lookup of an object no grant names",
+		ask: func() error {
+			_, err := a.Lookup(t.Context(), caller(alice, "alice", patClaims), info,
+				authorizer.ActionSandboxRead, elsewhere)
+			return err
+		},
+		want: auth.CodeNotFound,
+	}} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.ask()
+			if code := auth.CodeOf(err); code != tc.want {
+				t.Fatalf("the refusal is %q, want %q", code, tc.want)
+			}
+			if !strings.Contains(err.Error(), authz.ReasonGrant) {
+				t.Errorf("the refusal reads %q; a developer reads %q and knows the key was narrowed", err, authz.ReasonGrant)
+			}
+		})
+	}
+}

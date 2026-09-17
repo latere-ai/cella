@@ -4,6 +4,8 @@
 package auth_test
 
 import (
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,6 +14,7 @@ import (
 
 	"latere.ai/x/pkg/authkit"
 	authkitconformance "latere.ai/x/pkg/authkit/conformance"
+	"latere.ai/x/pkg/authz"
 	"latere.ai/x/pkg/authz/conformance"
 	"latere.ai/x/pkg/authz/server"
 	"latere.ai/x/pkg/authz/stub"
@@ -106,4 +109,74 @@ func endpointFromEnv() (url, token string, named bool) {
 	url = strings.TrimSpace(os.Getenv(envAuthorizerURL))
 	token = strings.TrimSpace(os.Getenv(envAuthorizerToken))
 	return url, token, url != ""
+}
+
+// TestOwnerPolicyNarrowsByTheGrants is id-13's A13 against the path
+// cellad actually runs: the owner policy, in process, with nothing in
+// front of it. A personal access token granted one action on one sandbox
+// is refused every other action on that sandbox and that action on every
+// other sandbox, and the request its own grant names is never refused as
+// a grant.
+//
+// It is a second run of the same suite because latere.ai/x/pkg/authz/server
+// applies the intersection to whatever its decider returned, so the run
+// above passes whether or not the policy narrows anything. cellad reaches
+// the policy through no scaffold, and this is the run that reads the
+// policy's own answer: the endpoint here is the contract's wire and the
+// bearer and nothing else.
+func TestOwnerPolicyNarrowsByTheGrants(t *testing.T) {
+	const token = "conformance-bearer"
+	endpoint := httptest.NewServer(bare(t, policy(), token))
+	defer endpoint.Close()
+	conformance.Run(t, endpoint.URL, token,
+		conformance.WithVocabulary(authorizer.Vocabulary()),
+		conformance.WithSubjects(alice, bob),
+		conformance.WithHTTPClient(&http.Client{}))
+}
+
+// bare serves one decider over the contract's wire: the bearer, the 400
+// an action outside the vocabulary answers, and the decision as the
+// decider gave it. It is the scaffold of latere.ai/x/pkg/authz/server
+// with the one thing left out that the run above cannot see around, and
+// it exists for that run alone.
+func bare(t *testing.T, d *auth.OwnerPolicy, token string) http.Handler {
+	t.Helper()
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer "+token {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		var req authz.Request
+		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		// The owner policy answers an unknown action with a verdict, and
+		// the contract answers a malformed request: the client refuses
+		// one before the wire, so the check is the endpoint's here.
+		if !authorizer.Known(req.Action) {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		decision, err := d.Decide(r.Context(), req)
+		if err != nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(answer{
+			Allow: decision.Allow, Reason: decision.Reason,
+			TTL: int(decision.TTL.Seconds()), Limits: decision.Limits, Filter: decision.Filter,
+		})
+	})
+}
+
+// answer is the wire form of a decision, which the shared package renders
+// from its own unexported type.
+type answer struct {
+	Allow  bool            `json:"allow"`
+	Reason string          `json:"reason,omitempty"`
+	TTL    int             `json:"ttl,omitempty"`
+	Limits json.RawMessage `json:"limits,omitempty"`
+	Filter *authz.Filter   `json:"filter,omitempty"`
 }

@@ -264,3 +264,127 @@ func createResource(kind string) authz.Resource {
 	}
 	return authz.Resource{}
 }
+
+// scoped is one question from a personal access token: the claims a
+// verified token carries verbatim, the credential class in token_use and
+// the grants its holder chose in authorization_details.
+func scoped(t *testing.T, p *auth.OwnerPolicy, subject, action string, res authz.Resource, grants ...any) authz.Decision {
+	t.Helper()
+	claims := map[string]any{"token_use": "pat"}
+	if grants != nil {
+		claims["authorization_details"] = grants
+	}
+	d, err := p.Authorize(t.Context(), authz.Request{
+		Subject: subject, Action: action, Resource: res, Claims: claims,
+	})
+	if err != nil {
+		t.Fatalf("the owner policy answered an error: %v", err)
+	}
+	return d
+}
+
+// entry is one authorization_details entry, as auth mints it: an action
+// set qualified by its core, paired with a resource selector. An empty id
+// selects every resource of the kind.
+func entry(kind, id string, actions ...string) any {
+	e := map[string]any{
+		"type": "latere-authz", "actions": actions,
+		"datatypes": []any{kind}, "locations": []any{"https://api.latere.ai"},
+	}
+	if id != "" {
+		e["identifier"] = id
+	}
+	return e
+}
+
+// TestOwnerPolicyNarrowsAPersonalAccessToken is id-13's rule at Cella's
+// decision point: the policy answers about the person, the grants answer
+// about the credential, and the allow is the conjunction. A person's key
+// narrowed to one sandbox reaches that sandbox and is refused everywhere
+// else, with reason "grant".
+func TestOwnerPolicyNarrowsAPersonalAccessToken(t *testing.T) {
+	p := policy()
+	mine := auth.Sandbox{ID: "sbx_01J9MINE", Owner: bob}.Resource()
+	other := auth.Sandbox{ID: "sbx_01J9OTHER", Owner: bob}.Resource()
+	read := entry(authorizer.KindSandbox, "sbx_01J9MINE", "cella:sandbox.read")
+
+	for _, tc := range []struct {
+		name    string
+		res     authz.Resource
+		action  string
+		grants  []any
+		allowed bool
+	}{{
+		name: "the action and the resource its own grant names",
+		res:  mine, action: authorizer.ActionSandboxRead, grants: []any{read}, allowed: true,
+	}, {
+		name: "another action on the granted resource",
+		res:  mine, action: authorizer.ActionSandboxDelete, grants: []any{read},
+	}, {
+		name: "the granted action on another resource",
+		res:  other, action: authorizer.ActionSandboxRead, grants: []any{read},
+	}, {
+		name: "a selector naming every sandbox",
+		res:  other, action: authorizer.ActionSandboxRead,
+		grants: []any{entry(authorizer.KindSandbox, "", "cella:sandbox.read")}, allowed: true,
+	}, {
+		name: "an action of another core, which names no Cella action at all",
+		res:  mine, action: authorizer.ActionSandboxRead,
+		grants: []any{entry(authorizer.KindSandbox, "", "origo:repo.read")},
+	}, {
+		// A grant is a restriction and never authority. The policy says
+		// the subject does not own this object, and a grant that names
+		// the action does not make it theirs.
+		name:   "a grant on an object the person does not own",
+		res:    auth.Sandbox{ID: "sbx_01J9MINE", Owner: "someone-else"}.Resource(),
+		action: authorizer.ActionSandboxRead, grants: []any{read},
+	}} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := scoped(t, p, bob, tc.action, tc.res, tc.grants...)
+			if d.Allow != tc.allowed {
+				t.Fatalf("the answer is %+v, want allow %v", d, tc.allowed)
+			}
+			if tc.allowed || tc.name == "a grant on an object the person does not own" {
+				return
+			}
+			if d.Reason != authz.ReasonGrant {
+				t.Errorf("the deny names %q, want %q: the credential says what it may do, and this is not it", d.Reason, authz.ReasonGrant)
+			}
+		})
+	}
+}
+
+// TestOwnerPolicyDeniesAGrantlessPAT: a personal access token carrying no
+// grant at all is a token nobody wrote a grant for, and the intersection
+// of an allow with an empty set is a deny. The claim is a restriction, so
+// an absent one is not full authority.
+func TestOwnerPolicyDeniesAGrantlessPAT(t *testing.T) {
+	d := scoped(t, policy(), bob, authorizer.ActionSandboxRead, auth.Sandbox{ID: "sbx_01J9", Owner: bob}.Resource())
+	if d.Allow || d.Reason != authz.ReasonGrant {
+		t.Fatalf("a grantless personal access token answered %+v, want a %q deny", d, authz.ReasonGrant)
+	}
+}
+
+// TestGrantsNarrowNothingButAPAT: the claim narrows one credential class.
+// A person's session token, and a token cellad minted for a sandbox, are
+// decided by the policy alone whatever authorization_details says.
+func TestGrantsNarrowNothingButAPAT(t *testing.T) {
+	p := policy()
+	res := auth.Sandbox{ID: "sbx_01J9", Owner: bob}.Resource()
+	claims := map[string]any{
+		"token_use":             "access",
+		"authorization_details": []any{entry(authorizer.KindSandbox, "sbx_01J9OTHER", "cella:sandbox.read")},
+	}
+	d, err := p.Authorize(t.Context(), authz.Request{
+		Subject: bob, Action: authorizer.ActionSandboxRead, Resource: res, Claims: claims,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !d.Allow {
+		t.Fatalf("a token that is no personal access token was narrowed by a claim: %+v", d)
+	}
+	if d := decide(t, p, bob, authorizer.ActionSandboxRead, res); !d.Allow {
+		t.Fatalf("a token carrying no claim at all was narrowed: %+v", d)
+	}
+}
