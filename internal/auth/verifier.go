@@ -163,6 +163,17 @@ func NewVerifier(ctx context.Context, o VerifierOptions) (*Verifier, error) {
 		// the promise from trust into evidence.
 		ReadsGrants: true,
 	})
+	// The start-up check above read every issuer's key set and kept none
+	// of it: the validator holds its own cache and it is still cold, so
+	// without this the first request a node ever serves pays for a
+	// discovery document and a key set on the request path. Warm fills
+	// the cache once, and a set that does not answer here is the same
+	// failure discover refuses to start on: one issuer that does not
+	// answer, refused with the variable named rather than left to become
+	// a stream of 401s.
+	if err := v.validator.Warm(ctx); err != nil {
+		return nil, fmt.Errorf("CELLA_OIDC_ISSUERS: %w", err)
+	}
 	if len(o.LocalKeys) > 0 {
 		if v.localIssuer == "" {
 			return nil, errors.New("CELLA_TOKEN_KEY holds a key while CELLA_PUBLIC_URL is unset, so a token cellad minted would name no issuer")

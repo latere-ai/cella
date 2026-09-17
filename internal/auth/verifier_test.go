@@ -8,10 +8,12 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -438,5 +440,70 @@ func TestVerifierReadsTheGrantsAPersonalAccessTokenCarries(t *testing.T) {
 	// TestOwnerPolicyDeniesAGrantlessPAT.
 	if _, err := v.Verify(pat(iss)); err != nil {
 		t.Errorf("a personal access token carrying no grants was refused at the door: %v", err)
+	}
+}
+
+// counting sends a verifier's reads through one place and counts them.
+// Told to break the key set, it answers the start-up check's read and
+// fails every one after it, which is the one window a warm failure opens:
+// discover passed, and the validator's own read of the same set did not.
+type counting struct {
+	inner      http.RoundTripper
+	n          atomic.Int64
+	jwks       atomic.Int64
+	breakAfter bool
+}
+
+func (c *counting) RoundTrip(r *http.Request) (*http.Response, error) {
+	c.n.Add(1)
+	if strings.HasSuffix(r.URL.Path, "/jwks") && c.jwks.Add(1) > 1 && c.breakAfter {
+		return nil, errors.New("the key set is gone")
+	}
+	return c.inner.RoundTrip(r)
+}
+
+// verifierThrough builds the verifier with every read going through tr.
+func verifierThrough(t *testing.T, tr *counting, issuers ...string) (*auth.Verifier, error) {
+	t.Helper()
+	return auth.NewVerifier(t.Context(), auth.VerifierOptions{
+		Issuers: issuers, Audience: audience, HTTP: &http.Client{Transport: tr},
+	})
+}
+
+// TestTheKeySetsAreWarmBeforeTheFirstRequest: cellad reads every issuer's
+// key set at start and refuses to start when one does not answer, so the
+// node pays for the fetch before it serves. The validator holds its own
+// cache and that check fills none of it, so without a warm the first
+// request a node ever serves pays for a discovery document and a key set
+// on the request path. It does not: nothing reaches the network between
+// the node coming up and the first token being answered.
+func TestTheKeySetsAreWarmBeforeTheFirstRequest(t *testing.T) {
+	iss := issuertest.New(t, issuertest.WithDefaultAudience(audience))
+	tr := &counting{inner: http.DefaultTransport}
+	v, err := verifierThrough(t, tr, iss.URL())
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := tr.n.Load()
+	if _, err := v.Verify(iss.Mint(issuertest.Claims{Sub: "alice"})); err != nil {
+		t.Fatalf("the first token was refused: %v", err)
+	}
+	if after := tr.n.Load(); after != before {
+		t.Errorf("the first request cost %d read(s) of the issuer; a node that is up has read them already", after-before)
+	}
+}
+
+// TestAnIssuerThatGoesAwayBeforeTheWarmRefusesTheStart: the warm is one
+// rule with the start-up check and not a best effort beside it. An issuer
+// that answered the check and does not answer the validator's own read is
+// an issuer that does not answer, and cellad refuses to start on it,
+// naming the variable, rather than coming up to serve 401s.
+func TestAnIssuerThatGoesAwayBeforeTheWarmRefusesTheStart(t *testing.T) {
+	iss := issuertest.New(t, issuertest.WithDefaultAudience(audience))
+	tr := &counting{inner: http.DefaultTransport, breakAfter: true}
+	if _, err := verifierThrough(t, tr, iss.URL()); err == nil {
+		t.Fatal("cellad started on an issuer whose key set stopped answering")
+	} else if !strings.Contains(err.Error(), "CELLA_OIDC_ISSUERS") {
+		t.Errorf("the refusal reads %q; every start-up refusal names the variable to fix", err)
 	}
 }
