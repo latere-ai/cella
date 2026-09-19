@@ -108,7 +108,7 @@ func egressRole(ctx context.Context, args []string, getenv config.Getenv, stdout
 	if err != nil {
 		return fail(stderr, err)
 	}
-	gateway, err := egressd.New(egressd.Options{
+	gateway, err := egressd.New(ctx, egressd.Options{
 		URL: cfg.URL, Key: cfg.EnvironmentKey,
 		ProxyAddr: cfg.ProxyAddr, ReverseAddr: cfg.ReverseAddr,
 		CAPEM: cfg.CAKeyPEM, UpstreamCAPEM: cfg.CABundlePEM,

@@ -5,8 +5,6 @@ package egressd
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -15,6 +13,8 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+
+	"latere.ai/x/pkg/authkit/jwt"
 
 	"latere.ai/x/cella/egress"
 )
@@ -71,11 +71,7 @@ func (c *syncClient) Record(r egress.Record) {
 func (c *syncClient) Run(ctx context.Context) error {
 	backoff := minBackoff
 	for {
-		err := c.connect(ctx)
-		if ctx.Err() != nil {
-			return nil
-		}
-		if err != nil {
+		if err := c.connect(ctx); err != nil && ctx.Err() == nil {
 			c.log.WarnContext(ctx, "the gateway's stream to the control plane ended", "err", err, "retryIn", backoff)
 		}
 		select {
@@ -245,26 +241,25 @@ func streamURL(controlPlane, environment string) (string, error) {
 
 // environmentOf reads the environment out of the key the gateway was given.
 // The gateway does not verify the key, which is the control plane's to do; it
-// reads it to learn which environment's stream to open, and a key the control
-// plane refuses is refused there.
+// reads its own configuration to learn which environment's stream to open,
+// and a key the control plane refuses is refused there. The payload is
+// decoded by the shared reader, so no token is ever taken apart here.
 func environmentOf(key string) (string, error) {
-	parts := strings.Split(strings.TrimSpace(key), ".")
-	if len(parts) != 3 {
-		return "", errors.New("CELLA_ENVIRONMENT_KEY is not a signed token of three parts")
-	}
-	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return "", errors.New("CELLA_ENVIRONMENT_KEY carries a payload that is not base64url")
-	}
 	var claims struct {
 		Sub string `json:"sub"`
 	}
-	if err = json.Unmarshal(payload, &claims); err != nil {
-		return "", errors.New("CELLA_ENVIRONMENT_KEY carries a payload that is not JSON")
+	if err := jwt.DecodePayload(strings.TrimSpace(key), &claims); err != nil {
+		return "", errors.New("CELLA_ENVIRONMENT_KEY is not a token this server can read: " + err.Error())
 	}
-	environment, ok := strings.CutPrefix(claims.Sub, "environment:")
+	environment, ok := strings.CutPrefix(claims.Sub, environmentSubjectPrefix)
 	if !ok || environment == "" {
 		return "", errors.New("CELLA_ENVIRONMENT_KEY is not an environment key; its subject names " + claims.Sub)
 	}
 	return environment, nil
 }
+
+// environmentSubjectPrefix is what the subject of an environment key starts
+// with. The control plane's own identity package owns the prefix; this role
+// imports nothing of the control plane, so it carries the one constant it
+// needs and a test holds the two equal.
+const environmentSubjectPrefix = "environment:"

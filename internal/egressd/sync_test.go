@@ -18,6 +18,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"latere.ai/x/cella/egress"
+	"latere.ai/x/cella/internal/auth"
 	v1 "latere.ai/x/cella/manifest/v1"
 )
 
@@ -357,5 +358,15 @@ func waitFor(t *testing.T, done func() bool, what string) {
 			t.Fatalf("timed out waiting for %s", what)
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// TestTheEnvironmentPrefixMatchesTheControlPlane holds the one constant this
+// role carries against the identity package that mints the key. The role
+// imports nothing of the control plane, so the two copies are held equal
+// here rather than shared.
+func TestTheEnvironmentPrefixMatchesTheControlPlane(t *testing.T) {
+	if environmentSubjectPrefix != auth.EnvironmentPrefix {
+		t.Fatalf("the gateway reads %q and the control plane mints %q", environmentSubjectPrefix, auth.EnvironmentPrefix)
 	}
 }

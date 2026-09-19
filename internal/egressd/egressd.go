@@ -84,8 +84,9 @@ type Gateway struct {
 }
 
 // New builds the role and binds both doors, so a caller that gets no error
-// has two listening addresses and a gateway that has not yet connected.
-func New(o Options) (*Gateway, error) {
+// has two listening addresses and a gateway that has not yet connected. The
+// context bounds the binding alone; Run takes the one that bounds the role.
+func New(ctx context.Context, o Options) (*Gateway, error) {
 	if o.Log == nil {
 		o.Log = slog.Default()
 	}
@@ -144,10 +145,11 @@ func New(o Options) (*Gateway, error) {
 	gw := &Gateway{opts: o, log: o.Log, store: s, gate: g, client: client, caPEM: caPEM, environment: environment}
 	gw.proxy = &http.Server{Handler: http.HandlerFunc(g.ServeProxy), ReadHeaderTimeout: 30 * time.Second}
 	gw.reverse = &http.Server{Handler: http.HandlerFunc(g.ServeReverse), ReadHeaderTimeout: 30 * time.Second}
-	if gw.proxyLn, err = net.Listen("tcp", o.ProxyAddr); err != nil {
+	var listen net.ListenConfig
+	if gw.proxyLn, err = listen.Listen(ctx, "tcp", o.ProxyAddr); err != nil {
 		return nil, fmt.Errorf("CELLA_EGRESS_PROXY_ADDR: %w", err)
 	}
-	if gw.reverseLn, err = net.Listen("tcp", o.ReverseAddr); err != nil {
+	if gw.reverseLn, err = listen.Listen(ctx, "tcp", o.ReverseAddr); err != nil {
 		_ = gw.proxyLn.Close()
 		return nil, fmt.Errorf("CELLA_EGRESS_REVERSE_ADDR: %w", err)
 	}
@@ -171,7 +173,7 @@ func (g *Gateway) Environment() string { return g.environment }
 func (g *Gateway) Run(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	g.log.Info("the egress gateway is up",
+	g.log.InfoContext(ctx, "the egress gateway is up",
 		"proxy", g.ProxyAddr(), "reverse", g.ReverseAddr(), "environment", g.environment)
 	var wg sync.WaitGroup
 	errs := make([]error, 3)
@@ -192,16 +194,16 @@ func (g *Gateway) Run(ctx context.Context) error {
 		errs[2] = g.client.Run(ctx)
 	})
 	<-ctx.Done()
-	g.Close()
+	g.Close(context.WithoutCancel(ctx))
 	wg.Wait()
-	g.log.Info("the egress gateway is down")
+	g.log.InfoContext(context.WithoutCancel(ctx), "the egress gateway is down")
 	return errors.Join(errs...)
 }
 
 // Close stops both doors. A connection in flight is given the drain period,
 // after which it is cut: a tunnel has no request boundary to wait for.
-func (g *Gateway) Close() {
-	drain, cancel := context.WithTimeout(context.WithoutCancel(context.Background()), drainTimeout)
+func (g *Gateway) Close(ctx context.Context) {
+	drain, cancel := context.WithTimeout(context.WithoutCancel(ctx), drainTimeout)
 	defer cancel()
 	_ = g.proxy.Shutdown(drain)
 	_ = g.reverse.Shutdown(drain)

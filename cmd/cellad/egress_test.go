@@ -502,7 +502,7 @@ func startGateway(t *testing.T, p *plane, o egressd.Options) *egressd.Gateway {
 	t.Helper()
 	o.URL = p.url
 	o.Key = p.environmentKey(t)
-	gateway, err := egressd.New(o)
+	gateway, err := egressd.New(t.Context(), o)
 	if err != nil {
 		t.Fatal(err)
 	}

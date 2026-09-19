@@ -99,9 +99,9 @@ func TestNewRefusals(t *testing.T) {
 		{"aReverseDoorThatCannotBind", Options{Key: key(t), URL: "http://127.0.0.1:1", ProxyAddr: "127.0.0.1:0", ReverseAddr: occupied.Addr().String()}, "CELLA_EGRESS_REVERSE_ADDR"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			gateway, err := New(tc.opts)
+			gateway, err := New(t.Context(), tc.opts)
 			if err == nil {
-				gateway.Close()
+				gateway.Close(t.Context())
 				t.Fatal("the configuration was accepted")
 			}
 			if !strings.Contains(err.Error(), tc.want) {
@@ -119,7 +119,7 @@ func TestRunServesBothDoorsUntilTheContextEnds(t *testing.T) {
 		send(conn, egress.Frame{Type: egress.FrameSnapshot, Snapshot: &egress.Snapshot{}})
 	}
 	ready := make(chan struct{})
-	gateway, err := New(Options{
+	gateway, err := New(t.Context(), Options{
 		URL: p.server.URL, Key: token(t, map[string]any{"sub": "environment:default"}),
 		ProxyAddr: "127.0.0.1:0", ReverseAddr: "127.0.0.1:0",
 		Ready: func() { close(ready) },
