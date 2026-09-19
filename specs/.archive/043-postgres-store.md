@@ -427,7 +427,14 @@ delivery half, `Pending`, `Acknowledge`, `Defer` and `Drop`, is
 [[009-events]]. Recovery re-pushes no egress map, mints no token and
 reattaches no volume: those are steps 3 to 5 of the create order and arrive
 with slices 039 and 045 and [[019-volumes]]. `CELLA_RECOVERY_ATTEMPTS` is an
-`Options` field with its default and not yet a variable. The coordinates
+`Options` field with its default and not yet a variable. Two names moved and
+the rest of the tree has not caught up: the key secret values are sealed
+under is `CELLA_SECRET_KEY` here and in [[010-state]], while
+[[012-test-stubs-and-tiers]], [[013-security-and-threat-model]],
+[[018-egress-and-secrets]] and [[002-repository-scaffold]] still say
+`CELLA_SECRETS_KEK`, and `CELLA_DB_MAX_CONNS` defaults to 4 here and in
+[[010-state]] where [[002-repository-scaffold]] says 8. Slice 046 is where
+the first of those is read by a caller, so it carries the rename. The coordinates
 check of [[031-hosted-sandbox-consolidation]] walks `runtime/` and
 `controller/`; adding `internal/store/` to its roots is an edit to
 `runtime/coordinates_test.go`, which two other slices hold open, so it is
