@@ -259,4 +259,5 @@ The map, the order, and the rule for a slice are in 031.
 | [032-runtime-conformance-suite.md](.archive/032-runtime-conformance-suite.md) | complete | Driver conformance suite, Nop fake, dial-nothing and coordinates tests |
 | [035-podman-driver.md](.archive/035-podman-driver.md) | complete | Container isolation over the libpod socket, with the sandbox record in the engine |
 | [037-lifecycle-enforcement.md](.archive/037-lifecycle-enforcement.md) | complete | Reaper deadline rules, lease and clock seams, activity stamping |
+| [039-egress-gateway.md](039-egress-gateway.md) | in-progress | The network boundary, the map compiler, the gateway role and its two doors, sync and records |
 | [044-manifest-fields.md](.archive/044-manifest-fields.md) | complete | Resource, user, workspace and lifecycle manifest fields with the staged resolver |
