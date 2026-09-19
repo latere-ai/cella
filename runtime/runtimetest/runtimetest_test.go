@@ -175,7 +175,7 @@ func (d filesLiar) ExportTar(ctx context.Context, id string, paths []string, w i
 }
 
 func (d filesLiar) isStopped(ctx context.Context, id string) bool {
-	s, err := d.Driver.Inspect(ctx, id)
+	s, err := d.Inspect(ctx, id)
 	return err == nil && s.Phase == runtime.Stopped
 }
 
