@@ -177,7 +177,7 @@ func defaulting(ctx context.Context, obj *v1.Sandbox, o Options) (*v1.Environmen
 		obj.Spec.Workdir = obj.Spec.Workspace.Path
 	}
 	if err = validateSpec(obj.Spec); err != nil {
-		return nil, fmt.Errorf("manifest: this server's defaults are invalid: %w", err)
+		return nil, fmt.Errorf("manifest: this server's defaults are invalid: %v", err)
 	}
 	return env, nil
 }
@@ -267,7 +267,7 @@ func ceilings(obj *v1.Sandbox, o Options) error {
 		}
 		limit, err := ParseQuantity(c.ceiling)
 		if err != nil {
-			return fmt.Errorf("manifest: this server's ceiling for %s is invalid: %w", c.path, err)
+			return fmt.Errorf("manifest: this server's ceiling for %s is invalid: %v", c.path, err)
 		}
 		value, err := ParseQuantity(c.value)
 		if err != nil {
@@ -295,7 +295,7 @@ func ttlCeiling(ttl, ceiling v1.Duration) error {
 	}
 	limit, unbounded, err := ParseDuration(ceiling)
 	if err != nil {
-		return fmt.Errorf("manifest: this server's ttl ceiling is invalid: %w", err)
+		return fmt.Errorf("manifest: this server's ttl ceiling is invalid: %v", err)
 	}
 	if unbounded {
 		return nil
