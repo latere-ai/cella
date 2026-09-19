@@ -1,6 +1,6 @@
 ---
 title: "Runtime conformance suite: one executable contract every driver passes"
-status: in-progress
+status: complete
 track: core
 depends_on:
   - specs/004-runtime-contract.md
@@ -45,10 +45,10 @@ package runtimetest
 
 // Options tells the suite what the driver under test can be asked for.
 type Options struct {
-	Image         string             // CreateSpec.Image; empty for a driver that runs host processes
-	Shell         []string           // runs one script; ["sh", "-c"] when nil
-	NoMainCommand bool               // the driver refuses CreateSpec.Command; LogsFollow is skipped
-	Down, Up      func(t *testing.T) // make Ready fail and recover; nil skips that half of PreflightAndReady
+	Image         string   // CreateSpec.Image; empty for a driver that runs host processes
+	Shell         []string // runs one script; ["sh", "-c"] when nil
+	NoMainCommand bool     // the driver refuses CreateSpec.Command; LogsFollow is skipped
+	Down, Up      func()   // make Ready fail and recover; nil skips that half of PreflightAndReady
 }
 
 // Run drives every case under t, one subtest each. open returns a fresh
@@ -60,7 +60,9 @@ func Run(t *testing.T, open func(t *testing.T) runtime.Driver, opts Options)
 The opener takes the case's `*testing.T` so a driver can allocate a
 per-case directory and register its `Close` with `t.Cleanup`; calling
 the parent's `Fatal` from a subtest goroutine is undefined in
-`testing`. Spec 004's sentence is amended in this slice.
+`testing`. Spec 004's sentence is amended in this slice. `Down` and `Up`
+take no argument: they act on the data plane the opener was given, not on
+the case.
 
 The cases are written over a small interface (`Helper`, `Errorf`,
 `Fatalf`, `Skipf`, `Logf`, `Cleanup`) that `*testing.T` satisfies, and
@@ -127,11 +129,15 @@ it. The hermetic gate puts the toolchain directory on `PATH`, so `go
 list` runs under it.
 
 `runtime/coordinates_test.go`, package `runtime_test`, holds
-`TestNoLatereCoordinates`: every file under `runtime/` is free of a
-bare `cella.latere.ai` (the group-qualified prefix `cella.latere.ai/`
-is the API group 004 stamps and is allowed), `sandbox-base`,
-`latere-k8s`, `sandbox-pool`, and `sandbox-workloads`. Later slices
-extend its root list as they add packages.
+`TestNoLatereCoordinates`: every file under `runtime/`, not only every
+Go file, is free of `sandbox-base`, `latere-k8s`, `sandbox-pool`, and
+`sandbox-workloads`, and names `cella.latere.ai` only as the API group
+004 stamps. The two bytes around the name separate the group from the
+host: a following `/` makes it the group-qualified prefix and is
+allowed, a preceding `/` makes it a URL authority and is a finding, as
+is the bare name. The needles are assembled from pieces, so the file
+is not its own finding. Later slices extend its root list as they add
+packages.
 
 ## Not in this spec
 
@@ -145,9 +151,68 @@ and API tests; any change to `runtime.Driver`.
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| `native` passes every case of the suite in the unit run, `-race` on | `TestNativeConformance` | open |
-| A driver that declares `Attach` and refuses `Stdin`, one that declares `Files` and refuses tar while `Stopped`, and one that reports an isolation outside the four classes each fail the suite; native unwrapped does not | `TestConformanceCatchesAFalseCapability` | open |
-| `Nop` satisfies `runtime.Driver`, returns zero values, and an embedder's override is called while inherited methods still no-op | `TestNopReturnsZeroValues`, `TestNopEmbedOverride` | open |
-| `manifest`, `manifest/v1`, `runtime`, `runtime/native`, `controller` import only the standard library, `latere.ai/x/cella/{manifest,manifest/v1,runtime}`, and their own engine client | `TestRootPackagesDialNothing` | open |
-| No file under `runtime/` names a Latere host, image, pool, or namespace | `TestNoLatereCoordinates` | open |
-| `runtimetest` and `runtime/native` statement coverage above 90% | `go tool lateregate cover` | open |
+| `native` passes every case of the suite in the unit run, `-race` on | `TestNativeConformance` | passing |
+| A driver that declares `Attach` and refuses `Stdin`, one that declares `Files` and refuses tar while `Stopped`, and one that reports an isolation outside the four classes each fail the suite; native unwrapped does not | `TestConformanceCatchesAFalseCapability` | passing |
+| `Nop` satisfies `runtime.Driver`, returns zero values, and an embedder's override is called while inherited methods still no-op | `TestNopReturnsZeroValues`, `TestNopEmbedOverride` | passing |
+| `manifest`, `manifest/v1`, `runtime`, `runtime/native`, `controller` import only the standard library, `latere.ai/x/cella/{manifest,manifest/v1,runtime}`, and their own engine client | `TestRootPackagesDialNothing` | passing |
+| No file under `runtime/` names a Latere host, image, pool, or namespace | `TestNoLatereCoordinates`, `TestNoLatereCoordinatesCatchesEachName` | passing |
+| `runtimetest` and `runtime/native` statement coverage above 90% | `go tool lateregate cover` | passing |
+
+## Outcome
+
+`latere.ai/x/cella/runtime/runtimetest` holds the twelve cases of the
+table above plus `DeclaredWithoutCase`, over `runtime.Driver` as
+`runtime/driver.go` declares it today. The interface did not change.
+`Nop` and `NopExec` are the port of the sandbox's `runtimetest.Nop`
+over cella's types; nothing was rewired to use them in this slice.
+
+`runtime/native` runs the suite as `TestNativeConformance`, opening a
+driver over a per-case `t.TempDir()`, with `Down` removing the root and
+`Up` recreating it. Eleven cases run and pass; `DetachRecovers` skips,
+because native declares `Files` alone, and `DeclaredWithoutCase` reports
+nothing. `ExecStreamsAndExits` exercises the `Attach` refusal path, and
+`TarOutAndIn` the `Files` transfers while `Stopped`.
+
+The suite proves it can fail. The cases are written over `tb`, the part
+of `testing.TB` they use, and `TestConformanceCatchesAFalseCapability`
+drives the registry through a recorder that implements it: a case runs
+on its own goroutine so `Fatalf` and `Skipf` unwind it through
+`runtime.Goexit` and its cleanups still run, exactly as `testing` does.
+Three wrappers over the native driver each fail their case with the
+assertion named, and the same case over the same harness with the driver
+unwrapped records nothing:
+
+| Wrapper | Case | Assertion that fails |
+|---|---|---|
+| declares `Attach`, refuses `Stdin` | `ExecStreamsAndExits` | `Exec with Stdin under Attach` |
+| declares `Files`, refuses tar while `Stopped` | `TarOutAndIn` | `ImportTar while Stopped under Files` |
+| reports `Isolation` outside the four classes | `NameIsolationCapabilities` | `Isolation "sandboxed" is not one of [container vm process none]` |
+
+`TestUndeclaredCapabilitiesAreSkippedNotAsserted` pins the other half of
+the gating rule: over a driver declaring nothing, `TarOutAndIn` reports
+the skipped `Files` half instead of asserting it, `DetachRecovers` skips
+without `Detach` and runs with it, `LogsFollow` skips under
+`NoMainCommand`, and `PreflightAndReady` reports the missing `Down`.
+
+`arch_test.go` at the module root, package `cella_test`, reads the whole
+build list of `manifest`, `manifest/v1`, `runtime`, `runtime/native` and
+`controller` through `go list -deps` and admits the standard library,
+`latere.ai/x/cella/{manifest,manifest/v1,runtime}`, and a per-package
+list of engine clients, empty for all five today. An import under
+`internal/` is named as its own failure. The package holds no source
+file, so it adds no statement to the coverage gate and no import to any
+build list.
+
+Statement coverage: `runtime/runtimetest` 98.9% (555/561),
+`runtime/native` 93.4% (566/606). The six statements left are the
+timeout arms of `waitPhase`, `touchStampsActivity` and `Run`'s
+per-capability subtest, which a passing driver does not reach.
+`go test -race ./runtime/...` passes. The whole bar, `go tool
+lateregate`, passes: 16 gates, 3 skipped for features this repository
+does not have.
+
+Two divergences from the design above, both amended in it: `Options.Down`
+and `Options.Up` take no argument, because they act on the data plane the
+opener was given rather than on the case; and `TestNoLatereCoordinates`
+reads the byte before the API group as well as the byte after it, so a
+URL authority is a finding while the group-qualified prefix is not.

@@ -351,7 +351,8 @@ heartbeat within the offline window. `remote` is never selected by
 
 ### Conformance
 
-`runtimetest.Run(t, func() runtime.Driver, runtimetest.Options)` runs
+`runtimetest.Run(t, func(t *testing.T) runtime.Driver, runtimetest.Options)`
+runs
 one case per method and one per declared capability, and fails a driver
 that declares a capability without its interface or whose declared
 capability the case finds not to hold; an undeclared capability's case
@@ -385,6 +386,13 @@ is skipped and reported:
 runtime is installed; `podman`, `k8s`, and `remote` run it in the tiers
 of [[012-test-stubs-and-tiers]].
 
+The package is built ([[032-runtime-conformance-suite]]) with the cases
+that today's `Driver` has an operation for. `Watch`, the optional
+interfaces above, and `PhaseTableMatchesPackageDoc` have no operation on
+it yet; a declared capability among them is reported by the suite as
+declared without a case, so a driver's run lists what it claims and the
+suite cannot yet check. Each of those cases lands with its interface.
+
 ### Selection
 
 `CELLA_RUNTIME` picks the in-process driver of the default environment:
@@ -407,10 +415,10 @@ requests ([[023-computer-use-operations]]); the microVM driver's design
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| `native` passes the whole conformance suite in the unit suite | `TestNativeConformance` | not built |
+| `native` passes the whole conformance suite in the unit suite | `TestNativeConformance` | passing for the cases built, [[032-runtime-conformance-suite]] |
 | `local` passes it on a machine with the sandbox runtime installed, with `Attach`, `Dial`, `Mesh`, `Display`, `Input`, `Resize`, `Pool` and the `open` egress case skipped as undeclared, and is skipped whole with the remediation printed where the runtime is absent | `TestLocalConformance` | not built |
 | `podman` passes it in the podman tier; `k8s` against kind; `remote` through a worker running `native` | `TestPodmanConformance`, `TestClusterConformance`, `TestWorkerConformance` | not built |
-| A driver that declares a capability without its interface, or one the suite finds not to hold, fails | `TestConformanceCatchesAFalseCapability` with two lying wrappers | not built |
+| A driver that declares a capability without its interface, or one the suite finds not to hold, fails | `TestConformanceCatchesAFalseCapability` with three lying wrappers | passing, [[032-runtime-conformance-suite]] |
 | Every stamped label value is a legal Kubernetes label value and every key a legal key, for an owner with `@` and a user label with a `/` | `TestStampedIdentityIsLegal` | not built |
 | A decorator that removes the token mount, sets `privileged`, adds `hostNetwork` or `shareProcessNamespace`, or mounts a service account token is refused with `decorator_violation` naming the field | `TestDecoratorCannotWeakenTheBaseline`, table-driven over the baseline | not built |
 | With `CELLA_K8S_RUNTIME_CLASS_ISOLATION=vm`, `Isolation()` is `vm` and the Pod carries the class; unset, `container` regardless of the class name | `TestK8sIsolationIsDeclared` | not built |
