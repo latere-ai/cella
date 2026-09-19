@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -46,6 +47,10 @@ type syncClient struct {
 	log         *slog.Logger
 	dialer      *websocket.Dialer
 	onConnected func()
+	// connected fires onConnected once over the client's whole life, not
+	// once per connection: a reconnect makes the gateway whole again and is
+	// not a second start.
+	connected sync.Once
 }
 
 // Record queues one connection record. It never blocks the connection that
@@ -120,7 +125,6 @@ func (c *syncClient) connect(ctx context.Context) error {
 // readLoop applies what the control plane sends and queues the answer.
 func (c *syncClient) readLoop(ctx context.Context, cancel context.CancelFunc, conn *websocket.Conn, up chan<- egress.Frame) {
 	defer cancel()
-	first := true
 	for {
 		if err := conn.SetReadDeadline(time.Now().Add(egress.HeartbeatTimeout)); err != nil {
 			return
@@ -143,10 +147,9 @@ func (c *syncClient) readLoop(ctx context.Context, cancel context.CancelFunc, co
 			for _, m := range f.Snapshot.Maps {
 				queue(ctx, up, ack(m.Principal, m.Version))
 			}
-			if first && c.onConnected != nil {
-				c.onConnected()
+			if c.onConnected != nil {
+				c.connected.Do(c.onConnected)
 			}
-			first = false
 		case f.Type == egress.FramePut && f.Put != nil:
 			m := *f.Put
 			c.store.Apply(m)
