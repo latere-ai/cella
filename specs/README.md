@@ -258,4 +258,5 @@ The map, the order, and the rule for a slice are in 031.
 | [030-native-main-process.md](.archive/030-native-main-process.md) | complete | Main command supervision and persisted output |
 | [032-runtime-conformance-suite.md](.archive/032-runtime-conformance-suite.md) | complete | Driver conformance suite, Nop fake, dial-nothing and coordinates tests |
 | [037-lifecycle-enforcement.md](.archive/037-lifecycle-enforcement.md) | complete | Reaper deadline rules, lease and clock seams, activity stamping |
+| [043-postgres-store.md](043-postgres-store.md) | in-progress | Store contract of spec 010, memory and Postgres adapters, the lost rule and recovery |
 | [044-manifest-fields.md](.archive/044-manifest-fields.md) | complete | Resource, user, workspace and lifecycle manifest fields with the staged resolver |
