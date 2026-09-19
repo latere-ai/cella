@@ -223,6 +223,24 @@ The platform built its admission endpoint (platform slice 58) against
 5. A policy refusal is a 200 with `allow: false` and a code; only a bad
    bearer (401) or an unparseable envelope (400) is `admission_unavailable`.
 
+### What the platform's sink found (for 042)
+
+The platform built its event sink (platform slice 59) against
+[[009-events]] before cella emitted a record. What 042 must match:
+
+1. `object.labels` on every record, and `sandbox.labels` on a record
+   that carries a sandbox: the sink files a record under the tenant its
+   labels name, and 009's `Object` has no labels today. Without them
+   every record lands under no tenant. 009 is amended.
+2. `seq` set on every record, operations included, from the journal;
+   the per-object feed and the usage fold order by it.
+3. The signature exactly as 009 states: `Cella-Signature:
+   t=<unix>,v1=<hex>[,v1=<hex>]`, HMAC-SHA256 over `<t>.<body>` under
+   each half of `CELLA_EVENTS_SECRET`, five minute freshness, no
+   `Authorization` header.
+4. The acknowledgement is any 2xx; 400 is a permanent drop, 401 a bad
+   signature, 500 a retry.
+
 ### What a slice does
 
 1. Writes its own spec file `specs/0NN-name.md` from its row here and
