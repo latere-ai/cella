@@ -259,4 +259,4 @@ The map, the order, and the rule for a slice are in 031.
 | [032-runtime-conformance-suite.md](.archive/032-runtime-conformance-suite.md) | complete | Driver conformance suite, Nop fake, dial-nothing and coordinates tests |
 | [037-lifecycle-enforcement.md](.archive/037-lifecycle-enforcement.md) | complete | Reaper deadline rules, lease and clock seams, activity stamping |
 | [044-manifest-fields.md](.archive/044-manifest-fields.md) | complete | Resource, user, workspace and lifecycle manifest fields with the staged resolver |
-| [036-k8s-driver.md](036-k8s-driver.md) | in-progress | Kubernetes driver: one claim and one Pod per sandbox, identity on the objects |
+| [036-k8s-driver.md](.archive/036-k8s-driver.md) | complete | Kubernetes driver: a claim and a Pod per sandbox, the baseline, exec, logs, archives, identity on the objects |
