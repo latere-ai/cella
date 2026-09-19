@@ -184,7 +184,11 @@ func (c *Controller) Create(ctx context.Context, obj v1.Sandbox, owner string, m
 	// that no gateway will hold is a refusal here, with nothing created.
 	m, held, err := c.pushEgress(ctx, &obj)
 	if err != nil {
+		// The map may already sit in a gateway that took the put and never
+		// answered, so the principal is purged with the object: every map a
+		// gateway holds is a map desired state has.
 		delete(c.objects, id)
+		c.purgeEgress(ctx, id)
 		return obj, errors.Join(err, c.save())
 	}
 	obj.Status.Conditions = setCondition(obj.Status.Conditions, c.egressCondition(m, held, now))

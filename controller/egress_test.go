@@ -197,9 +197,20 @@ func TestCreateWaitsForTheGateway(t *testing.T) {
 				t.Fatalf("the refused sandbox is still listed: %+v", c.List())
 			}
 			d.mu.Lock()
-			defer d.mu.Unlock()
 			if len(d.specs) != 0 {
+				d.mu.Unlock()
 				t.Fatal("the driver was called for a sandbox whose map reached no gateway")
+			}
+			d.mu.Unlock()
+			// A gateway that took the put and never answered holds a map for
+			// a sandbox that does not exist, so the principal is purged with
+			// the refusal.
+			if gw, ok := tc.egress.(*gateway); ok {
+				gw.mu.Lock()
+				defer gw.mu.Unlock()
+				if len(gw.purged) != 1 {
+					t.Fatalf("purged = %v, want the refused sandbox's principal", gw.purged)
+				}
 			}
 		})
 	}
