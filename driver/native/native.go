@@ -206,6 +206,11 @@ func (d *Driver) cancel(id string) {
 	for e := range d.active[id] {
 		_ = e.Close()
 	}
+	// Reapers signal completion before taking mu, so this is safe while the
+	// lifecycle operation holds mu and prevents any new exec from starting.
+	for e := range d.active[id] {
+		<-e.done
+	}
 }
 func (d *Driver) Delete(ctx context.Context, id string) error {
 	if err := ctx.Err(); err != nil {

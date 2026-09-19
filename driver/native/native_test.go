@@ -262,3 +262,40 @@ func TestExecutionTimeoutAndStop(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// A stopped/deleted workspace must not be reported complete while a managed
+// process can still mutate it. A controlled reap makes this regression repeatable.
+func TestLifecycleWaitsForReap(t *testing.T) {
+	for _, operation := range []string{"stop", "delete", "close"} {
+		t.Run(operation, func(t *testing.T) {
+			d, _ := fresh(t)
+			create(t, d, "one")
+			cancelled := make(chan struct{})
+			done := make(chan struct{})
+			out, _ := io.Pipe()
+			stderr, _ := io.Pipe()
+			e := &execution{stdout: out, stderr: stderr, cancel: func() { close(cancelled) }, done: done}
+			d.active["one"] = map[*execution]struct{}{e: {}}
+			returned := make(chan error, 1)
+			go func() {
+				switch operation {
+				case "stop":
+					returned <- d.Stop(context.Background(), "one")
+				case "delete":
+					returned <- d.Delete(context.Background(), "one")
+				case "close":
+					returned <- d.Close()
+				}
+			}()
+			<-cancelled
+			select {
+			case err := <-returned:
+				close(done)
+				t.Fatalf("%s returned before process reap: %v", operation, err)
+			case <-time.After(20 * time.Millisecond):
+			}
+			close(done)
+			check(t, <-returned)
+		})
+	}
+}
