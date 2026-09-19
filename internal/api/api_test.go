@@ -13,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -24,6 +25,7 @@ import (
 	"latere.ai/x/cella/authorizer"
 	"latere.ai/x/cella/controller"
 	"latere.ai/x/cella/internal/auth"
+	"latere.ai/x/cella/manifest"
 	v1 "latere.ai/x/cella/manifest/v1"
 	"latere.ai/x/cella/runtime"
 	"latere.ai/x/cella/runtime/native"
@@ -336,4 +338,97 @@ func TestEnvironmentKeysCannotAccessSandboxRoutes(t *testing.T) {
 		t.Fatal("worker reached ordinary authorization or runtime")
 	}
 	f.request("GET", base, f.alice, "", 200)
+}
+
+const sizedBody = `{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox","metadata":{"name":"sized"},"spec":{"user":"1000","resources":{"cpu":"500m","memory":"2Gi","disk":"10Gi"},"workspace":{"path":"/workspace"},"lifecycle":{"autoStop":"15m","ttl":"1h","autoDelete":"never"}}}`
+
+func TestNativeManifestFieldsEndToEnd(t *testing.T) {
+	f := setup(t, nil)
+	var created v1.Sandbox
+	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes", f.alice, sizedBody, 201), &created); err != nil {
+		t.Fatal(err)
+	}
+	if created.Spec.User != "1000" || created.Spec.Resources.CPU != "500m" || created.Spec.Resources.Memory != "2Gi" || created.Spec.Resources.Disk != "10Gi" {
+		t.Fatalf("spec = %+v", created.Spec)
+	}
+	if created.Spec.Workspace.Path != "/workspace" || created.Spec.Workspace.Source != v1.WorkspaceSourceEmpty {
+		t.Fatalf("workspace = %+v", created.Spec.Workspace)
+	}
+	if created.Spec.Lifecycle != (v1.Lifecycle{AutoStop: "15m", TTL: "1h", AutoDelete: v1.DurationNever}) {
+		t.Fatalf("lifecycle = %+v", created.Spec.Lifecycle)
+	}
+	// The native environment records what it cannot enforce and says so.
+	want := []string{manifest.WarningResourcesNotEnforced, manifest.WarningUserNotApplied}
+	if !slices.Equal(created.Status.Warnings, want) {
+		t.Fatalf("warnings = %v, want %v", created.Status.Warnings, want)
+	}
+	if expiry := created.Status.CreatedAt.Add(time.Hour); created.Status.ExpiresAt.Sub(expiry).Abs() > time.Minute {
+		t.Fatalf("expiresAt = %v, want about %v", created.Status.ExpiresAt, expiry)
+	}
+	var read v1.Sandbox
+	if err := json.Unmarshal(f.request("GET", "/v1/sandboxes/"+created.Status.ID, f.alice, "", 200), &read); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(read.Status.Warnings, want) || !read.Status.ExpiresAt.Equal(created.Status.ExpiresAt) {
+		t.Fatalf("read back %+v", read.Status)
+	}
+	// Each refusal of the new fields is the caller's error, with its code.
+	for _, tc := range []struct {
+		name, body, code string
+		status           int
+	}{
+		{"quantity", `{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox","metadata":{"name":"bad"},"spec":{"resources":{"cpu":"one"}}}`, "invalid_field", 400},
+		{"duration", `{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox","metadata":{"name":"bad"},"spec":{"lifecycle":{"ttl":"soon"}}}`, "invalid_field", 400},
+		{"idle stop past the life", `{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox","metadata":{"name":"bad"},"spec":{"lifecycle":{"autoStop":"2h","ttl":"1h"}}}`, "invalid_field", 400},
+		{"reserved label", `{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox","metadata":{"name":"bad","labels":{"pool.cella.latere.ai/owner":"evil"}},"spec":{}}`, "reserved_prefix", 400},
+		{"workspace source", `{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox","metadata":{"name":"bad"},"spec":{"workspace":{"source":"git"}}}`, "capability_unsupported", 422},
+		{"workspace path", `{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox","metadata":{"name":"bad"},"spec":{"workspace":{"path":"/srv/work"}}}`, "capability_unsupported", 422},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var body struct{ Error struct{ Code string } }
+			if err := json.Unmarshal(f.request("POST", "/v1/sandboxes", f.alice, tc.body, tc.status), &body); err != nil {
+				t.Fatal(err)
+			}
+			if body.Error.Code != tc.code {
+				t.Fatalf("code = %q, want %q", body.Error.Code, tc.code)
+			}
+		})
+	}
+}
+
+// TestResolverErrorStatuses holds the codes the resolver raises on an update
+// or under an operator's policy to the statuses the API contract gives them.
+func TestResolverErrorStatuses(t *testing.T) {
+	for _, tc := range []struct {
+		err    error
+		status int
+	}{
+		{&manifest.Error{Code: "immutable_field", Detail: "spec.image changed", Paths: []string{"spec.image", "spec.env"}}, 409},
+		{&manifest.Error{Code: "ceiling_exceeded", Detail: "cpu is above the ceiling"}, 422},
+		{&manifest.Error{Code: "admission_refused", Detail: "the policy refused"}, 422},
+	} {
+		w := httptest.NewRecorder()
+		respondError(w, tc.err)
+		if w.Code != tc.status {
+			t.Fatalf("%v: status = %d, want %d", tc.err, w.Code, tc.status)
+		}
+		var body struct {
+			Error struct {
+				Code    string
+				Details struct {
+					Paths []string
+				}
+			}
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		var known *manifest.Error
+		if !errors.As(tc.err, &known) || body.Error.Code != known.Code {
+			t.Fatalf("code = %q, want %q", body.Error.Code, known.Code)
+		}
+		if !slices.Equal(body.Error.Details.Paths, known.Paths) {
+			t.Fatalf("paths = %v, want %v", body.Error.Details.Paths, known.Paths)
+		}
+	}
 }
