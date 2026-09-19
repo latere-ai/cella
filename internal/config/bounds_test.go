@@ -6,6 +6,9 @@ package config
 import (
 	"strings"
 	"testing"
+	"time"
+
+	"latere.ai/x/cella/controller"
 )
 
 func TestRequestBodyBounds(t *testing.T) {
@@ -36,5 +39,35 @@ func TestRequestBodyBounds(t *testing.T) {
 	cfg, err := Load(env(identity(t, map[string]string{"CELLA_MAX_BODY_BYTES": "32768"})))
 	if err != nil || cfg.MaxBodyBytes != 32768 {
 		t.Fatalf("body bound: %d %v", cfg.MaxBodyBytes, err)
+	}
+}
+
+func TestReaperIntervals(t *testing.T) {
+	// The defaults a library caller gets when Options leaves the interval
+	// zero are the defaults an operator gets when the variable is unset.
+	if DefaultReapInterval != controller.DefaultReapInterval || DefaultTouchInterval != controller.DefaultTouchInterval {
+		t.Fatalf("the configuration and the controller disagree: %v/%v and %v/%v",
+			DefaultReapInterval, DefaultTouchInterval, controller.DefaultReapInterval, controller.DefaultTouchInterval)
+	}
+	cfg, err := Load(env(identity(t, nil)))
+	if err != nil || cfg.ReapInterval != DefaultReapInterval || cfg.TouchInterval != DefaultTouchInterval {
+		t.Fatalf("defaults: %v %v %v", cfg.ReapInterval, cfg.TouchInterval, err)
+	}
+	for _, name := range []string{"CELLA_REAP_INTERVAL", "CELLA_TOUCH_INTERVAL"} {
+		t.Run(name, func(t *testing.T) {
+			cfg, err := Load(env(identity(t, map[string]string{name: "5s"})))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := map[string]time.Duration{"CELLA_REAP_INTERVAL": cfg.ReapInterval, "CELLA_TOUCH_INTERVAL": cfg.TouchInterval}[name]; got != 5*time.Second {
+				t.Fatalf("%s is %v", name, got)
+			}
+			for _, raw := range []string{"never", "-5s", "0s", "999ms", "2h"} {
+				_, err := Load(env(identity(t, map[string]string{name: raw})))
+				if err == nil || !strings.Contains(err.Error(), name) {
+					t.Fatalf("%s=%s was accepted: %v", name, raw, err)
+				}
+			}
+		})
 	}
 }
