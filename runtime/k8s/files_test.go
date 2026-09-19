@@ -269,7 +269,7 @@ func TestFilesWhileStopped(t *testing.T) {
 func TestHelperPodCarriesTheBaselineAndNoIdentity(t *testing.T) {
 	h := newHarness(t)
 	const id = "sbx_helper"
-	helper, err := h.Driver.helperPod(id, spec(id))
+	helper, err := h.helperPod(id, spec(id))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -337,7 +337,7 @@ func TestTransferNeedsAClusterConnection(t *testing.T) {
 	h := newHarness(t)
 	const id = "sbx_transfernoconn"
 	h.created(t, spec(id))
-	h.Driver.stream = nil
+	h.stream = nil
 	if err := h.ExportTar(t.Context(), id, nil, io.Discard); !errors.Is(err, driver.ErrUnsupported) {
 		t.Fatalf("ExportTar = %v, want ErrUnsupported", err)
 	}

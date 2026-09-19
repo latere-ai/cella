@@ -29,7 +29,7 @@ func TestRenderPodAndClaim(t *testing.T) {
 		Resources: driver.Resources{CPU: "2", Memory: "512Mi", Disk: "20Gi"},
 		Workspace: driver.Workspace{Path: "/data"},
 	}
-	pod, err := h.Driver.pod(s, h.clock.now())
+	pod, err := h.pod(s, h.clock.now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func TestRenderPodAndClaim(t *testing.T) {
 		t.Fatalf("workspace volume %+v", pod.Spec.Volumes[0])
 	}
 
-	claim, err := h.Driver.claim(s, h.clock.now())
+	claim, err := h.claim(s, h.clock.now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestRenderPodAndClaim(t *testing.T) {
 
 func TestRenderDefaults(t *testing.T) {
 	h := newHarness(t)
-	pod, err := h.Driver.pod(spec("sbx_defaults"), h.clock.now())
+	pod, err := h.pod(spec("sbx_defaults"), h.clock.now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestRenderDefaults(t *testing.T) {
 	if c.Resources.Limits.Cpu().String() != DefaultCPU || c.Resources.Limits.Memory().String() != DefaultMemory {
 		t.Fatalf("limits %v", c.Resources.Limits)
 	}
-	claim, err := h.Driver.claim(spec("sbx_defaults"), h.clock.now())
+	claim, err := h.claim(spec("sbx_defaults"), h.clock.now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +117,7 @@ func TestRenderDefaults(t *testing.T) {
 
 func TestPodCarriesTheBaseline(t *testing.T) {
 	h := newHarness(t)
-	pod, err := h.Driver.pod(spec("sbx_baseline"), h.clock.now())
+	pod, err := h.pod(spec("sbx_baseline"), h.clock.now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,11 +199,11 @@ func TestResourcesAreConsistent(t *testing.T) {
 	h := newHarness(t)
 	s := spec("sbx_consistent")
 	s.Resources = driver.Resources{CPU: "1500m", Memory: "3Gi"}
-	first, err := h.Driver.pod(s, h.clock.at)
+	first, err := h.pod(s, h.clock.at)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := h.Driver.pod(s, h.clock.at)
+	second, err := h.pod(s, h.clock.at)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -291,7 +291,7 @@ func TestStampedIdentityIsLegal(t *testing.T) {
 		ID: "sbx_legal.1", Name: "a-name", Owner: "alice@example.com", Image: image,
 		Labels: map[string]string{"team/owner": "platform", "a very long key that a label could never hold as a key": "x"},
 	}
-	labels, annotations, err := h.Driver.identity(s, h.clock.now())
+	labels, annotations, err := h.identity(s, h.clock.now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -326,7 +326,7 @@ func TestNameTooLongForALabelIsAnnotationOnly(t *testing.T) {
 	h := newHarness(t)
 	s := spec("sbx_longname")
 	s.Name = strings.Repeat("n", 64)
-	labels, _, err := h.Driver.identity(s, h.clock.now())
+	labels, _, err := h.identity(s, h.clock.now())
 	if err != nil {
 		t.Fatal(err)
 	}

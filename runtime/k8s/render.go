@@ -21,16 +21,15 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 
+	"latere.ai/x/cella/manifest"
 	driver "latere.ai/x/cella/runtime"
 )
 
-// group is the API group this contract stamps its keys under. Assembled from
-// two pieces so the coordinates check reads the qualified prefix and not a
-// hostname.
-const group = "cella." + "latere.ai"
-
-// prefix qualifies every label and annotation key the driver writes.
-const prefix = group + "/"
+// prefix qualifies every label and annotation key the driver writes. The
+// domain is the contract's own, declared once in the manifest package, so a
+// key this driver stamps and a key the API refuses from a body are the same
+// namespace.
+const prefix = manifest.ReservedKeyDomain + "/"
 
 // The label half of the stamped identity: what a cluster can select on.
 const (
@@ -435,7 +434,7 @@ func specOf(pvc *corev1.PersistentVolumeClaim) (driver.CreateSpec, error) {
 	}
 	var s driver.CreateSpec
 	if err := json.Unmarshal([]byte(raw), &s); err != nil {
-		return driver.CreateSpec{}, fmt.Errorf("%w: claim %s spec annotation: %v", driver.ErrInvalid, pvc.Name, err)
+		return driver.CreateSpec{}, fmt.Errorf("%w: claim %s spec annotation: %w", driver.ErrInvalid, pvc.Name, err)
 	}
 	return s, nil
 }

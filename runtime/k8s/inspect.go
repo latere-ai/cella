@@ -178,7 +178,7 @@ func terminated(pod *corev1.Pod) (code int, finished time.Time, ok bool) {
 		if cs.Name != Container || cs.State.Terminated == nil {
 			continue
 		}
-		return int(cs.State.Terminated.ExitCode), cs.State.Terminated.FinishedAt.Time.UTC(), true
+		return int(cs.State.Terminated.ExitCode), cs.State.Terminated.FinishedAt.UTC(), true
 	}
 	if pod.Status.Phase == corev1.PodSucceeded {
 		return 0, time.Time{}, true

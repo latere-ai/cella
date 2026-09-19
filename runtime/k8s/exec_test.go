@@ -245,7 +245,7 @@ func TestExecNeedsAClusterConnection(t *testing.T) {
 	h := newHarness(t)
 	const id = "sbx_noconn"
 	h.created(t, spec(id))
-	h.Driver.stream = nil
+	h.stream = nil
 	if _, err := h.Exec(t.Context(), id, driver.ExecRequest{Command: []string{"true"}}); !errors.Is(err, driver.ErrUnsupported) {
 		t.Fatalf("Exec without a connection = %v, want ErrUnsupported", err)
 	}

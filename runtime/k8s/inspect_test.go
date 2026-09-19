@@ -20,7 +20,7 @@ import (
 func claimFor(t *testing.T, id string, mutate ...func(*corev1.PersistentVolumeClaim)) *corev1.PersistentVolumeClaim {
 	t.Helper()
 	h := newHarness(t)
-	pvc, err := h.Driver.claim(spec(id), time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC))
+	pvc, err := h.claim(spec(id), time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatal(err)
 	}

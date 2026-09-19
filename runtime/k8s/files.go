@@ -284,7 +284,7 @@ func sanitize(src io.Reader, dst io.Writer) error {
 			return tw.Close()
 		}
 		if err != nil {
-			return fmt.Errorf("%w: reading the archive: %v", driver.ErrInvalid, err)
+			return fmt.Errorf("%w: reading the archive: %w", driver.ErrInvalid, err)
 		}
 		name := strings.TrimSuffix(header.Name, "/")
 		if !fs.ValidPath(name) || name == "." || strings.Contains(name, `\`) || strings.Contains(name, "\x00") {
