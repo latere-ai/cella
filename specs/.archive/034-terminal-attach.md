@@ -286,6 +286,14 @@ added for the wire, `github.com/gorilla/websocket`, with a `depcheck` row
 covering this slice's sockets and the gateway sync stream of
 [[018-egress-and-secrets]].
 
+The suite ran on macOS. Linux is compiled, not run: `go vet` for
+`linux/amd64` over `runtime/`, `internal/api` and `controller`, which
+type-checks the test files too, and a `linux/arm64` build of the module.
+A `freebsd` build of `runtime/native` holds the other half of the build
+tags, where the driver declares no `Attach`. The one behaviour only Linux
+shows is a finished terminal reporting `EIO` where darwin reports the end
+of the file, which the session maps to `io.EOF` either way.
+
 Coverage: `internal/api` 92.5%, `runtime/native` 91.3%,
 `runtime/podman` 93.8%, `runtime/runtimetest` 96.7%, `controller` 96.0%.
 The whole bar passes, the race, hermetic and tempdir runs included.
