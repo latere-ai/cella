@@ -145,13 +145,22 @@ func opener(d runtime.Driver) func() runtime.Driver {
 	return func() runtime.Driver { return d }
 }
 
-// attachLiar declares Attach without implementing it: the driver under it
-// refuses Stdin. A suite that reports this driver as conforming would let a
-// lying capability reach the controller, which branches on it.
-type attachLiar struct{ *native.Driver }
+// attachLiar declares Attach without implementing it. It embeds the Driver
+// interface rather than the native driver, so the concrete Attach method is
+// not promoted and Exec refuses what the declaration promises. A suite that
+// reported this driver as conforming would let a lying capability reach the
+// controller and the API, which branch on the declaration alone.
+type attachLiar struct{ runtime.Driver }
 
 func (attachLiar) Capabilities() runtime.Capabilities {
 	return runtime.Capabilities{Files: true, Attach: true}
+}
+
+func (d attachLiar) Exec(ctx context.Context, id string, req runtime.ExecRequest) (runtime.Exec, error) {
+	if req.Stdin != nil || req.TTY {
+		return nil, runtime.ErrUnsupported
+	}
+	return d.Driver.Exec(ctx, id, req)
 }
 
 // filesLiar declares Files, which promises transfers while the sandbox is
@@ -208,6 +217,18 @@ func TestConformanceCatchesAFalseCapability(t *testing.T) {
 			kase:  "ExecStreamsAndExits",
 			wrap:  func(d *native.Driver) runtime.Driver { return attachLiar{d} },
 			wants: "Stdin under Attach",
+		},
+		{
+			name:  "AttachDeclaredWithoutTheInterface",
+			kase:  "NameIsolationCapabilities",
+			wrap:  func(d *native.Driver) runtime.Driver { return attachLiar{d} },
+			wants: "does not implement runtime.Attacher",
+		},
+		{
+			name:  "AttacherWithoutTheDeclaration",
+			kase:  "NameIsolationCapabilities",
+			wrap:  func(d *native.Driver) runtime.Driver { return noCapabilities{d} },
+			wants: "does not declare Attach",
 		},
 		{
 			name:  "FilesWithoutTransfersWhileStopped",

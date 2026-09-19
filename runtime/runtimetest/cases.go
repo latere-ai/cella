@@ -29,6 +29,15 @@ func nameIsolationCapabilities(t tb, open func() runtime.Driver, _ Options) {
 	expect(t, slices.Contains(classes, iso), "Isolation %q is not one of %v", iso, classes)
 	expect(t, d.Isolation() == iso, "Isolation changed between calls: %q then %q", iso, d.Isolation())
 	expect(t, reflect.DeepEqual(d.Capabilities(), d.Capabilities()), "Capabilities differ between calls")
+	// An optional interface is implemented if and only if its capability is
+	// declared: the controller and the API branch on the declaration alone.
+	_, attacher := d.(runtime.Attacher)
+	switch {
+	case d.Capabilities().Attach && !attacher:
+		t.Errorf("the driver declares Attach and does not implement runtime.Attacher")
+	case !d.Capabilities().Attach && attacher:
+		t.Errorf("the driver implements runtime.Attacher and does not declare Attach")
+	}
 }
 
 func preflightAndReady(t tb, open func() runtime.Driver, opts Options) {
@@ -406,4 +415,195 @@ func detachRecovers(t tb, open func() runtime.Driver, opts Options) {
 	s1, err := second.Inspect(context.Background(), id)
 	must(t, err, "Inspect through a second driver")
 	expect(t, s1.Name == s0.Name && s1.Owner == s0.Owner && s1.CreatedAt.Equal(s0.CreatedAt), "second driver reads %+v, first wrote %+v", s1, s0)
+}
+
+// attacherOf returns the driver's Attacher, or nil with the case skipped when
+// the driver declares no Attach. The declaration and the interface are checked
+// against each other in NameIsolationCapabilities.
+func attacherOf(t tb, d runtime.Driver) runtime.Attacher {
+	t.Helper()
+	if !d.Capabilities().Attach {
+		t.Skipf("the driver declares no Attach")
+		return nil
+	}
+	a, ok := d.(runtime.Attacher)
+	if !ok {
+		t.Fatalf("the driver declares Attach and does not implement runtime.Attacher")
+		return nil
+	}
+	return a
+}
+
+// pump reads a session in the background so a case waits for what the terminal
+// wrote with a bound, instead of blocking in Read with no deadline.
+type pump struct {
+	mu   sync.Mutex
+	buf  []byte
+	err  error
+	done chan struct{}
+}
+
+func newPump(r io.Reader) *pump {
+	p := &pump{done: make(chan struct{})}
+	go func() {
+		defer close(p.done)
+		b := make([]byte, 4096)
+		for {
+			n, err := r.Read(b)
+			p.mu.Lock()
+			p.buf = append(p.buf, b[:n]...)
+			p.err = err
+			p.mu.Unlock()
+			if err != nil {
+				return
+			}
+		}
+	}()
+	return p
+}
+func (p *pump) text() string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return string(p.buf)
+}
+func (p *pump) readErr() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.err
+}
+
+// await waits for marker in what the terminal has written so far.
+func (p *pump) await(t tb, marker string) {
+	t.Helper()
+	deadline := time.Now().Add(pollTimeout)
+	for !strings.Contains(p.text(), marker) {
+		need(t, time.Now().Before(deadline), "the session never wrote %q; it wrote %q", marker, p.text())
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// typed writes one line into the session as a person typing would.
+func typed(t tb, s runtime.Session, line string) {
+	t.Helper()
+	_, err := s.Write([]byte(line + "\n"))
+	must(t, err, "Write "+line)
+}
+
+// attachSandbox creates the sandbox the attach cases run in.
+func attachSandbox(t tb, d runtime.Driver, opts Options, id string) {
+	t.Helper()
+	create(t, d, opts, runtime.CreateSpec{ID: id, Name: "attach", Owner: "alice"})
+}
+
+func attachRoundTrip(t tb, open func() runtime.Driver, opts Options) {
+	d := open()
+	a := attacherOf(t, d)
+	if a == nil {
+		return
+	}
+	const id = "sbx_cnf_attach"
+	attachSandbox(t, d, opts, id)
+	s, err := a.Attach(context.Background(), id, runtime.AttachRequest{Cols: 80, Rows: 24})
+	must(t, err, "Attach")
+	t.Cleanup(func() { _ = s.Close() })
+	p := newPump(s)
+	// The marker is printed, not echoed: a terminal echoes what is typed, so
+	// the assertion has to name something only the process inside can write.
+	typed(t, s, `printf 'ROUND%s\n' TRIP`)
+	p.await(t, "ROUNDTRIP")
+	typed(t, s, "exit 7")
+	ctx, cancel := context.WithTimeout(context.Background(), pollTimeout)
+	defer cancel()
+	code, err := s.Wait(ctx)
+	must(t, err, "Wait")
+	expect(t, code == 7, "the session exited %d, want 7", code)
+	select {
+	case <-p.done:
+	case <-time.After(pollTimeout):
+		t.Errorf("the session's output stream stayed open after the shell exited")
+	}
+}
+
+func attachResize(t tb, open func() runtime.Driver, opts Options) {
+	d := open()
+	a := attacherOf(t, d)
+	if a == nil {
+		return
+	}
+	const id = "sbx_cnf_resize"
+	attachSandbox(t, d, opts, id)
+	s, err := a.Attach(context.Background(), id, runtime.AttachRequest{Cols: 80, Rows: 24})
+	must(t, err, "Attach")
+	t.Cleanup(func() { _ = s.Close() })
+	p := newPump(s)
+	typed(t, s, "stty size")
+	p.await(t, "24 80")
+	must(t, s.Resize(120, 40), "Resize")
+	typed(t, s, "stty size")
+	p.await(t, "40 120")
+}
+
+func attachCloseEndsTheSession(t tb, open func() runtime.Driver, opts Options) {
+	d := open()
+	a := attacherOf(t, d)
+	if a == nil {
+		return
+	}
+	const id = "sbx_cnf_attachclose"
+	attachSandbox(t, d, opts, id)
+	s, err := a.Attach(context.Background(), id, runtime.AttachRequest{Cols: 80, Rows: 24})
+	must(t, err, "Attach")
+	p := newPump(s)
+	typed(t, s, `printf 'ALI%s\n' VE`)
+	p.await(t, "ALIVE")
+	must(t, s.Close(), "Close")
+	select {
+	case <-p.done:
+	case <-time.After(pollTimeout):
+		t.Fatalf("the session's output stream stayed open after Close")
+	}
+	expect(t, p.readErr() != nil, "Read after Close reported no error")
+	_, err = s.Write([]byte("x"))
+	expect(t, err != nil, "Write after Close reported no error")
+	ctx, cancel := context.WithTimeout(context.Background(), pollTimeout)
+	defer cancel()
+	_, err = s.Wait(ctx)
+	expect(t, !errors.Is(err, context.DeadlineExceeded), "Wait after Close did not return: %v", err)
+}
+
+func execStdin(t tb, open func() runtime.Driver, opts Options) {
+	d := open()
+	if !d.Capabilities().Attach {
+		t.Skipf("the driver declares no Attach, so Exec takes no Stdin")
+		return
+	}
+	const id = "sbx_cnf_execstdin"
+	attachSandbox(t, d, opts, id)
+	out, errOut, code, err := run(t, d, id, runtime.ExecRequest{
+		Command: opts.shell(`read line; printf 'got:%s' "$line"; printf 'onstderr' >&2`),
+		Stdin:   strings.NewReader("hello\n"),
+	})
+	must(t, err, "Exec with Stdin")
+	expect(t, code == 0, "Exec with Stdin exited %d", code)
+	expect(t, strings.Contains(out, "got:hello"), "stdout %q does not carry what was written to stdin", out)
+	expect(t, strings.Contains(errOut, "onstderr"), "stderr %q is not the command's, so the streams did not stay separate", errOut)
+}
+
+func execTTY(t tb, open func() runtime.Driver, opts Options) {
+	d := open()
+	if !d.Capabilities().Attach {
+		t.Skipf("the driver declares no Attach, so Exec takes no TTY")
+		return
+	}
+	const id = "sbx_cnf_exectty"
+	attachSandbox(t, d, opts, id)
+	out, errOut, code, err := run(t, d, id, runtime.ExecRequest{
+		Command: opts.shell(`if [ -t 1 ]; then printf 'ISATTY\n'; else printf 'ISPIPE\n'; fi; printf 'ONERR\n' >&2`),
+		TTY:     true,
+	})
+	must(t, err, "Exec with TTY")
+	expect(t, code == 0, "Exec with TTY exited %d", code)
+	expect(t, strings.Contains(out, "ISATTY"), "stdout %q says the command had no terminal", out)
+	expect(t, strings.Contains(out, "ONERR"), "stdout %q does not carry stderr, which a terminal merges into it", out)
+	expect(t, errOut == "", "Stderr under a TTY carried %q, want nothing", errOut)
 }
