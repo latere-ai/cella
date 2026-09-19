@@ -331,6 +331,7 @@ func (h *handler) exec(w http.ResponseWriter, r *http.Request, obj v1.Sandbox) {
 			return
 		}
 	}
+	h.touch(r, obj)
 	started := time.Now()
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
