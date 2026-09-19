@@ -71,6 +71,7 @@ later.
 | [022](022-mesh-and-spawn.md) | Mesh and spawn: peers that reach each other, sandboxes that create sandboxes, a boundary that never moves | medium | validated | 003, 005, 006, 010, 018 |
 | [023](023-computer-use-operations.md) | Computer use operations: the desktop, screenshot, screen, input, ports and the proxy, browser-ready sandboxes | medium | validated | 003, 004, 005, 008, 009 |
 | [024](024-vm-driver.md) | VM driver: a hardware-isolated sandbox per environment; the design held open | large | vague | 004, 019 |
+| [031](031-hosted-sandbox-consolidation.md) | Hosted sandbox consolidation: every package of latere-ai/sandbox lands in cella, in the platform, or is dropped | large | in-progress | 001 |
 
 ## Dependency graph
 
@@ -242,6 +243,10 @@ the names the code uses. Cross-references are `[[NNN-name]]`
 wikilinks. No em dashes; the technical register throughout.
 
 ## Consolidation slices
+
+Slices of [[031-hosted-sandbox-consolidation]]: one package group of the
+hosted sandbox each, ported into the contract its parent spec states.
+The map, the order, and the rule for a slice are in 031.
 
 | Spec | Status | Deliverable |
 |---|---|---|
