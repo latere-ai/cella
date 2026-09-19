@@ -6,6 +6,17 @@ refused before it is pushed.
 
 ## Unreleased
 
+- `cellad` enforces the lifecycle its runtime reports. A sandbox past its
+  expiry is deleted, one stopped for longer than its auto-delete window is
+  deleted, and one idle for longer than its auto-stop window is stopped, each
+  with the reason in `status.reason`. The exec and file routes stamp activity,
+  coalesced per sandbox so a busy session does not write the substrate per
+  request. `CELLA_REAP_INTERVAL` (default `30s`) sets how often the rules run
+  and `CELLA_TOUCH_INTERVAL` (default `1m`) how often one sandbox's activity
+  reaches the runtime. No manifest field carries a lifecycle yet, so a sandbox
+  takes the deadline set its environment was opened with, and a sandbox with no
+  deadline is never ended.
+
 - `runtime/runtimetest` is the conformance suite a driver passes: `Run` drives
   every `Driver` method, skips an operation the driver does not declare, and
   fails one it declares but refuses. `Nop` is a driver for embedders' fakes.
