@@ -86,8 +86,16 @@ func ResolveNative(obj v1.Sandbox, environment string) (v1.Sandbox, error) {
 	if obj.Spec.Environment != environment {
 		return obj, fail("not_found", "environment is not registered")
 	}
-	if obj.Spec.Image != "" || len(obj.Spec.Command) > 0 || len(obj.Spec.Args) > 0 {
-		return obj, fail("capability_unsupported", "native workspaces do not run images or entrypoints")
+	if obj.Spec.Image != "" {
+		return obj, fail("capability_unsupported", "native workspaces do not run images")
+	}
+	if len(obj.Spec.Command) == 0 && len(obj.Spec.Args) > 0 {
+		return obj, fail("invalid_field", "args requires a command on native environments")
+	}
+	if len(obj.Spec.Command) > 0 {
+		if err := ValidateExec(append(append([]string{}, obj.Spec.Command...), obj.Spec.Args...), nil, ""); err != nil {
+			return obj, err
+		}
 	}
 	if obj.Spec.Workdir == "" {
 		obj.Spec.Workdir = "/workspace"

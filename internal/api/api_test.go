@@ -6,13 +6,17 @@ package api
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"latere.ai/x/pkg/authkit/issuertest"
 	"latere.ai/x/pkg/authz"
@@ -21,17 +25,20 @@ import (
 	"latere.ai/x/cella/controller"
 	"latere.ai/x/cella/internal/auth"
 	v1 "latere.ai/x/cella/manifest/v1"
+	"latere.ai/x/cella/runtime"
 	"latere.ai/x/cella/runtime/native"
 )
 
 type fixture struct {
 	t               *testing.T
 	url, alice, bob string
+	issuerURL       string
 	h               http.Handler
 	c               *controller.Controller
 }
 
-func setup(t *testing.T, policy authz.Authorizer) *fixture {
+func setup(t *testing.T, policy authz.Authorizer) *fixture { return setupDriver(t, policy, nil) }
+func setupDriver(t *testing.T, policy authz.Authorizer, wrap func(runtime.Driver) runtime.Driver) *fixture {
 	t.Helper()
 	issuer := issuertest.New(t, issuertest.WithDefaultAudience("cella"))
 	verifier, err := auth.NewVerifier(t.Context(), auth.VerifierOptions{Issuers: []string{issuer.URL()}, Audience: "cella"})
@@ -43,7 +50,11 @@ func setup(t *testing.T, policy authz.Authorizer) *fixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = d.Close() })
-	c, err := controller.Open(controller.Options{DataDir: t.TempDir(), Driver: d, Environment: "default"})
+	var runtimeDriver runtime.Driver = d
+	if wrap != nil {
+		runtimeDriver = wrap(d)
+	}
+	c, err := controller.Open(controller.Options{DataDir: t.TempDir(), Driver: runtimeDriver, Environment: "default"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +68,7 @@ func setup(t *testing.T, policy authz.Authorizer) *fixture {
 	}
 	server := httptest.NewServer(h)
 	t.Cleanup(server.Close)
-	return &fixture{t: t, url: server.URL, alice: issuer.Mint(issuertest.Claims{Sub: "alice"}), bob: issuer.Mint(issuertest.Claims{Sub: "bob"}), h: h, c: c}
+	return &fixture{t: t, url: server.URL, issuerURL: issuer.URL(), alice: issuer.Mint(issuertest.Claims{Sub: "alice"}), bob: issuer.Mint(issuertest.Claims{Sub: "bob"}), h: h, c: c}
 }
 func (f *fixture) request(method, path, token, body string, status int) []byte {
 	f.t.Helper()
@@ -256,4 +267,73 @@ func TestLifecycleAuthorizesUnchangedProposal(t *testing.T) {
 	if seen != 2 {
 		t.Fatal(seen)
 	}
+}
+
+type failingExecDriver struct {
+	runtime.Driver
+	execution *brokenExec
+}
+
+func (d failingExecDriver) Exec(context.Context, string, runtime.ExecRequest) (runtime.Exec, error) {
+	return d.execution, nil
+}
+
+type brokenExec struct{ closed bool }
+
+func (e *brokenExec) Stdout() io.Reader {
+	return io.MultiReader(strings.NewReader("partial"), brokenReader{})
+}
+func (e *brokenExec) Stderr() io.Reader                 { return strings.NewReader("") }
+func (e *brokenExec) Wait(context.Context) (int, error) { return 0, nil }
+func (e *brokenExec) Close() error                      { e.closed = true; return nil }
+
+type brokenReader struct{}
+
+func (brokenReader) Read([]byte) (int, error) { return 0, io.ErrUnexpectedEOF }
+func TestExecStreamFailureCannotReportSuccess(t *testing.T) {
+	execution := &brokenExec{}
+	f := setupDriver(t, nil, func(d runtime.Driver) runtime.Driver { return failingExecDriver{d, execution} })
+	var obj v1.Sandbox
+	_ = json.Unmarshal(f.request("POST", "/v1/sandboxes", f.alice, createBody, 201), &obj)
+	b := f.request("POST", "/v1/sandboxes/"+obj.Status.ID+"/exec?wait=1", f.alice, `{"command":["true"]}`, 503)
+	if !bytes.Contains(b, []byte("driver_unavailable")) || !execution.closed {
+		t.Fatal(string(b), execution.closed)
+	}
+	f.request("GET", "/v1/sandboxes?root=sbx_unknown", f.alice, "", 422)
+}
+
+func TestEnvironmentKeysCannotAccessSandboxRoutes(t *testing.T) {
+	var decisions atomic.Int32
+	f := setup(t, decisionFunc(func(context.Context, authz.Request) (authz.Decision, error) {
+		decisions.Add(1)
+		return authz.Decision{Allow: true}, nil
+	}))
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := auth.NewSigner(auth.SignerOptions{Issuer: "http://cella.test", Audience: "cella", Keys: []*rsa.PrivateKey{key}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifier, err := auth.NewVerifier(t.Context(), auth.VerifierOptions{Issuers: []string{f.issuerURL}, Audience: "cella", LocalIssuer: "http://cella.test", LocalKeys: signer.PublicKeys()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.h.(*handler).Verifier = verifier
+	token, err := signer.MintEnvironmentKey("default", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var obj v1.Sandbox
+	_ = json.Unmarshal(f.request("POST", "/v1/sandboxes", f.alice, createBody, 201), &obj)
+	base := "/v1/sandboxes/" + obj.Status.ID
+	before := decisions.Load()
+	for _, tc := range []struct{ method, path, body string }{{"POST", "/v1/sandboxes", strings.Replace(createBody, `"work"`, `"worker-owned"`, 1)}, {"GET", "/v1/sandboxes", ""}, {"GET", base, ""}, {"DELETE", base, ""}, {"POST", base + "/stop", ""}, {"POST", base + "/start", ""}, {"POST", base + "/exec?wait=1", `{"command":["true"]}`}, {"GET", base + "/files", ""}, {"PUT", base + "/files?dest=/workspace", ""}, {"GET", base + "/logs", ""}} {
+		f.request(tc.method, tc.path, token.Value, tc.body, 403)
+	}
+	if decisions.Load() != before || len(f.c.List()) != 1 {
+		t.Fatal("worker reached ordinary authorization or runtime")
+	}
+	f.request("GET", base, f.alice, "", 200)
 }

@@ -95,7 +95,9 @@ func (c *Controller) Create(ctx context.Context, obj v1.Sandbox, owner string, m
 	count := 0
 	for _, v := range c.objects {
 		if v.Status.Owner == owner {
-			count++
+			if v.Status.Phase != "Deleting" {
+				count++
+			}
 			if v.Metadata.Name == obj.Metadata.Name {
 				return obj, ErrNameTaken
 			}
@@ -169,6 +171,8 @@ func (c *Controller) refresh(ctx context.Context, obj v1.Sandbox) (v1.Sandbox, e
 		return obj, err
 	}
 	obj.Status.Phase = state.Phase
+	obj.Status.Reason = state.Reason
+	obj.Status.ExitCode = state.ExitCode
 	obj.Status.StartedAt = state.StartedAt
 	obj.Status.StoppedAt = state.StoppedAt
 	obj.Status.LastActivityAt = state.LastActivityAt
@@ -244,6 +248,10 @@ func clone(obj v1.Sandbox) v1.Sandbox {
 	obj.Spec.Command = slices.Clone(obj.Spec.Command)
 	obj.Spec.Args = slices.Clone(obj.Spec.Args)
 	obj.Spec.Env = maps.Clone(obj.Spec.Env)
+	if obj.Status.ExitCode != nil {
+		code := *obj.Status.ExitCode
+		obj.Status.ExitCode = &code
+	}
 	return obj
 }
 func newID() (string, error) {

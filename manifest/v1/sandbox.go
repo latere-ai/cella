@@ -43,5 +43,6 @@ type SandboxStatus struct {
 	StartedAt      time.Time `json:"startedAt,omitzero"`
 	StoppedAt      time.Time `json:"stoppedAt,omitzero"`
 	LastActivityAt time.Time `json:"lastActivityAt,omitzero"`
+	ExitCode       *int      `json:"exitCode,omitempty"`
 	Reason         string    `json:"reason,omitempty"`
 }

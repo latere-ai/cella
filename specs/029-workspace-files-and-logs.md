@@ -29,3 +29,9 @@ Exports stream directly with `X-Cella-Error` trailers on errors after the first 
 - Exceeding the configured upload cap leaves existing files unchanged; wrong content types and malformed selectors fail before the runtime.
 - An export error before bytes produces a JSON error; a later export error is carried in the trailer.
 - Main-process log reads use the runtime contract and pass a native end-to-end check when spec 030 lands.
+
+## Outcome
+
+Implemented authenticated tar upload/download and main-process log routes, including live flush, owner checks, file capability checks, strict path/selectors, bounded upload spooling and late-error trailers. The HTTP upload default is 1 GiB from design 002; the native runtime additionally limits uncompressed archive file contents to 256 MiB. Main-process command/args and exit status are integrated with slice 030; image execution remains unsupported.
+
+Real signed-identity HTTP tests prove transfer persistence across stop/start, traversal refusal, oversized upload preservation, denied cross-owner access, log filtering and immediate follow output. Race-enabled coverage is controller 92.1%, API 92.3%, manifest 100%. Regressions also establish the designed 64 KiB manifest default, failing exec output streams, non-counted Deleting records, unsupported spawn-tree filtering, and the worker-key-only credential boundary independent of external authorizer grants.

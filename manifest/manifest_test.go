@@ -41,7 +41,7 @@ func TestResolve(t *testing.T) {
 	tests := []func(*v1.Sandbox){
 		func(o *v1.Sandbox) { o.APIVersion = "bad" }, func(o *v1.Sandbox) { o.Metadata.Name = "INVALID" }, func(o *v1.Sandbox) { o.Metadata.Name = strings.Repeat("a", 64) },
 		func(o *v1.Sandbox) { o.Metadata.Labels = map[string]string{"cella.latere.ai/owner": "evil"} }, func(o *v1.Sandbox) { o.Metadata.Labels = map[string]string{"bad key": "v"} }, func(o *v1.Sandbox) { o.Metadata.Labels = map[string]string{"key": "bad value"} }, func(o *v1.Sandbox) { o.Metadata.Annotations = map[string]string{"key": strings.Repeat("v", 4097)} },
-		func(o *v1.Sandbox) { o.Spec.Environment = "other" }, func(o *v1.Sandbox) { o.Spec.Image = "ubuntu" }, func(o *v1.Sandbox) { o.Spec.Command = []string{"sh"} }, func(o *v1.Sandbox) { o.Spec.Args = []string{"a"} }, func(o *v1.Sandbox) { o.Spec.Workdir = "/etc" },
+		func(o *v1.Sandbox) { o.Spec.Environment = "other" }, func(o *v1.Sandbox) { o.Spec.Image = "ubuntu" }, func(o *v1.Sandbox) { o.Spec.Command = []string{""} }, func(o *v1.Sandbox) { o.Spec.Args = []string{"a"} }, func(o *v1.Sandbox) { o.Spec.Workdir = "/etc" },
 		func(o *v1.Sandbox) { o.Spec.Env = map[string]string{"bad-key": "v"} }, func(o *v1.Sandbox) { o.Spec.Env = map[string]string{"A": "\x00"} }, func(o *v1.Sandbox) { o.Spec.Env = map[string]string{"CELLA_OWNER": "v"} }, func(o *v1.Sandbox) { o.Spec.Env = map[string]string{"A": strings.Repeat("a", 32769)} },
 	}
 	for i, mut := range tests {

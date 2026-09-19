@@ -5,18 +5,19 @@
 package api
 
 import (
+	"archive/tar"
 	"context"
 	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"net/http"
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"latere.ai/x/pkg/authz"
@@ -35,10 +36,11 @@ type Verifier interface {
 	Verify(string) (auth.Caller, error)
 }
 type Options struct {
-	Controller   *controller.Controller
-	Verifier     Verifier
-	Authorizer   *auth.Authorizer
-	MaxBodyBytes int64
+	Controller     *controller.Controller
+	Verifier       Verifier
+	Authorizer     *auth.Authorizer
+	MaxBodyBytes   int64
+	MaxUploadBytes int64
 }
 type handler struct {
 	Options
@@ -50,9 +52,15 @@ func New(o Options) (http.Handler, error) {
 		return nil, errors.New("API requires controller, verifier and authorizer")
 	}
 	if o.MaxBodyBytes <= 0 {
-		o.MaxBodyBytes = 1 << 20
+		o.MaxBodyBytes = 65536
+	}
+	if o.MaxUploadBytes <= 0 {
+		o.MaxUploadBytes = 1 << 30
 	}
 	h := &handler{Options: o, mux: http.NewServeMux()}
+	h.mux.HandleFunc("GET /v1/sandboxes/{id}/files", h.files)
+	h.mux.HandleFunc("PUT /v1/sandboxes/{id}/files", h.files)
+	h.mux.HandleFunc("GET /v1/sandboxes/{id}/logs", h.logs)
 	h.mux.HandleFunc("POST /v1/sandboxes", h.create)
 	h.mux.HandleFunc("GET /v1/sandboxes", h.list)
 	h.mux.HandleFunc("GET /v1/sandboxes/{id}", h.item)
@@ -73,6 +81,10 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	caller, err := h.Verifier.Verify(token)
 	if err != nil {
 		respondError(w, err)
+		return
+	}
+	if _, worker := caller.Environment(); worker {
+		respondError(w, &auth.Error{Code: auth.CodeForbidden, Detail: "environment keys authorize worker routes only"})
 		return
 	}
 	r = r.WithContext(context.WithValue(r.Context(), callerKey{}, caller))
@@ -195,6 +207,10 @@ func (h *handler) list(w http.ResponseWriter, r *http.Request) {
 	d, err := h.decide(r, authorizer.ActionSandboxList, auth.List(authorizer.ActionSandboxList))
 	if err != nil {
 		respondError(w, err)
+		return
+	}
+	if r.URL.Query().Get("root") != "" {
+		respondError(w, &manifest.Error{Code: "capability_unsupported", Detail: "spawn tree selectors are not implemented"})
 		return
 	}
 	limit := 50
@@ -325,11 +341,20 @@ func (h *handler) exec(w http.ResponseWriter, r *http.Request, obj v1.Sandbox) {
 	}
 	defer func() { _ = running.Close() }()
 	var stdout, stderr cappedBuffer
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() { defer wg.Done(); _, _ = io.Copy(&stdout, running.Stdout()) }()
-	go func() { defer wg.Done(); _, _ = io.Copy(&stderr, running.Stderr()) }()
-	wg.Wait()
+	copied := make(chan error, 2)
+	go func() { _, copyErr := io.Copy(&stdout, running.Stdout()); copied <- copyErr }()
+	go func() { _, copyErr := io.Copy(&stderr, running.Stderr()); copied <- copyErr }()
+	var copyErr error
+	for range 2 {
+		if failure := <-copied; failure != nil {
+			copyErr = errors.Join(copyErr, failure)
+			_ = running.Close()
+		}
+	}
+	if copyErr != nil {
+		respondError(w, &manifest.Error{Code: "driver_unavailable", Detail: "exec output stream failed: " + copyErr.Error()})
+		return
+	}
 	code, err := running.Wait(ctx)
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		code = 124
@@ -373,7 +398,9 @@ func respondError(w http.ResponseWriter, err error) {
 		code = me.Code
 	case errors.As(err, &tooLarge):
 		code = "body_too_large"
-	case errors.Is(err, controller.ErrNotFound), errors.Is(err, driver.ErrNotFound):
+	case errors.Is(err, io.ErrUnexpectedEOF), errors.Is(err, tar.ErrHeader):
+		code = "bad_request"
+	case errors.Is(err, controller.ErrNotFound), errors.Is(err, driver.ErrNotFound), errors.Is(err, fs.ErrNotExist):
 		code = "not_found"
 	case errors.Is(err, controller.ErrNameTaken), errors.Is(err, driver.ErrAlreadyExists):
 		code = "name_taken"

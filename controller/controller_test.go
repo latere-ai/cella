@@ -298,3 +298,25 @@ func TestFileStoreFailures(t *testing.T) {
 		t.Fatal("save missing directory")
 	}
 }
+
+type deleteFailureDriver struct{ driver.Driver }
+
+func (d deleteFailureDriver) Delete(context.Context, string) error {
+	return errors.New("temporary runtime outage")
+}
+func TestDeletingObjectsDoNotConsumeCountQuota(t *testing.T) {
+	c, _ := newController(t)
+	obj, err := c.Create(t.Context(), workspace(), "alice", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.driver = deleteFailureDriver{c.driver}
+	if _, err = c.Act(t.Context(), obj.Status.ID, "delete"); err == nil {
+		t.Fatal("expected cleanup failure")
+	}
+	next := workspace()
+	next.Metadata.Name = "replacement"
+	if _, err = c.Create(t.Context(), next, "alice", 1); err != nil {
+		t.Fatal("Deleting still consumed count quota", err)
+	}
+}
