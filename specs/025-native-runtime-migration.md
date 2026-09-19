@@ -4,7 +4,7 @@ status: complete
 track: core
 depends_on:
   - specs/004-runtime-contract.md
-affects: [driver/]
+affects: [runtime/]
 effort: medium
 created: 2026-09-19
 updated: 2026-09-19
@@ -23,7 +23,7 @@ tests. Hosted policy, accounts, billing and scheduling do not enter this package
 ## Design
 
 - Export a driver contract using the lifecycle, inspect, execution and archive
-  operations in spec 004. `driver` avoids collision with Go's runtime package.
+  operations in spec 004, in its specified `runtime` package.
 - Persist owner, name, labels and lifecycle timestamps atomically on disk.
 - Create starts a directory-backed environment. Start and stop are idempotent;
   stop/delete terminate managed executions. No image is pulled.
@@ -45,10 +45,11 @@ tests. Hosted policy, accounts, billing and scheduling do not enter this package
 
 ## Outcome
 
-Implemented the public `driver` contract and `driver/native`. The end-to-end
+Implemented the public `runtime` contract and `runtime/native`. The end-to-end
 suite covers create, execute, archive round-trip while stopped, reload metadata,
 restart and delete. `go test -race -coverprofile=/tmp/cella-native.cover
-./driver/...` passes with 95.5% native statement coverage.
+./runtime/...` passes with 95.5% native statement coverage. The manifest package owns isolation and
+capability declarations; runtime exports aliases as specified.
 
 ### Migration provenance
 

@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"latere.ai/x/cella/driver"
+	driver "latere.ai/x/cella/runtime"
 )
 
 func fresh(t *testing.T) (*Driver, string) {

@@ -1,14 +1,16 @@
 // SPDX-FileCopyrightText: 2026 Latere AI
 // SPDX-License-Identifier: Apache-2.0
 
-// Package driver defines substrate operations independently of hosted services.
-package driver
+// Package runtime defines substrate operations independently of hosted services.
+package runtime
 
 import (
 	"context"
 	"errors"
 	"io"
 	"time"
+
+	v1 "latere.ai/x/cella/manifest/v1"
 )
 
 var (
@@ -27,11 +29,9 @@ const (
 	DefaultWorkdir = "/workspace"
 )
 
-type Capabilities struct {
-	Files  bool `json:"files"`
-	Attach bool `json:"attach"`
-	Detach bool `json:"detach"`
-}
+type Capabilities = v1.Capabilities
+type Isolation = v1.Isolation
+
 type Lifecycle struct {
 	TTL        time.Duration `json:"ttl,omitempty"`
 	AutoStop   time.Duration `json:"autoStop,omitempty"`

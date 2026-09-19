@@ -15,7 +15,7 @@ import (
 	"syscall"
 	"time"
 
-	"latere.ai/x/cella/driver"
+	driver "latere.ai/x/cella/runtime"
 )
 
 type execution struct {

@@ -19,7 +19,7 @@ import (
 	"sync"
 	"time"
 
-	"latere.ai/x/cella/driver"
+	driver "latere.ai/x/cella/runtime"
 )
 
 type record struct {

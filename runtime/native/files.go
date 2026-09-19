@@ -16,7 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"latere.ai/x/cella/driver"
+	driver "latere.ai/x/cella/runtime"
 )
 
 // MaxArchiveBytes limits the sum of uncompressed file bytes accepted per import.
