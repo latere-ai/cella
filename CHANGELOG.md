@@ -6,6 +6,18 @@ refused before it is pushed.
 
 ## Unreleased
 
+- `CELLA_RUNTIME=podman` runs each sandbox as a container on a podman engine,
+  reached over the libpod API at `CELLA_PODMAN_SOCKET`. Unset, the socket is
+  the rootless one and then the system one, and a start-up with neither
+  answering says which it tried. A sandbox is a container with its workspace on
+  a named volume at `workspace.path`, `resources.cpu` and `resources.memory` as
+  cgroup limits, `user`, `env` and the command as written, and its identity and
+  lifecycle stamped on the engine's own objects, so `cellad` reads every
+  sandbox back after a restart. Exec, logs and file transfer work, and file
+  transfer works while the sandbox is stopped. `resources.disk` is recorded and
+  not enforced, and attach, a desktop, egress rules and a mesh are not in this
+  backend yet.
+
 - `cellad` enforces the lifecycle its runtime reports. A sandbox past its
   expiry is deleted, one stopped for longer than its auto-delete window is
   deleted, and one idle for longer than its auto-stop window is stopped, each
