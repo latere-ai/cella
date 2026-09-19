@@ -87,7 +87,7 @@ func TestExecValidation(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if (&Error{"code", "detail"}).Error() != "code: detail" {
+	if (&Error{Code: "code", Detail: "detail"}).Error() != "code: detail" {
 		t.Fatal("error formatting")
 	}
 }
