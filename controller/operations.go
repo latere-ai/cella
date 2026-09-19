@@ -20,3 +20,13 @@ func (c *Controller) ImportTar(ctx context.Context, id, dest string, src io.Read
 func (c *Controller) Logs(ctx context.Context, id string, req runtime.LogsRequest) (io.ReadCloser, error) {
 	return c.driver.Logs(ctx, id, req)
 }
+
+// Attach opens one terminal in a sandbox. A driver that declares no Attach has
+// no Attacher, which the API reports as the capability the environment lacks.
+func (c *Controller) Attach(ctx context.Context, id string, req runtime.AttachRequest) (runtime.Session, error) {
+	a, ok := c.driver.(runtime.Attacher)
+	if !ok {
+		return nil, runtime.ErrUnsupported
+	}
+	return a.Attach(ctx, id, req)
+}
