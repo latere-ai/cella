@@ -372,6 +372,16 @@ func TestNativeManifestFieldsEndToEnd(t *testing.T) {
 	if !slices.Equal(read.Status.Warnings, want) || !read.Status.ExpiresAt.Equal(created.Status.ExpiresAt) {
 		t.Fatalf("read back %+v", read.Status)
 	}
+	// A manifest with no name resolves without one and the controller names
+	// the object, the API's own name generator not being wired yet.
+	var unnamed v1.Sandbox
+	body := `{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox","spec":{"resources":{"cpu":"1"}}}`
+	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes", f.alice, body, 201), &unnamed); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(unnamed.Metadata.Name, "sandbox-") || unnamed.Spec.Resources.CPU != "1" {
+		t.Fatalf("unnamed create = %+v", unnamed.Metadata)
+	}
 	// Each refusal of the new fields is the caller's error, with its code.
 	for _, tc := range []struct {
 		name, body, code string
