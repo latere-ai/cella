@@ -1,6 +1,6 @@
 ---
 title: "Lifecycle enforcement: the reaper of spec 005 over one driver"
-status: in-progress
+status: complete
 track: core
 depends_on:
   - specs/005-lifecycle-controller.md
@@ -244,9 +244,56 @@ slice 030, and the tick's error path reports it once per tick.
 | An errored `List` acts on nothing and returns the error | `TestListErrorIsNotEmpty` | built |
 | A sandbox touched between the list and the action is not stopped; one whose deadline moved is not deleted | `TestReaperRevalidatesBeforeActing` | built |
 | `Touch` reaches the driver at most once per `TouchInterval` per sandbox, and each sandbox is counted apart | `TestTouchCoalesces` | built |
-| The loop ticks under the clock, holds the lease, and returns when its context ends | `TestRunReaperTicks` | built |
+| The loop ticks under the clock, holds the lease, survives a failed tick, and returns with its ticker stopped when its context ends | `TestRunReaperTicksAndStops` | built |
 | A native sandbox with a short `autoStop` reaches `Stopped` with reason `AutoStop`, and with a short `autoDelete` is then deleted | `TestReaperEndToEndOverNative` | built |
+| A failing driver or store leaves the record with its intent and the tick reports the failure | `TestReaperDriverFailuresKeepTheIntent`, `TestReaperStoreFailuresKeepTheRecord` | built |
 | A reason the controller wrote survives a refresh while its phase holds, and goes when the phase does | `TestRefreshKeepsTheControllerReason` | built |
 | `CELLA_REAP_INTERVAL` and `CELLA_TOUCH_INTERVAL` take their defaults, accept a duration, and refuse one outside the bounds | `TestReaperIntervals` | built |
 | The exec and files routes stamp activity, and a failed stamp does not fail the request | `TestActivityIsStamped` | built |
 | No file under `controller/` names a Latere host, image, pool or namespace outside an example | `TestNoLatereCoordinates` with `controller/` in its roots | built |
+
+## Outcome
+
+The reaper runs in `controller/reaper.go`: `Reap` is one tick and
+`RunReaper` the loop, over the `Clock` and `Lease` seams `Options` now
+carries with `ReapInterval`, `TouchInterval` and the environment's
+default `Lifecycle`. `reapRule` is the whole rule table in one function,
+and it is what both the tick and its table test evaluate, so the rules
+have one statement. Every action re-reads its candidate under the
+controller's lock and acts only while the same rule still matches, which
+is how the hosted reaper's three revalidation regressions land here
+without the hosted conditional writes.
+
+`runtime/native` needed no change: slice 025 already stamped `ExpiresAt`
+from `CreatedAt + TTL` at create, honoured `Change.Lifecycle` on update,
+and slice 032's `UpdateEveryMutableField` and `TouchStampsActivity`
+already assert both, capability-neutral. The conformance suite therefore
+gained nothing; this slice reads what the contract already produced.
+
+`Controller.Touch` coalesces per sandbox and the exec and files handlers
+call it. `cellad` starts the loop after the controller opens and stops
+it before the runtime closes, so no tick outlives the driver it drives.
+`CELLA_REAP_INTERVAL` and `CELLA_TOUCH_INTERVAL` are read with every
+other variable and bounded to between `1s` and `1h`.
+
+`go tool lateregate` passes all 16 gates. `go test -race ./...` passes.
+Coverage: `controller` 96.1% (319/332), `cmd/cellad` 92.1%,
+`internal/api` 92.3%, `internal/config` 98.3%; every package clears 90%.
+The end-to-end case is `TestReaperEndToEndOverNative`: a native sandbox
+with a 40ms auto-stop and a 40ms auto-delete is created, observed
+`Stopped` with reason `AutoStop`, then observed gone from both the
+controller's records and the driver, with the loop under the wall clock
+and a 5ms tick.
+
+Left open, each with the slice that closes it: the `lost` rule, the
+grace and recovery need the durable desired state and the observed index
+of [[010-state]] (slice 043), which is also where the `Lease` seam gets
+its Postgres implementation and its renewal; the `token` rule needs the
+mint and the revocation of [[006-identity]] (slice 045); the lifecycle
+a caller asks for arrives with `spec.lifecycle` in slice 044, which
+fills `lifecycleOf` and adds `status.expiresAt`, and until then a
+sandbox takes the environment default the controller was opened with.
+The update path, the cascade and the environment phase gate stay with
+their own specs. `Logs` does not stamp activity, which is
+[[005-lifecycle-controller]]'s list and not a shortcut: tailing output
+is watching a sandbox, not using it.
