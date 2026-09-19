@@ -8,6 +8,7 @@ package migrations
 
 import (
 	"embed"
+	"errors"
 	"fmt"
 	"io/fs"
 	"strconv"
@@ -20,8 +21,11 @@ var FS embed.FS
 // Highest is the newest migration this binary carries. The store refuses to
 // start against a schema above it: the migrator would report no change and
 // then serve statements against columns it does not know.
-func Highest() (uint, error) {
-	entries, err := fs.ReadDir(FS, ".")
+func Highest() (uint, error) { return highestOf(FS) }
+
+// highestOf reads the number every migration file starts with.
+func highestOf(files fs.FS) (uint, error) {
+	entries, err := fs.ReadDir(files, ".")
 	if err != nil {
 		return 0, fmt.Errorf("reading the embedded migrations: %w", err)
 	}
@@ -40,7 +44,7 @@ func Highest() (uint, error) {
 		}
 	}
 	if highest == 0 {
-		return 0, fmt.Errorf("no migration is embedded")
+		return 0, errors.New("no migration is embedded")
 	}
 	return highest, nil
 }
