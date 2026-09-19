@@ -233,7 +233,7 @@ that `Attach` is declared if and only if `Attacher` is implemented.
 |---|---|
 | `AttachRoundTrip` | a shell echoes what is typed, and its exit code reaches `Wait` |
 | `AttachResize` | `stty size` inside reports the size a `Resize` set |
-| `AttachCloseEndsTheSession` | after `Close`, reads and writes fail and `Wait` returns rather than blocking |
+| `AttachCloseEndsTheStream` | after `Close` the stream is over for its caller: it ends, and a read or a write on it fails. Whether the process inside also ends is the driver's, because an engine with no exec kill keeps it |
 | `ExecStdin` | a command with `Stdin` and no TTY reads what was written, and the two output streams stay separate |
 | `ExecTTY` | a command with `TTY` reports a terminal on its standard output and `Exec.Stderr` is at its end |
 
@@ -251,13 +251,16 @@ driver itself (slice 036). The rate limit and the request id of
 |---|---|---|
 | `native` declares `Attach` and passes the five suite cases on darwin and linux | `TestNativeConformance` | open |
 | A native session's window reaches the process, and `Close` leaves no process in the group | `TestAttachResizeReachesTheProcess`, `TestAttachCloseKillsTheProcessGroup` | open |
-| `podman` declares `Attach`, passes the cases against the fake engine, and passes them against a real engine where a socket answers | `TestAttachOverTheFakeEngine`, `TestPodmanConformance` | open |
+| Stopping a sandbox ends every session in it | `TestStopEndsEverySession` | open |
+| `podman` declares `Attach`, passes the cases against the fake engine, and passes them against a real engine where a socket answers | `TestAttachRoundTripOverTheFakeEngine`, `TestPodmanConformance` | open |
 | A driver that declares `Attach` without implementing `Attacher`, or the reverse, fails the suite | `TestConformanceCatchesAFalseCapability` | open |
 | The attach WebSocket carries bytes both ways, a resize reaches the PTY, and the exit arrives as a text frame before close 1000 | `TestAttachRoundTrip` | open |
 | A client that disconnects ends the process inside | `TestAttachClientDisconnectEndsTheProcess` | open |
 | Two attaches to one sandbox are independent sessions | `TestAttachSessionsAreIndependent` | open |
 | A first frame that is not the JSON request closes 1008; one past the body limit closes 1009 | `TestAttachBadFirstFrame` | open |
+| A session the driver refuses, and a request frame the table refuses, reach the client as the error frame and close 1011 | `TestAttachRefusedByTheDriver`, `TestAttachInvalidRequestFrame` | open |
 | The exec WebSocket runs a command with stdin and no TTY, and with a PTY when both `cols` and `rows` are given | `TestExecSocketStdin`, `TestExecSocketTTY` | open |
-| An environment without `Attach` answers 422 `capability_unsupported` before the upgrade | `TestAttachCapabilityGate` | open |
-| A session stamps activity when it opens | `TestAttachStampsActivity` | open |
+| An environment without `Attach` answers 422 `capability_unsupported` before the upgrade, on both routes | `TestAttachCapabilityGate` | open |
+| Both sockets read, authorize and only then upgrade | `TestAttachAuthorization` | open |
+| A session stamps activity when it opens and on what is typed | `TestAttachStampsActivity` | open |
 | No file this slice adds names a Latere host, image, pool or namespace | `TestNoLatereCoordinates` | open |
