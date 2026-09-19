@@ -71,6 +71,38 @@ depcheck:
         github.com/felixge/httpsnoop: the response recorder of the SDK's HTTP instrumentation
         github.com/cespare/xxhash: a hash the OpenTelemetry SDK's metric pipeline uses
         github.com/cenkalti/backoff: the OTLP exporters' retry
+        k8s.io/client-go: >-
+          the Kubernetes client spec 001 admits for the k8s driver of spec
+          004: the driver of the container isolation class talks to one
+          cluster and to nothing else
+        k8s.io/api: the Kubernetes object types the k8s driver renders
+        k8s.io/apimachinery: the Kubernetes object machinery the client and the types are built on
+        k8s.io/klog: the Kubernetes client's logging seam
+        k8s.io/kube-openapi: the schema the Kubernetes client decodes objects against
+        k8s.io/utils: the Kubernetes client's clock, net and pointer helpers
+        sigs.k8s.io/json: the case-sensitive JSON decoder the Kubernetes client uses
+        sigs.k8s.io/randfill: a dependency of the Kubernetes object machinery
+        sigs.k8s.io/structured-merge-diff: the apply and merge machinery of the Kubernetes client
+        sigs.k8s.io/yaml: the YAML half of the Kubernetes client's decoders
+        github.com/gorilla/websocket: the Kubernetes client's exec stream
+        github.com/moby/spdystream: the Kubernetes client's exec stream upgrade where a cluster offers no websocket
+        github.com/mxk/go-flowrate: the Kubernetes client's stream rate limiter
+        github.com/spf13/pflag: a dependency of the Kubernetes client's configuration loader
+        github.com/davecgh/go-spew: a dependency of the Kubernetes object machinery's diagnostics
+        github.com/emicklei/go-restful: a dependency of the Kubernetes client's schema
+        github.com/fxamacker/cbor: the CBOR codec the Kubernetes client negotiates
+        github.com/x448/float16: a dependency of the CBOR codec
+        github.com/go-openapi/jsonpointer: a dependency of the Kubernetes client's schema
+        github.com/go-openapi/jsonreference: a dependency of the Kubernetes client's schema
+        github.com/go-openapi/swag: a dependency of the Kubernetes client's schema
+        github.com/google/gnostic-models: the OpenAPI models the Kubernetes client's discovery reads
+        github.com/json-iterator/go: a dependency of the Kubernetes client's schema
+        github.com/modern-go/concurrent: a dependency of the Kubernetes client's schema
+        github.com/modern-go/reflect2: a dependency of the Kubernetes client's schema
+        github.com/munnerz/goautoneg: the content negotiation of the Kubernetes client
+        go.yaml.in/yaml: the YAML parser the Kubernetes decoders are built on
+        gopkg.in/evanphx/json-patch.v4: the JSON patch the k8s driver's compare-and-swap is written as
+        gopkg.in/inf.v0: the arbitrary-precision arithmetic behind a Kubernetes quantity
 
 license:
   spdx: Apache-2.0
