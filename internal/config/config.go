@@ -101,6 +101,9 @@ type Config struct {
 	// SecretKey wraps every secret value's data key (specs 010 and 018).
 	// It is read where it is set and required once a Secret exists.
 	SecretKey []byte
+	// Events is spec 009's sink: where one record per mutation and per
+	// operation goes, and what signs it.
+	Events Events
 	// Identity is spec 006's half: the issuers, the audience, the signing
 	// keys, the authorizer, and the owner policy's admins.
 	Identity
@@ -124,6 +127,7 @@ func Load(getenv Getenv) (Config, error) {
 	c.DBURL = databaseURL(getenv, &problems)
 	c.DBMaxConns = connections(getenv, &problems)
 	c.SecretKey = secretKey(getenv, &problems)
+	c.loadEvents(getenv, &problems)
 	if raw := getenv("CELLA_ALLOW_UNSAFE_NATIVE"); raw != "" {
 		value, err := strconv.ParseBool(raw)
 		if err != nil {

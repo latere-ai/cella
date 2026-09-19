@@ -208,22 +208,11 @@ func (c *Controlled) Remove(ctx context.Context, id, mutation string) error {
 func (c *Controlled) record(ctx context.Context, mutation string, obj v1.Sandbox) (Event, error) {
 	kind := events.Type(mutation)
 	rec, err := events.Mutation(kind, events.ReasonOf(obj.Status.Reason, kind),
-		events.OfSandbox(obj), dataOf(kind, obj), events.ActorFrom(ctx), time.Now().UTC())
+		events.OfSandbox(obj), events.MutationData(kind, obj), events.ActorFrom(ctx), time.Now().UTC())
 	if err != nil {
 		return Event{}, err
 	}
 	return journalRow(rec)
-}
-
-// dataOf is the per-type data of design 009's table. A create carries the
-// resolved manifest with every environment value dropped to its key; every
-// other act of the controller carries the phase it reached, and the reason
-// says why.
-func dataOf(kind events.Type, obj v1.Sandbox) any {
-	if kind == events.TypeCreated {
-		return events.CreatedOf(obj)
-	}
-	return events.Phase{Phase: obj.Status.Phase}
 }
 
 // Rebuild replaces the observed rows of one environment with what its driver

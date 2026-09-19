@@ -26,6 +26,7 @@ import (
 	"latere.ai/x/cella/authorizer"
 	"latere.ai/x/cella/controller"
 	"latere.ai/x/cella/internal/auth"
+	"latere.ai/x/cella/internal/events"
 	"latere.ai/x/cella/manifest"
 	v1 "latere.ai/x/cella/manifest/v1"
 	driver "latere.ai/x/cella/runtime"
@@ -41,6 +42,9 @@ type Options struct {
 	Authorizer     *auth.Authorizer
 	MaxBodyBytes   int64
 	MaxUploadBytes int64
+	// Events is design 009's emitter. Nil journals no operation; the
+	// mutations below it are journaled by the store either way.
+	Events *events.Emitter
 }
 type handler struct {
 	Options
@@ -87,8 +91,12 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		respondError(w, &auth.Error{Code: auth.CodeForbidden, Detail: "environment keys authorize worker routes only"})
 		return
 	}
-	r = r.WithContext(context.WithValue(r.Context(), callerKey{}, caller))
-	h.mux.ServeHTTP(w, r)
+	ctx := context.WithValue(r.Context(), callerKey{}, caller)
+	// The actor rides the context from here: a mutation several calls below
+	// this handler records who asked for it and under which request id, and
+	// a controller loop that runs under no request records neither.
+	ctx = events.WithActor(ctx, actorOf(w, caller))
+	h.mux.ServeHTTP(w, r.WithContext(ctx))
 }
 func caller(r *http.Request) auth.Caller {
 	c, _ := r.Context().Value(callerKey{}).(auth.Caller)
@@ -365,7 +373,9 @@ func (h *handler) exec(w http.ResponseWriter, r *http.Request, obj v1.Sandbox) {
 		respondError(w, err)
 		return
 	}
-	respond(w, 200, execResult{code, string(stdout.data), string(stderr.data), stdout.truncated || stderr.truncated, time.Since(started).Milliseconds()})
+	elapsed := time.Since(started).Milliseconds()
+	respond(w, 200, execResult{code, string(stdout.data), string(stderr.data), stdout.truncated || stderr.truncated, elapsed})
+	h.emit(r, obj, events.TypeExec, events.Exec{ExitCode: code, DurationMS: elapsed})
 }
 
 type cappedBuffer struct {
