@@ -4,7 +4,10 @@ go 1.27.0
 
 tool latere.ai/x/ci-gate/cmd/lateregate
 
-require latere.ai/x/pkg v0.79.0
+require (
+	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674
+	latere.ai/x/pkg v0.79.0
+)
 
 require (
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
@@ -14,7 +17,6 @@ require (
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/goccy/go-yaml v1.19.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/bridges/otelslog v0.19.0 // indirect
