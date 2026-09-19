@@ -6,6 +6,11 @@ refused before it is pushed.
 
 ## Unreleased
 
+- `runtime/runtimetest` is the conformance suite a driver passes: `Run` drives
+  every `Driver` method, skips an operation the driver does not declare, and
+  fails one it declares but refuses. `Nop` is a driver for embedders' fakes.
+  `runtime/native` passes it. The tree refuses Latere coordinates under
+  `runtime/` and the exported packages are checked to import no client.
 - Native workloads can start a main command, report its exit, restart it, and
   stream timestamp-filtered or tailed logs. File routes import and export tar
   archives with authorization, upload bounds, and path containment.
