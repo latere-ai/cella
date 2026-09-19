@@ -34,10 +34,11 @@ func TestLoadAppliesEveryDefault(t *testing.T) {
 
 func TestLoadReadsEveryVariable(t *testing.T) {
 	c, err := Load(env(identity(t, map[string]string{
-		"CELLA_PUBLIC_ADDR":   "127.0.0.1:9000",
-		"CELLA_INTERNAL_ADDR": "127.0.0.1:9001",
-		"CELLA_DATA_DIR":      "/tmp/cella",
-		"CELLA_RUNTIME":       "native",
+		"CELLA_PUBLIC_ADDR":         "127.0.0.1:9000",
+		"CELLA_INTERNAL_ADDR":       "127.0.0.1:9001",
+		"CELLA_DATA_DIR":            "/tmp/cella",
+		"CELLA_RUNTIME":             "native",
+		"CELLA_ALLOW_UNSAFE_NATIVE": "true",
 	})))
 	if err != nil {
 		t.Fatal(err)

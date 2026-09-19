@@ -13,6 +13,7 @@ import (
 	"net"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -53,6 +54,8 @@ type Config struct {
 	DataDir string
 	// Runtime is the backend cellad drives, one of Runtimes.
 	Runtime string
+	// AllowUnsafeNative explicitly permits execution without isolation.
+	AllowUnsafeNative bool
 	// Identity is spec 006's half: the issuers, the audience, the signing
 	// keys, the authorizer, and the owner policy's admins.
 	Identity
@@ -68,6 +71,16 @@ func Load(getenv Getenv) (Config, error) {
 		Runtime:      withDefault(getenv("CELLA_RUNTIME"), DefaultRuntime),
 	}
 	problems := c.loadIdentity(getenv)
+	if raw := getenv("CELLA_ALLOW_UNSAFE_NATIVE"); raw != "" {
+		value, err := strconv.ParseBool(raw)
+		if err != nil {
+			problems = append(problems, "CELLA_ALLOW_UNSAFE_NATIVE must be true or false")
+		}
+		c.AllowUnsafeNative = value
+	}
+	if c.Runtime == RuntimeNative && !c.AllowUnsafeNative {
+		problems = append(problems, "CELLA_RUNTIME=native requires CELLA_ALLOW_UNSAFE_NATIVE=true; native execution has no isolation")
+	}
 	if err := checkAddr(c.PublicAddr); err != nil {
 		problems = append(problems, "CELLA_PUBLIC_ADDR "+err.Error())
 	}

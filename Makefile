@@ -37,8 +37,8 @@ build:
 	@echo "built $(OUT_DIR)/$(SERVICE)"
 
 # The server on loopback with its state under out/, the native backend
-# selected because it needs no cluster and no container engine. Spec 004
-# gives the backend its meaning; until then the process serves the probes.
+# selected because it needs no cluster and no container engine. It has no
+# isolation and runs only trusted development commands.
 RUN_DIR = $(CURDIR)/$(OUT_DIR)/run
 # Run the server on loopback. cellad verifies a token from an issuer you
 # list, so CELLA_OIDC_ISSUERS names one; the stub issuer that makes this
@@ -52,7 +52,7 @@ run: build
 		echo "make run needs CELLA_OIDC_ISSUERS=<issuer url>: cellad verifies every caller"; \
 		echo "and there is no anonymous access. An http:// issuer off loopback also needs"; \
 		echo "CELLA_OIDC_INSECURE_ISSUERS."; exit 1; }
-	CELLA_DATA_DIR=$(RUN_DIR) CELLA_RUNTIME=native \
+	CELLA_DATA_DIR=$(RUN_DIR) CELLA_RUNTIME=native CELLA_ALLOW_UNSAFE_NATIVE=true \
 	CELLA_PUBLIC_ADDR=127.0.0.1:8080 CELLA_INTERNAL_ADDR=127.0.0.1:8081 \
 	CELLA_PUBLIC_URL=http://127.0.0.1:8080 \
 	CELLA_TOKEN_KEY="$$(cat $(RUN_DIR)/token.pem)" \
