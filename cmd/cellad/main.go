@@ -30,6 +30,7 @@ import (
 	"latere.ai/x/cella/internal/api"
 	"latere.ai/x/cella/internal/auth"
 	"latere.ai/x/cella/internal/config"
+	"latere.ai/x/cella/internal/egressd"
 	"latere.ai/x/cella/internal/version"
 	"latere.ai/x/cella/runtime"
 	"latere.ai/x/cella/runtime/native"
@@ -66,8 +67,10 @@ func run(ctx context.Context, args []string, getenv config.Getenv, stdout, stder
 	switch name {
 	case "", "serve":
 		return serve(ctx, rest, getenv, stdout, stderr)
+	case "egress":
+		return egressRole(ctx, rest, getenv, stdout, stderr)
 	default:
-		_, _ = fmt.Fprintf(stderr, "cellad: unknown subcommand %q; serve is the default and the only one\n", name)
+		_, _ = fmt.Fprintf(stderr, "cellad: unknown subcommand %q; serve and egress are the subcommands\n", name)
 		return 2
 	}
 }
@@ -84,6 +87,41 @@ func subcommand(args []string) (string, []string) {
 		}
 	}
 	return "", args
+}
+
+// egressRole is the gateway beside the sandboxes: two doors over the
+// boundaries the control plane pushes it, and one stream it opens outbound to
+// receive them (spec 018). It reads none of the control plane's variables and
+// holds no store, no issuer and no authorizer.
+func egressRole(ctx context.Context, args []string, getenv config.Getenv, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("cellad egress", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	showVersion := fs.Bool("version", false, "print the build identity and exit")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *showVersion {
+		_, _ = fmt.Fprintln(stdout, version.String())
+		return 0
+	}
+	cfg, err := config.LoadEgress(getenv)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	gateway, err := egressd.New(egressd.Options{
+		URL: cfg.URL, Key: cfg.EnvironmentKey,
+		ProxyAddr: cfg.ProxyAddr, ReverseAddr: cfg.ReverseAddr,
+		CAPEM: cfg.CAKeyPEM, UpstreamCAPEM: cfg.CABundlePEM,
+	})
+	if err != nil {
+		return fail(stderr, fmt.Errorf("egress: %w", err))
+	}
+	_, _ = fmt.Fprintf(stdout, "cellad: %s egress proxy=%s reverse=%s environment=%s control-plane=%s\n",
+		version.Version, gateway.ProxyAddr(), gateway.ReverseAddr(), gateway.Environment(), cfg.URL)
+	if err = gateway.Run(ctx); err != nil {
+		return fail(stderr, err)
+	}
+	return 0
 }
 
 // serve is the node: the two listeners and the probes of spec 002. The
@@ -151,13 +189,26 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	if err := runtimeDriver.Preflight(ctx); err != nil {
 		return fail(stderr, fmt.Errorf("runtime preflight: %w", err))
 	}
+	// The gateways of the environment connect to this hub, and the
+	// controller pushes each sandbox's boundary through it before the
+	// driver is called (spec 018).
+	hub := api.NewEgressHub(api.EgressHubOptions{
+		Environment: cfg.DefaultEnvironment,
+		AckTimeout:  cfg.Gateway.AckTimeout,
+		RecordsCap:  cfg.Gateway.RecordsCap,
+	})
 	control, err := controller.Open(controller.Options{
 		Store: store, Driver: runtimeDriver, Environment: cfg.DefaultEnvironment,
 		Lease: controller.LocalLease{}, ReapInterval: cfg.ReapInterval, TouchInterval: cfg.TouchInterval,
+		Egress: hub, Gateway: controller.GatewayAddresses{Proxy: cfg.Gateway.ProxyAddr, Reverse: cfg.Gateway.ReverseAddr},
 	})
 	if err != nil {
 		return fail(stderr, fmt.Errorf("controller: %w", err))
 	}
+	// A gateway that connects to a control plane that has just restarted
+	// receives every live sandbox's map, with the credential that sandbox
+	// already holds, rather than an empty world.
+	hub.Seed(control.EgressMaps())
 	// The reaper is this process's clock: one tick applies the lifecycle
 	// rules to the environment cellad drives (spec 005). One cellad is the
 	// only writer of its environment, so it holds its own lease.
@@ -166,7 +217,7 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	go func() { defer close(reaperDone); control.RunReaper(reaperCtx) }()
 	stopReaper := sync.OnceFunc(func() { cancelReaper(); <-reaperDone })
 	defer stopReaper()
-	handler, err := api.New(api.Options{Controller: control, Verifier: identity.Verifier, Authorizer: identity.Authorizer, MaxBodyBytes: cfg.MaxBodyBytes, MaxUploadBytes: cfg.MaxUploadBytes})
+	handler, err := api.New(api.Options{Controller: control, Verifier: identity.Verifier, Authorizer: identity.Authorizer, MaxBodyBytes: cfg.MaxBodyBytes, MaxUploadBytes: cfg.MaxUploadBytes, Egress: hub})
 	if err != nil {
 		return fail(stderr, fmt.Errorf("API: %w", err))
 	}
