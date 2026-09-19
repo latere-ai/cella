@@ -1,6 +1,6 @@
 ---
 title: "Terminal attach: the PTY session of the runtime contract and the exec and attach WebSockets"
-status: in-progress
+status: complete
 track: core
 depends_on:
   - specs/004-runtime-contract.md
@@ -249,18 +249,76 @@ driver itself (slice 036). The rate limit and the request id of
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| `native` declares `Attach` and passes the five suite cases on darwin and linux | `TestNativeConformance` | open |
-| A native session's window reaches the process, and `Close` leaves no process in the group | `TestAttachResizeReachesTheProcess`, `TestAttachCloseKillsTheProcessGroup` | open |
-| Stopping a sandbox ends every session in it | `TestStopEndsEverySession` | open |
-| `podman` declares `Attach`, passes the cases against the fake engine, and passes them against a real engine where a socket answers | `TestAttachRoundTripOverTheFakeEngine`, `TestPodmanConformance` | open |
-| A driver that declares `Attach` without implementing `Attacher`, or the reverse, fails the suite | `TestConformanceCatchesAFalseCapability` | open |
-| The attach WebSocket carries bytes both ways, a resize reaches the PTY, and the exit arrives as a text frame before close 1000 | `TestAttachRoundTrip` | open |
-| A client that disconnects ends the process inside | `TestAttachClientDisconnectEndsTheProcess` | open |
-| Two attaches to one sandbox are independent sessions | `TestAttachSessionsAreIndependent` | open |
-| A first frame that is not the JSON request closes 1008; one past the body limit closes 1009 | `TestAttachBadFirstFrame` | open |
-| A session the driver refuses, and a request frame the table refuses, reach the client as the error frame and close 1011 | `TestAttachRefusedByTheDriver`, `TestAttachInvalidRequestFrame` | open |
-| The exec WebSocket runs a command with stdin and no TTY, and with a PTY when both `cols` and `rows` are given | `TestExecSocketStdin`, `TestExecSocketTTY` | open |
-| An environment without `Attach` answers 422 `capability_unsupported` before the upgrade, on both routes | `TestAttachCapabilityGate` | open |
-| Both sockets read, authorize and only then upgrade | `TestAttachAuthorization` | open |
-| A session stamps activity when it opens and on what is typed | `TestAttachStampsActivity` | open |
-| No file this slice adds names a Latere host, image, pool or namespace | `TestNoLatereCoordinates` | open |
+| `native` declares `Attach` and passes the five suite cases on darwin and linux | `TestNativeConformance` | done |
+| A native session's window reaches the process, and `Close` leaves no process in the group | `TestAttachResizeReachesTheProcess`, `TestAttachCloseKillsTheProcessGroup` | done |
+| Stopping a sandbox ends every session in it | `TestStopEndsEverySession` | done |
+| `podman` declares `Attach`, passes the cases against the fake engine, and passes them against a real engine where a socket answers | `TestAttachRoundTripOverTheFakeEngine`, `TestPodmanConformance` | done |
+| A driver that declares `Attach` without implementing `Attacher`, or the reverse, fails the suite | `TestConformanceCatchesAFalseCapability` | done |
+| The attach WebSocket carries bytes both ways, a resize reaches the PTY, and the exit arrives as a text frame before close 1000 | `TestAttachRoundTrip` | done |
+| A client that disconnects ends the process inside | `TestAttachClientDisconnectEndsTheProcess` | done |
+| Two attaches to one sandbox are independent sessions | `TestAttachSessionsAreIndependent` | done |
+| A first frame that is not the JSON request closes 1008; one past the body limit closes 1009 | `TestAttachBadFirstFrame` | done |
+| A session the driver refuses, and a request frame the table refuses, reach the client as the error frame and close 1011 | `TestAttachRefusedByTheDriver`, `TestAttachInvalidRequestFrame` | done |
+| The exec WebSocket runs a command with stdin and no TTY, and with a PTY when both `cols` and `rows` are given | `TestExecSocketStdin`, `TestExecSocketTTY` | done |
+| An environment without `Attach` answers 422 `capability_unsupported` before the upgrade, on both routes | `TestAttachCapabilityGate` | done |
+| Both sockets read, authorize and only then upgrade | `TestAttachAuthorization` | done |
+| A session stamps activity when it opens and on what is typed | `TestAttachStampsActivity` | done |
+| No file this slice adds names a Latere host, image, pool or namespace | `TestNoLatereCoordinates` | done |
+
+## Outcome
+
+Landed 2026-09-19. `runtime` carries `AttachRequest`, `Session` and
+`Attacher`; `runtime/native` opens a pseudo-terminal from the host's own
+ioctls (`pty.go`, `pty_linux.go`, `pty_darwin.go`, `pty_other.go`) and
+runs sessions, stdin and TTY commands through one execution path
+(`exec.go`); `runtime/podman` runs them over a hijacked libpod exec
+(`attach.go`, `client.go`, `exec.go`); `runtime/runtimetest` gained
+`ExecStdin`, `ExecTTY`, `AttachRoundTrip`, `AttachResize` and
+`AttachCloseEndsTheStream`, and `NameIsolationCapabilities` now fails a
+driver whose declaration and interface disagree in either direction.
+`internal/api/attach.go` serves both routes and `controller` passes
+`Attach` through.
+
+No module was added for the terminal: the pair is `/dev/ptmx` and four
+ioctls through `syscall`, so `runtime/native` still reaches only the
+standard library and `arch_test.go` keeps its empty row. One module was
+added for the wire, `github.com/gorilla/websocket`, with a `depcheck` row
+covering this slice's sockets and the gateway sync stream of
+[[018-egress-and-secrets]].
+
+Coverage: `internal/api` 92.5%, `runtime/native` 91.3%,
+`runtime/podman` 93.8%, `runtime/runtimetest` 96.7%, `controller` 96.0%.
+The whole bar passes, the race, hermetic and tempdir runs included.
+
+The end-to-end run is `TestAttachRoundTrip` over real HTTP with a signed
+issuer and the native driver: a WebSocket client sends the request frame,
+types into a shell, reads what it wrote, resizes and watches `stty size`
+follow, and reads `{"exit":3}` before close 1000. Beside it,
+`TestAttachClientDisconnectEndsTheProcess` drops the connection without a
+close frame and waits for the shell's pid to leave the process table, and
+`TestAttachSessionsAreIndependent` holds two terminals on one sandbox.
+
+`TestPodmanConformance` ran against podman 5.7.1 on a rootless macOS
+machine and every case passed, the five new ones included. The real
+engine found two things the fake could not. A resize before the start is
+refused, so the window the request asks for is set after the hijack, with
+a short retry while the engine still reports no session. And the engine
+keeps an exec session when its attach connection drops: `Close` ends the
+stream for its caller and the process inside runs until the sandbox stops
+or is deleted, which a probe held for 24 seconds. The conformance case
+therefore asserts what every driver holds, and the stronger claim, that
+the process group is killed, is `TestAttachCloseKillsTheProcessGroup` in
+the native package.
+
+### Left open
+
+1. Design 008's byte stream has no frame for the end of stdin, so a
+   command reading to the end of its input never sees one on the exec
+   socket. Inventing a frame would put this repository's wire ahead of
+   the design; the gap belongs to 008.
+2. Podman's abandoned session, above. Ending it needs an exec kill the
+   libpod API does not have; killing by the reported pid is a guess about
+   namespaces, not a design, so the driver states the behaviour instead.
+3. `sandbox/internal/pkg/streamcast` is still unported, as this spec's
+   Overview says, and slice 041 carries it.
+4. The k8s driver's `Attach` over SPDY lands with the driver (slice 036).
