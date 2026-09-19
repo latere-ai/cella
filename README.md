@@ -106,6 +106,11 @@ CELLA_OIDC_ISSUERS=<your issuer url> make run   # cellad on loopback
 make                                            # the quality gate
 ```
 
+`CELLA_RUNTIME=podman` runs the same server against a podman engine instead,
+one container per sandbox, which is the isolated backend to develop against on
+a laptop. Point `CELLA_PODMAN_SOCKET` at the libpod socket, or leave it unset
+where the rootless socket is in its usual place.
+
 `make run` opts into native execution and binds loopback. It needs a reachable
 OIDC issuer and generates the local signing key once under `out/run/`.
 The public listener serves `/v1/sandboxes` and the key set; the internal

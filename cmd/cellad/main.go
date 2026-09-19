@@ -31,8 +31,17 @@ import (
 	"latere.ai/x/cella/internal/auth"
 	"latere.ai/x/cella/internal/config"
 	"latere.ai/x/cella/internal/version"
+	"latere.ai/x/cella/runtime"
 	"latere.ai/x/cella/runtime/native"
+	"latere.ai/x/cella/runtime/podman"
 )
+
+// driverCloser is the in-process driver of the default environment plus the
+// shutdown this process owns, which every backend under runtime/ provides.
+type driverCloser interface {
+	runtime.Driver
+	Close() error
+}
 
 // Shutdown timing of spec 002: readiness answers 503 at once, the drain
 // delay lets a load balancer notice, then the servers close with the
@@ -118,8 +127,8 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		return fail(stderr, err)
 	}
 
-	if cfg.Runtime != config.RuntimeNative {
-		return fail(stderr, fmt.Errorf("CELLA_RUNTIME=%s is not implemented; native is available for trusted development with CELLA_ALLOW_UNSAFE_NATIVE=true", cfg.Runtime))
+	if cfg.Runtime != config.RuntimeNative && cfg.Runtime != config.RuntimePodman {
+		return fail(stderr, fmt.Errorf("CELLA_RUNTIME=%s is not implemented; native is available for trusted development with CELLA_ALLOW_UNSAFE_NATIVE=true, and podman where CELLA_PODMAN_SOCKET reaches an engine", cfg.Runtime))
 	}
 	// Recovery may change runtime records. Own the state directory before
 	// opening the driver so a second process cannot mutate live workloads.
@@ -128,7 +137,13 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		return fail(stderr, fmt.Errorf("controller store: %w", err))
 	}
 	defer func() { _ = store.Close() }()
-	runtimeDriver, err := native.New(filepath.Join(cfg.DataDir, "native"))
+	var runtimeDriver driverCloser
+	switch cfg.Runtime {
+	case config.RuntimePodman:
+		runtimeDriver, err = podman.New(podman.Options{Socket: cfg.PodmanSocket})
+	default:
+		runtimeDriver, err = native.New(filepath.Join(cfg.DataDir, "native"))
+	}
 	if err != nil {
 		return fail(stderr, fmt.Errorf("runtime: %w", err))
 	}

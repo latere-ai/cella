@@ -22,14 +22,23 @@ import (
 )
 
 func TestServeRefusesUnavailableRuntime(t *testing.T) {
-	for _, backend := range []string{"k8s", "podman"} {
-		t.Run(backend, func(t *testing.T) {
-			var errOut bytes.Buffer
-			cfg := identity(t, map[string]string{"CELLA_RUNTIME": backend, "CELLA_DATA_DIR": t.TempDir()})
-			if code := run(t.Context(), nil, env(cfg), io.Discard, &errOut); code != 1 || !strings.Contains(errOut.String(), "not implemented") {
-				t.Fatalf("code %d: %s", code, errOut.String())
-			}
-		})
+	var errOut bytes.Buffer
+	cfg := identity(t, map[string]string{"CELLA_RUNTIME": "k8s", "CELLA_DATA_DIR": t.TempDir()})
+	if code := run(t.Context(), nil, env(cfg), io.Discard, &errOut); code != 1 || !strings.Contains(errOut.String(), "not implemented") {
+		t.Fatalf("code %d: %s", code, errOut.String())
+	}
+}
+
+// TestPodmanRuntimeSelected proves CELLA_RUNTIME=podman reaches the podman
+// driver: the start-up fails at its preflight, naming the socket it was given,
+// rather than at the selection.
+func TestPodmanRuntimeSelected(t *testing.T) {
+	var errOut bytes.Buffer
+	socket := filepath.Join(t.TempDir(), "absent.sock")
+	cfg := identity(t, map[string]string{"CELLA_RUNTIME": "podman", "CELLA_PODMAN_SOCKET": socket, "CELLA_DATA_DIR": t.TempDir()})
+	code := run(t.Context(), nil, env(cfg), io.Discard, &errOut)
+	if code != 1 || !strings.Contains(errOut.String(), "runtime preflight") || !strings.Contains(errOut.String(), socket) {
+		t.Fatalf("code %d: %s", code, errOut.String())
 	}
 }
 
