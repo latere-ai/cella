@@ -6,6 +6,27 @@ refused before it is pushed.
 
 ## Unreleased
 
+- A manifest declares the network boundary its sandbox lives inside, and
+  `cellad egress` enforces it. `spec.network.egress` takes a `mode` of `none`,
+  `allowlist` or `open`, with `allowedHosts` for the first and `deniedHosts`
+  for the last, each an exact name or one leading `*.` wildcard; the mode is
+  inferred from whichever list is set. A sandbox may narrow its own boundary
+  and never widen it. At create, the control plane compiles the boundary into
+  the map its gateway holds and waits for a gateway to acknowledge it before
+  the sandbox exists, so nothing runs outside the boundary it declared; a
+  boundary of `open` with no denied host needs no gateway. The gateway is the
+  new `cellad egress` role: it connects outbound to `CELLA_URL` with
+  `CELLA_ENVIRONMENT_KEY`, receives every map of its environment and every
+  change after, and serves two doors, a CONNECT proxy on
+  `CELLA_EGRESS_PROXY_ADDR` and a reverse door on `CELLA_EGRESS_REVERSE_ADDR`,
+  each authenticated by the sandbox's own credential. Every connection is
+  decided before any dial and reported back as one record, which
+  `GET /v1/sandboxes/{id}/egress` serves newest first. The native and podman
+  drivers point the workload at the gateway through the proxy and trust
+  variables and project the gateway's authority into the sandbox. Secrets and
+  their values are not in this release: a boundary is enforced, and nothing is
+  substituted yet.
+
 - `CELLA_RUNTIME=podman` runs each sandbox as a container on a podman engine,
   reached over the libpod API at `CELLA_PODMAN_SOCKET`. Unset, the socket is
   the rootless one and then the system one, and a start-up with neither
