@@ -260,4 +260,5 @@ The map, the order, and the rule for a slice are in 031.
 | [035-podman-driver.md](.archive/035-podman-driver.md) | complete | Container isolation over the libpod socket, with the sandbox record in the engine |
 | [037-lifecycle-enforcement.md](.archive/037-lifecycle-enforcement.md) | complete | Reaper deadline rules, lease and clock seams, activity stamping |
 | [043-postgres-store.md](.archive/043-postgres-store.md) | complete | Store contract of spec 010, memory and Postgres adapters, the lost rule and recovery |
+| [042-events.md](042-events.md) | in-progress | Signed event records per mutation and operation, the journal's delivery half, the operator's sink |
 | [044-manifest-fields.md](.archive/044-manifest-fields.md) | complete | Resource, user, workspace and lifecycle manifest fields with the staged resolver |
