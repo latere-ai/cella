@@ -32,7 +32,7 @@ since it imports nothing under `internal/` ([[001-architecture]]).
 
 ## Current state
 
-[[026-direct-control-plane]] implements synchronous native create, inspect, list, start, stop, and delete with durable intent. Reconciliation, lifecycle timers, recovery, updates, and cascade below remain to build.
+[[026-direct-control-plane]] implements synchronous native create, inspect, list, start, stop, and delete with durable intent. [[037-lifecycle-enforcement]] implements the reaper's deadline rules, the `Lease` and `Clock` seams, and `Touch`. Reconciliation, recovery, updates, and cascade below remain to build, with the `lost` rule waiting for the store of [[010-state]] and the `token` rule for the mint of [[006-identity]].
 
 Design provenance: The reaper's rules come from the hosted platform, where
 they have run for months; the phase machine, the ordered create with
@@ -107,7 +107,7 @@ type Options struct {
 	ReapInterval     time.Duration // CELLA_REAP_INTERVAL, default 30s
 	LostGrace        time.Duration // CELLA_LOST_GRACE, default 10m
 	RecoveryAttempts int           // CELLA_RECOVERY_ATTEMPTS, default 5
-	TouchInterval    time.Duration // how often one sandbox's activity reaches the driver, default 1m
+	TouchInterval    time.Duration // CELLA_TOUCH_INTERVAL, how often one sandbox's activity reaches the driver, default 1m
 }
 ```
 
@@ -266,12 +266,12 @@ store behind `Store` ([[010-state]]); the token's shape
 | A spawn debits the budget in the same transaction as the desired write; two concurrent spawns against a budget of one yield one child and one `spawn_budget_exhausted` | `TestSpawnDebitIsAtomic` | not built |
 | A narrowing update and an owner's widening update each keep the effective boundary within both manifests at every instant, observed through fake gateway and driver | `TestUpdateNeverWidensMidChange` | not built |
 | `Change.Volumes` is sent only while `Stopped`; a secret update re-pushes; a secret delete re-pushes and writes `notInjectable` | `TestUpdatePaths` | not built |
-| Each reaper rule fires at its second and not one before under a fake clock; `never` disables it; a sandbox matching two rules gets the first | `TestReaperRules`, one case per rule and one per tie | not built |
-| The reaper does not run on a replica without the lease | `TestReaperNeedsTheLease` | not built |
+| Each reaper rule fires at its second and not one before under a fake clock; `never` disables it; a sandbox matching two rules gets the first | `TestReaperRules`, one case per rule and one per tie | built for expired, autoDelete and autoStop ([[037-lifecycle-enforcement]]); lost and token not built |
+| The reaper does not run on a replica without the lease | `TestReaperNeedsTheLease` | built ([[037-lifecycle-enforcement]]) |
 | For an environment that is `Offline`, nothing is rebuilt, no rule runs, and `Lost` does not count the grace; when it returns, lost sandboxes recover | `TestOfflineEnvironmentHoldsState` | not built |
-| An errored `List` rebuilds nothing | `TestListErrorIsNotEmpty` | not built |
+| An errored `List` rebuilds nothing | `TestListErrorIsNotEmpty` | built as acts on nothing ([[037-lifecycle-enforcement]]); the observed rebuild waits for [[010-state]] |
 | A token past two thirds of its life is re-minted, re-projected, and the old `jti` revoked in one act | `TestTokenReprojection` under a fake clock | not built |
-| `Touch` reaches the driver at most once per interval per sandbox | `TestTouchCoalesces` | not built |
+| `Touch` reaches the driver at most once per interval per sandbox | `TestTouchCoalesces` | built ([[037-lifecycle-enforcement]]) |
 | A `Lost` sandbox with Postgres recovers with the same id, a new token, the old `jti` revoked, and its volumes' files; a managed workspace the driver lost is `Recreated`; a missing volume is `Failed VolumeMissing`; exhausted attempts are `Failed RecoveryExhausted` with the stated backoff | `TestRecovery`, four cases | not built |
 | Without a durable store a lost sandbox is `Deleting` after the grace with reason `Lost` | `TestLostWithoutAStoreIsReaped` | not built |
 | Deleting a root deletes descendants deepest first with reason `Parent`, then the root; volumes are detached, `retain: false` volumes with no other attachment deleted, `retain: true` kept; the map is purged and the `jti` revoked | `TestCascade` | not built |

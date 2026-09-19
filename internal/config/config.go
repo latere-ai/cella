@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Defaults for the optional variables.
@@ -24,6 +25,15 @@ const (
 	DefaultInternalAddr = ":8081"
 	DefaultDataDir      = "/var/lib/cella"
 	DefaultRuntime      = RuntimeK8s
+	// DefaultReapInterval is how often the lifecycle rules of spec 005
+	// run, and DefaultTouchInterval how often one sandbox's activity
+	// reaches the driver. MinInterval and MaxInterval bound both: a tick
+	// per millisecond is a load generator and a tick per day is not a
+	// deadline.
+	DefaultReapInterval  = 30 * time.Second
+	DefaultTouchInterval = time.Minute
+	MinInterval          = time.Second
+	MaxInterval          = time.Hour
 )
 
 // The runtime backends CELLA_RUNTIME selects. Spec 004 owns what each one
@@ -60,6 +70,11 @@ type Config struct {
 	// MaxBodyBytes and MaxUploadBytes bound JSON and archive requests.
 	MaxBodyBytes   int64
 	MaxUploadBytes int64
+	// ReapInterval is how often the controller applies the lifecycle rules
+	// and TouchInterval how often one sandbox's activity reaches the
+	// driver, both from spec 005.
+	ReapInterval  time.Duration
+	TouchInterval time.Duration
 	// Identity is spec 006's half: the issuers, the audience, the signing
 	// keys, the authorizer, and the owner policy's admins.
 	Identity
@@ -77,6 +92,8 @@ func Load(getenv Getenv) (Config, error) {
 	problems := c.loadIdentity(getenv)
 	c.MaxBodyBytes = byteLimit(getenv, "CELLA_MAX_BODY_BYTES", 65536, &problems)
 	c.MaxUploadBytes = byteLimit(getenv, "CELLA_MAX_UPLOAD_BYTES", 1<<30, &problems)
+	c.ReapInterval = interval(getenv, "CELLA_REAP_INTERVAL", DefaultReapInterval, &problems)
+	c.TouchInterval = interval(getenv, "CELLA_TOUCH_INTERVAL", DefaultTouchInterval, &problems)
 	if raw := getenv("CELLA_ALLOW_UNSAFE_NATIVE"); raw != "" {
 		value, err := strconv.ParseBool(raw)
 		if err != nil {
@@ -131,6 +148,19 @@ func checkAddr(addr string) error {
 		return fmt.Errorf("is %q, not a host:port address", addr)
 	}
 	return nil
+}
+
+// interval reads an optional duration variable and holds it between
+// MinInterval and MaxInterval. A value outside the range is a start-up
+// problem rather than a silent clamp: an operator who asks for a tick this
+// process will not run gets an answer instead of a different behaviour.
+func interval(getenv Getenv, name string, def time.Duration, problems *[]string) time.Duration {
+	d := duration(getenv, name, def, problems)
+	if d < MinInterval || d > MaxInterval {
+		*problems = append(*problems, fmt.Sprintf("%s is %s; between %s and %s", name, d, MinInterval, MaxInterval))
+		return def
+	}
+	return d
 }
 
 // byteLimit accepts integer bytes and binary Ki, Mi and Gi suffixes.

@@ -12,7 +12,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -194,4 +196,52 @@ func TestFollowLogsFlushesBeforeProcessExits(t *testing.T) {
 		t.Fatal(string(data), err)
 	}
 	f.request("POST", "/v1/sandboxes/"+obj.Status.ID+"/stop", f.alice, "", 200)
+}
+
+// touchDriver counts activity stamps and refuses them, so a handler that
+// stamps is observable and a refused stamp is proved not to fail its request.
+type touchDriver struct {
+	runtime.Driver
+	mu  sync.Mutex
+	ids []string
+}
+
+func (d *touchDriver) Touch(_ context.Context, id string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.ids = append(d.ids, id)
+	return errors.New("runtime outage")
+}
+func (d *touchDriver) stamped() []string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return slices.Clone(d.ids)
+}
+func TestActivityIsStamped(t *testing.T) {
+	stamps := &touchDriver{}
+	f := setupDriver(t, nil, func(d runtime.Driver) runtime.Driver {
+		stamps.Driver = d
+		return stamps
+	})
+	create := func(name string) v1.Sandbox {
+		t.Helper()
+		var obj v1.Sandbox
+		body := strings.Replace(createBody, `"name":"work"`, `"name":"`+name+`"`, 1)
+		if err := json.Unmarshal(f.request("POST", "/v1/sandboxes", f.alice, body, 201), &obj); err != nil {
+			t.Fatal(err)
+		}
+		return obj
+	}
+	executed, transferred := create("executed"), create("transferred")
+	// Each request answers although every stamp is refused.
+	f.request("POST", "/v1/sandboxes/"+executed.Status.ID+"/exec?wait=1", f.alice, `{"command":["true"]}`, 200)
+	f.request("GET", "/v1/sandboxes/"+transferred.Status.ID+"/files?path=/workspace", f.alice, "", 200)
+	if got := stamps.stamped(); !slices.Equal(got, []string{executed.Status.ID, transferred.Status.ID}) {
+		t.Fatalf("exec and files stamped %v", got)
+	}
+	// Reading logs is watching a sandbox, not using it.
+	f.request("GET", "/v1/sandboxes/"+executed.Status.ID+"/logs", f.alice, "", 200)
+	if got := stamps.stamped(); len(got) != 2 {
+		t.Fatalf("a log read stamped activity: %v", got)
+	}
 }

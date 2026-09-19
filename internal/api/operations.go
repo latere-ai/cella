@@ -6,6 +6,7 @@ package api
 import (
 	"errors"
 	"io"
+	"log/slog"
 	"mime"
 	"net/http"
 	"os"
@@ -28,6 +29,16 @@ func (h *handler) authorizedObject(r *http.Request, action string) (v1.Sandbox, 
 	_, err = h.decide(r, action, resource(obj))
 	return obj, err
 }
+
+// touch stamps activity on the sandbox a request drives, the activity path of
+// design 005. The controller coalesces it per sandbox, so a busy session
+// reaches the driver once an interval. A stamp that fails is logged and never
+// returned: activity is a note on a sandbox, not the work the caller asked for.
+func (h *handler) touch(r *http.Request, obj v1.Sandbox) {
+	if err := h.Controller.Touch(r.Context(), obj.Status.ID); err != nil {
+		slog.WarnContext(r.Context(), "activity stamp failed", "sandbox", obj.Status.ID, "error", err)
+	}
+}
 func validWorkspacePath(p string) bool {
 	return path.Clean(p) == p && !strings.ContainsRune(p, 0) && (p == "/workspace" || strings.HasPrefix(p, "/workspace/"))
 }
@@ -41,6 +52,7 @@ func (h *handler) files(w http.ResponseWriter, r *http.Request) {
 		respondError(w, runtime.ErrUnsupported)
 		return
 	}
+	h.touch(r, obj)
 	if r.Method == http.MethodPut {
 		media, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 		if err != nil || media != "application/x-tar" {

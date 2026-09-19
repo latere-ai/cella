@@ -366,7 +366,7 @@ the packages ([[016-building-a-plane]]).
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| `manifest`, `runtime`, `controller`, and `egress` import nothing under `internal/`, no HTTP client, no database driver, and no identity library; each driver subpackage reaches only its own substrate's client | `TestRootPackagesDialNothing` over `go list -deps`, one allow list per package | not built |
+| `manifest`, `runtime`, `controller`, and `egress` import nothing under `internal/`, no HTTP client, no database driver, and no identity library; each driver subpackage reaches only its own substrate's client | `TestRootPackagesDialNothing` over `go list -deps`, one allow list per package | passing for `manifest`, `manifest/v1`, `runtime`, `runtime/native`, `controller`; `egress` joins with its slice, [[032-runtime-conformance-suite]] |
 | Each role package's and each binary's build list matches its `depcheck` allow list | the `depcheck` gate | passing for the scaffold's list |
 | No released artifact, deploy manifest, inherited default, or documentation page names a Latere hostname or namespace outside an example or the API group | `TestNoLatereCoordinatesInReleasedArtifacts` over `deploy/`, `docs/`, the workflows' image references, and every default in `internal/config`; [[014-release-and-installation]]'s `TestReleasePublishesUnderTheOwnersNamespace` | not built |
 | A manifest applied through the API and one handed to `manifest.Resolve` by an importer with the same options produce byte-identical resolved manifests | `TestAPIAndImporterResolveAgree`, comparing the `PUT` response body with `Resolve`'s output | not built |
