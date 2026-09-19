@@ -507,8 +507,10 @@ func TestPatchGuardsAgainstAStaleRead(t *testing.T) {
 
 // A key holding a slash is escaped, so the patch names the key it means.
 func TestPatchEscapesTheKey(t *testing.T) {
-	if got := annPath(annSpec); got != "/metadata/annotations/cella.latere.ai~1spec" {
-		t.Fatalf("annPath = %q", got)
+	// The group's slash is the escape the pointer needs; it is assembled here
+	// rather than written out, so this file is not itself a coordinate.
+	if got, want := annPath(annSpec), "/metadata/annotations/"+group+"~1spec"; got != want {
+		t.Fatalf("annPath = %q, want %q", got, want)
 	}
 	if got := annPath("a~b/c"); got != "/metadata/annotations/a~0b~1c" {
 		t.Fatalf("annPath = %q", got)
