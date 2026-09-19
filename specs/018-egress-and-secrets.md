@@ -10,7 +10,7 @@ depends_on:
 affects: [manifest/v1/, egress/, internal/egressd/, internal/api/, internal/store/, internal/config/, runtime/]
 effort: large
 created: 2026-09-12
-updated: 2026-09-13
+updated: 2026-09-19
 author: changkun
 ---
 
@@ -46,7 +46,12 @@ stays fixed.
 
 ## Current state
 
-Not built. `pkg/egress` today holds the substitution engine (`Map`,
+The boundary, the map, the gateway role, the sync stream and the
+records are built by [[039-egress-gateway]]; the `Secret` kind, its
+store and the values it substitutes are slice 046, and the `Records`
+store surface, the metrics and the journal path are 042's and 010's.
+That slice's Outcome records where it reads this spec differently.
+`pkg/egress` today holds the substitution engine (`Map`,
 `Entry` with placeholder, secret, allowed hosts, an optional resolver
 and a body flag; `SubstituteHTTPRequestContext` over header values,
 the raw query string, and small textual bodies; framing headers
@@ -382,18 +387,18 @@ The `Volume` kind ([[019-volumes]]); the worker's own stream
 |---|---|---|
 | `GET` and list of a Secret never return `spec.value`; no event or record carries a value, a placeholder, or the credential; a canary value appears in no log | `TestSecretValueIsWriteOnly`, `TestNoSecretLeaks` | not built |
 | A scope with an IP, a single label, or a private range is `invalid_field`; an empty scope is `missing_field`; `header` with `query` is `exclusive_fields` | `TestSecretRefusals` | not built |
-| `Compile` produces one entry per injectable secret with a per-sandbox placeholder and one credential; two sandboxes mounting one secret get different placeholders; every mounted secret's hosts are on `Allow`; a secret whose hosts are all denied gets no entry and is named `notInjectable` | `TestCompile` | not built |
-| A gateway that connects with nothing receives every map; one that missed a purge while disconnected drops that principal on reconnect; a sidecar receives one; two gateways each hold the full set and a put unacknowledged by the second is retried until it acks | `TestSyncSnapshotIsAuthoritative`, `TestSyncFanOut` | not built |
-| A put with a version at or below the held one is acknowledged and not applied; a value update produces a higher version and lands | `TestMapVersions` | not built |
-| With no gateway connected, or none acknowledging within the timeout, the create fails with `driver_unavailable`, no sandbox is left, and the environment is `Degraded NoGateway`; in sidecar mode the workload container does not start before the sidecar's ack | `TestCreateWaitsForTheGateway`, `TestSidecarGatesInsideCreate` | not built |
+| `Compile` produces one entry per injectable secret with a per-sandbox placeholder and one credential; two sandboxes mounting one secret get different placeholders; every mounted secret's hosts are on `Allow`; a secret whose hosts are all denied gets no entry and is named `notInjectable` | `TestCompile` | [[039-egress-gateway]]: `TestCompile*`, less the value half |
+| A gateway that connects with nothing receives every map; one that missed a purge while disconnected drops that principal on reconnect; a sidecar receives one; two gateways each hold the full set and a put unacknowledged by the second is retried until it acks | `TestSyncSnapshotIsAuthoritative`, `TestSyncFanOut` | [[039-egress-gateway]]: `TestASnapshotIsSentOnConnect`, `TestSendReturnsOnTheFirstAcknowledgement`, `TestASidecarReceivesOneMap`, `TestSnapshotIsAuthoritative` |
+| A put with a version at or below the held one is acknowledged and not applied; a value update produces a higher version and lands | `TestMapVersions` | [[039-egress-gateway]]: `TestApplyTakesOnlyAHigherVersion`, `TestAPutAppliesAndIsAcknowledged` |
+| With no gateway connected, or none acknowledging within the timeout, the create fails with `driver_unavailable`, no sandbox is left, and the environment is `Degraded NoGateway`; in sidecar mode the workload container does not start before the sidecar's ack | `TestCreateWaitsForTheGateway`, `TestSidecarGatesInsideCreate` | [[039-egress-gateway]]: `TestCreateWaitsForTheGateway`, less the sidecar and the Degraded phase |
 | A placeholder sent to an in-scope host and port is substituted in the header or query its `inject` names, or the body when opted in, on both doors; sent to any other host, port, or place it passes through verbatim | `TestSubstitutionIsScopedAndPlaced` against the gateway | not built |
 | Framing headers are never rewritten; a chunked, a large, and a binary body are never read | `TestBodyRule` | not built |
 | `basic` substitutes base64 of `user:pass`; `bearer` and `raw` substitute verbatim and the upstream sees one `Bearer ` | `TestSchemes` | not built |
 | An `oauth_client_credentials` secret mints a token at the token URL and caches it; the client secret never leaves the gateway | `TestOAuthKind` against a stub token endpoint | not built |
-| `none` refuses every connection; `allowlist` refuses an unlisted host; `open` refuses a denied host and admits the rest, with 403 on the reverse door and a refused CONNECT on the proxy door | `TestModes` | not built |
-| A request on either door without the sandbox's credential is refused before any dial; the credential does not change over the sandbox's life while the workload token rotates | `TestCredentialOnBothDoors` | not built |
-| Every connection yields one record with the fields named and never a header, body, value, placeholder, or credential; a sandbox's records are served newest first; the counters move; under a flood the ring keeps the cap and the journal's lifecycle events are untouched; events reach the sink only with `CELLA_EVENTS_EGRESS=1` | `TestTelemetry`, `TestRecordsDoNotEvictEvents` | not built |
+| `none` refuses every connection; `allowlist` refuses an unlisted host; `open` refuses a denied host and admits the rest, with 403 on the reverse door and a refused CONNECT on the proxy door | `TestModes` | [[039-egress-gateway]]: `TestGateMatrix`, `TestEgressEndToEnd` |
+| A request on either door without the sandbox's credential is refused before any dial; the credential does not change over the sandbox's life while the workload token rotates | `TestCredentialOnBothDoors` | [[039-egress-gateway]]: `TestProxyDoorNeedsTheSandboxsOwnCredential`, `TestCredentialOnBothDoors` |
+| Every connection yields one record with the fields named and never a header, body, value, placeholder, or credential; a sandbox's records are served newest first; the counters move; under a flood the ring keeps the cap and the journal's lifecycle events are untouched; events reach the sink only with `CELLA_EVENTS_EGRESS=1` | `TestTelemetry`, `TestRecordsDoNotEvictEvents` | [[039-egress-gateway]]: the fields, the ring and the route; the counters, the journal and the sink are open |
 | Updating a value reaches a running sandbox's next request without a restart; deleting it marks the sandbox `notInjectable` and its next request leaves unauthenticated | `TestLiveUpdateAndRevoke` | not built |
-| A workload token cannot add a host, remove a denied host, or add a secret to its own sandbox; the owner can | `TestBoundaryNeverWidens` | not built |
+| A workload token cannot add a host, remove a denied host, or add a secret to its own sandbox; the owner can | `TestBoundaryNeverWidens` | [[039-egress-gateway]]: `TestNarrowingIsForWorkloads`, less the secrets half |
 | On `local`, the sandbox runtime's policy names only the gateway and a request to an allowed host succeeds through the chain; on k8s, a sandbox reaches an allowed host through each door and cannot reach a disallowed host, another sandbox, or the Pod network | `TestLocalEgress`, e2e `TestClusterEgressBoundary` | not built |
-| The reserved key list in `egress` equals `manifest`'s; `egress` imports no package that dials | `TestReservedKeysMatchTheGateway`, `TestRootPackagesDialNothing` | not built |
+| The reserved key list in `egress` equals `manifest`'s; `egress` imports no package that dials | `TestReservedKeysMatchTheGateway`, `TestRootPackagesDialNothing` | [[039-egress-gateway]]: `TestReservedKeysMatchTheGateway`, `TestRootPackagesDialNothing` |

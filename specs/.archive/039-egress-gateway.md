@@ -1,6 +1,6 @@
 ---
 title: "Egress and the gateway role: the network boundary, the map, the two doors, sync and records"
-status: in-progress
+status: complete
 track: core
 depends_on:
   - specs/018-egress-and-secrets.md
@@ -337,19 +337,108 @@ The `Secret` kind, its store, its values and their substitution
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| The host rule refuses an IP, a single label, a port and a private range with `invalid_field`, and accepts an exact name and one leading wildcard | `TestHostRule` | not built |
-| `allowedHosts` without `allowlist`, `deniedHosts` without `open`, and both lists with no mode are `exclusive_fields`; the inferred mode follows the table | `TestEgressExclusiveFields`, `TestModeInference` | not built |
-| A workload actor that loosens the mode, adds an allowed host, widens one to a wildcard, or removes a denied host is `boundary_widened` naming every path; the same change by the owner is accepted; narrowing by either is accepted | `TestNarrowingIsForWorkloads` | not built |
-| An environment whose `capabilities.egress` omits the mode is `capability_unsupported`; an empty list warns and leaves `EgressEnforced` false | `TestEgressCapability` | not built |
-| `Compile` is deterministic, puts every injectable secret's hosts on `Allow`, drops a secret every host of which is denied into `NotInjectable`, refuses two entries scoping one host, and refuses a placeholder that is not one | `TestCompile`, `TestCompileRefusals` | not built |
-| The ported coverage rule: an exact reach never covers a wildcard credential, a wildcard never covers its own apex, case and a trailing dot do not matter, and violations are sorted | `TestCovers`, `TestCompileViolationsAreSorted` | not built |
-| The gate matrix over mode, allow, deny, a secret's host, loopback and the control plane's own address refuses before any dial on both doors, and a denied host beats a secret's scope | `TestGateMatrix`, `TestGateRefusesBeforeDial` | not built |
-| A request on either door without the sandbox's credential is refused, and a credential that belongs to another principal never admits | `TestCredentialOnBothDoors` | not built |
-| A snapshot replaces the whole registry and drops a principal absent from it; a put at or below the held version is acknowledged and not applied; a higher one lands | `TestSnapshotIsAuthoritative`, `TestMapVersions` | not built |
-| A create pushes the map and waits for one acknowledgement before the driver's `Create`; with no gateway and a boundary that needs one it fails `driver_unavailable`; with `open` and nothing to enforce it proceeds | `TestCreatePushesBeforeCreate`, `TestCreateWaitsForTheGateway`, `TestOpenBoundaryNeedsNoGateway` | not built |
-| A delete purges the principal from the gateway | `TestDeletePurges` | not built |
-| The driver projects the proxy, trust and gateway variables and the CA file when the spec carries them, and nothing when it does not | `TestNativeProjectsTheGateway`, `TestPodmanProjectsTheGateway` | not built |
-| The reserved key list in `egress` equals the set `manifest` refuses | `TestReservedKeysMatchTheGateway` | not built |
-| `egress` reaches `manifest/v1`, `pkg/egress/placeholder` and the standard library and nothing else | `TestRootPackagesDialNothing` | not built |
-| End to end: `cellad serve` on the native driver with a stub issuer, `cellad egress` connected with an environment key, a sandbox with `allowlist` and one allowed host; the workload's own `HTTPS_PROXY` reaches the allowed host, another host is refused before any dial, `none` refuses every host, and the records reach `GET /v1/sandboxes/{id}/egress` | `TestEgressEndToEnd` | not built |
-| No file under `egress/` names a Latere host, image, pool or namespace outside an example | `TestNoLatereCoordinates` | not built |
+| The host rule refuses an IP, a single label, a port and a private range with `invalid_field`, and accepts an exact name and one leading wildcard | `TestHostRule`, `TestHostRuleReachesBothListsThroughResolve` | passing |
+| `allowedHosts` without `allowlist`, `deniedHosts` without `open`, and both lists with no mode are `exclusive_fields`; the inferred mode follows the table | `TestEgressExclusiveFields`, `TestModeInference` | passing |
+| A workload actor that loosens the mode, adds an allowed host, widens one to a wildcard, or removes a denied host is `boundary_widened` naming every path; the same change by the owner is accepted; narrowing by either is accepted | `TestNarrowingIsForWorkloads` | passing |
+| An environment whose `capabilities.egress` omits the mode is `capability_unsupported`; an empty list warns and leaves `EgressEnforced` false | `TestEgressCapability` | passing |
+| `Compile` is deterministic, puts every injectable secret's hosts on `Allow`, drops a secret every host of which is denied into `NotInjectable`, refuses two entries scoping one host, and refuses a placeholder that is not one | `TestCompileCarriesTheBoundary`, `TestCompileIsDeterministic`, `TestCompileJoinsASecretsScopeToTheAllowList`, `TestCompileDropsASecretTheBoundaryDenies`, `TestCompileRefusals` | passing |
+| The ported coverage rule: an exact reach never covers a wildcard credential, a wildcard never covers its own apex, case and a trailing dot do not matter, and violations are sorted | `TestHostPatternCovers`, `TestHostCovers` | passing |
+| The gate matrix over mode, allow, deny, a secret's host, loopback and the control plane's own address refuses before any dial on both doors, and a denied host beats a secret's scope | `TestGateMatrix`, `TestProxyDoorRefusesBeforeAnyDial`, `TestADeniedHostBeatsASecretsScope` | passing |
+| A request on either door without the sandbox's credential is refused, and a credential that belongs to another principal never admits | `TestProxyDoorNeedsTheSandboxsOwnCredential`, `TestReverseDoor`, `TestCredentialAuthenticate` | passing |
+| A snapshot replaces the whole registry and drops a principal absent from it; a put at or below the held version is acknowledged and not applied; a higher one lands | `TestSnapshotIsAuthoritative`, `TestApplyTakesOnlyAHigherVersion`, `TestTheSnapshotReplacesTheWholeWorld`, `TestAPutAppliesAndIsAcknowledged`, `TestASidecarReceivesOneMap` | passing |
+| A create pushes the map and waits for one acknowledgement before the driver's `Create`; with no gateway and a boundary that needs one it fails `driver_unavailable`; with `open` and nothing to enforce it proceeds | `TestCreatePushesTheMapBeforeTheDriver`, `TestCreateWaitsForTheGateway`, `TestOpenBoundaryNeedsNoGateway`, `TestSendNeedsAConnectedGateway`, `TestSendReturnsOnTheFirstAcknowledgement` | passing |
+| A delete purges the principal from the gateway | `TestDeletePurgesTheMap`, `TestCreatePurgesWhenTheDriverRefuses`, `TestPurgeDropsTheMapAndTellsEveryGateway` | passing |
+| The driver projects the proxy, trust and gateway variables and the CA file when the spec carries them, and nothing when it does not | `TestNativeProjectsTheGateway`, `TestPodmanProjectsTheGateway`, `TestNativeWithoutAGatewaySetsNothing`, `TestPodmanWithoutAGatewaySetsNothing` | passing |
+| The reserved key list in `egress` equals the set `manifest` refuses | `TestReservedKeysMatchTheGateway`, `TestProjectionEnv` | passing |
+| `egress` reaches `manifest/v1`, `pkg/egress/placeholder` and the standard library and nothing else | `TestRootPackagesDialNothing` | passing |
+| End to end: `cellad serve` on the native driver with a stub issuer, `cellad egress` connected with an environment key, a sandbox with `allowlist` and one allowed host; the workload's own `HTTPS_PROXY` reaches the allowed host, another host is refused before any dial, `none` refuses every host, and the records reach `GET /v1/sandboxes/{id}/egress` | `TestEgressEndToEnd`, `TestTheEgressSubcommandConnects` | passing |
+| No file under `egress/` names a Latere host, image, pool or namespace outside an example | `TestNoLatereCoordinates` | passing |
+
+## Outcome
+
+The boundary is built end to end and enforced by two points: the map a
+gateway holds, and the driver's own rule where it has one. A sandbox
+that declares a boundary does not exist until a gateway acknowledges
+it.
+
+What landed, by package:
+
+| Package | What it holds now |
+|---|---|
+| `manifest/v1` | `spec.network.egress`, `status.conditions`, `status.egressState` (the control plane's own record, stripped from every answer), and the host pattern algebra the resolver and the compiler share |
+| `manifest` | the host rule over `latere.ai/x/pkg/hostmatch`, the exclusive pairs, the mode inference, `boundary_widened` for a workload actor, and the capability row with its warning |
+| `egress` | `Compile`, `Map`, `Entry`, `SecretView`, `MintCredential`, `MintPlaceholder`, `Map.Admits`, `Map.EntryFor`, the seven sync frames, `Record`, `ReservedEnv` and `Projection` |
+| `internal/egressd` | the `cellad egress` role: the policy gate, the proxy door's tunnel, the reverse door, the CA, the outbound WebSocket and the record emitter |
+| `internal/api` | `EgressHub` with the sync stream at `GET /v1/environments/{id}/egress`, and the records at `GET /v1/sandboxes/{id}/egress` |
+| `controller` | the create-order hook, the purge on delete, the `EgressEnforced` condition, and `EgressMaps` for a gateway that connects with nothing |
+| `runtime` | `CreateSpec.Egress`, projected by `runtime/native` beside the sandbox's directory and by `runtime/podman` into the container |
+
+Coverage: `egress` 99.3%, `internal/egressd` 91.1%, `internal/api`
+91.3%, `controller` 96.3%, `manifest` 97.0%, `manifest/v1` 100%,
+`runtime/native` 93.3%, `runtime/podman` 94.3%, `cmd/cellad` 92.2%;
+every package clears the gate's 90%. `go test -race ./...` passes and
+the whole bar is green.
+
+The end-to-end test is `TestEgressEndToEnd` in `cmd/cellad`: one
+`cellad serve` on the native driver against a stub issuer, one gateway
+connected with an environment key, and a sandbox whose manifest allows
+one host. The workload reads its own `HTTPS_PROXY` through `exec` and
+reaches the allowed host through the gateway; another host is refused
+with no dial; a sandbox in `none` reaches nothing; the reverse door
+carries the same boundary; the sandbox holds the gateway's own
+authority at the path its trust variables name; and every decision
+comes back as a record on `GET /v1/sandboxes/{id}/egress`.
+`TestTheEgressSubcommandConnects` runs the role the way an operator
+does, through `cellad egress`, and proves the stream is real by
+creating a sandbox whose boundary only a connected gateway can admit.
+
+### What this slice reads differently from 018 and 003, and why
+
+1. **`Compile`'s signature.** 018 writes
+   `Compile(resolved, secrets, credential) (Map, []string)`. Here it is
+   `Compile(sb, secrets) (Map, error)`: the credential and the version
+   travel in `status.egressState`, so a recompile of a running sandbox
+   cannot rotate what the workload already holds, and the second return
+   is a refusal (`secret_host_conflict`, a placeholder that is not one)
+   rather than a list. The `notInjectable` names are a field of the map
+   that never goes on the wire.
+2. **The create's wait.** 018 fails every create that no gateway
+   acknowledges. Here a boundary of `open` with no denied host and no
+   secret proceeds without one: there is nothing to enforce and nothing
+   to substitute, so requiring a gateway would make the inferred default
+   unusable on an installation that runs none, and the condition says
+   what the sandbox got.
+3. **The unenforced-boundary warning.** 003 warns whenever
+   `capabilities.egress` is empty. Here the warning is written only for
+   a boundary that asked for something to be kept out, because a warning
+   names what the environment could not honour.
+4. **The gate owns the proxy door's tunnel.** 018 describes the gate as
+   a policy in front of `pkg/egress.Gateway`. A decision taken before
+   any dial cannot be taken by a handler that dials inside itself, and a
+   record needs the outcome of the connection the decision admitted, so
+   the gate tunnels a destination with no credential itself and hands
+   one that has a credential to that `Gateway` for termination. The
+   dialer is an option, which is also what a gateway behind an upstream
+   proxy needs.
+5. **The mode inference table**, as the Design section states: the two
+   lists decide, and both lists with no mode is `exclusive_fields`.
+
+### The seams the next slices take
+
+- **046, the Secret kind.** `egress.SecretView` gains `Value`,
+  `egress.Entry` gains the value the control plane sends with it, and
+  `internal/egressd.valueOf` stops returning nil, at which point the
+  substitution engine's registry fills and the terminate branch of the
+  proxy door carries real traffic. The controller mints one placeholder
+  per mounted secret into `status.egressState.placeholders` and writes
+  `Map.NotInjectable` into `status.secrets.notInjectable`. Nothing else
+  in this slice moves.
+- **036, the k8s driver.** The same map is the NetworkPolicy's input:
+  `CreateSpec.Egress` carries the mode and both host lists, and the
+  driver that declares `Capabilities.Egress` turns them into the policy
+  that admits DNS, the gateway and `cellad` and nothing else. The
+  condition then reports `Enforced` rather than `NotEnforcedByDriver`.
+- **021, the Environment kind.** `CELLA_GATEWAY` and
+  `CELLA_GATEWAY_REVERSE` seed what will be `Environment.spec.gateway`,
+  and the keys route mints what a gateway authenticates with; a test
+  mints with the control plane's own signer until it exists.

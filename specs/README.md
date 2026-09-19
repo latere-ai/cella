@@ -216,8 +216,13 @@ consumer names a need; it is not in any phase.
 
 | Question | Where | Owner |
 |---|---|---|
-| The `vm` driver's substrate: a microVM driver of Cella's own, or the k8s runtime class alone; options and criteria in [[024-vm-driver]] | 024 | when a consumer names a need; not before the first release |
-| `pkg/egress` additions [[018-egress-and-secrets]] needs before the gateway role is built: a dependency-free `placeholder` subpackage; a per-principal policy gate (mode, allow, deny, ports) evaluated before a CONNECT completes; per-entry `inject` placement; `Registry` replace-all for an authoritative snapshot; the reverse-door handler and the outbound sync client, which the sibling application platform's gateway can then share | 018 | before phase 3 builds the gateway |
+| The `vm` driver's isolation: a microVM driver of Cella's own, or the k8s runtime class alone; options and criteria in [[024-vm-driver]] | 024 | when a consumer names a need; not before the first release |
+
+### Settled
+
+| Question | Where | How it was answered |
+|---|---|---|
+| The `pkg/egress` additions [[018-egress-and-secrets]] needed before the gateway role: a dependency-free `placeholder` subpackage, a per-principal policy gate before a CONNECT completes, per-entry `inject` placement, `Registry` replace-all, the reverse door and the outbound sync client | 018 | `placeholder` moved to `latere.ai/x/pkg/egress/placeholder` in v0.79.0, because a package that dials nothing must be able to mint one. The other five landed in `internal/egressd` with [[039-egress-gateway]]: cella is their only consumer today, and `pkg` holds small client primitives. A second consumer moves any of them, and the gate, the doors and the client are written to be moved |
 
 ## Open source readiness
 
@@ -259,5 +264,5 @@ The map, the order, and the rule for a slice are in 031.
 | [032-runtime-conformance-suite.md](.archive/032-runtime-conformance-suite.md) | complete | Driver conformance suite, Nop fake, dial-nothing and coordinates tests |
 | [035-podman-driver.md](.archive/035-podman-driver.md) | complete | Container isolation over the libpod socket, with the sandbox record in the engine |
 | [037-lifecycle-enforcement.md](.archive/037-lifecycle-enforcement.md) | complete | Reaper deadline rules, lease and clock seams, activity stamping |
-| [039-egress-gateway.md](039-egress-gateway.md) | in-progress | The network boundary, the map compiler, the gateway role and its two doors, sync and records |
+| [039-egress-gateway.md](.archive/039-egress-gateway.md) | complete | The network boundary, the map compiler, the gateway role and its two doors, sync and records |
 | [044-manifest-fields.md](.archive/044-manifest-fields.md) | complete | Resource, user, workspace and lifecycle manifest fields with the staged resolver |
