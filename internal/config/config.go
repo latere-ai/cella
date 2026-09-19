@@ -10,6 +10,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"slices"
 	"sort"
@@ -56,6 +57,9 @@ type Config struct {
 	Runtime string
 	// AllowUnsafeNative explicitly permits execution without isolation.
 	AllowUnsafeNative bool
+	// MaxBodyBytes and MaxUploadBytes bound JSON and archive requests.
+	MaxBodyBytes   int64
+	MaxUploadBytes int64
 	// Identity is spec 006's half: the issuers, the audience, the signing
 	// keys, the authorizer, and the owner policy's admins.
 	Identity
@@ -71,6 +75,8 @@ func Load(getenv Getenv) (Config, error) {
 		Runtime:      withDefault(getenv("CELLA_RUNTIME"), DefaultRuntime),
 	}
 	problems := c.loadIdentity(getenv)
+	c.MaxBodyBytes = byteLimit(getenv, "CELLA_MAX_BODY_BYTES", 65536, &problems)
+	c.MaxUploadBytes = byteLimit(getenv, "CELLA_MAX_UPLOAD_BYTES", 1<<30, &problems)
 	if raw := getenv("CELLA_ALLOW_UNSAFE_NATIVE"); raw != "" {
 		value, err := strconv.ParseBool(raw)
 		if err != nil {
@@ -125,4 +131,27 @@ func checkAddr(addr string) error {
 		return fmt.Errorf("is %q, not a host:port address", addr)
 	}
 	return nil
+}
+
+// byteLimit accepts integer bytes and binary Ki, Mi and Gi suffixes.
+func byteLimit(getenv Getenv, name string, fallback int64, problems *[]string) int64 {
+	raw := strings.TrimSpace(getenv(name))
+	if raw == "" {
+		return fallback
+	}
+	number := raw
+	multiplier := int64(1)
+	for suffix, scale := range map[string]int64{"Ki": 1 << 10, "Mi": 1 << 20, "Gi": 1 << 30} {
+		if before, ok := strings.CutSuffix(number, suffix); ok {
+			number = before
+			multiplier = scale
+			break
+		}
+	}
+	value, err := strconv.ParseInt(number, 10, 64)
+	if err != nil || value <= 0 || value > math.MaxInt64/multiplier {
+		*problems = append(*problems, name+" must be positive integer bytes, optionally suffixed Ki, Mi, or Gi")
+		return 0
+	}
+	return value * multiplier
 }
