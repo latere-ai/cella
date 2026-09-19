@@ -14,7 +14,7 @@ import (
 
 // roots are the trees the check covers, relative to this package's directory.
 // A slice that ports a package into the repository adds its tree here.
-var roots = []string{".", "../controller"}
+var roots = []string{".", "../controller", "../egress"}
 
 // group is the API group the contract stamps on an object. A hostname is a
 // coordinate of one deployment; the group is part of the schema, so the

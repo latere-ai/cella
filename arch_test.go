@@ -35,6 +35,10 @@ var engines = map[string][]string{
 	"./runtime/native": nil, // the native driver runs host processes: no client
 	"./runtime/podman": nil, // the podman driver speaks libpod over net/http: no client module
 	"./controller":     nil,
+	// the boundary compiler mints and recognises placeholders; the
+	// subpackage holds that primitive alone and imports only the standard
+	// library, so the compiler keeps the root packages' rule (spec 018)
+	"./egress": {"latere.ai/x/pkg/egress/placeholder"},
 }
 
 // TestRootPackagesDialNothing reads each package's whole build list, not its
