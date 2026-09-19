@@ -25,9 +25,12 @@ import (
 
 	"latere.ai/x/pkg/health"
 
+	"latere.ai/x/cella/controller"
+	"latere.ai/x/cella/internal/api"
 	"latere.ai/x/cella/internal/auth"
 	"latere.ai/x/cella/internal/config"
 	"latere.ai/x/cella/internal/version"
+	"latere.ai/x/cella/runtime/native"
 )
 
 // Shutdown timing of spec 002: readiness answers 503 at once, the drain
@@ -114,6 +117,27 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		return fail(stderr, err)
 	}
 
+	if cfg.Runtime != config.RuntimeNative {
+		return fail(stderr, fmt.Errorf("CELLA_RUNTIME=%s is not implemented; native is available for trusted development with CELLA_ALLOW_UNSAFE_NATIVE=true", cfg.Runtime))
+	}
+	runtimeDriver, err := native.New(filepath.Join(cfg.DataDir, "native"))
+	if err != nil {
+		return fail(stderr, fmt.Errorf("runtime: %w", err))
+	}
+	defer func() { _ = runtimeDriver.Close() }()
+	if err := runtimeDriver.Preflight(ctx); err != nil {
+		return fail(stderr, fmt.Errorf("runtime preflight: %w", err))
+	}
+	control, err := controller.Open(controller.Options{DataDir: filepath.Join(cfg.DataDir, "controller"), Driver: runtimeDriver, Environment: cfg.DefaultEnvironment})
+	if err != nil {
+		return fail(stderr, fmt.Errorf("controller: %w", err))
+	}
+	defer func() { _ = control.Close() }()
+	handler, err := api.New(api.Options{Controller: control, Verifier: identity.Verifier, Authorizer: identity.Authorizer})
+	if err != nil {
+		return fail(stderr, fmt.Errorf("API: %w", err))
+	}
+
 	draining := make(chan struct{})
 	probes := health.Handler(health.Options{
 		Ready:     health.Checks(health.Check{Name: "draining", Run: notDraining(draining)}, health.Check{Name: "disk", Run: diskWritable(cfg.DataDir)}),
@@ -124,6 +148,7 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	})
 
 	public := http.NewServeMux()
+	public.Handle("/v1/", handler)
 	for _, p := range []string{"/livez", "/readyz", "/version"} {
 		public.Handle("GET "+p, probes)
 	}

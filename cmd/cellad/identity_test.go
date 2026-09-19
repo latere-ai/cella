@@ -30,9 +30,11 @@ import (
 func identity(t *testing.T, m map[string]string) map[string]string {
 	t.Helper()
 	out := map[string]string{
-		"CELLA_OIDC_ISSUERS": issuertest.New(t).URL(),
-		"CELLA_PUBLIC_URL":   "https://cella.example.com",
-		"CELLA_TOKEN_KEY":    signingKeyPEM(t, 1),
+		"CELLA_OIDC_ISSUERS":        issuertest.New(t).URL(),
+		"CELLA_RUNTIME":             "native",
+		"CELLA_ALLOW_UNSAFE_NATIVE": "true",
+		"CELLA_PUBLIC_URL":          "https://cella.example.com",
+		"CELLA_TOKEN_KEY":           signingKeyPEM(t, 1),
 	}
 	maps.Copy(out, m)
 	return out
@@ -111,7 +113,9 @@ func TestServeRefusesToStartWithoutIdentity(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var errOut bytes.Buffer
 			e := identity(t, tc.env)
-			e["CELLA_DATA_DIR"] = t.TempDir()
+			if e["CELLA_DATA_DIR"] == "" {
+				e["CELLA_DATA_DIR"] = t.TempDir()
+			}
 			e["CELLA_PUBLIC_ADDR"] = "127.0.0.1:0"
 			e["CELLA_INTERNAL_ADDR"] = "127.0.0.1:0"
 			code := run(t.Context(), nil, env(e), io.Discard, &errOut)
@@ -166,7 +170,9 @@ func startServeWithLog(t *testing.T, extra map[string]string) (publicURL, intern
 	var out syncBuffer
 	var errOut bytes.Buffer
 	e := identity(t, extra)
-	e["CELLA_DATA_DIR"] = t.TempDir()
+	if e["CELLA_DATA_DIR"] == "" {
+		e["CELLA_DATA_DIR"] = t.TempDir()
+	}
 	e["CELLA_PUBLIC_ADDR"] = "127.0.0.1:0"
 	e["CELLA_INTERNAL_ADDR"] = "127.0.0.1:0"
 	codec := make(chan int, 1)

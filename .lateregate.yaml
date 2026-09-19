@@ -28,11 +28,10 @@ spec:
   require_section_by_status:
     complete: [Outcome]
 
-# The suite runs with only the Go toolchain on PATH. cellad itself needs
-# no binary beside it; the podman and native backends of spec 004 add
-# their own allowances when they land.
+# Native execution and HTTP end-to-end tests run real sh, cat, and sleep
+# commands (specs 025 and 028). Only the system tool directories join Go.
 hermetic:
-  allow: []
+  allow: [/usr/bin, /bin]
 
 tempdir:
   allow: {}

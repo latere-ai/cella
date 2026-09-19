@@ -132,10 +132,11 @@ func startServe(t *testing.T) (publicURL, internalURL string, stop func() int) {
 	codec := make(chan int, 1)
 	go func() {
 		codec <- run(ctx, nil, env(identity(t, map[string]string{
-			"CELLA_DATA_DIR":      t.TempDir(),
-			"CELLA_PUBLIC_ADDR":   "127.0.0.1:0",
-			"CELLA_INTERNAL_ADDR": "127.0.0.1:0",
-			"CELLA_RUNTIME":       "native",
+			"CELLA_DATA_DIR":            t.TempDir(),
+			"CELLA_PUBLIC_ADDR":         "127.0.0.1:0",
+			"CELLA_INTERNAL_ADDR":       "127.0.0.1:0",
+			"CELLA_RUNTIME":             "native",
+			"CELLA_ALLOW_UNSAFE_NATIVE": "true",
 		})), &out, &errOut)
 	}()
 	deadline := time.Now().Add(5 * time.Second)
