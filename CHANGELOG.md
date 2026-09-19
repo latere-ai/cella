@@ -6,6 +6,27 @@ refused before it is pushed.
 
 ## Unreleased
 
+- `CELLA_RUNTIME=k8s` runs each sandbox on a Kubernetes cluster: one
+  PersistentVolumeClaim and one Pod per sandbox, where a stop deletes the Pod
+  and keeps the claim, and a start renders a new Pod against it. Every Pod runs
+  as a non-root uid with a read-only root file system, dropped capabilities, the
+  default seccomp profile, no privilege escalation, no host namespaces and no
+  service account token, with the workspace and `/tmp` as the only writable
+  mounts. Identity, the deadlines and the activity stamp live on the two
+  objects, so listing a namespace is enough to see every sandbox after a
+  restart. Exec, logs and archive transfer go through the cluster, and a
+  transfer into a stopped sandbox runs in a short-lived helper Pod. The cluster
+  is named by `CELLA_K8S_KUBECONFIG` (empty means in-cluster) and
+  `CELLA_K8S_NAMESPACE` (default `cella`); `CELLA_K8S_STORAGE_CLASS`,
+  `CELLA_K8S_NODE_SELECTOR`, `CELLA_K8S_TOLERATIONS`,
+  `CELLA_K8S_IMAGE_PULL_SECRETS`, `CELLA_K8S_RUN_AS_USER`,
+  `CELLA_K8S_RUN_AS_GROUP`, `CELLA_K8S_CPU_REQUEST_RATIO`,
+  `CELLA_K8S_MEMORY_REQUEST_RATIO`, `CELLA_K8S_DEFAULT_CPU`,
+  `CELLA_K8S_DEFAULT_MEMORY`, `CELLA_K8S_DEFAULT_DISK`,
+  `CELLA_K8S_READY_TIMEOUT` and `CELLA_K8S_GRACE_PERIOD` are what one
+  installation supplies. Egress rules, the mesh, attach, ports, display and a
+  warm pool are not on this driver yet.
+
 - `cellad` enforces the lifecycle its runtime reports. A sandbox past its
   expiry is deleted, one stopped for longer than its auto-delete window is
   deleted, and one idle for longer than its auto-stop window is stopped, each
