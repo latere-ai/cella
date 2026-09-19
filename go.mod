@@ -4,7 +4,10 @@ go 1.27.0
 
 tool latere.ai/x/ci-gate/cmd/lateregate
 
-require latere.ai/x/pkg v0.76.0
+require (
+	github.com/gorilla/websocket v1.5.3
+	latere.ai/x/pkg v0.76.0
+)
 
 require (
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect

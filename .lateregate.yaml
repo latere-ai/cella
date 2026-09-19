@@ -71,6 +71,11 @@ depcheck:
         github.com/felixge/httpsnoop: the response recorder of the SDK's HTTP instrumentation
         github.com/cespare/xxhash: a hash the OpenTelemetry SDK's metric pipeline uses
         github.com/cenkalti/backoff: the OTLP exporters' retry
+        github.com/gorilla/websocket: >-
+          the WebSocket server and client of spec 008's streams: the exec and
+          attach sockets of spec 034 and the gateway sync stream of spec 018.
+          The standard library has no WebSocket, and both streams need the
+          same framing, close codes and one-writer rule
 
 license:
   spdx: Apache-2.0
