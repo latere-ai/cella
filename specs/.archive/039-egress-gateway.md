@@ -247,23 +247,28 @@ proxy needs.
 ### Sync
 
 The gateway opens one outbound stream per environment and the control
-plane never dials it, which is [[001-architecture]] invariant 10. The
-message vocabulary is [[018-egress-and-secrets]]'s
-(`hello`, `snapshot`, `put`, `purge`, `ack`, `heartbeat`, `record`),
-carried as one JSON object per line over two routes rather than one
-WebSocket:
+plane never dials it, which is [[001-architecture]] invariant 10. It is
+one WebSocket on `GET /v1/environments/{id}/egress` ([[008-api]]),
+subprotocol `cella.egress.v1`, one JSON text message per frame, with
+the vocabulary [[018-egress-and-secrets]] fixes:
 
-| Route | Direction | Carries |
+| Frame | Direction | Meaning |
 |---|---|---|
-| `GET /v1/environments/{id}/egress` | down, held open | `snapshot` on connect, then `put`, `purge` and `heartbeat` |
-| `POST /v1/environments/{id}/egress` | up, one request per batch | `hello`, `ack`, `record` |
+| `hello` | up, first | the gateway's id, an optional single-principal filter for a sidecar, the versions it holds, and its certificate authority |
+| `snapshot` | down, in reply | every map of the environment, or the one filtered; authoritative |
+| `put` | down | a new or changed map, applied when its version is above the held one |
+| `purge` | down | the map is gone |
+| `ack` | up | applied, or already held at that version |
+| `heartbeat` | both, every 15 seconds | a stream with none for 45 seconds is closed by either side |
+| `record` | up | one connection handled |
 
-Both are authenticated by the environment key and by nothing else, and
-the key's environment must be the one the path names. The framing is
-the same vocabulary a WebSocket would carry, so the upgrade to one is a
-transport change with no protocol change; the reason for the pair today
-is that the module's dependency list holds no WebSocket library and
-[[001-architecture]] admits none for this role.
+The route is authenticated by the environment key and by nothing else,
+and the key's environment must be the one the path names; an
+environment key reaches this route and no route that decides on a
+subject. The transport is `github.com/gorilla/websocket`, admitted by
+the `depcheck` rows of `cmd/cellad` and `internal/egressd` and shared
+with the attach stream of slice 034, so the module carries one
+WebSocket library and not two.
 
 `hello` carries the gateway's id, the versions it holds and its CA
 certificate, which is what the control plane projects into a sandbox as
@@ -319,7 +324,7 @@ of them is in this slice.
 | `manifest`, `manifest/v1` | the fields, the host rule, the narrowing rule, the shared pattern algebra |
 | `egress` | `Compile`, `Map`, `Entry`, `SecretView`, `ReservedEnv`, the frames, `Record` |
 | `internal/egressd` | the role: the gate, the two doors, the CA, the sync client, the record emitter |
-| `internal/api` | the two sync routes, the records route, and the hub the controller pushes through |
+| `internal/api` | the sync stream, the records route, and the hub the controller pushes through |
 | `controller` | the create-order hook and the `EgressEnforced` condition |
 | `runtime`, `runtime/native`, `runtime/podman` | `CreateSpec.Egress` and its projection |
 
