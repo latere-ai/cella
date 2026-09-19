@@ -120,6 +120,13 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	if cfg.Runtime != config.RuntimeNative {
 		return fail(stderr, fmt.Errorf("CELLA_RUNTIME=%s is not implemented; native is available for trusted development with CELLA_ALLOW_UNSAFE_NATIVE=true", cfg.Runtime))
 	}
+	// Recovery may change runtime records. Own the state directory before
+	// opening the driver so a second process cannot mutate live workloads.
+	store, err := controller.OpenFileStore(filepath.Join(cfg.DataDir, "controller"))
+	if err != nil {
+		return fail(stderr, fmt.Errorf("controller store: %w", err))
+	}
+	defer func() { _ = store.Close() }()
 	runtimeDriver, err := native.New(filepath.Join(cfg.DataDir, "native"))
 	if err != nil {
 		return fail(stderr, fmt.Errorf("runtime: %w", err))
@@ -128,19 +135,18 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	if err := runtimeDriver.Preflight(ctx); err != nil {
 		return fail(stderr, fmt.Errorf("runtime preflight: %w", err))
 	}
-	control, err := controller.Open(controller.Options{DataDir: filepath.Join(cfg.DataDir, "controller"), Driver: runtimeDriver, Environment: cfg.DefaultEnvironment})
+	control, err := controller.Open(controller.Options{Store: store, Driver: runtimeDriver, Environment: cfg.DefaultEnvironment})
 	if err != nil {
 		return fail(stderr, fmt.Errorf("controller: %w", err))
 	}
-	defer func() { _ = control.Close() }()
-	handler, err := api.New(api.Options{Controller: control, Verifier: identity.Verifier, Authorizer: identity.Authorizer})
+	handler, err := api.New(api.Options{Controller: control, Verifier: identity.Verifier, Authorizer: identity.Authorizer, MaxBodyBytes: cfg.MaxBodyBytes, MaxUploadBytes: cfg.MaxUploadBytes})
 	if err != nil {
 		return fail(stderr, fmt.Errorf("API: %w", err))
 	}
 
 	draining := make(chan struct{})
 	probes := health.Handler(health.Options{
-		Ready:     health.Checks(health.Check{Name: "draining", Run: notDraining(draining)}, health.Check{Name: "disk", Run: diskWritable(cfg.DataDir)}),
+		Ready:     health.Checks(health.Check{Name: "draining", Run: notDraining(draining)}, health.Check{Name: "disk", Run: diskWritable(cfg.DataDir)}, health.Check{Name: "runtime", Run: runtimeDriver.Ready}),
 		Timeout:   2 * time.Second,
 		Version:   version.Version,
 		Commit:    version.Commit,
@@ -201,6 +207,9 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	defer cancel()
 	for _, s := range servers {
 		_ = s.Shutdown(shutdownCtx)
+	}
+	if err := runtimeDriver.Close(); err != nil {
+		return fail(stderr, fmt.Errorf("runtime shutdown: %w", err))
 	}
 	return 0
 }

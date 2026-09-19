@@ -9,10 +9,16 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"latere.ai/x/pkg/authkit/issuertest"
+
+	"latere.ai/x/cella/controller"
+	"latere.ai/x/cella/runtime"
+	"latere.ai/x/cella/runtime/native"
 )
 
 func TestServeRefusesUnavailableRuntime(t *testing.T) {
@@ -109,5 +115,50 @@ func TestNativeServerEndToEnd(t *testing.T) {
 	request("GET", path, alice, "", 404)
 	if code, _ := get(t, fmt.Sprintf("%s/v1/sandboxes", internal)); code != 404 {
 		t.Fatalf("internal API exposed: %d", code)
+	}
+}
+
+func TestSecondServerCannotMutateRunningWorkload(t *testing.T) {
+	data := t.TempDir()
+	store, err := controller.OpenFileStore(filepath.Join(data, "controller"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	driver, err := native.New(filepath.Join(data, "native"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = driver.Close() }()
+	_, err = driver.Create(t.Context(), runtime.CreateSpec{ID: "sbx_running", Owner: "alice", Command: []string{"sh", "-c", "sleep 60"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	code := run(t.Context(), nil, env(identity(t, map[string]string{"CELLA_DATA_DIR": data})), io.Discard, &stderr)
+	if code != 1 || !strings.Contains(stderr.String(), "already in use") {
+		t.Fatalf("second start: %d %s", code, stderr.String())
+	}
+	state, err := driver.Inspect(t.Context(), "sbx_running")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Phase != runtime.Running {
+		t.Fatalf("second start mutated active workload: %+v", state)
+	}
+	if err := driver.Stop(t.Context(), "sbx_running"); err != nil {
+		t.Fatalf("running workload no longer stoppable: %v", err)
+	}
+}
+
+func TestReadinessIncludesRuntime(t *testing.T) {
+	data := t.TempDir()
+	_, internal, _, stop := startServeWithLog(t, map[string]string{"CELLA_DATA_DIR": data})
+	defer stop()
+	if err := os.Remove(filepath.Join(data, "native")); err != nil {
+		t.Fatal(err)
+	}
+	if code, body := get(t, internal+"/readyz"); code != 503 {
+		t.Fatalf("missing runtime ready: %d %s", code, body)
 	}
 }
