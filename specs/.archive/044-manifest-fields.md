@@ -58,7 +58,7 @@ states it:
 | `user` | string | the image's | a uid, `uid:gid`, or a user name |
 | `resources.cpu`, `.memory`, `.disk` | `Quantity` | `Defaults.CPU`, `.Memory`, `.Disk` | Kubernetes quantity syntax, decimal and binary SI, positive |
 | `workspace.path` | string | `/workspace` | absolute, clean, not `/`, not under `/run/cella` |
-| `workspace.source` | enum | `empty` | `empty` only; `git` and `volume` are `capability_unsupported` until [[019-volumes]] lands them |
+| `workspace.source` | enum | `empty` | `empty` only; `git` waits on the clone the contract describes and `volume` on [[019-volumes]], and both are `capability_unsupported` until then |
 | `lifecycle.autoStop` | `Duration` | `Defaults.AutoStop` | Go syntax and positive, or `never` |
 | `lifecycle.ttl` | `Duration` | `Defaults.TTL` | Go syntax and positive, or `never` |
 | `lifecycle.autoDelete` | `Duration` | `Defaults.AutoDelete` | Go syntax and positive, or `never` |
