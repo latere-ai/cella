@@ -20,6 +20,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -135,10 +136,21 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	if err := runtimeDriver.Preflight(ctx); err != nil {
 		return fail(stderr, fmt.Errorf("runtime preflight: %w", err))
 	}
-	control, err := controller.Open(controller.Options{Store: store, Driver: runtimeDriver, Environment: cfg.DefaultEnvironment})
+	control, err := controller.Open(controller.Options{
+		Store: store, Driver: runtimeDriver, Environment: cfg.DefaultEnvironment,
+		Lease: controller.LocalLease{}, ReapInterval: cfg.ReapInterval, TouchInterval: cfg.TouchInterval,
+	})
 	if err != nil {
 		return fail(stderr, fmt.Errorf("controller: %w", err))
 	}
+	// The reaper is this process's clock: one tick applies the lifecycle
+	// rules to the environment cellad drives (spec 005). One cellad is the
+	// only writer of its environment, so it holds its own lease.
+	reaperCtx, cancelReaper := context.WithCancel(ctx)
+	reaperDone := make(chan struct{})
+	go func() { defer close(reaperDone); control.RunReaper(reaperCtx) }()
+	stopReaper := sync.OnceFunc(func() { cancelReaper(); <-reaperDone })
+	defer stopReaper()
 	handler, err := api.New(api.Options{Controller: control, Verifier: identity.Verifier, Authorizer: identity.Authorizer, MaxBodyBytes: cfg.MaxBodyBytes, MaxUploadBytes: cfg.MaxUploadBytes})
 	if err != nil {
 		return fail(stderr, fmt.Errorf("API: %w", err))
@@ -208,6 +220,8 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	for _, s := range servers {
 		_ = s.Shutdown(shutdownCtx)
 	}
+	// The reaper drives the runtime, so it ends before the runtime does.
+	stopReaper()
 	if err := runtimeDriver.Close(); err != nil {
 		return fail(stderr, fmt.Errorf("runtime shutdown: %w", err))
 	}
