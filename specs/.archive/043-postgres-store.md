@@ -1,6 +1,6 @@
 ---
 title: "Postgres store: the store contract of spec 010, its memory and Postgres adapters, and the lost rule that recovers a sandbox"
-status: in-progress
+status: complete
 track: core
 depends_on:
   - specs/010-state.md
@@ -78,11 +78,10 @@ written down once.
 ### The contract
 
 ```go
-// Store is the whole of design 010 this slice carries. The embedded Tx
-// runs one statement per call, each in its own transaction; Tx(ctx, fn)
-// runs many in one.
+// Store is the whole of design 010 this slice carries. Every call runs in a
+// transaction, so a write and the journal row that records it commit
+// together or not at all.
 type Store interface {
-	Tx
 	Tx(ctx context.Context, fn func(Tx) error) error
 	// Durable reports whether what is written outlives this process.
 	Durable() bool
@@ -98,6 +97,12 @@ type Tx interface {
 	Leases() Leases
 }
 ```
+
+[[010-state]] also gives `Store` the method sets outside a transaction, each
+call its own. They are sugar over `Tx(ctx, fn)` and this slice does not build
+them: every caller in the tree writes an object and its journal row together,
+which is a transaction by definition, and a second way to reach the same
+statements is a second thing to keep right.
 
 `Object` is one desired row: `Kind`, `ID`, `Owner`, `Name`,
 `Environment`, `Phase`, `Labels`, the resolved manifest as `Data`, the
@@ -211,13 +216,14 @@ imports nothing under `internal/`:
 // after LostGrace.
 type Durable interface {
 	Store
-	// Write stores one object at its version and appends the mutation to
-	// the journal in one transaction. Version 0 creates; a version that
-	// moved is ErrVersionConflict.
-	Write(ctx context.Context, obj v1.Sandbox, version int64, mutation string) (int64, error)
+	// Durable reports whether what is written outlives this process.
+	Durable() bool
+	// Write stores one object at the version this process last saw and
+	// appends the mutation to the journal, in one transaction.
+	Write(ctx context.Context, obj v1.Sandbox, mutation string) error
 	// Remove deletes one object and appends the mutation, in one
 	// transaction.
-	Remove(ctx context.Context, id string, version int64, mutation string) error
+	Remove(ctx context.Context, id, mutation string) error
 	// Rebuild replaces the observed rows of this environment.
 	Rebuild(ctx context.Context, environment string, states []driver.State) error
 }
@@ -225,10 +231,13 @@ type Durable interface {
 
 One call is one mutation and one journal row, so "every mutation is
 journaled" holds by construction rather than by a rule somebody has to
-remember. The controller keeps the version of every object it holds
-beside the object; a durable store takes the per object write and a
-plain `Store` takes `Save` of the whole map, which is what a single
-process with one JSON snapshot already did.
+remember. The version is the adapter's rather than the controller's: the
+bridge in `internal/store` remembers the version of every row this process
+read or wrote and writes conditionally on it, so a second replica cannot
+overwrite a row it never read and the controller holds no bookkeeping it
+would have to keep right. A durable store takes the per object write; a plain
+`Store` takes `Save` of the whole map, which is what a single process with
+one JSON snapshot already did.
 
 ### Memory
 
@@ -270,9 +279,9 @@ DSN belongs to the hosted plane that deploys this binary.
 `Ready` is `SELECT 1` inside a one second budget, which is the readiness
 check `cellad` mounts when the database store is in use.
 
-Tables, with the indexes of [[010-state]]: `objects`, `observed`,
-`journal`, `secret_values`, `leases`, and the seams `revocations`,
-`queue`, `operations`, `workers`.
+Tables, with the indexes of [[010-state]]: `objects`, `observed`, `events`,
+`secret_values`, `leases`, and the seams `revocations`, `queue`,
+`operations`, `workers`.
 
 ### Leases
 
@@ -336,24 +345,90 @@ recovery, the re-mint and the revocation (slice 045). Volumes
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| One suite over every built method runs against both adapters; the memory adapter is exempt from durability across a restart and from the schema check | `TestMemoryStore`, `TestPostgresStore` over `storetest.Run` | not built |
-| `Put` with a stale version is `ErrVersionConflict`; with the current version it advances it; version 0 creates and a second create conflicts | `storetest` case `Versions` | not built |
-| `(kind, owner, name)` is unique among live rows and reusable after delete; `Count` excludes `Deleting` and deleted rows | `storetest` cases `Names`, `Count` | not built |
-| Writes inside `Tx` commit together or not at all | `storetest` case `Transactions` | not built |
-| `Rebuild` replaces one environment's observed rows, leaves another environment's alone, and touches no `objects` row or status | `storetest` case `Observed` | not built |
-| The journal appends one row per mutation with a per object sequence, reads back newest first, and prunes by age | `storetest` case `Journal` | not built |
-| Two holders contend for one lease: one holds, the other acquires after the term lapses, the holder renews, and a release frees it at once | `storetest` case `Leases` | not built |
-| A value round trips through the envelope; the row holds neither the plaintext nor the key; a wrong key fails to open | `storetest` case `Values` | not built |
-| A schema ahead of the binary and a dirty migration each refuse to start, naming the version | `TestSchemaGuards` | not built |
-| The Postgres adapter runs the whole suite against a real server in a container, and skips with one sentence where no container runtime answers | `TestPostgresStore` | not built |
-| A desired sandbox with no observed counterpart is `Lost`; one in `Pending`, `Failed` or `Deleting` is not | `TestLostForVanishedSandbox`, `TestLostSuppressedForEndedSandbox` | not built |
-| A sandbox that reappears between the list and the action is not declared lost | `TestLostRevalidatesBeforeActing` | not built |
-| With a durable store a lost sandbox is `Recovering` and then recreated with the same id, name, labels and lifecycle, and the journal holds the mutations in order | `TestRecoveryRecreates` | not built |
-| A create that reports `ErrAlreadyExists` during recovery is adopted | `TestRecoveryAdopts` | not built |
-| Recovery attempts back off and end in `Failed` with reason `RecoveryExhausted` | `TestRecoveryExhausts` | not built |
-| Without a durable store a lost sandbox is `Deleting` with reason `Lost` after `LostGrace` and not one tick before | `TestLostGraceReaps` | not built |
-| `Observed.Rebuild` is called once per tick with what `List` returned, and an errored `List` rebuilds nothing | `TestRebuildPerTick` | not built |
-| A native sandbox whose driver object is deleted behind the controller's back is recovered on the next tick with the same id and labels | `TestRecoveryEndToEndOverNative` | not built |
-| `CELLA_DB_URL`, `CELLA_DB_MAX_CONNS`, `CELLA_SECRET_KEY` and `CELLA_LOST_GRACE` take their defaults, accept a value, and refuse a malformed one | `TestStoreConfiguration` | not built |
-| The start-up line names the store and whether a lost sandbox is recovered | `TestServeNamesTheStore` | not built |
-| No package outside `internal/store` imports pgx or the migrator | `TestDriverIsConfined` | not built |
+| One suite over every built method runs against both adapters; the memory adapter is exempt from durability across a restart and from the schema check | `TestMemoryStore`, `TestPostgresStore` over `storetest.Run` | built |
+| The suite fails an adapter that answers nothing and one that fails everything, so a passing run says what it proves | `TestSuiteCatchesAStoreThatAnswersNothing`, `TestSuiteCatchesAStoreThatFailsEverything` | built |
+| `Put` with a stale version is `ErrVersionConflict`; with the current version it advances it; version 0 creates and a second create conflicts | `storetest` case `Versions` | built |
+| `(kind, owner, name)` is unique among live rows and reusable after delete; `Count` excludes `Deleting` and deleted rows | `storetest` cases `Names`, `Count` | built |
+| Writes inside `Tx` commit together or not at all | `storetest` case `Transactions` | built |
+| `Rebuild` replaces one environment's observed rows, leaves another environment's alone, and touches no `objects` row or status | `storetest` case `Observed` | built |
+| The journal appends one row per mutation with a per object sequence, reads back newest first, and prunes by age | `storetest` case `Journal` | built |
+| Two holders contend for one lease: one holds, the other acquires after the term lapses, the holder renews, and a release frees it at once | `storetest` case `Leases`, `TestLeaseRenewal`, `TestRenewalStopsWhenTheLeaseMoves` | built |
+| A value round trips through the envelope; the row holds neither the plaintext nor the key; a wrong key fails to open | `storetest` case `Values`, `TestEnvelopeSealsAndOpens`, `TestEnvelopeRefusesTheWrongKey` | built |
+| A schema ahead of the binary and a dirty migration each refuse to start, naming the version | `TestSchemaGuards` | built |
+| The Postgres adapter runs the whole suite against a real server in a container, and skips with one sentence where no container runtime answers | `TestPostgresStore` | built |
+| What one process wrote, the next process reads | `TestDurable` | built |
+| A desired sandbox with no observed counterpart is `Lost`; one in `Pending`, `Failed` or `Deleting` is not | `TestLostForVanishedSandbox`, `TestLostSuppressedForEndedSandbox` | built |
+| A sandbox that reappears between the list and the action is not declared lost, and a driver that does not answer is not evidence of one | `TestLostRevalidatesBeforeActing`, `TestLostRevalidationReportsADriverFailure` | built |
+| With a durable store a lost sandbox is `Recovering` and then recreated with the same id, name, labels and lifecycle, and the journal holds the mutations in order | `TestRecoveryRecreates` | built |
+| A create that reports `ErrAlreadyExists` during recovery is adopted | `TestRecoveryAdopts` | built |
+| Recovery attempts back off and end in `Failed` with reason `RecoveryExhausted` | `TestRecoveryExhausts`, `TestRecoveryWaitsOutTheBackoff` | built |
+| Without a durable store a lost sandbox is `Deleting` with reason `Lost` after `LostGrace` and not one tick before | `TestLostGraceReaps` | built |
+| `Observed.Rebuild` is called once per tick with what `List` returned, and a rebuild that fails holds the lost rule for that tick | `TestRebuildPerTick`, `TestRebuildIsNotAskedOfASnapshotStore` | built |
+| A native sandbox whose driver object is deleted behind the controller's back is recovered on the next tick with the same id and labels | `TestRecoveryEndToEndOverNative` | built |
+| `CELLA_DB_URL`, `CELLA_DB_MAX_CONNS`, `CELLA_SECRET_KEY` and `CELLA_LOST_GRACE` take their defaults, accept a value, and refuse a malformed one | `TestStoreDefaults`, `TestStoreConfiguration` | built |
+| The start-up line names the store and whether a lost sandbox is recovered, and a database that does not answer is a start-up failure | `TestServeNamesTheStore`, `TestTheStartUpLineReportsRecovery`, `TestServeRefusesADatabaseItCannotReach` | built |
+| No package outside `internal/store/postgres` imports the Postgres driver or the migrator | `TestDriverIsConfined` | built |
+
+## Outcome
+
+`internal/store` is the contract of [[010-state]] and `internal/store/memory`
+and `internal/store/postgres` are its two adapters, proven by one suite in
+`internal/store/storetest`. The suite runs against a real Postgres in a
+container, one database per case, and against the memory adapter always; it
+also runs against two deliberately wrong adapters through a recorder, one
+that answers nothing and one that fails everything, and every case is
+required to fail both. A suite that only passes says nothing about the
+adapter it would catch, which is the pattern
+[[032-runtime-conformance-suite]] set for `runtime/runtimetest`.
+
+Two rules the suite holds every adapter to, learned from running it against
+Postgres first: a statement that fails ends its transaction, so a caller
+rolls back and retries rather than writing on, and a JSON column is a value
+and not a byte string, so a comparison is of documents and not of the
+server's formatter.
+
+The controller keeps `Load`, `Save` and `Close`, and takes the per object
+write where the store is also a `Durable`. `persist` and `forget` are the two
+places the controller writes state, so every mutation of a sandbox is one
+conditional write and one journal row. The `lost` rule and recovery are in
+`controller/recovery.go`: `vanished` is the desired sandboxes with no
+counterpart in the driver's list, `enforceLost` re-reads each one under the
+lock and only `ErrNotFound` confirms it, and then either `recoverLocked`
+recreates it by the create order or `graceLocked` counts the grace and
+deletes it. `RunReaper` runs its first tick at once, which is the start-up
+reconcile: desired state has just been read from the store and everything in
+it is compared against the driver before the process serves a request.
+
+`go tool lateregate` passes all 16 gates. `go test -race ./...` passes.
+Coverage: `internal/store` 90.2%, `internal/store/memory` 97.8%,
+`internal/store/postgres` 93.5%, `internal/store/postgres/migrations` 94.1%,
+`internal/store/storetest` 90.2%, `controller` 96.2%, `cmd/cellad` 91.2%,
+`internal/config` 98.6%; every package clears 90%. The end-to-end case is
+`TestRecoveryEndToEndOverNative`: a native sandbox whose object is deleted
+behind the controller's back is `Lost`, `Recovering` and running again under
+the same id and labels within one tick, with the three mutations in the
+journal in that order.
+
+The Postgres suite ran for real: `postgres:17-alpine` under Testcontainers,
+one fresh database per case, terminated in `TestMain`. The container runtime
+writes its own state under `TMPDIR`, so the `tempdir` gate admits `podman`
+and `storage-run-501` with the reason, which is what `latere-ai/auth` and
+`latere-ai/platform` do rather than gating the suite behind a variable that
+would leave the adapter unmeasured in CI.
+
+Left open, each with the slice that closes it. `Values` is built and has no
+caller: the `Secret` kind, `Rewrap` and `egress.Compile` are slice 046 and
+[[018-egress-and-secrets]]. `Revocations` is the interface and the table
+only; the mint and the revocation are slice 045. `Queue` is the interface and
+the table only; the order `Dequeue` returns is [[020-scheduling-and-sets]]
+and slice 038. `Operations` and `workers` are the interfaces and the tables
+only; the worker protocol is [[021-data-plane-workers]]. The journal's
+delivery half, `Pending`, `Acknowledge`, `Defer` and `Drop`, is
+[[009-events]]. Recovery re-pushes no egress map, mints no token and
+reattaches no volume: those are steps 3 to 5 of the create order and arrive
+with slices 039 and 045 and [[019-volumes]]. `CELLA_RECOVERY_ATTEMPTS` is an
+`Options` field with its default and not yet a variable. The coordinates
+check of [[031-hosted-sandbox-consolidation]] walks `runtime/` and
+`controller/`; adding `internal/store/` to its roots is an edit to
+`runtime/coordinates_test.go`, which two other slices hold open, so it is
+left for whoever merges them.
