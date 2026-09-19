@@ -5,6 +5,7 @@ package postgres_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -65,15 +66,15 @@ func TestStatementsReportFailures(t *testing.T) {
 				t.Errorf("%s on a caller that gave up was reported as done", tc.name)
 			}
 		}
-		return errClosedCase
+		return errRollback
 	})
-	if err != errClosedCase {
+	if !errors.Is(err, errRollback) {
 		t.Fatalf("the transaction returned %v", err)
 	}
 }
 
-// errClosedCase ends the transaction above without committing it.
-var errClosedCase = context.Canceled
+// errRollback ends the transaction above without committing it.
+var errRollback = errors.New("the case is done")
 
 // TestObservedStateThatIsNotJSON: a row nothing this binary wrote is a read
 // failure and not a zero state, because a zero state would be a sandbox the

@@ -36,8 +36,18 @@ spec:
 hermetic:
   allow: [/usr/bin, /bin]
 
+# The Postgres suite of spec 010 starts a server in a container, and the
+# container runtime writes its own state under TMPDIR. Those entries are the
+# runtime's and outlive every run by design; nothing a test made survives.
 tempdir:
-  allow: {}
+  allow:
+    podman: >-
+      the container runtime's own state under TMPDIR, made when the Postgres
+      suite of internal/store starts its server; it belongs to the runtime and
+      not to a test, and outlives every run by design
+    storage-run-501: >-
+      the container runtime's per-user run directory, the same runtime state
+      as above
 
 # Spec 001's dependency rule: the build list of ./cmd/cellad reaches the
 # standard library, latere.ai/x/pkg, the Kubernetes and Podman clients the
