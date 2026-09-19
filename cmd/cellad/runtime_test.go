@@ -22,14 +22,26 @@ import (
 )
 
 func TestServeRefusesUnavailableRuntime(t *testing.T) {
-	for _, backend := range []string{"k8s", "podman"} {
-		t.Run(backend, func(t *testing.T) {
-			var errOut bytes.Buffer
-			cfg := identity(t, map[string]string{"CELLA_RUNTIME": backend, "CELLA_DATA_DIR": t.TempDir()})
-			if code := run(t.Context(), nil, env(cfg), io.Discard, &errOut); code != 1 || !strings.Contains(errOut.String(), "not implemented") {
-				t.Fatalf("code %d: %s", code, errOut.String())
-			}
-		})
+	var errOut bytes.Buffer
+	cfg := identity(t, map[string]string{"CELLA_RUNTIME": "podman", "CELLA_DATA_DIR": t.TempDir()})
+	if code := run(t.Context(), nil, env(cfg), io.Discard, &errOut); code != 1 || !strings.Contains(errOut.String(), "not implemented") {
+		t.Fatalf("code %d: %s", code, errOut.String())
+	}
+}
+
+// The Kubernetes driver is selected and built, so a node whose cluster is
+// unreachable fails at start-up with the cluster named rather than serving an
+// API over a backend that is not there.
+func TestServeNeedsTheClusterItIsPointedAt(t *testing.T) {
+	var errOut bytes.Buffer
+	cfg := identity(t, map[string]string{
+		"CELLA_RUNTIME":        "k8s",
+		"CELLA_DATA_DIR":       t.TempDir(),
+		"CELLA_K8S_KUBECONFIG": filepath.Join(t.TempDir(), "absent"),
+	})
+	code := run(t.Context(), nil, env(cfg), io.Discard, &errOut)
+	if code != 1 || !strings.Contains(errOut.String(), "kubeconfig") {
+		t.Fatalf("code %d: %s", code, errOut.String())
 	}
 }
 

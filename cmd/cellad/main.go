@@ -31,6 +31,8 @@ import (
 	"latere.ai/x/cella/internal/auth"
 	"latere.ai/x/cella/internal/config"
 	"latere.ai/x/cella/internal/version"
+	"latere.ai/x/cella/runtime"
+	"latere.ai/x/cella/runtime/k8s"
 	"latere.ai/x/cella/runtime/native"
 )
 
@@ -118,8 +120,10 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		return fail(stderr, err)
 	}
 
-	if cfg.Runtime != config.RuntimeNative {
-		return fail(stderr, fmt.Errorf("CELLA_RUNTIME=%s is not implemented; native is available for trusted development with CELLA_ALLOW_UNSAFE_NATIVE=true", cfg.Runtime))
+	switch cfg.Runtime {
+	case config.RuntimeK8s, config.RuntimeNative:
+	default:
+		return fail(stderr, fmt.Errorf("CELLA_RUNTIME=%s is not implemented; k8s drives a cluster and native is trusted local development with CELLA_ALLOW_UNSAFE_NATIVE=true", cfg.Runtime))
 	}
 	// Recovery may change runtime records. Own the state directory before
 	// opening the driver so a second process cannot mutate live workloads.
@@ -128,11 +132,25 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		return fail(stderr, fmt.Errorf("controller store: %w", err))
 	}
 	defer func() { _ = store.Close() }()
-	runtimeDriver, err := native.New(filepath.Join(cfg.DataDir, "native"))
-	if err != nil {
-		return fail(stderr, fmt.Errorf("runtime: %w", err))
+	// A driver that owns local processes is closed at shutdown; one that
+	// drives a cluster owns nothing this process has to release.
+	var runtimeDriver runtime.Driver
+	closeRuntime := func() error { return nil }
+	switch cfg.Runtime {
+	case config.RuntimeK8s:
+		driver, err := k8s.New(cfg.K8s)
+		if err != nil {
+			return fail(stderr, fmt.Errorf("runtime: %w", err))
+		}
+		runtimeDriver = driver
+	default:
+		driver, err := native.New(filepath.Join(cfg.DataDir, "native"))
+		if err != nil {
+			return fail(stderr, fmt.Errorf("runtime: %w", err))
+		}
+		defer func() { _ = driver.Close() }()
+		runtimeDriver, closeRuntime = driver, driver.Close
 	}
-	defer func() { _ = runtimeDriver.Close() }()
 	if err := runtimeDriver.Preflight(ctx); err != nil {
 		return fail(stderr, fmt.Errorf("runtime preflight: %w", err))
 	}
@@ -222,7 +240,7 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	}
 	// The reaper drives the runtime, so it ends before the runtime does.
 	stopReaper()
-	if err := runtimeDriver.Close(); err != nil {
+	if err := closeRuntime(); err != nil {
 		return fail(stderr, fmt.Errorf("runtime shutdown: %w", err))
 	}
 	return 0
