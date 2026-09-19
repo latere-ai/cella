@@ -98,14 +98,18 @@ type Options struct {
 	// GracePeriod is the Pod's termination grace period.
 	GracePeriod time.Duration
 
-	// Client replaces the clientset New would build, for tests and for a
-	// caller that already holds an authenticated connection. REST is the
+	// The three fields below are seams, not configuration: no variable sets
+	// them, internal/config leaves them zero, and a deployment is described
+	// entirely by the fields above.
+	//
+	// Client replaces the clientset New would build, for a caller that
+	// already holds an authenticated connection and for tests. REST is the
 	// configuration the exec subresource dials; a driver with a Client and no
-	// REST serves every call but Exec and the archive transfers.
+	// REST serves every call but Exec and the archive transfers. Now is the
+	// clock every stamp reads.
 	Client kubernetes.Interface
 	REST   *rest.Config
-	// Now is the clock every stamp reads.
-	Now func() time.Time
+	Now    func() time.Time
 }
 
 func (o Options) withDefaults() Options {

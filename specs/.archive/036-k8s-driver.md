@@ -316,6 +316,11 @@ stamping, and the preflight an operator reads before the first sandbox.
   such a key to be stamped legally. One JSON annotation is legal for
   every key and every value, and it is where the rendering input
   already is.
+- **The compare-and-swap is proven against the client double.** The
+  guard is two `test` operations, one on the resource version and one
+  on the spec annotation, and both a lost race and a settled refusal
+  are exercised. RFC 6902 fixes the comparison, so a real API server
+  applies the same one, but no cluster has run it here.
 - **Create and Start both wait.** A create that returns before the Pod
   is scheduled hands the caller an id and no answer. Both wait within
   `CELLA_K8S_READY_TIMEOUT` and roll back what they made, and the error

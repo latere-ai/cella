@@ -52,6 +52,11 @@ func TestK8sDefaultsNameNoDeployment(t *testing.T) {
 	if o.Kubeconfig != "" || o.StorageClass != "" || o.NodeSelector != nil || o.Tolerations != nil || o.ImagePullSecrets != nil {
 		t.Errorf("a cluster-shaped value carries a default: %+v", o)
 	}
+	// The driver's seams are not configuration: no variable reaches them, so
+	// a deployment is described by the table above and nothing else.
+	if o.Client != nil || o.REST != nil || o.Now != nil {
+		t.Errorf("the environment set a seam of the driver: %+v", o)
+	}
 }
 
 func TestK8sReadsEveryVariable(t *testing.T) {

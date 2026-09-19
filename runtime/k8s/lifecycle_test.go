@@ -109,10 +109,14 @@ func TestCreateRollsBackAfterCancellation(t *testing.T) {
 	h.opts.ReadyTimeout = time.Minute
 	ctx, cancel := context.WithCancel(t.Context())
 	const id = "sbx_cancelled"
-	go func() {
-		time.Sleep(50 * time.Millisecond)
-		cancel()
-	}()
+	// The caller hangs up at the first read of the Pod, which is inside the
+	// wait for readiness, so the create fails where the rollback has both
+	// objects to clean up.
+	var once sync.Once
+	h.cs.PrependReactor("get", "pods", func(k8stesting.Action) (bool, kruntime.Object, error) {
+		once.Do(cancel)
+		return false, nil, nil
+	})
 	if _, err := h.Create(ctx, spec(id)); !errors.Is(err, context.Canceled) {
 		t.Fatalf("Create = %v, want the caller's cancellation", err)
 	}
