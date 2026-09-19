@@ -335,8 +335,12 @@ func (g *gate) upstreamRequest(r *http.Request, host, path, principal string) (*
 // stock client sends the proxy URL's userinfo this way, so the sandbox's
 // credential arrives without the workload doing anything.
 func proxyCredential(header string) string {
-	value, ok := strings.CutPrefix(strings.TrimSpace(header), "Basic ")
-	if !ok {
+	trimmed := strings.TrimSpace(header)
+	scheme, value, ok := strings.Cut(trimmed, " ")
+	// The scheme is case insensitive, and a client that writes it in
+	// another case is a client whose sandbox would otherwise be refused at
+	// its own door.
+	if !ok || !strings.EqualFold(scheme, "Basic") {
 		return ""
 	}
 	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(value))
