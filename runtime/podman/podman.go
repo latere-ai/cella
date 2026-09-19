@@ -121,6 +121,7 @@ type Driver struct {
 }
 
 var _ driver.Driver = (*Driver)(nil)
+var _ driver.Attacher = (*Driver)(nil)
 
 // New builds a driver over the named socket, or over the default candidates
 // when none is named. It opens no connection: Preflight decides which
@@ -147,9 +148,10 @@ func (d *Driver) Isolation() string { return v1.IsolationContainer }
 // Capabilities declares what this driver enforces. Files, because the archive
 // endpoints answer on a stopped container as well as a running one. Detach,
 // because the driver keeps nothing in this process and a second instance over
-// the same engine reads every sandbox back.
+// the same engine reads every sandbox back. Attach, because the engine runs an
+// exec session with a TTY over a connection it speaks bytes both ways on.
 func (d *Driver) Capabilities() driver.Capabilities {
-	return driver.Capabilities{Files: true, Detach: true}
+	return driver.Capabilities{Files: true, Detach: true, Attach: true}
 }
 
 // Socket is the socket the driver last found answering, for the start-up line.

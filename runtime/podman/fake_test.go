@@ -5,6 +5,7 @@ package podman
 
 import (
 	"archive/tar"
+	"bufio"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -90,8 +91,14 @@ type fakeExec struct {
 	cmd       []string
 	env       []string
 	dir       string
+	tty       bool
+	stdin     bool
 	result    fakeExecResult
 	running   bool
+	// window is the last size a resize set, as rows then columns.
+	window [2]int
+	// typed is everything the client wrote into the session's input.
+	typed []byte
 }
 
 // newFake starts an engine on a unix socket in a directory of its own, removed
@@ -486,7 +493,7 @@ func (f *fake) createExec(w http.ResponseWriter, r *http.Request, container stri
 		result = f.run(in.Cmd, in.Env, in.WorkingDir)
 	}
 	id := "exec" + strconv.Itoa(len(f.execs)+1)
-	f.execs[id] = &fakeExec{container: container, cmd: in.Cmd, env: in.Env, dir: in.WorkingDir, result: result, running: true}
+	f.execs[id] = &fakeExec{container: container, cmd: in.Cmd, env: in.Env, dir: in.WorkingDir, tty: in.Tty, stdin: in.AttachStdin, result: result, running: true}
 	writeJSON(w, map[string]string{"Id": id})
 }
 
@@ -501,6 +508,10 @@ func (f *fake) exec(w http.ResponseWriter, r *http.Request, rest string) {
 	}
 	switch verb {
 	case "start":
+		if e.tty || e.stdin {
+			f.hijackExec(w, r, e)
+			return
+		}
 		w.Header().Set("Content-Type", "application/octet-stream")
 		_, _ = w.Write(frame(1, e.result.stdout))
 		_, _ = w.Write(frame(2, e.result.stderr))
@@ -519,9 +530,112 @@ func (f *fake) exec(w http.ResponseWriter, r *http.Request, rest string) {
 		out := execInspect{ExitCode: e.result.code, Running: e.running}
 		f.mu.Unlock()
 		writeJSON(w, out)
+	case "resize":
+		rows, _ := strconv.Atoi(r.URL.Query().Get("h"))
+		cols, _ := strconv.Atoi(r.URL.Query().Get("w"))
+		f.mu.Lock()
+		e.window = [2]int{rows, cols}
+		f.mu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
 	default:
 		refuse(w, http.StatusNotFound, "no verb "+verb)
 	}
+}
+
+// hijackExec answers an upgrade with the raw stream the engine speaks a
+// terminal over. A session the arrangement blocks is interactive: it echoes
+// what is typed, as a terminal does, until the client goes away. One that does
+// not block runs once: it takes the input the client half-closed, writes the
+// arranged output, and ends. A TTY stream is unframed, as podman's is; without
+// one the framing stays.
+func (f *fake) hijackExec(w http.ResponseWriter, r *http.Request, e *fakeExec) {
+	// The request body is drained before the connection is taken over, or the
+	// bytes still in the reader would be read back as the session's input.
+	_, _ = io.Copy(io.Discard, r.Body)
+	conn, brw, err := http.NewResponseController(w).Hijack()
+	if err != nil {
+		refuse(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer func() { _ = conn.Close() }()
+	_, _ = brw.WriteString("HTTP/1.1 200 OK\r\nContent-Type: application/vnd.docker.raw-stream\r\n\r\n")
+	if err = brw.Flush(); err != nil {
+		return
+	}
+	if e.result.block {
+		f.echo(e, brw)
+		return
+	}
+	if e.stdin {
+		typed, _ := io.ReadAll(brw)
+		f.mu.Lock()
+		e.typed = typed
+		f.mu.Unlock()
+	}
+	if e.tty {
+		_, _ = brw.WriteString(e.result.stdout + e.result.stderr)
+	} else {
+		_, _ = brw.Write(frame(1, e.result.stdout))
+		_, _ = brw.Write(frame(2, e.result.stderr))
+	}
+	_ = brw.Flush()
+	f.mu.Lock()
+	e.running = false
+	f.mu.Unlock()
+}
+
+// echo is the interactive half: every byte typed is recorded and written back.
+func (f *fake) echo(e *fakeExec, brw *bufio.ReadWriter) {
+	b := make([]byte, 4096)
+	for {
+		n, err := brw.Read(b)
+		if n > 0 {
+			f.mu.Lock()
+			e.typed = append(e.typed, b[:n]...)
+			f.mu.Unlock()
+			if _, werr := brw.Write(b[:n]); werr != nil {
+				break
+			}
+			if brw.Flush() != nil {
+				break
+			}
+		}
+		if err != nil {
+			break
+		}
+	}
+	f.mu.Lock()
+	e.running = false
+	f.mu.Unlock()
+}
+
+// typedInto is everything the client wrote into a session.
+func (f *fake) typedInto(e *fakeExec) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return string(e.typed)
+}
+
+// windowOf is the last size a resize set on a session, as rows then columns.
+func (f *fake) windowOf(e *fakeExec) [2]int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return e.window
+}
+
+// session is the one exec session the engine holds, for a case that asserts
+// what was created, resized or typed.
+func (f *fake) session(t *testing.T) *fakeExec {
+	t.Helper()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.execs) != 1 {
+		t.Fatalf("the engine holds %d exec sessions, want one", len(f.execs))
+	}
+	for _, e := range f.execs {
+		return e
+	}
+	return nil
 }
 
 // frame renders one payload in podman's stream framing.

@@ -4,6 +4,7 @@
 package podman
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -62,6 +63,67 @@ func newClient(socket string) *client {
 }
 
 func (c *client) libpodURL(p string) string { return "http://d/v" + apiVersion + "/libpod" + p }
+
+// libpodPath is the same route without the placeholder host, which a hijacked
+// request writes into its own request line.
+func (c *client) libpodPath(p string) string { return "/v" + apiVersion + "/libpod" + p }
+
+// dial opens one connection to the socket outside the pooled client, for a
+// request whose reply is a raw byte stream rather than an HTTP body.
+func (c *client) dial(ctx context.Context) (net.Conn, error) {
+	var d net.Dialer
+	return d.DialContext(ctx, "unix", c.socket)
+}
+
+// hijack issues an upgrade request and hands back the connection the engine
+// then speaks bytes over. It is written by hand because net/http gives no way
+// to read a 200 reply whose body has no framing: podman answers the exec
+// start either with 101 and an upgraded connection or with 200 and the stream
+// in place of a body.
+func (c *client) hijack(ctx context.Context, path string, body any) (net.Conn, *bufio.Reader, error) {
+	conn, err := c.dial(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	var payload []byte
+	if body != nil {
+		if payload, err = json.Marshal(body); err != nil {
+			_ = conn.Close()
+			return nil, nil, err
+		}
+	}
+	var req bytes.Buffer
+	fmt.Fprintf(&req, "POST %s HTTP/1.1\r\n", path)
+	req.WriteString("Host: d\r\n")
+	req.WriteString("Content-Type: application/json\r\n")
+	req.WriteString("Connection: Upgrade\r\n")
+	req.WriteString("Upgrade: tcp\r\n")
+	fmt.Fprintf(&req, "Content-Length: %d\r\n\r\n", len(payload))
+	req.Write(payload)
+	if _, err = conn.Write(req.Bytes()); err != nil {
+		_ = conn.Close()
+		return nil, nil, err
+	}
+	br := bufio.NewReader(conn)
+	// The accepted reply's body is never closed: a 200 upgrade has no framing,
+	// so closing it would drain the hijacked stream and block. The caller reads
+	// from br and tears the session down by closing conn. Only the refused
+	// reply is closed, after the connection, so the drain fails at once.
+	resp, err := http.ReadResponse(br, &http.Request{Method: http.MethodPost})
+	if err != nil {
+		_ = conn.Close()
+		return nil, nil, err
+	}
+	if resp.StatusCode != http.StatusSwitchingProtocols && resp.StatusCode != http.StatusOK {
+		// The refusal's own message is read before the connection goes, so the
+		// caller sees what podman said and not only the status.
+		serr := statusErr(resp)
+		_ = resp.Body.Close()
+		_ = conn.Close()
+		return nil, nil, serr
+	}
+	return conn, br, nil
+}
 func (c *client) compatURL(p string) string { return "http://d/v" + apiVersion + p }
 
 // do issues one request with an optional JSON body and returns the raw
