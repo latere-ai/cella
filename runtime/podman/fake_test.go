@@ -7,6 +7,7 @@ import (
 	"archive/tar"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"io"
 	"maps"
 	"net"
@@ -269,7 +270,7 @@ func (f *fake) createVolume(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	f.volumes[in.Name] = maps.Clone(in.Labels)
-	writeJSON(w, volumeInspect{Name: in.Name, Labels: in.Labels})
+	writeJSON(w, volumeInspect(in))
 }
 
 func (f *fake) listVolumes(w http.ResponseWriter, r *http.Request) {
@@ -604,7 +605,7 @@ func (f *fake) archive(w http.ResponseWriter, r *http.Request, name string) {
 		tr := tar.NewReader(r.Body)
 		for {
 			h, err := tr.Next()
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				w.WriteHeader(http.StatusOK)
 				return
 			}

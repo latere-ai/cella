@@ -65,10 +65,13 @@ func (d *Driver) Logs(ctx context.Context, id string, req driver.LogsRequest) (i
 		return nil, fmt.Errorf("podman: reading the logs of %s: %w", id, serr)
 	}
 	pr, pw := io.Pipe()
+	body := resp.Body
 	go func() {
-		defer func() { _ = resp.Body.Close() }()
+		// The body is closed here rather than by the caller: the stream is
+		// what the reader reads, and closing the reader ends the request.
+		defer func() { _ = body.Close() }()
 		defer cancel()
-		_ = pw.CloseWithError(demux(resp.Body, pw, pw))
+		_ = pw.CloseWithError(demux(body, pw, pw))
 	}()
 	return &logStream{PipeReader: pr, cancel: cancel}, nil
 }

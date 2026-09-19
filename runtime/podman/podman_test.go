@@ -61,8 +61,7 @@ func TestPreflightSockets(t *testing.T) {
 	f := newFake(t)
 	absent := path.Join(t.TempDir(), "x")
 
-	d, err := New(Options{})
-	if err != nil {
+	if _, err := New(Options{}); err != nil {
 		t.Fatal(err)
 	}
 	if got := DefaultSockets(); len(got) == 0 || !strings.HasSuffix(got[len(got)-1], "/run/podman/podman.sock") {
@@ -73,7 +72,7 @@ func TestPreflightSockets(t *testing.T) {
 		t.Fatalf("DefaultSockets with XDG_RUNTIME_DIR = %v", got)
 	}
 
-	d, err = New(Options{Socket: absent})
+	d, err := New(Options{Socket: absent})
 	if err != nil {
 		t.Fatal(err)
 	}
