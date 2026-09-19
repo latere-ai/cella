@@ -78,7 +78,7 @@ func archive(t *testing.T, name, body string, typ byte) []byte {
 func TestNativeEndToEnd(t *testing.T) {
 	ctx := context.Background()
 	d, root := fresh(t)
-	if d.Name() != "native" || d.Isolation() != driver.IsolationNone || !d.Capabilities().Files || d.Capabilities().Attach || d.Capabilities().Detach {
+	if d.Name() != "native" || d.Isolation() != driver.IsolationNone || !d.Capabilities().Files || !d.Capabilities().Attach || d.Capabilities().Detach {
 		t.Fatal("capabilities")
 	}
 	check(t, d.Preflight(ctx))
@@ -165,7 +165,7 @@ func TestInvalidAndUnsupported(t *testing.T) {
 			t.Fatal(s)
 		}
 	}
-	for _, req := range []driver.ExecRequest{{}, {Command: []string{"true"}, Timeout: -1}, {Command: []string{"true"}, TTY: true}, {Command: []string{"true"}, Stdin: strings.NewReader("")}, {Command: []string{"true"}, Workdir: "/outside"}, {Command: []string{"true"}, Workdir: "/workspace/missing"}, {Command: []string{"/no-such-command"}}} {
+	for _, req := range []driver.ExecRequest{{}, {Command: []string{"true"}, Timeout: -1}, {Command: []string{"true"}, Workdir: "/outside"}, {Command: []string{"true"}, Workdir: "/workspace/missing"}, {Command: []string{"/no-such-command"}}} {
 		if _, err := d.Exec(ctx, "one", req); err == nil {
 			t.Fatal(req)
 		}

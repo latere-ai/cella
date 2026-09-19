@@ -59,7 +59,7 @@ func (d *Driver) startMainLocked(ctx context.Context, id string, r *record) erro
 		return err
 	}
 	argv := append(append([]string{}, r.Command...), r.Args...)
-	e, err := d.execLocked(ctx, id, driver.ExecRequest{Command: argv})
+	e, err := d.execLocked(ctx, id, driver.ExecRequest{Command: argv}, 0, 0)
 	if err != nil {
 		_ = log.Close()
 		r.State.Phase = "Failed"

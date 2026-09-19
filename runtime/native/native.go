@@ -39,6 +39,7 @@ type Driver struct {
 }
 
 var _ driver.Driver = (*Driver)(nil)
+var _ driver.Attacher = (*Driver)(nil)
 var validID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`)
 
 func New(root string) (*Driver, error) {
@@ -75,9 +76,11 @@ func New(root string) (*Driver, error) {
 	}
 	return d, nil
 }
-func (d *Driver) Name() string                        { return "native" }
-func (d *Driver) Isolation() string                   { return driver.IsolationNone }
-func (d *Driver) Capabilities() driver.Capabilities   { return driver.Capabilities{Files: true} }
+func (d *Driver) Name() string      { return "native" }
+func (d *Driver) Isolation() string { return driver.IsolationNone }
+func (d *Driver) Capabilities() driver.Capabilities {
+	return driver.Capabilities{Files: true, Attach: ptySupported}
+}
 func (d *Driver) Preflight(ctx context.Context) error { return d.Ready(ctx) }
 func (d *Driver) Ready(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
