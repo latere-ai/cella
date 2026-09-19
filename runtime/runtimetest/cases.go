@@ -543,7 +543,11 @@ func attachResize(t tb, open func() runtime.Driver, opts Options) {
 	p.await(t, "40 120")
 }
 
-func attachCloseEndsTheSession(t tb, open func() runtime.Driver, opts Options) {
+// attachCloseEndsTheStream asserts what Close means on every driver: the
+// session is over for its caller. Whether the process inside also ends is the
+// driver's: a driver over an engine with no exec kill leaves it running until
+// the sandbox stops, and its package documentation says so.
+func attachCloseEndsTheStream(t tb, open func() runtime.Driver, opts Options) {
 	d := open()
 	a := attacherOf(t, d)
 	if a == nil {
@@ -565,10 +569,7 @@ func attachCloseEndsTheSession(t tb, open func() runtime.Driver, opts Options) {
 	expect(t, p.readErr() != nil, "Read after Close reported no error")
 	_, err = s.Write([]byte("x"))
 	expect(t, err != nil, "Write after Close reported no error")
-	ctx, cancel := context.WithTimeout(context.Background(), pollTimeout)
-	defer cancel()
-	_, err = s.Wait(ctx)
-	expect(t, !errors.Is(err, context.DeadlineExceeded), "Wait after Close did not return: %v", err)
+	must(t, s.Close(), "second Close")
 }
 
 func execStdin(t tb, open func() runtime.Driver, opts Options) {

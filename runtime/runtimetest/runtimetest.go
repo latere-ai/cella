@@ -64,7 +64,7 @@ var cases = []caseDef{
 	{"ExecTTY", execTTY},
 	{"AttachRoundTrip", attachRoundTrip},
 	{"AttachResize", attachResize},
-	{"AttachCloseEndsTheSession", attachCloseEndsTheSession},
+	{"AttachCloseEndsTheStream", attachCloseEndsTheStream},
 	{"LogsFollow", logsFollow},
 	{"TarOutAndIn", tarOutAndIn},
 	{"TouchStampsActivity", touchStampsActivity},
