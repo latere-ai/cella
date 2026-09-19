@@ -34,11 +34,19 @@ type Controlled struct {
 	// overwrite.
 	mu       sync.Mutex
 	versions map[string]int64
+
+	// delivery says whether a record this bridge journals is waiting for a
+	// sink; see Delivery.
+	delivery Delivery
 }
 
-// ForController wraps a store for one environment's controller.
-func ForController(s Store, environment string) *Controlled {
-	return &Controlled{store: s, environment: environment, holder: Holder(), versions: map[string]int64{}}
+// ForController wraps a store for one environment's controller. d says
+// whether the records it journals are waiting for a sink.
+func ForController(s Store, environment string, d Delivery) *Controlled {
+	return &Controlled{
+		store: s, environment: environment, holder: Holder(),
+		versions: map[string]int64{}, delivery: d,
+	}
 }
 
 // Store reports the store underneath, for a caller that needs the contract
@@ -212,7 +220,7 @@ func (c *Controlled) record(ctx context.Context, mutation string, obj v1.Sandbox
 	if err != nil {
 		return Event{}, err
 	}
-	return journalRow(rec)
+	return journalRow(rec, c.delivery)
 }
 
 // Rebuild replaces the observed rows of one environment with what its driver

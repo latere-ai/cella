@@ -11,6 +11,20 @@ import (
 	"latere.ai/x/cella/internal/events"
 )
 
+// Delivery is what happens to a record this process journals.
+//
+// Delivered waits for the sink to take it. Journaled stores it acknowledged,
+// which is a record with no sink configured: design 008's per-object feed
+// still reads it, and design 010's retention forgets it on schedule rather
+// than holding a row nothing will ever post.
+type Delivery bool
+
+// The two settings, named so a call site says which it means.
+const (
+	Journaled Delivery = false
+	Delivered Delivery = true
+)
+
 // EventJournal is design 009's journal over one store. Each call opens its
 // own transaction, which is what an operation needs: an exec changes no
 // desired state, so there is no mutation to commit with.
@@ -18,14 +32,17 @@ import (
 // A mutation's record does not come through here. Controlled.Write and
 // Controlled.Remove append it inside the transaction that writes the state,
 // so a record and the change it explains commit together or not at all.
-func EventJournal(s Store) events.Journal { return eventJournal{s} }
+func EventJournal(s Store, d Delivery) events.Journal { return eventJournal{s, d} }
 
-type eventJournal struct{ store Store }
+type eventJournal struct {
+	store    Store
+	delivery Delivery
+}
 
 // Append writes one record. The journal assigns the sequence, so the record
 // the caller built carries none and the row's column is authoritative.
 func (j eventJournal) Append(ctx context.Context, r events.Record) error {
-	row, err := journalRow(r)
+	row, err := journalRow(r, j.delivery)
 	if err != nil {
 		return err
 	}
@@ -72,10 +89,11 @@ func (j eventJournal) Drop(ctx context.Context, id string) error {
 }
 
 // journalRow splits one record into the columns and the payload. A record of
-// a type design 009 does not deliver is stored acknowledged: design 010 keeps
-// one row per mutation, and a row nothing will ever post is finished the
-// moment it is written rather than pending forever.
-func journalRow(r events.Record) (Event, error) {
+// a type design 009 does not deliver, and every record where no sink is
+// configured, is stored acknowledged: design 010 keeps one row per mutation,
+// and a row nothing will ever post is finished the moment it is written
+// rather than pending forever.
+func journalRow(r events.Record, d Delivery) (Event, error) {
 	if err := r.Valid(); err != nil {
 		return Event{}, err
 	}
@@ -86,7 +104,7 @@ func journalRow(r events.Record) (Event, error) {
 	row := Event{
 		ID: r.ID, ObjectID: r.Object.ID, Type: string(r.Type), At: r.Time, Payload: payload,
 	}
-	if !events.Deliverable(r.Type) {
+	if d == Journaled || !events.Deliverable(r.Type) {
 		row.AckedAt = r.Time
 	}
 	return row, nil
