@@ -119,19 +119,6 @@ type Phase struct {
 	Phase string `json:"phase"`
 }
 
-// Recovery is the data of the two recovery types: the phase, and which
-// recreation this was, so a reader of the feed tells the first from the
-// last one the bound allows.
-type Recovery struct {
-	Phase   string `json:"phase"`
-	Attempt int    `json:"attempt"`
-}
-
-// Update is the data of sandbox.updated: the paths an apply changed.
-type Update struct {
-	Paths []string `json:"paths"`
-}
-
 // Exec is the data of sandbox.exec: how the command ended and how long it
 // took. The command itself is never here. A command line is where a secret
 // reaches a process, and a record that cannot hold the string needs no scan

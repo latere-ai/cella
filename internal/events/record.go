@@ -128,6 +128,7 @@ const (
 	ReasonExited            Reason = "Exited"
 	ReasonLost              Reason = "Lost"
 	ReasonCreateFailed      Reason = "CreateFailed"
+	ReasonDriverFailed      Reason = "DriverFailed"
 	ReasonRecoveryExhausted Reason = "RecoveryExhausted"
 )
 
@@ -135,7 +136,27 @@ const (
 // reason to it.
 var Reasons = []Reason{
 	ReasonRequest, ReasonAutoStop, ReasonAutoDelete, ReasonExpired,
-	ReasonExited, ReasonLost, ReasonCreateFailed, ReasonRecoveryExhausted,
+	ReasonExited, ReasonLost, ReasonCreateFailed, ReasonDriverFailed,
+	ReasonRecoveryExhausted,
+}
+
+// ReasonOf maps a status reason to the closed enum. A driver names failures
+// of its own that design 009's enum does not, and DriverFailed is the value
+// the enum has for a failure this contract does not name; the sandbox's own
+// status keeps the driver's word for it. A reason outside the enum on a
+// transition that is not terminal is dropped, because only a terminal
+// transition carries one.
+func ReasonOf(status string, t Type) Reason {
+	reason := Reason(status)
+	switch {
+	case status == "":
+		return ""
+	case reason.Known():
+		return reason
+	case Terminal(t):
+		return ReasonDriverFailed
+	}
+	return ""
 }
 
 // Known reports whether a reason is in the enum.

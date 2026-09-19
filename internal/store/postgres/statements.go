@@ -286,13 +286,86 @@ func (x journal) Append(ctx context.Context, e store.Event) (int64, error) {
 		e.At = time.Now().UTC()
 	}
 	var seq int64
-	err := x.q.QueryRow(ctx, `insert into events (id, object_id, seq, type, at, payload)
-		select $1, $2, coalesce(max(seq), 0) + 1, $3, $4, $5 from events where object_id = $2
-		returning seq`, e.ID, e.ObjectID, e.Type, e.At, e.Payload).Scan(&seq)
+	err := x.q.QueryRow(ctx, `insert into events (id, object_id, seq, type, at, payload, acked_at)
+		select $1, $2, coalesce(max(seq), 0) + 1, $3, $4, $5, $6 from events where object_id = $2
+		returning seq`, e.ID, e.ObjectID, e.Type, e.At, e.Payload, nullTime(e.AckedAt)).Scan(&seq)
 	if err != nil {
 		return 0, fmt.Errorf("store: appending to the journal: %w", err)
 	}
 	return seq, nil
+}
+
+// Pending takes each object's lowest unfinished sequence in a subquery and
+// filters by the due time outside it. Filtering first would let sequence two
+// overtake a deferred sequence one, which is the one ordering the contract
+// promises.
+func (x journal) Pending(ctx context.Context, limit int, now time.Time) ([]store.Event, error) {
+	if limit <= 0 {
+		limit = store.DefaultPageLimit
+	}
+	rows, err := x.q.Query(ctx, `select id, object_id, seq, type, at, payload, attempts,
+			coalesce(next_attempt_at, to_timestamp(0))
+		from (
+			select distinct on (object_id) id, object_id, seq, type, at, payload, attempts, next_attempt_at
+			from events where acked_at is null and dropped_at is null
+			order by object_id, seq
+		) head
+		where next_attempt_at is null or next_attempt_at <= $1
+		order by id limit $2`, now, limit)
+	if err != nil {
+		return nil, fmt.Errorf("store: reading what the journal has pending: %w", err)
+	}
+	defer rows.Close()
+	var out []store.Event
+	for rows.Next() {
+		var e store.Event
+		if err := rows.Scan(&e.ID, &e.ObjectID, &e.Seq, &e.Type, &e.At, &e.Payload,
+			&e.Attempts, &e.NextAttemptAt); err != nil {
+			return nil, fmt.Errorf("store: reading a pending journal row: %w", err)
+		}
+		if e.NextAttemptAt.Unix() == 0 {
+			e.NextAttemptAt = time.Time{}
+		}
+		out = append(out, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: reading what the journal has pending: %w", err)
+	}
+	return out, nil
+}
+
+func (x journal) Acknowledge(ctx context.Context, id string, at time.Time) error {
+	return x.finish(ctx, `update events set acked_at = $2 where id = $1`, id, at)
+}
+
+func (x journal) Drop(ctx context.Context, id string, at time.Time) error {
+	return x.finish(ctx, `update events set dropped_at = $2 where id = $1`, id, at)
+}
+
+func (x journal) Defer(ctx context.Context, id string, next time.Time) error {
+	return x.finish(ctx, `update events set attempts = attempts + 1, next_attempt_at = $2 where id = $1`, id, next)
+}
+
+// finish applies one delivery outcome. An id no row holds is ErrNotFound: the
+// caller read it from Pending, so its absence is a fact worth reporting
+// rather than a write that quietly did nothing.
+func (x journal) finish(ctx context.Context, statement, id string, at time.Time) error {
+	tag, err := x.q.Exec(ctx, statement, id, at.UTC())
+	if err != nil {
+		return fmt.Errorf("store: recording a delivery outcome: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return store.ErrNotFound
+	}
+	return nil
+}
+
+// nullTime is a zero time as SQL null, so an unset column stays unset.
+func nullTime(t time.Time) any {
+	if t.IsZero() {
+		return nil
+	}
+	return t.UTC()
 }
 
 func (x journal) ByObject(ctx context.Context, objectID string, p store.Page) ([]store.Event, string, error) {
@@ -328,8 +401,12 @@ func (x journal) ByObject(ctx context.Context, objectID string, p store.Page) ([
 	return out, next, nil
 }
 
+// Prune forgets finished rows only. An event still waiting for the sink is
+// older than the retention long before it is undeliverable, and design 009
+// decides when it is given up, not the retention.
 func (x journal) Prune(ctx context.Context, before time.Time) (int, error) {
-	tag, err := x.q.Exec(ctx, `delete from events where at < $1`, before)
+	tag, err := x.q.Exec(ctx, `delete from events
+		where at < $1 and (acked_at is not null or dropped_at is not null)`, before)
 	if err != nil {
 		return 0, fmt.Errorf("store: pruning the journal: %w", err)
 	}
