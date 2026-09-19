@@ -12,12 +12,15 @@ import (
 	"fmt"
 	"math"
 	"net"
+	"net/url"
 	"path/filepath"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	"latere.ai/x/cella/internal/store"
 )
 
 // Defaults for the optional variables.
@@ -35,6 +38,15 @@ const (
 	DefaultTouchInterval = time.Minute
 	MinInterval          = time.Second
 	MaxInterval          = time.Hour
+	// DefaultLostGrace is how long a sandbox the driver no longer has is
+	// held before it is deleted, where no durable store can recover it
+	// (spec 005). It takes the same bounds as the intervals.
+	DefaultLostGrace = 10 * time.Minute
+	// DefaultDBMaxConns is the pool one replica opens on the database, and
+	// MaxDBMaxConns the most it may ask for: a database shared by a fleet
+	// has a connection ceiling, and one replica does not hold it (spec 010).
+	DefaultDBMaxConns = 4
+	MaxDBMaxConns     = 32
 )
 
 // The runtime backends CELLA_RUNTIME selects. Spec 004 owns what each one
@@ -79,6 +91,16 @@ type Config struct {
 	// driver, both from spec 005.
 	ReapInterval  time.Duration
 	TouchInterval time.Duration
+	// LostGrace is how long a sandbox the data plane lost is held before it
+	// is deleted, where the store cannot recover it (spec 005).
+	LostGrace time.Duration
+	// DBURL is spec 010's store: a postgres:// URL, or empty for the
+	// single-process snapshot under DataDir. DBMaxConns bounds the pool.
+	DBURL      string
+	DBMaxConns int32
+	// SecretKey wraps every secret value's data key (specs 010 and 018).
+	// It is read where it is set and required once a Secret exists.
+	SecretKey []byte
 	// Identity is spec 006's half: the issuers, the audience, the signing
 	// keys, the authorizer, and the owner policy's admins.
 	Identity
@@ -98,6 +120,10 @@ func Load(getenv Getenv) (Config, error) {
 	c.MaxUploadBytes = byteLimit(getenv, "CELLA_MAX_UPLOAD_BYTES", 1<<30, &problems)
 	c.ReapInterval = interval(getenv, "CELLA_REAP_INTERVAL", DefaultReapInterval, &problems)
 	c.TouchInterval = interval(getenv, "CELLA_TOUCH_INTERVAL", DefaultTouchInterval, &problems)
+	c.LostGrace = interval(getenv, "CELLA_LOST_GRACE", DefaultLostGrace, &problems)
+	c.DBURL = databaseURL(getenv, &problems)
+	c.DBMaxConns = connections(getenv, &problems)
+	c.SecretKey = secretKey(getenv, &problems)
 	if raw := getenv("CELLA_ALLOW_UNSAFE_NATIVE"); raw != "" {
 		value, err := strconv.ParseBool(raw)
 		if err != nil {
@@ -169,6 +195,56 @@ func interval(getenv Getenv, name string, def time.Duration, problems *[]string)
 		return def
 	}
 	return d
+}
+
+// databaseURL reads the optional store URL. Unset keeps every state in the
+// single-process snapshot under CELLA_DATA_DIR and turns recovery off, which
+// the start-up line says; set, it must be a Postgres URL, because the scheme
+// is what selects the driver and the migrator.
+func databaseURL(getenv Getenv, problems *[]string) string {
+	raw := strings.TrimSpace(getenv("CELLA_DB_URL"))
+	if raw == "" {
+		return ""
+	}
+	parsed, err := url.Parse(raw)
+	switch {
+	case err != nil, !strings.HasPrefix(parsed.Scheme, "postgres"), parsed.Host == "":
+		*problems = append(*problems, "CELLA_DB_URL must be a postgres:// URL naming a host")
+		return ""
+	}
+	return raw
+}
+
+// connections bounds the pool one replica opens. A database shared by a fleet
+// has a connection ceiling, and a replica that asked for all of it would take
+// the fleet down with it.
+func connections(getenv Getenv, problems *[]string) int32 {
+	raw := strings.TrimSpace(getenv("CELLA_DB_MAX_CONNS"))
+	if raw == "" {
+		return DefaultDBMaxConns
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < 1 || value > MaxDBMaxConns {
+		*problems = append(*problems, fmt.Sprintf("CELLA_DB_MAX_CONNS is %q; a whole number between 1 and %d", raw, MaxDBMaxConns))
+		return DefaultDBMaxConns
+	}
+	return int32(value)
+}
+
+// secretKey reads the key every secret value's data key is wrapped under. It
+// is validated where it is set, so a deployment learns at start-up that its
+// key is the wrong length rather than on the first secret.
+func secretKey(getenv Getenv, problems *[]string) []byte {
+	raw := strings.TrimSpace(getenv("CELLA_SECRET_KEY"))
+	if raw == "" {
+		return nil
+	}
+	key, err := store.ParseKey(raw)
+	if err != nil {
+		*problems = append(*problems, fmt.Sprintf("CELLA_SECRET_KEY is not usable: %v", err))
+		return nil
+	}
+	return key
 }
 
 // byteLimit accepts integer bytes and binary Ki, Mi and Gi suffixes.

@@ -39,7 +39,7 @@ are satisfied by an adapter in `internal/serve` over this store.
 
 ## Current state
 
-[[026-direct-control-plane]] adds a provisional, exclusively locked local development snapshot through `controller.Store`. It is not the memory/Postgres implementation below, and does not implement distributed transactions, leases, journals, queues, or replicated recovery.
+[[043-postgres-store]] builds `internal/store`, both adapters, and one suite over them: desired state with a version, the observed index, the journal's append and read, the leases, and the secret value envelope. The seams it leaves are the revocations, the queue and the operations: their tables are in the schema and their interfaces are declared, with no accessor on `Tx` until a caller exists. [[026-direct-control-plane]]'s locked file snapshot stays for a single process with `CELLA_DATA_DIR` and no database.
 
 Design provenance: The hosted platform kept all product state in Postgres and
 read runtime truth from labels; the split into desired and observed is
@@ -185,7 +185,7 @@ the environment's own status, not from this table.
 
 Envelope encryption per [[018-egress-and-secrets]]: a random 32-byte
 data key per secret, the value encrypted under it with AES-256-GCM,
-the data key wrapped by `CELLA_SECRETS_KEK` with AES-256-GCM. The row
+the data key wrapped by `CELLA_SECRET_KEY` with AES-256-GCM. The row
 holds the secret id, the version, the wrapped data key with its nonce,
 and the ciphertext with its nonce; the two are separate columns so
 `Rewrap` touches one. `Open` is the only method that returns a
@@ -266,7 +266,7 @@ highest embedded migration is a start-up failure naming both, since
 a dirty flag is a start-up failure naming the version, for the
 operator to repair. `Ready` is `SELECT 1` with a 1 second budget,
 inside [[002-repository-scaffold]]'s readiness budget. The pool is
-sized by `CELLA_DB_MAX_CONNS` (default 8), because a replica set
+sized by `CELLA_DB_MAX_CONNS` (default 4), because a replica set
 shares the database's connection ceiling.
 
 Indexes, one per query shape: `objects (kind, owner, name) unique where
@@ -308,18 +308,18 @@ table ([[021-data-plane-workers]]); the `v1.Object` interface
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| Both stores pass one suite over every method of every interface; the memory store is exempt only from durability across a restart and the schema check | `TestStoreSuite` over memory and Postgres in a test container | not built |
-| Writes inside `Tx` commit together or not at all: a desired put plus a debit, and a desired put plus a count check, under a failure injected between them | `TestTxIsAtomic` | not built |
-| `Put` with a stale version is `ErrVersionConflict`; with the current version it advances it | `TestOptimisticConcurrency` | not built |
-| `(kind, owner, name)` is unique among live rows and reusable after delete | `TestNamesAreUniqueAmongLiveRows` | not built |
-| `Rebuild` for one environment replaces only that environment's observed rows and touches no `objects` row; a desired sandbox with no observed counterpart is reported `Lost` and keeps its `Queued` or `Recovering` status | `TestRebuildIsScopedAndKeepsStatus` | not built |
-| `Count` excludes `Deleting` and deleted rows | `TestCountExcludesDeleting` | not built |
-| A plaintext value is returned by `Open` alone; its only caller in the tree is `egress.Compile`; both stores hold ciphertext; `Rewrap` under a new KEK leaves every ciphertext byte unchanged and `Open` still works | `TestValuesAreConfined`, `TestRewrap` | not built |
+| Both stores pass one suite over every method of every interface; the memory store is exempt only from durability across a restart and the schema check | `TestStoreSuite` over memory and Postgres in a test container | built for `Desired`, `Observed`, `Journal`, `Values` and `Leases` ([[043-postgres-store]]); the seams have no accessor yet |
+| Writes inside `Tx` commit together or not at all: a desired put plus a debit, and a desired put plus a count check, under a failure injected between them | `TestTxIsAtomic` | built without the ledger half ([[043-postgres-store]]) |
+| `Put` with a stale version is `ErrVersionConflict`; with the current version it advances it | `TestOptimisticConcurrency` | built ([[043-postgres-store]]) |
+| `(kind, owner, name)` is unique among live rows and reusable after delete | `TestNamesAreUniqueAmongLiveRows` | built ([[043-postgres-store]]) |
+| `Rebuild` for one environment replaces only that environment's observed rows and touches no `objects` row; a desired sandbox with no observed counterpart is reported `Lost` and keeps its `Queued` or `Recovering` status | `TestRebuildIsScopedAndKeepsStatus` | built ([[043-postgres-store]]) |
+| `Count` excludes `Deleting` and deleted rows | `TestCountExcludesDeleting` | built ([[043-postgres-store]]) |
+| A plaintext value is returned by `Open` alone; its only caller in the tree is `egress.Compile`; both stores hold ciphertext; `Rewrap` under a new KEK leaves every ciphertext byte unchanged and `Open` still works | `TestValuesAreConfined`, `TestRewrap` | the envelope, `Put`, `Open` and `Delete` built ([[043-postgres-store]]); the confinement test and `Rewrap` wait for the `Secret` kind |
 | `Debit` at one remaining unit under contention yields one success; `Credit` restores it | `TestLedgerIsAtomic` | not built |
-| `Pending` returns one event per object, oldest first, and holds later events behind a deferred one; `Drop` after the retry window; `ByObject` pages newest first; `Prune` respects retention | `TestJournal` | not built |
+| `Pending` returns one event per object, oldest first, and holds later events behind a deferred one; `Drop` after the retry window; `ByObject` pages newest first; `Prune` respects retention | `TestJournal` | `Append`, `ByObject` and `Prune` built ([[043-postgres-store]]); delivery waits for [[009-events]] |
 | `Dequeue` orders by priority, fair share, arrival; capacity in use equals the sum over the named phases after a restart | `TestQueueOrder`, `TestCapacityIsDerived` | not built |
 | `Claim` redelivers an operation whose claimer's heartbeat lapsed, exactly once to a live worker | `TestOperationsRedeliver` | not built |
-| A schema ahead of the binary and a dirty migration each refuse to start naming the version | `TestSchemaGuards` | not built |
+| A schema ahead of the binary and a dirty migration each refuse to start naming the version | `TestSchemaGuards` | built ([[043-postgres-store]]) |
 | Every list and count query in the index list uses its index | `TestQueriesUseIndexes` with `EXPLAIN` | not built |
-| Two holders contend for one lease; one holds; the other acquires after the TTL lapses | `TestLeases` | not built |
-| No package outside `internal/store` imports the Postgres driver or the migrator | `TestDriverIsConfined` | not built |
+| Two holders contend for one lease; one holds; the other acquires after the TTL lapses | `TestLeases` | built, with renewal at a third of the term and a release on Close ([[043-postgres-store]]) |
+| No package outside `internal/store` imports the Postgres driver or the migrator | `TestDriverIsConfined` | built ([[043-postgres-store]]) |

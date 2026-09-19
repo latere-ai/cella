@@ -30,6 +30,8 @@ import (
 	"latere.ai/x/cella/internal/api"
 	"latere.ai/x/cella/internal/auth"
 	"latere.ai/x/cella/internal/config"
+	"latere.ai/x/cella/internal/store"
+	"latere.ai/x/cella/internal/store/postgres"
 	"latere.ai/x/cella/internal/version"
 	"latere.ai/x/cella/runtime"
 	"latere.ai/x/cella/runtime/native"
@@ -130,13 +132,13 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	if cfg.Runtime != config.RuntimeNative && cfg.Runtime != config.RuntimePodman {
 		return fail(stderr, fmt.Errorf("CELLA_RUNTIME=%s is not implemented; native is available for trusted development with CELLA_ALLOW_UNSAFE_NATIVE=true, and podman where CELLA_PODMAN_SOCKET reaches an engine", cfg.Runtime))
 	}
-	// Recovery may change runtime records. Own the state directory before
-	// opening the driver so a second process cannot mutate live workloads.
-	store, err := controller.OpenFileStore(filepath.Join(cfg.DataDir, "controller"))
+	// Recovery may change runtime records. Own the state before opening the
+	// driver so a second process cannot mutate live workloads.
+	desired, lease, storeReady, err := openStore(ctx, cfg)
 	if err != nil {
-		return fail(stderr, fmt.Errorf("controller store: %w", err))
+		return fail(stderr, err)
 	}
-	defer func() { _ = store.Close() }()
+	defer func() { _ = desired.Close() }()
 	var runtimeDriver driverCloser
 	switch cfg.Runtime {
 	case config.RuntimePodman:
@@ -152,8 +154,9 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		return fail(stderr, fmt.Errorf("runtime preflight: %w", err))
 	}
 	control, err := controller.Open(controller.Options{
-		Store: store, Driver: runtimeDriver, Environment: cfg.DefaultEnvironment,
-		Lease: controller.LocalLease{}, ReapInterval: cfg.ReapInterval, TouchInterval: cfg.TouchInterval,
+		Store: desired, Driver: runtimeDriver, Environment: cfg.DefaultEnvironment,
+		Lease: lease, ReapInterval: cfg.ReapInterval, TouchInterval: cfg.TouchInterval,
+		LostGrace: cfg.LostGrace,
 	})
 	if err != nil {
 		return fail(stderr, fmt.Errorf("controller: %w", err))
@@ -172,8 +175,18 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	}
 
 	draining := make(chan struct{})
+	checks := []health.Check{
+		{Name: "draining", Run: notDraining(draining)},
+		{Name: "disk", Run: diskWritable(cfg.DataDir)},
+		{Name: "runtime", Run: runtimeDriver.Ready},
+	}
+	// A control plane whose store does not answer serves nothing, so the
+	// store is a readiness check wherever there is one to ask (spec 010).
+	if storeReady != nil {
+		checks = append(checks, health.Check{Name: "store", Run: storeReady})
+	}
 	probes := health.Handler(health.Options{
-		Ready:     health.Checks(health.Check{Name: "draining", Run: notDraining(draining)}, health.Check{Name: "disk", Run: diskWritable(cfg.DataDir)}, health.Check{Name: "runtime", Run: runtimeDriver.Ready}),
+		Ready:     health.Checks(checks...),
 		Timeout:   2 * time.Second,
 		Version:   version.Version,
 		Commit:    version.Commit,
@@ -204,8 +217,9 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		_ = publicLn.Close()
 		return fail(stderr, fmt.Errorf("CELLA_INTERNAL_ADDR: %w", err))
 	}
-	_, _ = fmt.Fprintf(stdout, "cellad: %s listening public=%s internal=%s runtime=%s issuers=%d authorizer=%s\n",
-		version.Version, publicLn.Addr(), internalLn.Addr(), cfg.Runtime, len(cfg.OIDCIssuers), identity.Mode)
+	_, _ = fmt.Fprintf(stdout, "cellad: %s listening public=%s internal=%s runtime=%s issuers=%d authorizer=%s %s\n",
+		version.Version, publicLn.Addr(), internalLn.Addr(), cfg.Runtime, len(cfg.OIDCIssuers), identity.Mode,
+		recovery(cfg, control))
 
 	servers := []*http.Server{
 		{Handler: public, ReadHeaderTimeout: 10 * time.Second},
@@ -241,6 +255,39 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		return fail(stderr, fmt.Errorf("runtime shutdown: %w", err))
 	}
 	return 0
+}
+
+// openStore opens desired state: the Postgres of spec 010 where CELLA_DB_URL
+// names one, and the single-process snapshot under CELLA_DATA_DIR otherwise.
+// It returns the store, the lease the reaper runs under, and the readiness
+// check to mount, which is nil where the store is local.
+func openStore(ctx context.Context, cfg config.Config) (controller.Store, controller.Lease, func(context.Context) error, error) {
+	if cfg.DBURL == "" {
+		local, err := controller.OpenFileStore(filepath.Join(cfg.DataDir, "controller"))
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("controller store: %w", err)
+		}
+		return local, controller.LocalLease{}, nil, nil
+	}
+	durable, err := postgres.Open(ctx, postgres.Options{URL: cfg.DBURL, MaxConns: cfg.DBMaxConns, Key: cfg.SecretKey})
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	bound := store.ForController(durable, cfg.DefaultEnvironment)
+	return bound, bound, bound.Ready, nil
+}
+
+// recovery is what the start-up line says about state: which store is in use,
+// and what a sandbox the data plane lost gets (spec 001, State).
+func recovery(cfg config.Config, control *controller.Controller) string {
+	kind := "file"
+	if cfg.DBURL != "" {
+		kind = "postgres"
+	}
+	if control.Recovers() {
+		return "store=" + kind + " recovery=on"
+	}
+	return fmt.Sprintf("store=%s recovery=off lost-grace=%s", kind, cfg.LostGrace)
 }
 
 // fail writes the one line an operator reads on a start-up or runtime

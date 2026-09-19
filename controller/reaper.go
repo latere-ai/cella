@@ -15,9 +15,11 @@ import (
 
 // The reasons the reaper writes, from the one transition enum of design 009.
 const (
-	ReasonExpired    = "Expired"
-	ReasonAutoDelete = "AutoDelete"
-	ReasonAutoStop   = "AutoStop"
+	ReasonExpired           = "Expired"
+	ReasonAutoDelete        = "AutoDelete"
+	ReasonAutoStop          = "AutoStop"
+	ReasonLost              = "Lost"
+	ReasonRecoveryExhausted = "RecoveryExhausted"
 )
 
 // ReaperLease is the lease name design 010 gives the reaper and LeaseTTL its
@@ -28,10 +30,17 @@ const (
 	LeaseTTL    = 15 * time.Second
 )
 
-// The reaper's intervals when Options leaves them zero.
+// The reaper's intervals and bounds when Options leaves them zero.
 const (
 	DefaultReapInterval  = 30 * time.Second
 	DefaultTouchInterval = time.Minute
+	// DefaultLostGrace is how long a sandbox the driver no longer has is
+	// held as Lost before it is deleted, where no durable store can recover
+	// it. CELLA_LOST_GRACE sets it.
+	DefaultLostGrace = 10 * time.Minute
+	// DefaultRecoveryAttempts is how many recreations a lost sandbox gets
+	// before it is Failed with reason RecoveryExhausted.
+	DefaultRecoveryAttempts = 5
 )
 
 // Clock is the controller's view of time. Now is read once per tick and every
@@ -96,23 +105,34 @@ func activityOf(s driver.State) time.Time {
 func (c *Controller) RunReaper(ctx context.Context) {
 	ticks, stop := c.clock.Ticker(c.reapInterval)
 	defer stop()
+	// The first tick runs at once rather than one interval in. It is the
+	// start-up reconcile of design 005: desired state has just been read from
+	// the store, the observed index is whatever the last process left, and
+	// everything this environment holds is compared against the driver before
+	// the process serves its first request.
+	c.tick(ctx)
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticks:
-			held, err := c.lease.Acquire(ctx, ReaperLease, LeaseTTL)
-			if err != nil {
-				c.log.WarnContext(ctx, "reaper lease unavailable", "lease", ReaperLease, "err", err)
-				continue
-			}
-			if !held {
-				continue
-			}
-			if acted, err := c.Reap(ctx); err != nil {
-				c.log.WarnContext(ctx, "reaper tick incomplete", "acted", acted, "err", err)
-			}
+			c.tick(ctx)
 		}
+	}
+}
+
+// tick runs one pass while this replica holds the reaper lease.
+func (c *Controller) tick(ctx context.Context) {
+	held, err := c.lease.Acquire(ctx, ReaperLease, LeaseTTL)
+	if err != nil {
+		c.log.WarnContext(ctx, "reaper lease unavailable", "lease", ReaperLease, "err", err)
+		return
+	}
+	if !held {
+		return
+	}
+	if acted, err := c.Reap(ctx); err != nil {
+		c.log.WarnContext(ctx, "reaper tick incomplete", "acted", acted, "err", err)
 	}
 }
 
@@ -128,6 +148,18 @@ func (c *Controller) Reap(ctx context.Context) (int, error) {
 	now := c.clock.Now()
 	acted := 0
 	var failed error
+	// The observed index is what the lost rule reads, and it is rebuilt from
+	// the same list the deadline rules run over, so one tick has one view of
+	// the environment. A rebuild that fails holds the lost rule for that
+	// tick: its input is the index, and a stale index would report a sandbox
+	// lost that the driver has.
+	rebuilt := true
+	if c.durable != nil {
+		if err := c.durable.Rebuild(ctx, c.environment, states); err != nil {
+			rebuilt = false
+			failed = errors.Join(failed, fmt.Errorf("reaper: rebuilding the observed index: %w", err))
+		}
+	}
 	for _, s := range states {
 		rule := reapRule(s, now)
 		if rule == "" {
@@ -140,6 +172,19 @@ func (c *Controller) Reap(ctx context.Context) (int, error) {
 		}
 		if done {
 			c.log.InfoContext(ctx, "reaper ended a sandbox", "sandbox", s.ID, "reason", rule)
+			acted++
+		}
+	}
+	if !rebuilt {
+		return acted, failed
+	}
+	for _, id := range c.vanished(states) {
+		done, err := c.enforceLost(ctx, id, now)
+		if err != nil {
+			failed = errors.Join(failed, fmt.Errorf("reaper: %s on %s: %w", ReasonLost, id, err))
+			continue
+		}
+		if done {
 			acted++
 		}
 	}
@@ -184,8 +229,7 @@ func (c *Controller) stopLocked(ctx context.Context, id, reason string) error {
 		return err
 	}
 	obj.Status.Reason = reason
-	c.objects[id] = clone(obj)
-	return c.save()
+	return c.persist(ctx, obj, MutationUpdated)
 }
 
 // deleteLocked writes the Deleting intent with its reason before it calls the
@@ -195,28 +239,21 @@ func (c *Controller) deleteLocked(ctx context.Context, id, reason string) error 
 	obj, tracked := c.objects[id]
 	if tracked {
 		intent := clone(obj)
-		intent.Status.Phase = "Deleting"
+		intent.Status.Phase = PhaseDeleting
 		intent.Status.Reason = reason
-		c.objects[id] = intent
-		if err := c.save(); err != nil {
-			c.objects[id] = obj
+		if err := c.persist(ctx, intent, MutationDeleting); err != nil {
 			return err
 		}
-		obj = intent
 	}
 	if err := c.driver.Delete(ctx, id); err != nil && !errors.Is(err, driver.ErrNotFound) {
 		return err
 	}
 	c.forgetTouch(id)
+	c.forgetLost(id)
 	if !tracked {
 		return nil
 	}
-	delete(c.objects, id)
-	if err := c.save(); err != nil {
-		c.objects[id] = obj
-		return err
-	}
-	return nil
+	return c.forget(ctx, id, MutationDeleted)
 }
 
 // Touch stamps activity on a sandbox, coalesced per sandbox: the first call
