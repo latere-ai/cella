@@ -122,7 +122,9 @@ func (d *Driver) Exec(ctx context.Context, id string, req driver.ExecRequest) (d
 // runExec starts the session, splits its stream into the two writers, and
 // reads the exit code back. The context ending is the one reason reported in
 // place of an exit code, so Close, a timeout and a cancelled request each
-// reach the caller as themselves.
+// reach the caller as themselves. A session with a TTY or a stdin travels over
+// a connection the engine speaks both ways on, which net/http does not give
+// for a reply whose body has no framing; every other session reads the reply.
 func (d *Driver) runExec(ctx context.Context, execID string, e *execution, outW, errW *io.PipeWriter, req driver.ExecRequest) {
 	defer close(e.done)
 	fail := func(err error) {
@@ -133,13 +135,46 @@ func (d *Driver) runExec(ctx context.Context, execID string, e *execution, outW,
 		_ = outW.CloseWithError(err)
 		_ = errW.CloseWithError(err)
 	}
-	stream, release, err := d.startExec(ctx, execID, req)
+	if req.TTY || req.Stdin != nil {
+		conn, br, err := d.client().hijack(ctx, d.client().libpodPath("/exec/"+execID+"/start"), execStart{Tty: req.TTY})
+		if err != nil {
+			fail(fmt.Errorf("podman: starting the exec session: %w", err))
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		if req.Stdin != nil {
+			go func() {
+				_, _ = io.Copy(conn, req.Stdin)
+				// Half-closing tells the command its input ended. A connection
+				// that cannot be half-closed leaves the command reading, which
+				// is the gap a caller works around with a command that does not.
+				if half, ok := conn.(interface{ CloseWrite() error }); ok {
+					_ = half.CloseWrite()
+				}
+			}()
+		}
+		d.pipeExec(ctx, execID, e, outW, errW, br, req.TTY, fail)
+		return
+	}
+	resp, err := d.client().do(ctx, http.MethodPost, d.client().libpodURL("/exec/"+execID+"/start"), execStart{})
 	if err != nil {
 		fail(fmt.Errorf("podman: starting the exec session: %w", err))
 		return
 	}
-	defer release()
-	if req.TTY {
+	defer func() { _ = resp.Body.Close() }()
+	if serr := statusErr(resp); serr != nil {
+		fail(fmt.Errorf("podman: starting the exec session: %w", serr))
+		return
+	}
+	d.pipeExec(ctx, execID, e, outW, errW, resp.Body, false, fail)
+}
+
+// pipeExec reads one started session's stream into the caller's writers and
+// then its exit code. Under a TTY the stream is raw and everything is stdout;
+// without one it keeps podman's framing and the demultiplexer splits it.
+func (d *Driver) pipeExec(ctx context.Context, execID string, e *execution, outW, errW *io.PipeWriter, stream io.Reader, tty bool, fail func(error)) {
+	var err error
+	if tty {
 		_, err = io.Copy(outW, stream)
 	} else {
 		err = demux(stream, outW, errW)
@@ -159,40 +194,6 @@ func (d *Driver) runExec(ctx context.Context, execID string, e *execution, outW,
 		return
 	}
 	e.code = code
-}
-
-// startExec starts one created session and returns the stream its output
-// arrives on, with the release that ends it. A session with a TTY or a stdin
-// needs a connection the engine speaks both ways over, which net/http does
-// not give for a reply whose body has no framing.
-func (d *Driver) startExec(ctx context.Context, execID string, req driver.ExecRequest) (io.Reader, func(), error) {
-	if !req.TTY && req.Stdin == nil {
-		resp, err := d.client().do(ctx, http.MethodPost, d.client().libpodURL("/exec/"+execID+"/start"), execStart{})
-		if err != nil {
-			return nil, nil, err
-		}
-		if serr := statusErr(resp); serr != nil {
-			_ = resp.Body.Close()
-			return nil, nil, serr
-		}
-		return resp.Body, func() { _ = resp.Body.Close() }, nil
-	}
-	conn, br, err := d.client().hijack(ctx, d.client().libpodPath("/exec/"+execID+"/start"), execStart{Tty: req.TTY})
-	if err != nil {
-		return nil, nil, err
-	}
-	if req.Stdin != nil {
-		go func() {
-			_, _ = io.Copy(conn, req.Stdin)
-			// Half-closing tells the command its input ended. A connection
-			// that cannot be half-closed leaves the command reading, which is
-			// the gap a caller works around with a command that does not.
-			if half, ok := conn.(interface{ CloseWrite() error }); ok {
-				_ = half.CloseWrite()
-			}
-		}()
-	}
-	return br, func() { _ = conn.Close() }, nil
 }
 
 // waitExec polls the session until it reports that it has ended.
