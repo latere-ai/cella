@@ -176,6 +176,7 @@ func defaulting(ctx context.Context, obj *v1.Sandbox, o Options) (*v1.Environmen
 	if obj.Spec.Workdir == "" {
 		obj.Spec.Workdir = obj.Spec.Workspace.Path
 	}
+	inferEgressMode(&obj.Spec.Network)
 	if err = validateSpec(obj.Spec); err != nil {
 		return nil, errors.New("manifest: this server's defaults are invalid: " + err.Error())
 	}
@@ -248,6 +249,14 @@ func semantic(obj *v1.Sandbox, o Options) error {
 	if o.Existing != nil {
 		if err := immutable(o.Existing, obj); err != nil {
 			return err
+		}
+		// The narrow fields are the boundary. Any caller may move one
+		// inward; only a caller that is not the sandbox itself may move
+		// one outward, which is invariant 9 of the architecture.
+		if o.Actor.Workload {
+			if err := narrowing(o.Existing, obj); err != nil {
+				return err
+			}
 		}
 	}
 	return autoStopWithinTTL(obj.Spec.Lifecycle)
@@ -371,13 +380,16 @@ func capabilities(obj *v1.Sandbox, env *v1.Environment, o Options) ([]string, er
 	if o.Existing != nil && obj.Spec.Resources != o.Existing.Spec.Resources && !env.Status.Capabilities.Resize {
 		return nil, failAt("capability_unsupported", "spec.resources", "This environment cannot change the resources of a sandbox that exists.")
 	}
+	warnings, err := egressCapability(obj, env)
+	if err != nil {
+		return nil, err
+	}
 	// An environment that confines nothing runs the workload as the server's
 	// own process: it has no cgroup to size and no user to switch to. The
 	// fields are recorded so one manifest stays valid across environments.
 	if env.Status.Isolation != v1.IsolationNone {
-		return nil, nil
+		return warnings, nil
 	}
-	var warnings []string
 	if obj.Spec.Resources != (v1.Resources{}) {
 		warnings = append(warnings, WarningResourcesNotEnforced)
 	}
@@ -465,7 +477,15 @@ func clone(obj *v1.Sandbox) v1.Sandbox {
 	out.Spec.Command = slices.Clone(obj.Spec.Command)
 	out.Spec.Args = slices.Clone(obj.Spec.Args)
 	out.Spec.Env = maps.Clone(obj.Spec.Env)
+	out.Spec.Network.Egress.AllowedHosts = slices.Clone(obj.Spec.Network.Egress.AllowedHosts)
+	out.Spec.Network.Egress.DeniedHosts = slices.Clone(obj.Spec.Network.Egress.DeniedHosts)
+	out.Status.Conditions = slices.Clone(obj.Status.Conditions)
 	out.Status.Warnings = slices.Clone(obj.Status.Warnings)
+	if obj.Status.EgressState != nil {
+		state := *obj.Status.EgressState
+		state.Placeholders = maps.Clone(obj.Status.EgressState.Placeholders)
+		out.Status.EgressState = &state
+	}
 	if obj.Status.ExitCode != nil {
 		code := *obj.Status.ExitCode
 		out.Status.ExitCode = &code

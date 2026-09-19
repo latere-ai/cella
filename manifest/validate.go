@@ -127,6 +127,9 @@ func validateSpec(s v1.SandboxSpec) error {
 	if err := validateLifecycle(s.Lifecycle); err != nil {
 		return err
 	}
+	if err := validateNetwork(s.Network); err != nil {
+		return err
+	}
 	return validateEnv(s.Env)
 }
 

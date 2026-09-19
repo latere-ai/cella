@@ -18,9 +18,11 @@ import (
 // module is the import path every package of this repository shares.
 const module = "latere.ai/x/cella"
 
-// shared is what any role package may reach: the contract types and the
-// driver interface. They hold no client, so importing one opens no connection.
-var shared = []string{module + "/manifest", module + "/manifest/v1", module + "/runtime"}
+// shared is what any role package may reach: the contract types, the driver
+// interface, and the host-pattern grammar the contract's host rule names
+// (spec 003), which the manifest carries into everything that imports it.
+// They hold no client, so importing one opens no connection.
+var shared = []string{module + "/manifest", module + "/manifest/v1", module + "/runtime", "latere.ai/x/pkg/hostmatch"}
 
 // engines is the client each package may reach beyond shared, one entry per
 // package, with the reason it is there. A driver reaches the client of the

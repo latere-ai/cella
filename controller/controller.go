@@ -340,7 +340,15 @@ func clone(obj v1.Sandbox) v1.Sandbox {
 	obj.Spec.Command = slices.Clone(obj.Spec.Command)
 	obj.Spec.Args = slices.Clone(obj.Spec.Args)
 	obj.Spec.Env = maps.Clone(obj.Spec.Env)
+	obj.Spec.Network.Egress.AllowedHosts = slices.Clone(obj.Spec.Network.Egress.AllowedHosts)
+	obj.Spec.Network.Egress.DeniedHosts = slices.Clone(obj.Spec.Network.Egress.DeniedHosts)
+	obj.Status.Conditions = slices.Clone(obj.Status.Conditions)
 	obj.Status.Warnings = slices.Clone(obj.Status.Warnings)
+	if obj.Status.EgressState != nil {
+		state := *obj.Status.EgressState
+		state.Placeholders = maps.Clone(obj.Status.EgressState.Placeholders)
+		obj.Status.EgressState = &state
+	}
 	if obj.Status.ExitCode != nil {
 		code := *obj.Status.ExitCode
 		obj.Status.ExitCode = &code

@@ -95,9 +95,13 @@ widens and is refused.
 Stage 7 holds the mode against the environment's
 `status.capabilities.egress`: a mode the list omits is
 `capability_unsupported`, and an empty list is the warning that
-`EgressEnforced` will be false. `status.conditions` gains the condition
-type set of [[003-manifest-contract]], of which this slice writes
-`EgressEnforced`.
+`EgressEnforced` will be false. A warning says what the environment
+could not honour, so the boundary that asks for nothing to be kept out,
+`open` with no denied host, produces none: an environment that keeps
+nothing out has honoured it exactly. Any other boundary on an
+environment that declares no enforcement warns.
+`status.conditions` gains the condition type set of
+[[003-manifest-contract]], of which this slice writes `EgressEnforced`.
 
 ### The map
 
