@@ -636,7 +636,8 @@ func (d *Driver) Create(ctx context.Context, s driver.CreateSpec) (driver.Ref, e
 		_ = d.removeVolume(clean, recordVolume(s.ID, 1))
 		_ = d.removeVolume(clean, workspaceVolume(s.ID))
 	}
-	rec := record{labels: maps.Clone(s.Labels), env: maps.Clone(s.Env), lastActivityAt: time.Now().UTC(),
+	env := egressEnv(s)
+	rec := record{labels: maps.Clone(s.Labels), env: maps.Clone(env), lastActivityAt: time.Now().UTC(),
 		ttl: s.Lifecycle.TTL, autoStop: s.Lifecycle.AutoStop, autoDelete: s.Lifecycle.AutoDelete}
 	if err := d.writeRecord(ctx, s.ID, 0, rec); err != nil {
 		undo()
@@ -648,7 +649,7 @@ func (d *Driver) Create(ctx context.Context, s driver.CreateSpec) (driver.Ref, e
 	}
 	grace := uint(stopGrace)
 	sg := specGenerator{
-		Image: s.Image, Name: containerName(s.ID), Command: command, Env: maps.Clone(s.Env),
+		Image: s.Image, Name: containerName(s.ID), Command: command, Env: maps.Clone(env),
 		Labels: map[string]string{labelID: s.ID, labelKind: kindSandbox}, WorkDir: workdir,
 		User: s.User, RestartPolicy: "no", StopTimeout: &grace,
 		Volumes:        []namedVolume{{Name: workspaceVolume(s.ID), Dest: root, Options: []string{"rw"}}},
@@ -657,6 +658,15 @@ func (d *Driver) Create(ctx context.Context, s driver.CreateSpec) (driver.Ref, e
 	if err := d.client().json(ctx, http.MethodPost, "/containers/create", sg, nil); err != nil {
 		undo()
 		return driver.Ref{}, fmt.Errorf("podman: creating the container: %w", err)
+	}
+	// The authority the gateway signs with is projected between the create
+	// and the start, so the workload's first request already trusts the
+	// door its environment points at (spec 018).
+	if s.Egress.CAPEM != "" {
+		if err := d.putEgressCA(ctx, s.ID, s.Egress.CAPEM); err != nil {
+			undo()
+			return driver.Ref{}, err
+		}
 	}
 	if err := d.client().json(ctx, http.MethodPost, "/containers/"+containerName(s.ID)+"/start", nil, nil); err != nil {
 		undo()

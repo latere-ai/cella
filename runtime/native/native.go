@@ -156,8 +156,12 @@ func (d *Driver) Create(ctx context.Context, s driver.CreateSpec) (driver.Ref, e
 	if err := os.Mkdir(filepath.Join(d.dir(s.ID), "workspace"), 0700); err != nil {
 		return driver.Ref{}, err
 	}
+	env, err := projectEgress(d.dir(s.ID), s)
+	if err != nil {
+		return driver.Ref{}, err
+	}
 	now := time.Now().UTC()
-	r := record{State: driver.State{ID: s.ID, Name: s.Name, Owner: s.Owner, Phase: driver.Running, Isolation: driver.IsolationNone, Labels: maps.Clone(s.Labels), CreatedAt: now, StartedAt: now, LastActivityAt: now, AutoStop: s.Lifecycle.AutoStop, AutoDelete: s.Lifecycle.AutoDelete}, Env: maps.Clone(s.Env), Workdir: s.Workdir, Command: slices.Clone(s.Command), Args: slices.Clone(s.Args)}
+	r := record{State: driver.State{ID: s.ID, Name: s.Name, Owner: s.Owner, Phase: driver.Running, Isolation: driver.IsolationNone, Labels: maps.Clone(s.Labels), CreatedAt: now, StartedAt: now, LastActivityAt: now, AutoStop: s.Lifecycle.AutoStop, AutoDelete: s.Lifecycle.AutoDelete}, Env: env, Workdir: s.Workdir, Command: slices.Clone(s.Command), Args: slices.Clone(s.Args)}
 	if s.Lifecycle.TTL > 0 {
 		r.State.ExpiresAt = now.Add(s.Lifecycle.TTL)
 	}
