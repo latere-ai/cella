@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"math"
 	"net"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strconv"
@@ -65,6 +66,9 @@ type Config struct {
 	DataDir string
 	// Runtime is the backend cellad drives, one of Runtimes.
 	Runtime string
+	// PodmanSocket is the libpod API the podman backend drives. Empty lets
+	// the driver try the rootless user socket and then the system one.
+	PodmanSocket string
 	// AllowUnsafeNative explicitly permits execution without isolation.
 	AllowUnsafeNative bool
 	// MaxBodyBytes and MaxUploadBytes bound JSON and archive requests.
@@ -100,6 +104,10 @@ func Load(getenv Getenv) (Config, error) {
 			problems = append(problems, "CELLA_ALLOW_UNSAFE_NATIVE must be true or false")
 		}
 		c.AllowUnsafeNative = value
+	}
+	c.PodmanSocket = strings.TrimSpace(getenv("CELLA_PODMAN_SOCKET"))
+	if c.PodmanSocket != "" && !filepath.IsAbs(c.PodmanSocket) {
+		problems = append(problems, "CELLA_PODMAN_SOCKET must be an absolute path to a unix socket")
 	}
 	if c.Runtime == RuntimeNative && !c.AllowUnsafeNative {
 		problems = append(problems, "CELLA_RUNTIME=native requires CELLA_ALLOW_UNSAFE_NATIVE=true; native execution has no isolation")
