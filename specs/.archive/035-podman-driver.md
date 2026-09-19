@@ -128,6 +128,16 @@ change. `StartedAt` and `StoppedAt` are the container's `StartedAt` and
 `FinishedAt`; `StoppedAt` is zero while `Running`. `ExpiresAt` is
 `CreatedAt` plus the record's `ttl`, so one clock owns it.
 
+Every one of those instants is at one resolution, the second. The list
+endpoint carries a container's clocks as unix seconds and the inspect
+endpoint to the nanosecond, so the finer one is cut down and the create
+stamp with it: the same sandbox reads the same state whether a caller
+asked for it by name or in a list, which a controller comparing an
+observed state against a stored one depends on, and a container that
+starts in the second it was created in does not read as started before
+it. `LastActivityAt` keeps its full resolution, because it comes from
+the record either way and no two endpoints disagree about it.
+
 ### Lifecycle
 
 `Create` resolves the image and pulls it when absent, bounded by
@@ -147,7 +157,12 @@ idle process every OCI base image can run, so a sandbox created to be
 already answers 304 to when there is nothing to do; `Stop` sets the
 record's intent first and `Start` clears it, and neither writes a record
 when the flag already holds the value it wants, so the second call
-changes no clock. `Delete` force-removes the container, then every
+changes no clock. The flag is written before the stop rather than after
+it because the two failures are not equal: a stop that fails after the
+flag is set leaves a running sandbox whose phase is still read from the
+container, and the next `Stop` retries the call; a stop that succeeded
+before the flag could be written leaves a killed container reading
+`Failed`, which is a lie about what happened. `Delete` force-removes the container, then every
 record generation, then the workspace volume, and a delete of what is
 not there is not an error.
 
@@ -276,11 +291,11 @@ Landed 2026-09-19. `latere.ai/x/cella/runtime/podman` is the `container`
 driver: `client.go` (the socket, the request shapes, the refusals),
 `podman.go` (declarations, the identity and the record, the lifecycle,
 the phases, the resources and the paths), `exec.go`, `logs.go`,
-`files.go`. Coverage 94.6% of 738 statements, and the whole bar passes,
+`files.go`. Coverage 94.6% of 743 statements, and the whole bar passes,
 including the race, hermetic and tempdir runs.
 
 `TestPodmanConformance` ran for real against podman 5.7.1 on a rootless
-macOS machine, over the podman machine's socket, and every case passed:
+macOS machine and every case passed:
 `NameIsolationCapabilities`, `PreflightAndReady`, `CreateInspectDelete`,
 `StopStartKeepsTheWorkspace`, `UpdateEveryMutableField`,
 `ListReadsIdentityBack`, `FilterSelectsOnLabels`, `ExecStreamsAndExits`,
@@ -290,23 +305,32 @@ tried where none answers, so the hermetic gate and a machine with no
 podman still run the suite; the fake engine of `fake_test.go` carries the
 coverage there.
 
-Four things the design settled that the spec above states and that the
+The socket that run used was named, not discovered: on macOS the engine
+is in a virtual machine and its API is forwarded to a socket under the
+temporary directory, which is neither default candidate. The discovery
+order itself is proven by `TestPreflightSockets` against the fake engine
+and not yet by a real one, which waits for a Linux host in the tiers of
+[[012-test-stubs-and-tiers]].
+
+Five things the design settled that the spec above states and that the
 next container driver inherits:
 
-1. Podman fixes an object's labels at create. The libpod update endpoint
+1. Every instant a caller reads is at one resolution, the second, because
+   podman's list and inspect endpoints report a container's clocks at two.
+2. Podman fixes an object's labels at create. The libpod update endpoint
    accepts a label map and answers 201 without applying it, which was
    verified rather than assumed, so a mutable record is a replaced object
    with a generation and not an edited label.
-2. `Update` rewrites neither the container nor its labels. `Change.Env`
+3. `Update` rewrites neither the container nor its labels. `Change.Env`
    lands in the record and reaches the sandbox through `Exec`. The
    alternative, re-creating the container, kills the workload, and
    `Touch` is frequent enough that it would do so constantly.
-3. `Detach` is declared, which [[004-runtime-contract]]'s table did not
+4. `Detach` is declared, which [[004-runtime-contract]]'s table did not
    expect of this driver. The driver keeps nothing in this process, so a
    second instance over the same engine reads every sandbox back and the
    suite's `DetachRecovers` proves it. The table's cell is corrected in
    this slice.
-4. The driver reaches the standard library and the contract packages and
+5. The driver reaches the standard library and the contract packages and
    nothing else, so `arch_test.go` takes it as the strict case. That
    rules out `latere.ai/x/pkg/otel`, whose build list a driver package may
    not carry, and a local engine socket is not a peer a client span

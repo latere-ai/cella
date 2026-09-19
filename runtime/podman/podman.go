@@ -419,7 +419,19 @@ func (d *Driver) inspectContainer(ctx context.Context, id string) (status, error
 		return status{}, err
 	}
 	return status{present: true, state: ci.State.Status, exitCode: ci.State.ExitCode,
-		startedAt: ci.State.StartedAt.UTC(), finishedAt: ci.State.FinishedAt.UTC()}, nil
+		startedAt: engineInstant(ci.State.StartedAt), finishedAt: engineInstant(ci.State.FinishedAt)}, nil
+}
+
+// engineInstant is one resolution for every instant a container reports. The
+// list endpoint carries them as unix seconds and the inspect endpoint to the
+// nanosecond, so the finer one is cut down: the same sandbox must read the
+// same clock whether a caller asked for it by name or in a list, which is what
+// a controller comparing an observed state against a stored one depends on.
+func engineInstant(t time.Time) time.Time {
+	if t.IsZero() {
+		return time.Time{}
+	}
+	return t.UTC().Truncate(time.Second)
 }
 
 // listContainers returns every sandbox container keyed by sandbox id.
@@ -606,7 +618,10 @@ func (d *Driver) Create(ctx context.Context, s driver.CreateSpec) (driver.Ref, e
 
 	unlock := d.lock(s.ID)
 	defer unlock()
-	now := time.Now().UTC()
+	// The create instant is cut to the same resolution the engine reports its
+	// own clocks at, so a container that starts in the same second as the
+	// sandbox was created does not read as started before it.
+	now := time.Now().UTC().Truncate(time.Second)
 	ident := identity{id: s.ID, name: s.Name, owner: s.Owner, image: s.Image, digest: digest,
 		workspacePath: root, disk: s.Resources.Disk, createdAt: now}
 	if err := d.createVolume(ctx, workspaceVolume(s.ID), ident.labels()); err != nil {
@@ -621,7 +636,7 @@ func (d *Driver) Create(ctx context.Context, s driver.CreateSpec) (driver.Ref, e
 		_ = d.removeVolume(clean, recordVolume(s.ID, 1))
 		_ = d.removeVolume(clean, workspaceVolume(s.ID))
 	}
-	rec := record{labels: maps.Clone(s.Labels), env: maps.Clone(s.Env), lastActivityAt: now,
+	rec := record{labels: maps.Clone(s.Labels), env: maps.Clone(s.Env), lastActivityAt: time.Now().UTC(),
 		ttl: s.Lifecycle.TTL, autoStop: s.Lifecycle.AutoStop, autoDelete: s.Lifecycle.AutoDelete}
 	if err := d.writeRecord(ctx, s.ID, 0, rec); err != nil {
 		undo()

@@ -797,3 +797,61 @@ func TestClientHelpers(t *testing.T) {
 		t.Fatalf("apiError = %q", got)
 	}
 }
+
+// TestListAndInspectAgree pins the one clock resolution: the list endpoint
+// carries a container's instants as unix seconds and the inspect endpoint to
+// the nanosecond, so a state read one way must equal the same state read the
+// other or a caller comparing an observed state against a stored one sees
+// drift that is not there.
+func TestListAndInspectAgree(t *testing.T) {
+	f := newFake(t)
+	d := f.driver(t)
+	create(t, d, driver.CreateSpec{ID: "sbx_a", Name: "one", Owner: "alice",
+		Labels: map[string]string{"k": "1"}, Lifecycle: driver.Lifecycle{TTL: time.Hour, AutoStop: time.Minute}})
+	// The engine reports sub-second precision on inspect and whole seconds on
+	// the list, which is what podman does.
+	c := f.container(t, "sbx_a")
+	f.mu.Lock()
+	c.startedAt = time.Now().UTC().Add(-time.Minute).Add(637 * time.Millisecond)
+	f.mu.Unlock()
+	for _, stop := range []bool{false, true} {
+		if stop {
+			if err := d.Stop(t.Context(), "sbx_a"); err != nil {
+				t.Fatal(err)
+			}
+			f.mu.Lock()
+			c.finishedAt = time.Now().UTC().Add(412 * time.Millisecond)
+			f.mu.Unlock()
+		}
+		one, err := d.Inspect(t.Context(), "sbx_a")
+		if err != nil {
+			t.Fatal(err)
+		}
+		many, err := d.List(t.Context(), driver.Filter{IDs: []string{"sbx_a"}})
+		if err != nil || len(many) != 1 {
+			t.Fatalf("List: %d %v", len(many), err)
+		}
+		if !reflect.DeepEqual(one, many[0]) {
+			t.Fatalf("stopped=%v: Inspect reads %+v, List reads %+v", stop, one, many[0])
+		}
+	}
+	if !engineInstant(time.Time{}).IsZero() {
+		t.Fatal("a container that never ran reports an instant")
+	}
+}
+
+// TestCreatedAtPrecedesTheStart holds the ordering a caller reads off one
+// sandbox: it was created before it started, whatever second either fell in.
+func TestCreatedAtPrecedesTheStart(t *testing.T) {
+	f := newFake(t)
+	d := f.driver(t)
+	for range 20 {
+		state := create(t, d, driver.CreateSpec{ID: "sbx_a"})
+		if state.StartedAt.Before(state.CreatedAt) {
+			t.Fatalf("StartedAt %v is before CreatedAt %v", state.StartedAt, state.CreatedAt)
+		}
+		if err := d.Delete(t.Context(), "sbx_a"); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
