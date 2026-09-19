@@ -256,3 +256,4 @@ The map, the order, and the rule for a slice are in 031.
 | [028-runnable-native-control-plane.md](.archive/028-runnable-native-control-plane.md) | complete | Server wiring and authenticated native lifecycle end-to-end |
 | [029-workspace-files-and-logs.md](.archive/029-workspace-files-and-logs.md) | complete | Authorized tar import/export and process log routes |
 | [030-native-main-process.md](.archive/030-native-main-process.md) | complete | Main command supervision and persisted output |
+| [032-runtime-conformance-suite.md](032-runtime-conformance-suite.md) | in-progress | Driver conformance suite, Nop fake, dial-nothing and coordinates tests |
