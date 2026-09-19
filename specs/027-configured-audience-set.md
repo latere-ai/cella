@@ -1,8 +1,8 @@
 ---
 title: Configured audience set
-status: in-progress
+status: complete
 track: foundations
-depends_on: [006-identity.md]
+depends_on: [specs/006-identity.md]
 affects: [internal/config, internal/auth, cmd/cellad]
 effort: small
 created: 2026-09-19
@@ -33,3 +33,10 @@ or token exchange is introduced.
 | A configured set is parsed and invalid entries fail startup | `TestConfiguredAudienceSet` |
 | External tokens for either configured audience verify; unrelated tokens fail | `TestAudienceSetIdentityEndToEnd` |
 | Minted environment tokens keep the first audience and verify locally | `TestAudienceSetIdentityEndToEnd` |
+
+## Outcome
+
+Implemented. The configuration regression failed against the old list refusal
+and passed after the change. Identity end-to-end tests accept either external
+audience, reject unrelated audiences, and retain the local-token audience
+boundary. The configuration, identity, and server suites pass.

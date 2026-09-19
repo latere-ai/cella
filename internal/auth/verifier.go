@@ -69,8 +69,10 @@ func (c Caller) reserved(prefix string) (string, bool) {
 // are CELLA_PUBLIC_URL and the public halves of CELLA_TOKEN_KEY, which
 // verify the tokens cellad mints with no fetch at all.
 type VerifierOptions struct {
-	Issuers     []string
-	Audience    string
+	Issuers  []string
+	Audience string
+	// Audiences overrides the external audience set; local tokens use Audience.
+	Audiences   []string
 	LocalIssuer string
 	LocalKeys   []*rsa.PublicKey
 	HTTP        *http.Client
@@ -113,6 +115,15 @@ func NewVerifier(ctx context.Context, o VerifierOptions) (*Verifier, error) {
 	if o.Audience == "" {
 		return nil, errors.New("CELLA_OIDC_AUDIENCE is empty, and a token addressed to nobody is a token addressed to everybody")
 	}
+	audiences := slices.Clone(o.Audiences)
+	if len(audiences) == 0 {
+		audiences = []string{o.Audience}
+	}
+	for _, audience := range audiences {
+		if strings.TrimSpace(audience) == "" {
+			return nil, errors.New("CELLA_OIDC_AUDIENCE has an empty entry")
+		}
+	}
 	client := o.HTTP
 	if client == nil {
 		client = &http.Client{Timeout: DefaultFetchTimeout, Transport: otel.Transport(nil)}
@@ -134,7 +145,7 @@ func NewVerifier(ctx context.Context, o VerifierOptions) (*Verifier, error) {
 	}
 	v.validator = jwt.New(jwt.Config{
 		Issuers:    v.issuers,
-		Audiences:  []string{o.Audience},
+		Audiences:  audiences,
 		CacheTTL:   o.CacheTTL,
 		HTTPClient: client,
 		// The family's age bound, one rule across the three cores and

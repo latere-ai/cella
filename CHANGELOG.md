@@ -6,6 +6,10 @@ refused before it is pushed.
 
 ## Unreleased
 
+- `CELLA_OIDC_AUDIENCE` accepts a comma-separated set for external callers.
+  The first entry remains the audience of locally signed workload and
+  environment tokens. Empty and repeated entries fail startup.
+
 ## v0.1.0 - 2026-09-17
 
 - A personal access key can now be narrower than the person who holds

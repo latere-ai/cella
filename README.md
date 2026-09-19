@@ -126,7 +126,7 @@ trust, any of them. At start `cellad` reads each one's discovery
 document and key set and refuses to start when one does not answer,
 names another issuer, or publishes no RS256 or ES256 key, so a wrong
 issuer is a deployment you fix rather than a log you read later. A
-bearer is accepted when a listed issuer signed it, its `aud` contains
+bearer is accepted when a listed issuer signed it, its `aud` matches an entry in
 `CELLA_OIDC_AUDIENCE`, it has not expired, and it was minted less than
 24 hours ago: a token older than that, or one that does not say when it
 was minted, is refused however long its `exp` runs, so a caller re-mints
@@ -176,7 +176,7 @@ CELLA_ADMIN_SUBJECTS='https://login.example.com|alice' \
 | `CELLA_OIDC_ISSUERS` | yes | | issuer URLs whose tokens are accepted, comma separated |
 | `CELLA_PUBLIC_URL` | yes | | where callers reach the public listener; the issuer of the tokens `cellad` signs |
 | `CELLA_TOKEN_KEY` | yes | | one or two PEM RSA private keys of at least 2048 bits; the first signs, all are published |
-| `CELLA_OIDC_AUDIENCE` | | `cella` | the `aud` a caller's token must contain |
+| `CELLA_OIDC_AUDIENCE` | | `cella` | comma-separated accepted audiences; the first is used for locally signed tokens |
 | `CELLA_OIDC_INSECURE_ISSUERS` | | | issuers from the list that may use `http://` off a loopback address; for a local issuer, never for a deployment |
 | `CELLA_AUTHORIZER_URL`, `CELLA_AUTHORIZER_TOKEN` | | | your authorization endpoint and the bearer `cellad` sends it; the URL unset selects the owner policy, and the URL without the token is a start-up failure |
 | `CELLA_AUTHORIZER_TIMEOUT`, `CELLA_AUTHORIZER_CACHE` | | `5s`, `60s` | one decision's deadline, and how long an allow that names no `ttl` is held |

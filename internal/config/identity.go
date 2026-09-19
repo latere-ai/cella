@@ -58,9 +58,10 @@ type Identity struct {
 	// OIDCInsecureIssuers is CELLA_OIDC_INSECURE_ISSUERS, the entries of
 	// the list above that may be http:// on a host other than loopback.
 	OIDCInsecureIssuers []string
-	// OIDCAudience is CELLA_OIDC_AUDIENCE, the one audience a caller's
-	// token must contain.
+	// OIDCAudience is the first configured audience, used for local tokens.
 	OIDCAudience string
+	// OIDCAudiences is the set accepted from external OIDC issuers.
+	OIDCAudiences []string
 	// PublicURL is CELLA_PUBLIC_URL, the absolute URL callers reach the
 	// public listener at and the iss of every token cellad mints.
 	PublicURL string
@@ -97,9 +98,16 @@ func (i *Identity) loadIdentity(getenv Getenv) []string {
 	if len(i.OIDCIssuers) == 0 {
 		problems = append(problems, "CELLA_OIDC_ISSUERS names no issuer; a control plane that verifies no token admits nobody, and there is no anonymous access")
 	}
-	i.OIDCAudience = withDefault(getenv("CELLA_OIDC_AUDIENCE"), DefaultOIDCAudience)
-	if strings.Contains(i.OIDCAudience, ",") {
-		problems = append(problems, "CELLA_OIDC_AUDIENCE is "+strconv.Quote(i.OIDCAudience)+", a list; one audience is verified")
+	for entry := range strings.SplitSeq(withDefault(getenv("CELLA_OIDC_AUDIENCE"), DefaultOIDCAudience), ",") {
+		audience := strings.TrimSpace(entry)
+		if audience == "" || slices.Contains(i.OIDCAudiences, audience) {
+			problems = append(problems, "CELLA_OIDC_AUDIENCE requires distinct nonempty entries")
+			continue
+		}
+		i.OIDCAudiences = append(i.OIDCAudiences, audience)
+	}
+	if len(i.OIDCAudiences) > 0 {
+		i.OIDCAudience = i.OIDCAudiences[0]
 	}
 
 	i.PublicURL = strings.TrimRight(strings.TrimSpace(getenv("CELLA_PUBLIC_URL")), "/")

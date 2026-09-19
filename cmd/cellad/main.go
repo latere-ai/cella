@@ -101,6 +101,7 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	identity, err := auth.Start(ctx, auth.Options{
 		Issuers:            cfg.OIDCIssuers,
 		Audience:           cfg.OIDCAudience,
+		Audiences:          cfg.OIDCAudiences,
 		PublicURL:          cfg.PublicURL,
 		TokenKeys:          cfg.TokenKeys,
 		AuthorizerURL:      cfg.AuthorizerURL,

@@ -240,3 +240,9 @@ and Outcome once complete. Acceptance criteria are a table of
 criterion, the test that proves it, and its state. Names in a spec are
 the names the code uses. Cross-references are `[[NNN-name]]`
 wikilinks. No em dashes; the technical register throughout.
+
+## Consolidation slices
+
+| Spec | State | Deliverable |
+|---|---|---|
+| [[027-configured-audience-set]] | complete | External audience sets with one local signing audience |

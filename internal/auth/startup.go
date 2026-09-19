@@ -34,6 +34,7 @@ const (
 type Options struct {
 	Issuers            []string
 	Audience           string
+	Audiences          []string
 	PublicURL          string
 	TokenKeys          []*rsa.PrivateKey
 	AuthorizerURL      string
@@ -81,7 +82,7 @@ func Start(ctx context.Context, o Options) (*Identity, error) {
 		return nil, err
 	}
 	verifier, err := NewVerifier(ctx, VerifierOptions{
-		Issuers: o.Issuers, Audience: o.Audience,
+		Issuers: o.Issuers, Audience: o.Audience, Audiences: o.Audiences,
 		LocalIssuer: o.PublicURL, LocalKeys: signer.PublicKeys(),
 		HTTP: client,
 	})
