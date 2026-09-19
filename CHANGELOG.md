@@ -6,6 +6,16 @@ refused before it is pushed.
 
 ## Unreleased
 
+- Desired state can live in Postgres. `CELLA_DB_URL` selects it, bounded by
+  `CELLA_DB_MAX_CONNS` (default `4`), with the schema applied at start-up and
+  a schema this binary does not know refused rather than served. With it, a
+  sandbox the runtime lost is recreated from its desired state with the same
+  id, name, labels and lifecycle; without it, a lost sandbox is reported and
+  deleted after `CELLA_LOST_GRACE` (default `10m`), which the start-up line
+  says out loud. `CELLA_SECRET_KEY` is read where it is set: 32 bytes, base64,
+  the key every secret value's data key is sealed under. Several `cellad`
+  replicas on one database take one writer's lease each.
+
 - `cellad` enforces the lifecycle its runtime reports. A sandbox past its
   expiry is deleted, one stopped for longer than its auto-delete window is
   deleted, and one idle for longer than its auto-stop window is stopped, each
