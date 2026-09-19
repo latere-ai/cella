@@ -37,11 +37,28 @@ type Lifecycle struct {
 	AutoStop   time.Duration `json:"autoStop,omitempty"`
 	AutoDelete time.Duration `json:"autoDelete,omitempty"`
 }
+
+// Resources is the compute a sandbox is granted, in Kubernetes quantity
+// syntax as the manifest wrote it. A driver that enforces no limit records the
+// request and the resolved manifest carries the warning.
+type Resources struct {
+	CPU    string `json:"cpu,omitempty"`
+	Memory string `json:"memory,omitempty"`
+	Disk   string `json:"disk,omitempty"`
+}
+
+// Workspace is where the sandbox's own files live inside it.
+type Workspace struct {
+	Path string `json:"path,omitempty"`
+}
 type CreateSpec struct {
 	ID, Name, Owner, Image, Workdir string
 	Command, Args                   []string
 	Env, Labels                     map[string]string
 	Lifecycle                       Lifecycle
+	User                            string
+	Resources                       Resources
+	Workspace                       Workspace
 }
 type Ref struct {
 	ID string `json:"id"`
