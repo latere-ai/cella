@@ -212,6 +212,18 @@ func (d *touchDriver) Touch(_ context.Context, id string) error {
 	d.ids = append(d.ids, id)
 	return errors.New("runtime outage")
 }
+
+// Attach forwards to the driver under the counter. A wrapper that embeds the
+// Driver interface does not promote the concrete Attach, and one that
+// declares the capability without the interface is what the conformance suite
+// calls a lying driver.
+func (d *touchDriver) Attach(ctx context.Context, id string, req runtime.AttachRequest) (runtime.Session, error) {
+	a, ok := d.Driver.(runtime.Attacher)
+	if !ok {
+		return nil, runtime.ErrUnsupported
+	}
+	return a.Attach(ctx, id, req)
+}
 func (d *touchDriver) stamped() []string {
 	d.mu.Lock()
 	defer d.mu.Unlock()

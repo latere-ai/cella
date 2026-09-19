@@ -66,6 +66,8 @@ func New(o Options) (http.Handler, error) {
 	h.mux.HandleFunc("GET /v1/sandboxes/{id}", h.item)
 	h.mux.HandleFunc("DELETE /v1/sandboxes/{id}", h.item)
 	h.mux.HandleFunc("POST /v1/sandboxes/{id}/{verb}", h.item)
+	h.mux.HandleFunc("GET /v1/sandboxes/{id}/exec", h.execSocket)
+	h.mux.HandleFunc("GET /v1/sandboxes/{id}/attach", h.attachSocket)
 	return h, nil
 }
 
@@ -387,6 +389,15 @@ func respond(w http.ResponseWriter, status int, body any) {
 	httpjson.Write(w, status, body)
 }
 func respondError(w http.ResponseWriter, err error) {
+	status, envelope := errorEnvelope(err, w.Header().Get("X-Request-ID"))
+	httpjson.WriteError(w, status, envelope)
+}
+
+// errorEnvelope is the error table of design 008: one code, one status and one
+// fixed user sentence per failure, with the developer sentence in details. The
+// WebSocket routes send the same envelope in a text frame, so a client reads
+// one error shape whether it failed before or after the upgrade.
+func errorEnvelope(err error, requestID string) (int, httpjson.Error) {
 	code := "driver_unavailable"
 	status := 503
 	message := "The environment is unavailable; retry shortly."
@@ -476,9 +487,9 @@ func respondError(w http.ResponseWriter, err error) {
 		status = 422
 		message = "The request was refused by this server's policy."
 	}
-	details := map[string]any{"request_id": w.Header().Get("X-Request-ID"), "detail": fmt.Sprint(err)}
+	details := map[string]any{"request_id": requestID, "detail": fmt.Sprint(err)}
 	if me != nil && len(me.Paths) > 0 {
 		details["paths"] = me.Paths
 	}
-	httpjson.WriteError(w, status, httpjson.Error{Code: code, Message: message, Details: details})
+	return status, httpjson.Error{Code: code, Message: message, Details: details}
 }
