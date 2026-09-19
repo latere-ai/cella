@@ -83,6 +83,13 @@ func (d *Driver) Ready(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for id := range d.mains {
+		if err := d.mainError(id); err != nil {
+			return err
+		}
+	}
 	_, err := os.Stat(d.root)
 	return err
 }
@@ -172,6 +179,9 @@ func (d *Driver) Inspect(ctx context.Context, id string) (driver.State, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	r, err := d.load(id)
+	if err == nil {
+		err = d.mainError(id)
+	}
 	return r.State, err
 }
 func (d *Driver) List(ctx context.Context, f driver.Filter) ([]driver.State, error) {
@@ -191,6 +201,9 @@ func (d *Driver) List(ctx context.Context, f driver.Filter) ([]driver.State, err
 		}
 		r, err := d.load(e.Name())
 		if err != nil {
+			return nil, err
+		}
+		if err := d.mainError(e.Name()); err != nil {
 			return nil, err
 		}
 		s := r.State
@@ -222,6 +235,9 @@ func (d *Driver) Start(ctx context.Context, id string) error {
 	defer d.mu.Unlock()
 	r, err := d.load(id)
 	if err != nil {
+		return err
+	}
+	if err := d.mainError(id); err != nil {
 		return err
 	}
 	if r.State.Phase == driver.Running {
@@ -260,7 +276,13 @@ func (d *Driver) Stop(ctx context.Context, id string) error {
 		r.State.Phase = driver.Stopped
 		r.State.StoppedAt = time.Now().UTC()
 	}
-	return d.save(id, r)
+	if err := d.save(id, r); err != nil {
+		return err
+	}
+	if main := d.mains[id]; main != nil && mainFinished(main) {
+		delete(d.mains, id)
+	}
+	return nil
 }
 func (d *Driver) cancel(id string) {
 	for e := range d.active[id] {
@@ -282,7 +304,11 @@ func (d *Driver) Delete(ctx context.Context, id string) error {
 		return err
 	}
 	d.cancel(id)
-	return os.RemoveAll(d.dir(id))
+	if err := os.RemoveAll(d.dir(id)); err != nil {
+		return err
+	}
+	delete(d.mains, id)
+	return nil
 }
 func (d *Driver) Touch(ctx context.Context, id string) error {
 	return d.edit(ctx, id, func(r *record) { r.State.LastActivityAt = time.Now().UTC() })

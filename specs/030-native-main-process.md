@@ -81,6 +81,13 @@ restoring it passes. Lifecycle cleanup waits for the existing reaper, so no new
 process-wait implementation was introduced.
 
 `go test -race -timeout=45s -coverprofile=/tmp/cella-native-main.cover
-./runtime/...` passes at 93.6% native statement coverage. `go vet ./runtime/...`
+./runtime/...` passes at 93.2% native statement coverage. `go vet ./runtime/...`
 passes. End-to-end tests cover commands, logs, success/failure exit states,
 stop/restart/delete, orderly reopen and unrecoverable process records.
+
+A terminal metadata-write failure is retained in memory and fails readiness,
+inspection, listing, start and exec instead of trusting a stale Running record.
+Close reports the failure; explicit stop can repair the state after storage is
+restored, and deletion remains available. A deterministic test blocks the
+metadata temporary path, lets the main command exit, and verifies each refusal;
+it fails against the version that silently discarded the write error.

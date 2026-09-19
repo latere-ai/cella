@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -96,7 +97,11 @@ func (d *Driver) supervise(id string, main *mainProcess, log *os.File) {
 	if d.mains[id] != main {
 		return
 	}
-	delete(d.mains, id)
+	defer func() {
+		if main.err == nil {
+			delete(d.mains, id)
+		}
+	}()
 	r, err := d.load(id)
 	if err != nil {
 		if !errors.Is(err, driver.ErrNotFound) {
@@ -125,4 +130,13 @@ func (d *Driver) supervise(id string, main *mainProcess, log *os.File) {
 		r.State.StoppedAt = time.Now().UTC()
 	}
 	main.err = d.save(id, r)
+}
+
+// mainError is called with mu held. Keep failed terminal writes visible until
+// an explicit stop repairs the record or delete removes the environment.
+func (d *Driver) mainError(id string) error {
+	if main := d.mains[id]; main != nil && main.err != nil {
+		return fmt.Errorf("native: main process state persistence failed: %w", main.err)
+	}
+	return nil
 }

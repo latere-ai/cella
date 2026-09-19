@@ -342,3 +342,44 @@ func TestLogTailRejectsOversizedUnterminatedLine(t *testing.T) {
 		t.Fatalf("oversized tail must fail before buffering/emitting it: bytes=%d error=%v", output.Len(), err)
 	}
 }
+
+func TestCompletedMainPersistenceFailureFailsClosed(t *testing.T) {
+	d, root := fresh(t)
+	ctx := context.Background()
+	_, err := d.Create(ctx, driver.CreateSpec{ID: "one", Command: []string{"sh", "-c", "while [ ! -f release ]; do sleep 0.01; done"}})
+	check(t, err)
+	d.mu.Lock()
+	main := d.mains["one"]
+	d.mu.Unlock()
+	blocker := filepath.Join(root, "one", "record.json.tmp")
+	check(t, os.Mkdir(blocker, 0700))
+	check(t, os.WriteFile(filepath.Join(root, "one", "workspace", "release"), nil, 0600))
+	select {
+	case <-main.done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("main did not complete")
+	}
+	if _, err = d.Inspect(ctx, "one"); err == nil {
+		t.Fatal("completed process with failed state persistence still reported Running")
+	}
+	if err = d.Ready(ctx); err == nil {
+		t.Fatal("runtime ignored failed state persistence")
+	}
+	if _, err = d.Exec(ctx, "one", driver.ExecRequest{Command: []string{"true"}}); err == nil {
+		t.Fatal("exec trusted stale Running state")
+	}
+	if _, err = d.List(ctx, driver.Filter{}); err == nil {
+		t.Fatal("list trusted stale Running state")
+	}
+	if err = d.Start(ctx, "one"); err == nil {
+		t.Fatal("start trusted stale Running state")
+	}
+	if err = d.Close(); err == nil {
+		t.Fatal("close ignored prior persistence failure")
+	}
+	// Deletion remains available while failed readiness prevents new work.
+	check(t, os.Remove(blocker))
+	check(t, d.Delete(ctx, "one"))
+	check(t, d.Ready(ctx))
+	check(t, d.Close())
+}

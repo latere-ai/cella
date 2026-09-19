@@ -61,6 +61,9 @@ func (d *Driver) Exec(ctx context.Context, id string, req driver.ExecRequest) (d
 	return d.execLocked(ctx, id, req)
 }
 func (d *Driver) execLocked(ctx context.Context, id string, req driver.ExecRequest) (*execution, error) {
+	if err := d.mainError(id); err != nil {
+		return nil, err
+	}
 	r, err := d.load(id)
 	if err != nil {
 		return nil, err
