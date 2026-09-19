@@ -37,27 +37,27 @@ func (r *recorder) Helper() {}
 func (r *recorder) Errorf(format string, args ...any) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.errors = append(r.errors, sprintf(format, args...))
+	r.errors = append(r.errors, fmt.Sprintf(format, args...))
 }
 
 func (r *recorder) Logf(format string, args ...any) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.logs = append(r.logs, sprintf(format, args...))
+	r.logs = append(r.logs, fmt.Sprintf(format, args...))
 }
 
 // Fatalf and Skipf end the case the way testing does: the goroutine running
 // it exits, its deferred cleanups run, and nothing after the call executes.
 func (r *recorder) Fatalf(format string, args ...any) {
 	r.mu.Lock()
-	r.fatal = sprintf(format, args...)
+	r.fatal = fmt.Sprintf(format, args...)
 	r.mu.Unlock()
 	gort.Goexit()
 }
 
 func (r *recorder) Skipf(format string, args ...any) {
 	r.mu.Lock()
-	r.skip = sprintf(format, args...)
+	r.skip = fmt.Sprintf(format, args...)
 	r.mu.Unlock()
 	gort.Goexit()
 }
@@ -93,8 +93,6 @@ func (r *recorder) report() string {
 	defer r.mu.Unlock()
 	return strings.Join(append(append([]string(nil), r.logs...), append(r.errors, r.fatal, r.skip)...), "\n")
 }
-
-func sprintf(format string, args ...any) string { return fmt.Sprintf(format, args...) }
 
 // drive runs one case to its end on its own goroutine, so Fatalf and Skipf
 // unwind it, and runs the cleanups it registered last in first out.
