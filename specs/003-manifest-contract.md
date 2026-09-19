@@ -37,7 +37,7 @@ nothing a workload does inside it later can widen that boundary.
 
 ## Current state
 
-A strict JSON Sandbox subset is implemented by [[026-direct-control-plane]]: metadata, the configured environment, and native execution fields. The complete resolver, other kinds, defaults, admission, and boundary algebra below remain to build.
+A strict JSON Sandbox subset is implemented by [[026-direct-control-plane]]: metadata, the configured environment, and native execution fields. [[044-manifest-fields]] added `user`, `resources`, `workspace.path`, `lifecycle`, the full `metadata` and `env` rules, `status.expiresAt` and `status.warnings`, the quantity and duration parsers, and the staged `Resolve` with `Defaults`, `Ceilings`, `Limits`, `Admit`, `Existing` and `NewName`, over a `Lookup` that answers `Environment`. YAML decoding, the secret, volume, network, port, mesh, scheduling and display fields, the host rule, the boundary check, and the golden corpus remain to build.
 
 Design provenance: The schema descends from a manifest that has served a
 hosted platform for months, with these changes: the platform's own
@@ -479,23 +479,23 @@ mapping and user sentences of the errors ([[008-api]]).
 |---|---|---|
 | The example above decodes from YAML and from its JSON form to equal objects, and resolves without error under options that grant every capability it uses | `TestDecodeYAMLAndJSONAgree`, `TestTheExampleResolves` | not built |
 | Every unknown field, at any depth, is refused with its path | `TestUnknownFieldNamesThePath`, table-driven over twenty paths | not built |
-| A second YAML document, a wrong version, a wrong kind, and an unsupported content type are refused with their codes, version before kind | `TestDecodeRefusals` | not built |
+| A second YAML document, a wrong version, a wrong kind, and an unsupported content type are refused with their codes, version before kind | `TestDecodeRefusals` | partial: `TestDecode` over a second JSON document, the version, the kind and a content type that is not JSON |
 | An alias chain past 1 MiB and nesting past 64 levels are each refused in under 100 ms | `TestYAMLLimits` | not built |
-| Every syntax rule in the field table has a refusing case: quantity, duration and `never`, RFC 3339, DNS-1123 names, port range and uniqueness, display ranges, OCI reference, absolute paths | `TestFieldSyntax`, table-driven | not built |
-| Every default in the table is applied and returned; a field the caller set is never overwritten; `mode` is inferred from hosts and secrets; an absent name comes from `NewName` | `TestDefaultsFillOnlyAbsentFields`, `TestModeInference`, `TestNameGeneration` | not built |
+| Every syntax rule in the field table has a refusing case: quantity, duration and `never`, RFC 3339, DNS-1123 names, port range and uniqueness, display ranges, OCI reference, absolute paths | `TestFieldSyntax`, table-driven | partial: `TestFieldSyntax`, `TestParseQuantity` and `TestParseDuration` over the fields that exist |
+| Every default in the table is applied and returned; a field the caller set is never overwritten; `mode` is inferred from hosts and secrets; an absent name comes from `NewName` | `TestDefaultsFillOnlyAbsentFields`, `TestModeInference`, `TestNameGeneration` | partial: `TestDefaultsFillOnlyAbsentFields` and `TestNameGeneration`; mode inference waits on the egress field |
 | Each `exclusive_fields`, `path_conflict`, and `missing_field` case in the table is refused with the code | `TestExclusiveMissingAndPathConflicts` | not built |
-| An admission function's output is validated again; one that changes `kind` or `metadata.name` on update is `admission_refused` | `TestAdmissionOutputIsValidated` | not built |
+| An admission function's output is validated again; one that changes `kind` or `metadata.name` on update is `admission_refused` | `TestAdmissionOutputIsValidated` | built |
 | Every mounted secret's hosts join the allow list; two secrets on one host are `secret_host_conflict`; a clone secret without the clone host, or with an `ssh://` URL, is `secret_out_of_scope`; companion names collide with `env` and other entries | `TestSecretReferences` | not built |
-| `Lookup` returning not-found and refused both surface as `not_found`; unavailable surfaces as `authorizer_unavailable` | `TestLookupErrors` | not built |
+| `Lookup` returning not-found and refused both surface as `not_found`; unavailable surfaces as `authorizer_unavailable` | `TestLookupErrors` | partial: `TestLookupErrors` over `Environment`, the one reference the interface carries |
 | A `single` volume attached read-write elsewhere is `volume_busy`; a volume in another environment is `invalid_field` | `TestVolumeReferences` | not built |
-| Every reserved env key and prefix, in `env` and as a `secrets[].env`, is `reserved_prefix`; the list equals the gateway's | `TestReservedEnvKeys`, `TestReservedKeysMatchTheGateway` | not built |
+| Every reserved env key and prefix, in `env` and as a `secrets[].env`, is `reserved_prefix`; the list equals the gateway's | `TestReservedEnvKeys`, `TestReservedKeysMatchTheGateway` | partial: `TestResolve` and `TestFieldSyntax` over `env`; the gateway comparison waits on the gateway |
 | The host rule: each refused form (IP, single label, port, private range) is `invalid_field`; wildcard containment matches `hostmatch` on a table of pattern pairs | `TestHostRule`, `TestHostContainment` | not built |
-| Every immutable field changed on update is named in one `immutable_field` error; a workload widening each `narrow` field is `boundary_widened`; the owner widening the same is accepted | `TestImmutableFields`, `TestNarrowingIsForWorkloads` | not built |
+| Every immutable field changed on update is named in one `immutable_field` error; a workload widening each `narrow` field is `boundary_widened`; the owner widening the same is accepted | `TestImmutableFields`, `TestNarrowingIsForWorkloads` | partial: `TestImmutableFields`; no `narrow` field exists yet |
 | Each of the nine boundary rules, violated one at a time against a parent, is `boundary_exceeded` naming the path; a conforming child passes; a child's default `ttl` is cut to the parent's remaining life | `TestBoundaryCheck`, table-driven over the nine rules | not built |
-| Ceilings refuse with the field and the ceiling; a ceiling of zero is no ceiling; `priority` above `Limits.MaxPriority` is `ceiling_exceeded` | `TestCeilings` | not built |
-| Each capability row of stage 7 refuses or warns as stated when the capability is absent and passes when present | `TestCapabilityRows`, table-driven over every row | not built |
-| `status` on apply is ignored; `Resolve` returns an empty status but warnings | `TestStatusIsIgnoredOnApply` | not built |
-| `Resolve` on the same input, options, and lookup answers twice yields byte-identical JSON | `TestResolveIsDeterministic` | not built |
+| Ceilings refuse with the field and the ceiling; a ceiling of zero is no ceiling; `priority` above `Limits.MaxPriority` is `ceiling_exceeded` | `TestCeilings` | partial: `TestCeilings` over the resource and ttl ceilings; `scheduling.priority` waits on the scheduler |
+| Each capability row of stage 7 refuses or warns as stated when the capability is absent and passes when present | `TestCapabilityRows`, table-driven over every row | partial: the `Resize` row in `TestImmutableFields` and the workspace source rows in `TestFieldSyntax` |
+| `status` on apply is ignored; `Resolve` returns an empty status but warnings | `TestStatusIsIgnoredOnApply` | built |
+| `Resolve` on the same input, options, and lookup answers twice yields byte-identical JSON | `TestResolveIsDeterministic` | built |
 | Every manifest in `testdata/v1/` resolves to its golden output | `TestGoldenCorpus` | not built |
 | The quantity parser agrees with the Kubernetes parser on a fuzz corpus | `FuzzQuantity` against `resource.ParseQuantity` in a test-only dependency | not built |
-| `manifest/v1` imports only the standard library; `manifest` imports no `internal/` or `runtime` package | `TestManifestImports` | not built |
+| `manifest/v1` imports only the standard library; `manifest` imports no `internal/` or `runtime` package | `TestManifestImports` | built |

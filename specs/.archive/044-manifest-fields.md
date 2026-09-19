@@ -1,6 +1,6 @@
 ---
 title: "Manifest fields: user, resources, workspace, lifecycle, metadata rules, and the Resolve stages"
-status: in-progress
+status: complete
 track: core
 depends_on:
   - specs/003-manifest-contract.md
@@ -135,14 +135,22 @@ total before the next begins:
 
 ```mermaid
 flowchart TB
-  S1[1 structural validation] --> S2[2 defaulting]
+  S1[1 structural validation] --> S2[2 defaulting, with the environment resolved]
   S2 --> S3[3 admission]
   S3 --> S1b[1 again over the admission output]
-  S1b --> S4[4 reference resolution: Environment]
-  S4 --> S5[5 semantic validation: ceilings, immutability, autoStop against ttl]
+  S1b --> S5[5 semantic validation: ceilings, immutability, autoStop against ttl]
   S5 --> S7[7 capability check and warnings]
   S7 --> R[Resolved]
 ```
+
+The environment is resolved inside stage 2 rather than at stage 4,
+because both stage 2 and stage 3 read it: defaulting takes the
+environment's default queue from it, and `AdmitRequest.Environment`
+carries it with its capabilities. Stage 4 keeps the secret and volume
+references, which nothing before them reads. `Lookup.Environment` with
+the empty name answers the default environment, and `Resolve` writes
+that environment's name back into `spec.environment`, so a resolved
+manifest names where it runs.
 
 Stage 6, the boundary check, has no `Parent` to check against until
 [[022-mesh-and-spawn]] and is not in this slice.
@@ -200,7 +208,7 @@ The two sentences land in `status.warnings`:
 - `The native environment does not limit cpu, memory or disk; the requested resources are recorded and not enforced.`
 - `The native environment runs the workload as the server's own user; spec.user is not applied.`
 
-`ResolveNative(obj, environment)` is `Resolve` with a lookup that
+`ResolveNative(ctx, obj, environment)` is `Resolve` with a lookup that
 answers one environment of isolation `none`, no defaults, and no
 ceilings. Its native-only refusals stay where they are: an `image` is
 `capability_unsupported`, `args` without `command` is `invalid_field`,
@@ -235,21 +243,69 @@ the name generator. Where `Defaults` and `Ceilings` come from
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| The quantity parser takes the decimal and binary SI subset, refuses a bad suffix, sub-milli precision, and an out-of-range value, and agrees with the hosted parser's cases | `TestParseQuantity` | not built |
-| A duration is Go syntax and positive, or `never`; zero and negative are refused | `TestParseDuration` | not built |
-| `autoStop` above a duration `ttl` is `invalid_field`; `autoStop: never` under a duration `ttl` is accepted; a defaulted `autoStop` above a caller's `ttl` refuses | `TestAutoStopAgainstTTL` | not built |
-| Every default in this slice's table is applied and returned, and a field the caller set is never overwritten | `TestDefaultsFillOnlyAbsentFields` | not built |
-| A key under `cella.latere.ai/` or any subdomain of it, in labels or annotations, is `reserved_prefix`; label syntax, label value length, the 4 KiB annotation value and the 64 KiB annotation total are refused with `invalid_field` | `TestMetadataRules` | not built |
-| `user`, `workspace.path`, and `workspace.source` refuse each bad form with the table's code | `TestFieldSyntax` | not built |
-| Ceilings refuse with the field and the ceiling, a zero ceiling is no ceiling, `ttl: never` under a ceiling is `ceiling_exceeded`, and a negative `MaxPriority` is `ceiling_exceeded` | `TestCeilings` | not built |
-| Every immutable field changed on update is named in one `immutable_field` error | `TestImmutableFields` | not built |
-| An admission function's output is validated again; one that changes `kind` or `metadata.name` on update is `admission_refused`; a nil `Admit` is the identity | `TestAdmissionOutputIsValidated` | not built |
-| An absent `metadata.name` comes from `NewName` and is validated | `TestNameGeneration` | not built |
-| `Lookup` returning not-found surfaces as `not_found`; an unavailable lookup surfaces as `authorizer_unavailable` | `TestLookupErrors` | not built |
-| `status` on apply is ignored and `Resolve` returns an empty status but warnings | `TestStatusIsIgnoredOnApply` | not built |
-| `Resolve` on the same input, options, and lookup answers twice yields byte-identical JSON, and never mutates its input | `TestResolveIsDeterministic` | not built |
-| An environment of isolation `none` warns about `resources` and `user` instead of refusing them | `TestNativeWarnsInsteadOfRefusing` | not built |
-| `manifest/v1` imports only the standard library; `manifest` imports no `internal/` or `runtime` package | `TestManifestImports` | not built |
-| No file of this slice names a Latere host, image, pool, or namespace outside an example | `TestNoLatereCoordinates` | not built |
-| `user`, `resources`, `workspace.path`, and `lifecycle` reach the driver's `CreateSpec`, and `never` reaches it as the zero duration | `TestCreateSpecCarriesManifestFields` | not built |
-| A create over HTTP with all four fields returns 201 with the warnings and an `expiresAt` in its status, and reads back the same | `TestNativeManifestFieldsEndToEnd` | not built |
+| The quantity parser takes the decimal and binary SI subset, refuses a bad suffix, sub-milli precision, and an out-of-range value, and agrees with the hosted parser's cases | `TestParseQuantity` | built |
+| A duration is Go syntax and positive, or `never`; zero and negative are refused | `TestParseDuration` | built |
+| `autoStop` above a duration `ttl` is `invalid_field`; `autoStop: never` under a duration `ttl` is accepted; a defaulted `autoStop` above a caller's `ttl` refuses | `TestAutoStopAgainstTTL` | built |
+| Every default in this slice's table is applied and returned, and a field the caller set is never overwritten | `TestDefaultsFillOnlyAbsentFields` | built |
+| A key under `cella.latere.ai/` or any subdomain of it, in labels or annotations, is `reserved_prefix`; label syntax, label value length, the 4 KiB annotation value and the 64 KiB annotation total are refused with `invalid_field` | `TestMetadataRules` | built |
+| `user`, `workspace.path`, and `workspace.source` refuse each bad form with the table's code | `TestFieldSyntax` | built |
+| Ceilings refuse with the field and the ceiling, a zero ceiling is no ceiling, `ttl: never` under a ceiling is `ceiling_exceeded`, and a negative `MaxPriority` is `ceiling_exceeded` | `TestCeilings` | built |
+| Every immutable field changed on update is named in one `immutable_field` error | `TestImmutableFields` | built |
+| An admission function's output is validated again; one that changes `kind` or `metadata.name` on update is `admission_refused`; a nil `Admit` is the identity | `TestAdmissionOutputIsValidated` | built |
+| An absent `metadata.name` comes from `NewName` and is validated | `TestNameGeneration` | built |
+| `Lookup` returning not-found surfaces as `not_found`; an unavailable lookup surfaces as `authorizer_unavailable` | `TestLookupErrors` | built |
+| `status` on apply is ignored and `Resolve` returns an empty status but warnings | `TestStatusIsIgnoredOnApply` | built |
+| `Resolve` on the same input, options, and lookup answers twice yields byte-identical JSON, and never mutates its input | `TestResolveIsDeterministic` | built |
+| An environment of isolation `none` warns about `resources` and `user` instead of refusing them | `TestNativeWarnsInsteadOfRefusing` | built |
+| `manifest/v1` imports only the standard library; `manifest` imports no `internal/` or `runtime` package | `TestManifestImports` | built |
+| No file of this slice names a Latere host, image, pool, or namespace outside an example | `TestNoLatereCoordinates` | built |
+| `user`, `resources`, `workspace.path`, and `lifecycle` reach the driver's `CreateSpec`, and `never` reaches it as the zero duration | `TestCreateSpecCarriesManifestFields` | built |
+| A create over HTTP with all four fields returns 201 with the warnings and an `expiresAt` in its status, and reads back the same | `TestNativeManifestFieldsEndToEnd` | built |
+
+## Outcome
+
+`manifest/v1.SandboxSpec` carries `user`, `resources`, `workspace` and
+`lifecycle`; `SandboxStatus` carries `expiresAt` and `warnings`;
+`Quantity` and `Duration` are named string types, so a resolved
+manifest returns the caller's own spelling. `manifest` holds the
+quantity parser over the decimal and binary SI subset in milli-units,
+the duration parser with `never`, the metadata, env, user, workspace
+and lifecycle rules, and `Resolve` with `Actor`, `Lookup`, `Defaults`,
+`Ceilings`, `Limits`, `Admit`, `Existing`, `Now` and `NewName`.
+`ResolveNative` is that function with a lookup of one environment of
+isolation `none` and the native refusals after it.
+`runtime.CreateSpec` carries `User`, `Resources` and `Workspace`
+additively, with no change to any `Driver` method, and the controller
+fills them and parses `lifecycle` into the `Lifecycle` the spec already
+had, where `never` is the zero duration. The API maps
+`immutable_field`, `ceiling_exceeded` and `admission_refused` to their
+statuses and renders `paths`.
+
+`go tool lateregate` passes all 16 gates, `go test -race ./...`
+included. Coverage: manifest 97.4%, controller 95.3%, internal/api
+93.0%, runtime/native 93.1%, cmd/cellad 91.4%, every package above 90%.
+The end-to-end test is `TestNativeManifestFieldsEndToEnd`: a create
+over HTTP with `user`, `resources`, `workspace.path` and `lifecycle`
+returns 201 with both warnings and an `expiresAt` an hour after
+creation, a read returns the same, and six refusals return their codes
+and statuses.
+
+Divergences from the design above, each deliberate:
+
+- `manifest.Error` is `{Code, Path, Detail, Paths}`. The contract names
+  a `Message`; this repository's register rule puts the fixed user
+  sentence in the API envelope's `message` and the developer detail in
+  a field of its own, so the field keeps the name `Detail` the tree
+  already uses. `Paths` carries every path of a multi-path refusal.
+- `ResolveNative` takes the caller's context, so a resolve that reaches
+  a lookup is cancelled with its request.
+- An operator's invalid default or ceiling returns a plain error, not a
+  contract error, so a server misconfiguration cannot surface to a
+  caller as a 400 about a field the caller did not write.
+
+Not built here, each with its owner: YAML decoding and the golden
+corpus, the fuzz agreement with the Kubernetes parser, the secret,
+volume, network, port, mesh, scheduling and display fields with stage
+4's secret and volume resolution, stage 6, the rest of stage 7, the
+host rule, and the name generator behind `Options.NewName`, which
+[[008-api]] owns.

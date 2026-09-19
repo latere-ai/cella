@@ -256,4 +256,4 @@ The map, the order, and the rule for a slice are in 031.
 | [028-runnable-native-control-plane.md](.archive/028-runnable-native-control-plane.md) | complete | Server wiring and authenticated native lifecycle end-to-end |
 | [029-workspace-files-and-logs.md](.archive/029-workspace-files-and-logs.md) | complete | Authorized tar import/export and process log routes |
 | [030-native-main-process.md](.archive/030-native-main-process.md) | complete | Main command supervision and persisted output |
-| [044-manifest-fields.md](044-manifest-fields.md) | in-progress | Resource, user, workspace and lifecycle manifest fields with the staged resolver |
+| [044-manifest-fields.md](.archive/044-manifest-fields.md) | complete | Resource, user, workspace and lifecycle manifest fields with the staged resolver |
