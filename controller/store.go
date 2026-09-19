@@ -4,6 +4,7 @@
 package controller
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,17 +13,55 @@ import (
 	"syscall"
 
 	v1 "latere.ai/x/cella/manifest/v1"
+	driver "latere.ai/x/cella/runtime"
 )
 
-// Store is the direct controller's desired-state persistence seam. Save replaces
-// the snapshot atomically. A store instance has exactly one controller owner;
-// methods run under that controller's mutex. The full transactional, observed,
-// journal and operation stores remain the responsibility of design 010.
+// Store is the controller's desired-state persistence seam. Save replaces the
+// snapshot atomically. A store instance has exactly one controller owner;
+// methods run under that controller's mutex.
 type Store interface {
 	Load() (map[string]v1.Sandbox, error)
 	Save(map[string]v1.Sandbox) error
 	Close() error
 }
+
+// Durable is the store of design 010 as the controller reads it: desired state
+// that can outlive the process, the observed index a driver's list rebuilds,
+// and the journal every mutation appends to.
+//
+// A Store that is also a Durable takes one conditional write per object rather
+// than the whole snapshot, so a second replica cannot overwrite a row it did
+// not read. One whose Durable reports true also recovers a sandbox the data
+// plane lost; one that reports false reaps it after LostGrace, which is the
+// rule of design 005.
+type Durable interface {
+	Store
+	// Durable reports whether what is written outlives this process.
+	Durable() bool
+	// Write stores one object at the version this process last saw and
+	// appends the mutation to the journal, in one transaction.
+	Write(ctx context.Context, obj v1.Sandbox, mutation string) error
+	// Remove deletes one object and appends the mutation, in one transaction.
+	Remove(ctx context.Context, id, mutation string) error
+	// Rebuild replaces the observed rows of one environment with what its
+	// driver last listed.
+	Rebuild(ctx context.Context, environment string, states []driver.State) error
+}
+
+// The mutations the controller appends to the journal, one per act it takes on
+// a sandbox. Design 009 fixes the event vocabulary a sink receives; these are
+// the names in the journal until it lands.
+const (
+	MutationCreated    = "sandbox.created"
+	MutationUpdated    = "sandbox.updated"
+	MutationSaved      = "sandbox.saved"
+	MutationDeleting   = "sandbox.deleting"
+	MutationDeleted    = "sandbox.deleted"
+	MutationLost       = "sandbox.lost"
+	MutationRecovering = "sandbox.recovering"
+	MutationRecovered  = "sandbox.recovered"
+)
+
 type fileStore struct {
 	dir  string
 	lock *os.File

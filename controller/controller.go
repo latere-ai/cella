@@ -21,6 +21,16 @@ import (
 	driver "latere.ai/x/cella/runtime"
 )
 
+// The phases the controller writes that no driver reports, from the machine of
+// design 005. Lost is a desired sandbox with no observed counterpart, and
+// Recovering is one being recreated from its desired state.
+const (
+	PhaseFailed     = "Failed"
+	PhaseDeleting   = "Deleting"
+	PhaseLost       = "Lost"
+	PhaseRecovering = "Recovering"
+)
+
 var (
 	ErrNotFound  = errors.New("sandbox not found")
 	ErrNameTaken = errors.New("sandbox name is already in use")
@@ -47,10 +57,20 @@ type Options struct {
 	// Lifecycle is the environment's default deadline set, applied to a
 	// sandbox whose manifest sets no lifecycle field at all.
 	Lifecycle driver.Lifecycle
+	// LostGrace is how long a sandbox the driver no longer has is held as
+	// Lost before it is deleted, where the store is not durable. Zero takes
+	// the default; CELLA_LOST_GRACE sets it. Where the store is durable the
+	// sandbox is recovered instead and no grace is counted.
+	LostGrace time.Duration
+	// RecoveryAttempts is how many times a lost sandbox is recreated before
+	// it is Failed with reason RecoveryExhausted. Zero takes the default.
+	RecoveryAttempts int
 }
 type Controller struct {
 	mu            sync.Mutex
 	store         Store
+	durable       Durable
+	recovers      bool
 	driver        driver.Driver
 	environment   string
 	objects       map[string]v1.Sandbox
@@ -62,6 +82,15 @@ type Controller struct {
 	lifecycle     driver.Lifecycle
 	touchMu       sync.Mutex
 	touched       map[string]time.Time
+	// The lost rule's own state, which lives in the process because the
+	// grace it counts protects an intent that also lives in the process:
+	// when the sandbox was first seen missing, how many recreations it has
+	// had, and when the next one is due.
+	lostGrace        time.Duration
+	recoveryAttempts int
+	lost             map[string]time.Time
+	attempts         map[string]int
+	retry            map[string]time.Time
 }
 
 // Open restores desired state from an operator-supplied store, or the provisional
@@ -100,6 +129,15 @@ func Open(o Options) (*Controller, error) {
 		clock: o.Clock, lease: o.Lease, log: logger(o.Log),
 		reapInterval: o.ReapInterval, touchInterval: o.TouchInterval,
 		lifecycle: o.Lifecycle, touched: map[string]time.Time{},
+		lostGrace: o.LostGrace, recoveryAttempts: o.RecoveryAttempts,
+		lost: map[string]time.Time{}, attempts: map[string]int{}, retry: map[string]time.Time{},
+	}
+	// A store of design 010 takes one conditional write per object and
+	// carries the journal; one that is also durable is what lets the lost
+	// rule recover a sandbox rather than reap it.
+	if d, ok := store.(Durable); ok {
+		c.durable = d
+		c.recovers = d.Durable()
 	}
 	if c.clock == nil {
 		c.clock = wallClock{}
@@ -113,12 +151,63 @@ func Open(o Options) (*Controller, error) {
 	if c.touchInterval <= 0 {
 		c.touchInterval = DefaultTouchInterval
 	}
+	if c.lostGrace <= 0 {
+		c.lostGrace = DefaultLostGrace
+	}
+	if c.recoveryAttempts <= 0 {
+		c.recoveryAttempts = DefaultRecoveryAttempts
+	}
 	return c, nil
 }
+
+// Recovers reports what a sandbox the data plane lost gets: recreation from
+// desired state, or the grace and then a delete. The start-up log says it, and
+// design 001's State section is why it is said out loud.
+func (c *Controller) Recovers() bool      { return c.recovers }
 func (c *Controller) Close() error        { c.mu.Lock(); defer c.mu.Unlock(); return c.store.Close() }
 func (c *Controller) Environment() string { return c.environment }
 func (c *Controller) Isolation() string   { return c.driver.Isolation() }
-func (c *Controller) save() error         { return c.store.Save(c.objects) }
+
+// persist records one object and the mutation that produced it: one
+// conditional write and one journal row where the store is a Durable, the
+// whole snapshot where it is not. A write that fails leaves the controller's
+// map as it was, so what this process holds and what the store holds do not
+// disagree.
+func (c *Controller) persist(ctx context.Context, obj v1.Sandbox, mutation string) error {
+	id := obj.Status.ID
+	previous, held := c.objects[id]
+	c.objects[id] = clone(obj)
+	var err error
+	if c.durable != nil {
+		err = c.durable.Write(ctx, clone(obj), mutation)
+	} else {
+		err = c.store.Save(c.objects)
+	}
+	if err != nil {
+		if held {
+			c.objects[id] = previous
+		} else {
+			delete(c.objects, id)
+		}
+	}
+	return err
+}
+
+// forget drops one object and records the mutation that ended it.
+func (c *Controller) forget(ctx context.Context, id, mutation string) error {
+	previous, held := c.objects[id]
+	delete(c.objects, id)
+	var err error
+	if c.durable != nil {
+		err = c.durable.Remove(ctx, id, mutation)
+	} else {
+		err = c.store.Save(c.objects)
+	}
+	if err != nil && held {
+		c.objects[id] = previous
+	}
+	return err
+}
 
 // Create atomically reserves the owner's name and quota before calling runtime.
 func (c *Controller) Create(ctx context.Context, obj v1.Sandbox, owner string, max int) (v1.Sandbox, error) {
@@ -130,15 +219,9 @@ func (c *Controller) Create(ctx context.Context, obj v1.Sandbox, owner string, m
 	// The resolver's warnings say what this environment could not honour. They
 	// are the caller's answer and outlive the status the controller writes.
 	warnings := slices.Clone(obj.Status.Warnings)
-	lifecycle, err := lifecycleOf(obj.Spec.Lifecycle)
+	lifecycle, err := c.lifecycleFor(obj)
 	if err != nil {
 		return obj, err
-	}
-	if obj.Spec.Lifecycle == (v1.Lifecycle{}) {
-		// A manifest that sets no lifecycle takes the controller's: the
-		// operator's floor for an environment whose resolver left it empty.
-		// An explicit "never" is a set field and is kept as zero.
-		lifecycle = c.lifecycle
 	}
 	id, err := newID()
 	if err != nil {
@@ -162,28 +245,32 @@ func (c *Controller) Create(ctx context.Context, obj v1.Sandbox, owner string, m
 		return obj, ErrQuota
 	}
 	obj.Status = v1.SandboxStatus{ID: id, Owner: owner, Environment: c.environment, Driver: c.driver.Name(), Isolation: c.driver.Isolation(), Phase: driver.Pending, CreatedAt: time.Now().UTC(), Warnings: warnings}
-	c.objects[id] = clone(obj)
-	if err = c.save(); err != nil {
-		delete(c.objects, id)
+	if err = c.persist(ctx, obj, MutationCreated); err != nil {
 		return obj, err
 	}
-	_, err = c.driver.Create(ctx, driver.CreateSpec{
-		ID: id, Name: obj.Metadata.Name, Owner: owner, Image: obj.Spec.Image,
+	_, err = c.driver.Create(ctx, specOf(obj, lifecycle))
+	if err != nil {
+		obj.Status.Phase = PhaseFailed
+		obj.Status.Reason = "RuntimeCreateFailed"
+		return obj, errors.Join(err, c.persist(ctx, obj, MutationUpdated))
+	}
+	obj, err = c.refresh(ctx, obj)
+	return clone(obj), errors.Join(err, c.persist(ctx, obj, MutationUpdated))
+}
+
+// specOf derives the driver's create spec from one resolved manifest and the
+// deadline set it runs under. It is the one place the manifest's vocabulary
+// meets the driver's, so a create and a recovery of the same sandbox ask for
+// the same object.
+func specOf(obj v1.Sandbox, lifecycle driver.Lifecycle) driver.CreateSpec {
+	return driver.CreateSpec{
+		ID: obj.Status.ID, Name: obj.Metadata.Name, Owner: obj.Status.Owner, Image: obj.Spec.Image,
 		Command: obj.Spec.Command, Args: obj.Spec.Args, Env: obj.Spec.Env,
 		Workdir: obj.Spec.Workdir, Labels: obj.Metadata.Labels, User: obj.Spec.User,
 		Resources: driver.Resources{CPU: string(obj.Spec.Resources.CPU), Memory: string(obj.Spec.Resources.Memory), Disk: string(obj.Spec.Resources.Disk)},
 		Workspace: driver.Workspace{Path: obj.Spec.Workspace.Path},
 		Lifecycle: lifecycle,
-	})
-	if err != nil {
-		obj.Status.Phase = "Failed"
-		obj.Status.Reason = "RuntimeCreateFailed"
-		c.objects[id] = clone(obj)
-		return obj, errors.Join(err, c.save())
 	}
-	obj, err = c.refresh(ctx, obj)
-	c.objects[id] = clone(obj)
-	return clone(obj), errors.Join(err, c.save())
 }
 func (c *Controller) Get(ctx context.Context, key, owner string) (v1.Sandbox, error) {
 	c.mu.Lock()
@@ -248,6 +335,20 @@ func (c *Controller) refresh(ctx context.Context, obj v1.Sandbox) (v1.Sandbox, e
 	return obj, nil
 }
 
+// lifecycleFor is the deadline set one sandbox runs under: its own manifest's,
+// or the environment default where the manifest names none. An explicit never
+// is a set field and stays the zero duration the drivers read as no bound.
+func (c *Controller) lifecycleFor(obj v1.Sandbox) (driver.Lifecycle, error) {
+	lifecycle, err := lifecycleOf(obj.Spec.Lifecycle)
+	if err != nil {
+		return lifecycle, err
+	}
+	if obj.Spec.Lifecycle == (v1.Lifecycle{}) {
+		return c.lifecycle, nil
+	}
+	return lifecycle, nil
+}
+
 // lifecycleOf turns the resolved manifest's durations into the driver's, where
 // never and absent are both the zero duration the drivers read as no bound.
 func lifecycleOf(l v1.Lifecycle) (driver.Lifecycle, error) {
@@ -300,10 +401,8 @@ func (c *Controller) Act(ctx context.Context, id, verb string) (v1.Sandbox, erro
 		err = c.driver.Stop(ctx, id)
 	case "delete":
 		old := obj
-		obj.Status.Phase = "Deleting"
-		c.objects[id] = clone(obj)
-		if err = c.save(); err != nil {
-			c.objects[id] = old
+		obj.Status.Phase = PhaseDeleting
+		if err = c.persist(ctx, obj, MutationDeleting); err != nil {
 			return old, err
 		}
 		err = c.driver.Delete(ctx, id)
@@ -312,11 +411,8 @@ func (c *Controller) Act(ctx context.Context, id, verb string) (v1.Sandbox, erro
 		}
 		if err == nil {
 			c.forgetTouch(id)
-			delete(c.objects, id)
-			if err = c.save(); err != nil {
-				c.objects[id] = obj
-			}
-			return obj, err
+			c.forgetLost(id)
+			return obj, c.forget(ctx, id, MutationDeleted)
 		}
 	default:
 		return obj, ErrPhase
@@ -328,8 +424,7 @@ func (c *Controller) Act(ctx context.Context, id, verb string) (v1.Sandbox, erro
 	if err != nil {
 		return obj, err
 	}
-	c.objects[id] = clone(obj)
-	return clone(obj), c.save()
+	return clone(obj), c.persist(ctx, obj, MutationUpdated)
 }
 func (c *Controller) Exec(ctx context.Context, id string, req driver.ExecRequest) (driver.Exec, error) {
 	return c.driver.Exec(ctx, id, req)
