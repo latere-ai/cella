@@ -34,7 +34,7 @@ func TestDecode(t *testing.T) {
 	}
 }
 func TestResolve(t *testing.T) {
-	obj, err := ResolveNative(base(), "default")
+	obj, err := ResolveNative(t.Context(), base(), "default")
 	if err != nil || obj.Spec.Environment != "default" || obj.Spec.Workdir != "/workspace" {
 		t.Fatal(obj, err)
 	}
@@ -47,7 +47,7 @@ func TestResolve(t *testing.T) {
 	for i, mut := range tests {
 		obj := base()
 		mut(&obj)
-		if _, err := ResolveNative(obj, "default"); err == nil {
+		if _, err := ResolveNative(t.Context(), obj, "default"); err == nil {
 			t.Errorf("case %d accepted", i)
 		}
 	}
@@ -55,7 +55,7 @@ func TestResolve(t *testing.T) {
 	obj.Metadata.Labels = map[string]string{"example.org/team": "research", "empty": ""}
 	obj.Metadata.Annotations = map[string]string{"example.org/note": "any value"}
 	obj.Spec.Env = map[string]string{"A": "b"}
-	if _, err := ResolveNative(obj, "default"); err != nil {
+	if _, err := ResolveNative(t.Context(), obj, "default"); err != nil {
 		t.Fatal(err)
 	}
 	for _, key := range []string{"a/b/c", "a/", strings.Repeat("a", 64), strings.Repeat("a", 254) + "/b", "BAD.org/key", strings.Repeat("a", 64) + ".org/key"} {
@@ -87,7 +87,7 @@ func TestExecValidation(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if (&Error{"code", "detail"}).Error() != "code: detail" {
+	if (&Error{Code: "code", Detail: "detail"}).Error() != "code: detail" {
 		t.Fatal("error formatting")
 	}
 }

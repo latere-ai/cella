@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"latere.ai/x/cella/manifest"
 	v1 "latere.ai/x/cella/manifest/v1"
 	driver "latere.ai/x/cella/runtime"
 )
@@ -43,8 +44,8 @@ type Options struct {
 	// default; CELLA_REAP_INTERVAL and CELLA_TOUCH_INTERVAL set them.
 	ReapInterval  time.Duration
 	TouchInterval time.Duration
-	// Lifecycle is the environment's default deadline set, applied to every
-	// sandbox until manifest/v1 carries spec.lifecycle.
+	// Lifecycle is the environment's default deadline set, applied to a
+	// sandbox whose manifest sets no lifecycle field at all.
 	Lifecycle driver.Lifecycle
 }
 type Controller struct {
@@ -126,6 +127,19 @@ func (c *Controller) Create(ctx context.Context, obj v1.Sandbox, owner string, m
 	if owner == "" {
 		return obj, errors.New("sandbox owner is required")
 	}
+	// The resolver's warnings say what this environment could not honour. They
+	// are the caller's answer and outlive the status the controller writes.
+	warnings := slices.Clone(obj.Status.Warnings)
+	lifecycle, err := lifecycleOf(obj.Spec.Lifecycle)
+	if err != nil {
+		return obj, err
+	}
+	if obj.Spec.Lifecycle == (v1.Lifecycle{}) {
+		// A manifest that sets no lifecycle takes the controller's: the
+		// operator's floor for an environment whose resolver left it empty.
+		// An explicit "never" is a set field and is kept as zero.
+		lifecycle = c.lifecycle
+	}
 	id, err := newID()
 	if err != nil {
 		return obj, err
@@ -147,13 +161,20 @@ func (c *Controller) Create(ctx context.Context, obj v1.Sandbox, owner string, m
 	if max > 0 && count >= max {
 		return obj, ErrQuota
 	}
-	obj.Status = v1.SandboxStatus{ID: id, Owner: owner, Environment: c.environment, Driver: c.driver.Name(), Isolation: c.driver.Isolation(), Phase: driver.Pending, CreatedAt: time.Now().UTC()}
+	obj.Status = v1.SandboxStatus{ID: id, Owner: owner, Environment: c.environment, Driver: c.driver.Name(), Isolation: c.driver.Isolation(), Phase: driver.Pending, CreatedAt: time.Now().UTC(), Warnings: warnings}
 	c.objects[id] = clone(obj)
 	if err = c.save(); err != nil {
 		delete(c.objects, id)
 		return obj, err
 	}
-	_, err = c.driver.Create(ctx, driver.CreateSpec{ID: id, Name: obj.Metadata.Name, Owner: owner, Image: obj.Spec.Image, Command: obj.Spec.Command, Args: obj.Spec.Args, Env: obj.Spec.Env, Workdir: obj.Spec.Workdir, Labels: obj.Metadata.Labels, Lifecycle: c.lifecycleOf(obj)})
+	_, err = c.driver.Create(ctx, driver.CreateSpec{
+		ID: id, Name: obj.Metadata.Name, Owner: owner, Image: obj.Spec.Image,
+		Command: obj.Spec.Command, Args: obj.Spec.Args, Env: obj.Spec.Env,
+		Workdir: obj.Spec.Workdir, Labels: obj.Metadata.Labels, User: obj.Spec.User,
+		Resources: driver.Resources{CPU: string(obj.Spec.Resources.CPU), Memory: string(obj.Spec.Resources.Memory), Disk: string(obj.Spec.Resources.Disk)},
+		Workspace: driver.Workspace{Path: obj.Spec.Workspace.Path},
+		Lifecycle: lifecycle,
+	})
 	if err != nil {
 		obj.Status.Phase = "Failed"
 		obj.Status.Reason = "RuntimeCreateFailed"
@@ -223,7 +244,30 @@ func (c *Controller) refresh(ctx context.Context, obj v1.Sandbox) (v1.Sandbox, e
 	obj.Status.StartedAt = state.StartedAt
 	obj.Status.StoppedAt = state.StoppedAt
 	obj.Status.LastActivityAt = state.LastActivityAt
+	obj.Status.ExpiresAt = state.ExpiresAt
 	return obj, nil
+}
+
+// lifecycleOf turns the resolved manifest's durations into the driver's, where
+// never and absent are both the zero duration the drivers read as no bound.
+func lifecycleOf(l v1.Lifecycle) (driver.Lifecycle, error) {
+	var out driver.Lifecycle
+	for _, field := range []struct {
+		value v1.Duration
+		into  *time.Duration
+	}{{l.AutoStop, &out.AutoStop}, {l.TTL, &out.TTL}, {l.AutoDelete, &out.AutoDelete}} {
+		if field.value == "" {
+			continue
+		}
+		value, never, err := manifest.ParseDuration(field.value)
+		if err != nil {
+			return out, err
+		}
+		if !never {
+			*field.into = value
+		}
+	}
+	return out, nil
 }
 
 // Act serializes lifecycle changes; failed deletes retain the desired record.
@@ -296,6 +340,7 @@ func clone(obj v1.Sandbox) v1.Sandbox {
 	obj.Spec.Command = slices.Clone(obj.Spec.Command)
 	obj.Spec.Args = slices.Clone(obj.Spec.Args)
 	obj.Spec.Env = maps.Clone(obj.Spec.Env)
+	obj.Status.Warnings = slices.Clone(obj.Status.Warnings)
 	if obj.Status.ExitCode != nil {
 		code := *obj.Status.ExitCode
 		obj.Status.ExitCode = &code

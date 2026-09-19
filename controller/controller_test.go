@@ -8,9 +8,11 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	v1 "latere.ai/x/cella/manifest/v1"
 	driver "latere.ai/x/cella/runtime"
@@ -318,5 +320,66 @@ func TestDeletingObjectsDoNotConsumeCountQuota(t *testing.T) {
 	next.Metadata.Name = "replacement"
 	if _, err = c.Create(t.Context(), next, "alice", 1); err != nil {
 		t.Fatal("Deleting still consumed count quota", err)
+	}
+}
+
+// recordingDriver keeps the spec it was created with, so a test can see what
+// the manifest turned into.
+type recordingDriver struct {
+	driver.Driver
+	spec driver.CreateSpec
+}
+
+func (d *recordingDriver) Create(ctx context.Context, spec driver.CreateSpec) (driver.Ref, error) {
+	d.spec = spec
+	return d.Driver.Create(ctx, spec)
+}
+
+func TestCreateSpecCarriesManifestFields(t *testing.T) {
+	c, _ := newController(t)
+	recorder := &recordingDriver{Driver: c.driver}
+	c.driver = recorder
+	obj := workspace()
+	obj.Spec.User = "1000:1000"
+	obj.Spec.Resources = v1.Resources{CPU: "500m", Memory: "2Gi", Disk: "10Gi"}
+	obj.Spec.Workspace = v1.Workspace{Path: "/workspace", Source: v1.WorkspaceSourceEmpty}
+	obj.Spec.Lifecycle = v1.Lifecycle{AutoStop: "15m", TTL: "1h", AutoDelete: v1.DurationNever}
+	obj.Status.Warnings = []string{"The native environment does not limit cpu, memory or disk."}
+	got, err := c.Create(t.Context(), obj, "alice", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recorder.spec.User != "1000:1000" || recorder.spec.Workspace.Path != "/workspace" {
+		t.Fatalf("spec = %+v", recorder.spec)
+	}
+	if recorder.spec.Resources != (driver.Resources{CPU: "500m", Memory: "2Gi", Disk: "10Gi"}) {
+		t.Fatalf("resources = %+v", recorder.spec.Resources)
+	}
+	// never is the zero duration the drivers already read as no bound.
+	if recorder.spec.Lifecycle != (driver.Lifecycle{AutoStop: 15 * time.Minute, TTL: time.Hour}) {
+		t.Fatalf("lifecycle = %+v", recorder.spec.Lifecycle)
+	}
+	// The resolver's warnings survive the status the controller writes, and
+	// the expiry the driver computed is read back.
+	if !slices.Equal(got.Status.Warnings, obj.Status.Warnings) {
+		t.Fatalf("warnings = %v", got.Status.Warnings)
+	}
+	if want := got.Status.CreatedAt.Add(time.Hour); got.Status.ExpiresAt.Sub(want).Abs() > time.Minute {
+		t.Fatalf("expiresAt = %v, want about %v", got.Status.ExpiresAt, want)
+	}
+	stored, err := c.Get(t.Context(), got.Status.ID, "alice")
+	if err != nil || !slices.Equal(stored.Status.Warnings, obj.Status.Warnings) {
+		t.Fatal(stored.Status.Warnings, err)
+	}
+	stored.Status.Warnings[0] = "mutated"
+	if again, _ := c.Get(t.Context(), got.Status.ID, "alice"); again.Status.Warnings[0] == "mutated" {
+		t.Fatal("the store aliases its warnings")
+	}
+	// A lifecycle the resolver would have refused never reaches the driver.
+	obj = workspace()
+	obj.Metadata.Name = "broken"
+	obj.Spec.Lifecycle.TTL = "soon"
+	if _, err = c.Create(t.Context(), obj, "alice", 0); err == nil {
+		t.Fatal("an unparsable lifecycle reached the driver")
 	}
 }

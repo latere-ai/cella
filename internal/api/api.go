@@ -125,7 +125,7 @@ func (h *handler) create(w http.ResponseWriter, r *http.Request) {
 		respondError(w, err)
 		return
 	}
-	obj, err = manifest.ResolveNative(obj, h.Controller.Environment())
+	obj, err = manifest.ResolveNative(r.Context(), obj, h.Controller.Environment())
 	if err != nil {
 		respondError(w, err)
 		return
@@ -466,6 +466,19 @@ func respondError(w http.ResponseWriter, err error) {
 	case "reserved_prefix":
 		status = 400
 		message = "That name is reserved for the control plane."
+	case "immutable_field":
+		status = 409
+		message = "This field cannot be changed after the object is created."
+	case "ceiling_exceeded":
+		status = 422
+		message = "The value is above what this server allows."
+	case "admission_refused":
+		status = 422
+		message = "The request was refused by this server's policy."
 	}
-	httpjson.WriteError(w, status, httpjson.Error{Code: code, Message: message, Details: map[string]any{"request_id": w.Header().Get("X-Request-ID"), "detail": fmt.Sprint(err)}})
+	details := map[string]any{"request_id": w.Header().Get("X-Request-ID"), "detail": fmt.Sprint(err)}
+	if me != nil && len(me.Paths) > 0 {
+		details["paths"] = me.Paths
+	}
+	httpjson.WriteError(w, status, httpjson.Error{Code: code, Message: message, Details: details})
 }

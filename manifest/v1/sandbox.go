@@ -8,6 +8,19 @@ import "time"
 
 const APIVersion = "cella.latere.ai/v1beta1"
 
+// Quantity is a compute amount in Kubernetes syntax, decimal ("500m", "2") or
+// binary SI ("2Gi"). It is the caller's own spelling: the manifest package
+// parses it and never re-renders it, so what a caller reads back is what it
+// wrote.
+type Quantity string
+
+// Duration is a Go duration ("15m") or the word never, which no time.Duration
+// can express. Zero and negative values are refused by the manifest package.
+type Duration string
+
+// DurationNever disables the lifecycle rule it is written on.
+const DurationNever Duration = "never"
+
 // Sandbox describes a workspace and its server-owned runtime state.
 type Sandbox struct {
 	APIVersion string        `json:"apiVersion"`
@@ -22,15 +35,43 @@ type Metadata struct {
 	Annotations map[string]string `json:"annotations,omitempty"`
 }
 
-// SandboxSpec currently supports a direct native workspace. Additional
-// boundaries must be implemented before their fields can be accepted.
+// SandboxSpec is the environment a caller asks for. Boundaries this contract
+// does not implement yet are refused rather than accepted and ignored.
 type SandboxSpec struct {
 	Environment string            `json:"environment,omitempty"`
 	Image       string            `json:"image,omitempty"`
 	Command     []string          `json:"command,omitempty"`
 	Args        []string          `json:"args,omitempty"`
 	Workdir     string            `json:"workdir,omitempty"`
+	User        string            `json:"user,omitempty"`
+	Resources   Resources         `json:"resources,omitzero"`
+	Workspace   Workspace         `json:"workspace,omitzero"`
 	Env         map[string]string `json:"env,omitempty"`
+	Lifecycle   Lifecycle         `json:"lifecycle,omitzero"`
+}
+
+// Resources is the compute the sandbox asks for. Disk sizes the workspace.
+type Resources struct {
+	CPU    Quantity `json:"cpu,omitempty"`
+	Memory Quantity `json:"memory,omitempty"`
+	Disk   Quantity `json:"disk,omitempty"`
+}
+
+// Workspace is the initial state and mount point of the sandbox's own files.
+type Workspace struct {
+	Path   string `json:"path,omitempty"`
+	Source string `json:"source,omitempty"`
+}
+
+// WorkspaceSourceEmpty is a workspace the sandbox starts with nothing in.
+const WorkspaceSourceEmpty = "empty"
+
+// Lifecycle is when the sandbox stops being run and being kept. AutoStop
+// counts idle time, TTL counts from creation, AutoDelete counts from the stop.
+type Lifecycle struct {
+	AutoStop   Duration `json:"autoStop,omitempty"`
+	TTL        Duration `json:"ttl,omitempty"`
+	AutoDelete Duration `json:"autoDelete,omitempty"`
 }
 type SandboxStatus struct {
 	ID             string    `json:"id"`
@@ -43,6 +84,8 @@ type SandboxStatus struct {
 	StartedAt      time.Time `json:"startedAt,omitzero"`
 	StoppedAt      time.Time `json:"stoppedAt,omitzero"`
 	LastActivityAt time.Time `json:"lastActivityAt,omitzero"`
+	ExpiresAt      time.Time `json:"expiresAt,omitzero"`
 	ExitCode       *int      `json:"exitCode,omitempty"`
 	Reason         string    `json:"reason,omitempty"`
+	Warnings       []string  `json:"warnings,omitempty"`
 }

@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"time"
 
-	v1 "latere.ai/x/cella/manifest/v1"
 	driver "latere.ai/x/cella/runtime"
 )
 
@@ -254,11 +253,6 @@ func (c *Controller) forgetTouch(id string) {
 	defer c.touchMu.Unlock()
 	delete(c.touched, id)
 }
-
-// lifecycleOf is the one place the manifest's lifecycle meets the driver's.
-// manifest/v1 carries spec.lifecycle from slice 044 of design 031; until it
-// does, every sandbox of this environment takes the environment's default.
-func (c *Controller) lifecycleOf(_ v1.Sandbox) driver.Lifecycle { return c.lifecycle }
 
 // logger is the reaper's log: an operator sees every sandbox it ends and every
 // tick it could not finish.
