@@ -177,7 +177,7 @@ func defaulting(ctx context.Context, obj *v1.Sandbox, o Options) (*v1.Environmen
 		obj.Spec.Workdir = obj.Spec.Workspace.Path
 	}
 	if err = validateSpec(obj.Spec); err != nil {
-		return nil, fmt.Errorf("manifest: this server's defaults are invalid: %v", err)
+		return nil, errors.New("manifest: this server's defaults are invalid: " + err.Error())
 	}
 	return env, nil
 }
@@ -267,7 +267,7 @@ func ceilings(obj *v1.Sandbox, o Options) error {
 		}
 		limit, err := ParseQuantity(c.ceiling)
 		if err != nil {
-			return fmt.Errorf("manifest: this server's ceiling for %s is invalid: %v", c.path, err)
+			return errors.New("manifest: this server's ceiling for " + c.path + " is invalid: " + err.Error())
 		}
 		value, err := ParseQuantity(c.value)
 		if err != nil {
@@ -295,7 +295,7 @@ func ttlCeiling(ttl, ceiling v1.Duration) error {
 	}
 	limit, unbounded, err := ParseDuration(ceiling)
 	if err != nil {
-		return fmt.Errorf("manifest: this server's ttl ceiling is invalid: %v", err)
+		return errors.New("manifest: this server's ttl ceiling is invalid: " + err.Error())
 	}
 	if unbounded {
 		return nil
@@ -435,8 +435,8 @@ func NativeEnvironment(name string) v1.Environment {
 // ResolveNative resolves a manifest against the one native environment, with
 // no operator defaults and no ceilings, and adds the refusals that environment
 // owns: it runs no image and owns the workspace directory.
-func ResolveNative(obj v1.Sandbox, environment string) (v1.Sandbox, error) {
-	resolved, err := Resolve(context.Background(), &obj, Options{Lookup: FixedEnvironment(NativeEnvironment(environment))})
+func ResolveNative(ctx context.Context, obj v1.Sandbox, environment string) (v1.Sandbox, error) {
+	resolved, err := Resolve(ctx, &obj, Options{Lookup: FixedEnvironment(NativeEnvironment(environment))})
 	if err != nil {
 		return obj, err
 	}

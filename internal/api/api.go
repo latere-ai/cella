@@ -125,7 +125,7 @@ func (h *handler) create(w http.ResponseWriter, r *http.Request) {
 		respondError(w, err)
 		return
 	}
-	obj, err = manifest.ResolveNative(obj, h.Controller.Environment())
+	obj, err = manifest.ResolveNative(r.Context(), obj, h.Controller.Environment())
 	if err != nil {
 		respondError(w, err)
 		return

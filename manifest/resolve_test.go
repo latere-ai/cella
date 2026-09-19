@@ -558,7 +558,7 @@ func TestNativeWarnsInsteadOfRefusing(t *testing.T) {
 }
 
 func TestResolveNative(t *testing.T) {
-	got, err := ResolveNative(sandbox(), "default")
+	got, err := ResolveNative(t.Context(), sandbox(), "default")
 	if err != nil || got.Spec.Environment != "default" || got.Spec.Workdir != DefaultWorkspacePath {
 		t.Fatal(got, err)
 	}
@@ -581,7 +581,7 @@ func TestResolveNative(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			obj := sandbox()
 			tc.mut(&obj)
-			_, err := ResolveNative(obj, "default")
+			_, err := ResolveNative(t.Context(), obj, "default")
 			var known *Error
 			if !errors.As(err, &known) || known.Code != tc.code {
 				t.Fatalf("got %v, want %q", err, tc.code)
@@ -590,7 +590,7 @@ func TestResolveNative(t *testing.T) {
 	}
 	obj := sandbox()
 	obj.Spec.Command, obj.Spec.Args = []string{"sh"}, []string{"-c", "true"}
-	if _, err = ResolveNative(obj, "default"); err != nil {
+	if _, err = ResolveNative(t.Context(), obj, "default"); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -85,8 +85,8 @@ func validateMetadata(md v1.Metadata) error {
 }
 
 // reservedKey reports whether a label or annotation key is under the control
-// plane's own domain. A subdomain of it is reserved too, so a key such as
-// pool.cella.latere.ai/owner cannot impersonate a stamped one.
+// plane's own domain. A subdomain of that domain is reserved too, so a key one
+// label deeper cannot impersonate a stamped one.
 func reservedKey(key string) bool {
 	domain, _, ok := strings.Cut(key, "/")
 	if !ok {

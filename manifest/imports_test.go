@@ -17,20 +17,26 @@ import (
 // included, so a dependency cannot enter through a test either.
 func imports(t *testing.T, dir string) map[string]string {
 	t.Helper()
-	pkgs, err := parser.ParseDir(token.NewFileSet(), dir, nil, parser.ImportsOnly)
+	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	out := map[string]string{}
-	for _, pkg := range pkgs {
-		for name, file := range pkg.Files {
-			for _, spec := range file.Imports {
-				path, err := strconv.Unquote(spec.Path.Value)
-				if err != nil {
-					t.Fatal(err)
-				}
-				out[path] = name
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".go" {
+			continue
+		}
+		name := filepath.Join(dir, entry.Name())
+		file, err := parser.ParseFile(token.NewFileSet(), name, nil, parser.ImportsOnly)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, spec := range file.Imports {
+			path, err := strconv.Unquote(spec.Path.Value)
+			if err != nil {
+				t.Fatal(err)
 			}
+			out[path] = name
 		}
 	}
 	return out
