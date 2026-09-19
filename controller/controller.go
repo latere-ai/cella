@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
+	"log/slog"
 	"maps"
 	"math/big"
 	"slices"
@@ -31,13 +32,35 @@ type Options struct {
 	Store       Store
 	Driver      driver.Driver
 	Environment string
+	// Clock, Lease and Log are the reaper's collaborators of design 005.
+	// Each is optional: the wall clock, the in-process lease and the
+	// default logger are what one cellad runs on.
+	Clock Clock
+	Lease Lease
+	Log   *slog.Logger
+	// ReapInterval is how often the lifecycle rules run and TouchInterval
+	// how often one sandbox's activity reaches the driver. Zero takes the
+	// default; CELLA_REAP_INTERVAL and CELLA_TOUCH_INTERVAL set them.
+	ReapInterval  time.Duration
+	TouchInterval time.Duration
+	// Lifecycle is the environment's default deadline set, applied to every
+	// sandbox until manifest/v1 carries spec.lifecycle.
+	Lifecycle driver.Lifecycle
 }
 type Controller struct {
-	mu          sync.Mutex
-	store       Store
-	driver      driver.Driver
-	environment string
-	objects     map[string]v1.Sandbox
+	mu            sync.Mutex
+	store         Store
+	driver        driver.Driver
+	environment   string
+	objects       map[string]v1.Sandbox
+	clock         Clock
+	lease         Lease
+	log           *slog.Logger
+	reapInterval  time.Duration
+	touchInterval time.Duration
+	lifecycle     driver.Lifecycle
+	touchMu       sync.Mutex
+	touched       map[string]time.Time
 }
 
 // Open restores desired state from an operator-supplied store, or the provisional
@@ -71,7 +94,25 @@ func Open(o Options) (*Controller, error) {
 	if objects == nil {
 		objects = map[string]v1.Sandbox{}
 	}
-	return &Controller{store: store, driver: o.Driver, environment: o.Environment, objects: objects}, nil
+	c := &Controller{
+		store: store, driver: o.Driver, environment: o.Environment, objects: objects,
+		clock: o.Clock, lease: o.Lease, log: logger(o.Log),
+		reapInterval: o.ReapInterval, touchInterval: o.TouchInterval,
+		lifecycle: o.Lifecycle, touched: map[string]time.Time{},
+	}
+	if c.clock == nil {
+		c.clock = wallClock{}
+	}
+	if c.lease == nil {
+		c.lease = LocalLease{}
+	}
+	if c.reapInterval <= 0 {
+		c.reapInterval = DefaultReapInterval
+	}
+	if c.touchInterval <= 0 {
+		c.touchInterval = DefaultTouchInterval
+	}
+	return c, nil
 }
 func (c *Controller) Close() error        { c.mu.Lock(); defer c.mu.Unlock(); return c.store.Close() }
 func (c *Controller) Environment() string { return c.environment }
@@ -112,7 +153,7 @@ func (c *Controller) Create(ctx context.Context, obj v1.Sandbox, owner string, m
 		delete(c.objects, id)
 		return obj, err
 	}
-	_, err = c.driver.Create(ctx, driver.CreateSpec{ID: id, Name: obj.Metadata.Name, Owner: owner, Image: obj.Spec.Image, Command: obj.Spec.Command, Args: obj.Spec.Args, Env: obj.Spec.Env, Workdir: obj.Spec.Workdir, Labels: obj.Metadata.Labels})
+	_, err = c.driver.Create(ctx, driver.CreateSpec{ID: id, Name: obj.Metadata.Name, Owner: owner, Image: obj.Spec.Image, Command: obj.Spec.Command, Args: obj.Spec.Args, Env: obj.Spec.Env, Workdir: obj.Spec.Workdir, Labels: obj.Metadata.Labels, Lifecycle: c.lifecycleOf(obj)})
 	if err != nil {
 		obj.Status.Phase = "Failed"
 		obj.Status.Reason = "RuntimeCreateFailed"
@@ -170,8 +211,14 @@ func (c *Controller) refresh(ctx context.Context, obj v1.Sandbox) (v1.Sandbox, e
 	if err != nil {
 		return obj, err
 	}
+	// A driver names the reason for a transition it made itself and names
+	// none for one it was told to make, so a reason the controller wrote
+	// stands until the phase it was written for changes. Without that the
+	// first read after an autoStop would erase AutoStop.
+	if state.Reason != "" || state.Phase != obj.Status.Phase {
+		obj.Status.Reason = state.Reason
+	}
 	obj.Status.Phase = state.Phase
-	obj.Status.Reason = state.Reason
 	obj.Status.ExitCode = state.ExitCode
 	obj.Status.StartedAt = state.StartedAt
 	obj.Status.StoppedAt = state.StoppedAt
@@ -220,6 +267,7 @@ func (c *Controller) Act(ctx context.Context, id, verb string) (v1.Sandbox, erro
 			err = nil
 		}
 		if err == nil {
+			c.forgetTouch(id)
 			delete(c.objects, id)
 			if err = c.save(); err != nil {
 				c.objects[id] = obj
