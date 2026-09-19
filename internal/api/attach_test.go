@@ -258,6 +258,8 @@ func TestAttachBadFirstFrame(t *testing.T) {
 		"notAnObject":  `["sh"]`,
 		"unknownField": `{"command":["sh"],"shell":true}`,
 		"twoObjects":   `{"cols":80} {"rows":24}`,
+		// The close frame's reason is bounded, so a long refusal still fits.
+		"longReason": `{"` + strings.Repeat("field", 40) + `":1}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, r := f.attachTo(path, f.alice, frame)
@@ -317,6 +319,20 @@ func TestAttachRefusedByTheDriver(t *testing.T) {
 	if frame.Error.Details["detail"] == nil {
 		t.Fatalf("the error frame carries no developer detail: %+v", frame.Error)
 	}
+	// The same refusal on the other socket, where the command runs without a
+	// terminal and the stdin pipe has to be given up unopened.
+	_, piped := f.attachTo("/v1/sandboxes/"+obj.Status.ID+"/exec", f.alice, `{"command":["true"]}`)
+	if last, code := piped.ended(t); code != websocket.CloseInternalServerErr || !strings.Contains(last, "phase_conflict") {
+		t.Fatalf("the exec socket ended %q with %d", last, code)
+	}
+}
+
+// TestAttachWithoutTheUpgrade proves an ordinary GET on a socket route is the
+// handshake's own refusal, not a panic or a hanging request.
+func TestAttachWithoutTheUpgrade(t *testing.T) {
+	f := setup(t, nil)
+	obj := f.sandbox("plainget")
+	f.request("GET", "/v1/sandboxes/"+obj.Status.ID+"/attach", f.alice, "", http.StatusBadRequest)
 }
 
 // TestAttachInvalidRequestFrame covers the requests the route refuses after
@@ -357,6 +373,16 @@ func TestExecSocketStdin(t *testing.T) {
 	obj := f.sandbox("piped")
 	conn, r := f.attachTo("/v1/sandboxes/"+obj.Status.ID+"/exec", f.alice,
 		`{"command":["sh","-c","read line; printf 'got:%s\\n' \"$line\"; printf 'ONERR\\n' >&2; exit 4"]}`)
+	// A command without a terminal has no window, so a resize is accepted and
+	// changes nothing; the frames that carry nothing to do are ignored too.
+	for _, frame := range []string{`{"resize":{"cols":100,"rows":30}}`, `{"resize":{"cols":0,"rows":30}}`, `{}`, `not json`} {
+		if err := conn.WriteMessage(websocket.TextMessage, []byte(frame)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := conn.WriteMessage(websocket.BinaryMessage, nil); err != nil {
+		t.Fatal(err)
+	}
 	if err := conn.WriteMessage(websocket.BinaryMessage, []byte("typed\n")); err != nil {
 		t.Fatal(err)
 	}
