@@ -19,8 +19,14 @@ import (
 	"latere.ai/x/cella/runtime/native"
 )
 
+// workspace is a resolved manifest, which is what Create takes: the boundary
+// carries the mode the resolver inferred, because a manifest with none never
+// reaches the controller.
 func workspace() v1.Sandbox {
-	return v1.Sandbox{APIVersion: v1.APIVersion, Kind: "Sandbox", Metadata: v1.Metadata{Name: "work", Labels: map[string]string{"team": "a"}}, Spec: v1.SandboxSpec{Environment: "default", Workdir: "/workspace"}}
+	return v1.Sandbox{APIVersion: v1.APIVersion, Kind: "Sandbox", Metadata: v1.Metadata{Name: "work", Labels: map[string]string{"team": "a"}}, Spec: v1.SandboxSpec{
+		Environment: "default", Workdir: "/workspace",
+		Network: v1.Network{Egress: v1.Egress{Mode: v1.EgressOpen}},
+	}}
 }
 func newController(t *testing.T) (*Controller, Options) {
 	t.Helper()

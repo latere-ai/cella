@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"latere.ai/x/cella/egress"
 	"latere.ai/x/cella/manifest"
 	v1 "latere.ai/x/cella/manifest/v1"
 	driver "latere.ai/x/cella/runtime"
@@ -47,6 +48,13 @@ type Options struct {
 	// Lifecycle is the environment's default deadline set, applied to a
 	// sandbox whose manifest sets no lifecycle field at all.
 	Lifecycle driver.Lifecycle
+	// Egress is the environment's connected gateways. It is optional: with
+	// none, a sandbox whose boundary needs a gateway is refused and one
+	// that needs none is created with EgressEnforced false (spec 018).
+	Egress Egress
+	// Gateway is where sandboxes of this environment reach the gateway's
+	// two doors, from CELLA_GATEWAY and CELLA_GATEWAY_REVERSE.
+	Gateway GatewayAddresses
 }
 type Controller struct {
 	mu            sync.Mutex
@@ -62,6 +70,8 @@ type Controller struct {
 	lifecycle     driver.Lifecycle
 	touchMu       sync.Mutex
 	touched       map[string]time.Time
+	egress        Egress
+	gateway       GatewayAddresses
 }
 
 // Open restores desired state from an operator-supplied store, or the provisional
@@ -100,6 +110,7 @@ func Open(o Options) (*Controller, error) {
 		clock: o.Clock, lease: o.Lease, log: logger(o.Log),
 		reapInterval: o.ReapInterval, touchInterval: o.TouchInterval,
 		lifecycle: o.Lifecycle, touched: map[string]time.Time{},
+		egress: o.Egress, gateway: o.Gateway,
 	}
 	if c.clock == nil {
 		c.clock = wallClock{}
@@ -161,12 +172,23 @@ func (c *Controller) Create(ctx context.Context, obj v1.Sandbox, owner string, m
 	if max > 0 && count >= max {
 		return obj, ErrQuota
 	}
-	obj.Status = v1.SandboxStatus{ID: id, Owner: owner, Environment: c.environment, Driver: c.driver.Name(), Isolation: c.driver.Isolation(), Phase: driver.Pending, CreatedAt: time.Now().UTC(), Warnings: warnings}
+	now := time.Now().UTC()
+	obj.Status = v1.SandboxStatus{ID: id, Owner: owner, Environment: c.environment, Driver: c.driver.Name(), Isolation: c.driver.Isolation(), Phase: driver.Pending, CreatedAt: now, Warnings: warnings}
 	c.objects[id] = clone(obj)
 	if err = c.save(); err != nil {
 		delete(c.objects, id)
 		return obj, err
 	}
+	// The boundary is put in a gateway before the driver is called, so a
+	// sandbox never starts before a gateway knows it (spec 018). A boundary
+	// that no gateway will hold is a refusal here, with nothing created.
+	m, held, err := c.pushEgress(ctx, &obj)
+	if err != nil {
+		delete(c.objects, id)
+		return obj, errors.Join(err, c.save())
+	}
+	obj.Status.Conditions = setCondition(obj.Status.Conditions, c.egressCondition(m, held, now))
+	c.objects[id] = clone(obj)
 	_, err = c.driver.Create(ctx, driver.CreateSpec{
 		ID: id, Name: obj.Metadata.Name, Owner: owner, Image: obj.Spec.Image,
 		Command: obj.Spec.Command, Args: obj.Spec.Args, Env: obj.Spec.Env,
@@ -174,16 +196,28 @@ func (c *Controller) Create(ctx context.Context, obj v1.Sandbox, owner string, m
 		Resources: driver.Resources{CPU: string(obj.Spec.Resources.CPU), Memory: string(obj.Spec.Resources.Memory), Disk: string(obj.Spec.Resources.Disk)},
 		Workspace: driver.Workspace{Path: obj.Spec.Workspace.Path},
 		Lifecycle: lifecycle,
+		Egress:    c.egressSpec(m),
 	})
 	if err != nil {
 		obj.Status.Phase = "Failed"
 		obj.Status.Reason = "RuntimeCreateFailed"
 		c.objects[id] = clone(obj)
-		return obj, errors.Join(err, c.save())
+		c.purgeEgress(ctx, id)
+		return export(obj), errors.Join(err, c.save())
 	}
 	obj, err = c.refresh(ctx, obj)
 	c.objects[id] = clone(obj)
-	return clone(obj), errors.Join(err, c.save())
+	return export(obj), errors.Join(err, c.save())
+}
+
+// purgeEgress drops a principal from every gateway of the environment. It
+// runs on a delete and on a create whose driver refused, so no gateway holds
+// a map for an object that does not exist.
+func (c *Controller) purgeEgress(ctx context.Context, id string) {
+	if c.egress == nil {
+		return
+	}
+	c.egress.Purge(ctx, egress.Principal(id))
 }
 func (c *Controller) Get(ctx context.Context, key, owner string) (v1.Sandbox, error) {
 	c.mu.Lock()
@@ -201,7 +235,7 @@ func (c *Controller) Get(ctx context.Context, key, owner string) (v1.Sandbox, er
 	if !ok {
 		return v1.Sandbox{}, ErrNotFound
 	}
-	return clone(obj), nil
+	return export(obj), nil
 }
 
 // List returns desired records. Runtime refresh is deferred until after API authorization.
@@ -213,7 +247,7 @@ func (c *Controller) List() []v1.Sandbox {
 	defer c.mu.Unlock()
 	out := make([]v1.Sandbox, 0, len(c.objects))
 	for _, obj := range c.objects {
-		out = append(out, clone(obj))
+		out = append(out, export(obj))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Status.ID < out[j].Status.ID })
 	return out
@@ -313,10 +347,11 @@ func (c *Controller) Act(ctx context.Context, id, verb string) (v1.Sandbox, erro
 		if err == nil {
 			c.forgetTouch(id)
 			delete(c.objects, id)
+			c.purgeEgress(ctx, id)
 			if err = c.save(); err != nil {
 				c.objects[id] = obj
 			}
-			return obj, err
+			return export(obj), err
 		}
 	default:
 		return obj, ErrPhase
@@ -329,10 +364,20 @@ func (c *Controller) Act(ctx context.Context, id, verb string) (v1.Sandbox, erro
 		return obj, err
 	}
 	c.objects[id] = clone(obj)
-	return clone(obj), c.save()
+	return export(obj), c.save()
 }
 func (c *Controller) Exec(ctx context.Context, id string, req driver.ExecRequest) (driver.Exec, error) {
 	return c.driver.Exec(ctx, id, req)
+}
+
+// export is the object as a caller reads it: everything clone carries, less
+// the control plane's own record of the boundary. The credential in it is
+// what both gateway doors authenticate, so it leaves the process only toward
+// a gateway and inside the sandbox it belongs to, never in an API response.
+func export(obj v1.Sandbox) v1.Sandbox {
+	out := clone(obj)
+	out.Status.EgressState = nil
+	return out
 }
 func clone(obj v1.Sandbox) v1.Sandbox {
 	obj.Metadata.Labels = maps.Clone(obj.Metadata.Labels)
