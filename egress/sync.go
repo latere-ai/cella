@@ -51,8 +51,9 @@ const (
 	HeartbeatTimeout  = 45 * time.Second
 )
 
-// Frame is one message of the sync protocol, one JSON object per line. The
-// type names which field carries the payload; every other field is absent.
+// Frame is one message of the sync protocol, one JSON object per text
+// message. The type names which field carries the payload; every other field
+// is absent.
 type Frame struct {
 	Type     string    `json:"type"`
 	Hello    *Hello    `json:"hello,omitempty"`
@@ -158,22 +159,15 @@ func (r *Record) Normalize() error {
 	return nil
 }
 
-// Encode writes one frame as a line of JSON. Every frame of the protocol is
-// one line, so a reader that loses its place finds the next frame at the next
-// newline.
-func Encode(f Frame) ([]byte, error) {
-	b, err := json.Marshal(f)
-	if err != nil {
-		return nil, err
-	}
-	return append(b, '\n'), nil
-}
+// Encode writes one frame as one JSON text message. The protocol is one
+// frame per message, so a reader never has to find a boundary inside one.
+func Encode(f Frame) ([]byte, error) { return json.Marshal(f) }
 
-// Decode reads one frame from a line of JSON and refuses a type the protocol
+// Decode reads one frame from one message and refuses a type the protocol
 // does not have, so an unknown frame is a refusal rather than a silent skip.
-func Decode(line []byte) (Frame, error) {
+func Decode(message []byte) (Frame, error) {
 	var f Frame
-	if err := json.Unmarshal(line, &f); err != nil {
+	if err := json.Unmarshal(message, &f); err != nil {
 		return Frame{}, err
 	}
 	switch f.Type {

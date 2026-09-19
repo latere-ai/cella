@@ -300,8 +300,8 @@ func TestFrameRoundTrip(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Encode(%s): %v", f.Type, err)
 		}
-		if !strings.HasSuffix(string(line), "\n") || strings.Count(string(line), "\n") != 1 {
-			t.Fatalf("Encode(%s) is not one line: %q", f.Type, line)
+		if strings.Contains(string(line), "\n") {
+			t.Fatalf("Encode(%s) is not one message: %q", f.Type, line)
 		}
 		got, err := Decode(line)
 		if err != nil {
