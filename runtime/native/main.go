@@ -41,7 +41,9 @@ func (w *logWriter) Write(p []byte) (int, error) {
 	}
 	return len(p), nil
 }
-func (d *Driver) startMainLocked(id string, r *record) error {
+func (d *Driver) startMainLocked(ctx context.Context, id string, r *record) error {
+	// Main processes retain request values but outlive request cancellation.
+	ctx = context.WithoutCancel(ctx)
 	log, err := os.OpenFile(filepath.Join(d.dir(id), "logs.jsonl"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
 		return err
@@ -57,7 +59,7 @@ func (d *Driver) startMainLocked(id string, r *record) error {
 		return err
 	}
 	argv := append(append([]string{}, r.Command...), r.Args...)
-	e, err := d.execLocked(context.Background(), id, driver.ExecRequest{Command: argv})
+	e, err := d.execLocked(ctx, id, driver.ExecRequest{Command: argv})
 	if err != nil {
 		_ = log.Close()
 		r.State.Phase = "Failed"
@@ -73,10 +75,10 @@ func (d *Driver) startMainLocked(id string, r *record) error {
 	}
 	main := &mainProcess{exec: e, done: make(chan struct{})}
 	d.mains[id] = main
-	go d.supervise(id, main, log)
+	go d.supervise(ctx, id, main, log)
 	return nil
 }
-func (d *Driver) supervise(id string, main *mainProcess, log *os.File) {
+func (d *Driver) supervise(ctx context.Context, id string, main *mainProcess, log *os.File) {
 	writer := &logWriter{file: log}
 	var wg sync.WaitGroup
 	var writeErrors [2]error
@@ -88,7 +90,7 @@ func (d *Driver) supervise(id string, main *mainProcess, log *os.File) {
 			}
 		})
 	}
-	code, runErr := main.exec.Wait(context.Background())
+	code, runErr := main.exec.Wait(ctx)
 	wg.Wait()
 	logErr := errors.Join(writeErrors[0], writeErrors[1], log.Close())
 	d.mu.Lock()

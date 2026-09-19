@@ -165,7 +165,7 @@ func (d *Driver) Create(ctx context.Context, s driver.CreateSpec) (driver.Ref, e
 		return driver.Ref{}, err
 	}
 	if len(r.Command) > 0 {
-		if err := d.startMainLocked(s.ID, &r); err != nil {
+		if err := d.startMainLocked(ctx, s.ID, &r); err != nil {
 			return driver.Ref{}, err
 		}
 	}
@@ -247,7 +247,7 @@ func (d *Driver) Start(ctx context.Context, id string) error {
 		return driver.ErrUnsupported
 	}
 	if len(r.Command) > 0 {
-		return d.startMainLocked(id, &r)
+		return d.startMainLocked(ctx, id, &r)
 	}
 	r.State.Phase = driver.Running
 	r.State.StartedAt = time.Now().UTC()
