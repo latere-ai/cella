@@ -152,6 +152,7 @@ the destination already or is not wanted.
 | `deploy/`, `tools/deploy`, `tools/smoke` | - | platform deploy of `cellad serve` and `cellad egress` | platform 60 | [[014-release-and-installation]] |
 | `docs/internal`, user docs | - | platform docs where user facing; cella `docs/` where operator facing | platform 62 | - |
 | `test/cellae2e` | 0.6k | drop: [[015-conformance-suite]] is the executable contract | - | - |
+| (no source: the admission client of 007, which the platform's webhook of slice 58 answers) | - | cella `manifest` `AdmitFunc` over HTTP, `CELLA_ADMISSION_URL`, fail closed, no retry | 047 | [[007-admission]] |
 
 ### Slice order
 
@@ -172,6 +173,7 @@ flowchart TB
   S045[045 tokens] --> S040
   S039 --> S046[046 secret kind]
   S043 --> S046
+  S044 --> S047[047 admission client]
 ```
 
 The suite comes first because every later driver port proves itself
@@ -181,6 +183,45 @@ on a `pkg/egress` check: the open question of [[018-egress-and-secrets]]
 lists additions the gateway role needs; slice 039 starts by diffing what
 `cmd/egress` uses against what `latere.ai/x/pkg/egress` v0.76.0 exports,
 and if the gap is real the gap is a `pkg` release before this slice.
+
+### Cutover critical path
+
+The hosted platform switches when cella serves what the hosted binary
+serves today for a tenant: a manifest with resources and lifecycle
+(044), the k8s data plane (036), the reaper (037), durable desired
+state (043), the egress gateway with secrets (039, 046), events to the
+platform's sink (042), admission from the platform's webhook (047), and
+workload tokens (045). Those slices run first and in parallel where the
+graph allows. Pools (038), mesh and spawn (040), display and input
+(041), sets, workers and the vm driver are built alongside and never
+hold the cutover.
+
+Every slice reaches `complete` on its own tests, above 90% with an e2e.
+The parent specs 003 to 023 stay `in-progress` or `testing` until the
+platform runs on `cellad` in production and the conformance suite of
+[[015-conformance-suite]] passes against it; that day their status and
+Outcome move in one act. The evidence is per slice; only the bookkeeping
+is bulk.
+
+### What the platform's webhook found (for 047)
+
+The platform built its admission endpoint (platform slice 58) against
+[[007-admission]] before cella's client existed. What 047 must match:
+
+1. The wire body flattens `Actor` into `subject`, `issuer`, `sub` and
+   carries `request.id`; the Go type in 007 is not the JSON shape. 047
+   sends the JSON shape and 007 is amended to say so.
+2. `spec.image` is required at stage 1, so no webhook can default it.
+   047 adds `CELLA_DEFAULT_IMAGE` (an operator default, no Latere value)
+   or moves the required check after admission; the spec records which.
+3. `max_sandboxes` has two definitions: `authorizer/limits.go` counts
+   live sandboxes one subject holds; 007 counts every desired Sandbox
+   not `Deleting`. 047 picks 007's and amends the authorizer package.
+4. Stage 2 runs before admission, so a hosted `cellad` runs with every
+   `CELLA_DEFAULT_*` unset and only `CELLA_MAX_*` set; the webhook
+   supplies defaults. 047 documents this in 002's table.
+5. A policy refusal is a 200 with `allow: false` and a code; only a bad
+   bearer (401) or an unparseable envelope (400) is `admission_unavailable`.
 
 ### What a slice does
 
