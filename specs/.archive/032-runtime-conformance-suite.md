@@ -204,12 +204,13 @@ file, so it adds no statement to the coverage gate and no import to any
 build list.
 
 Statement coverage: `runtime/runtimetest` 98.9% (555/561),
-`runtime/native` 93.4% (566/606). The six statements left are the
-timeout arms of `waitPhase`, `touchStampsActivity` and `Run`'s
-per-capability subtest, which a passing driver does not reach.
-`go test -race ./runtime/...` passes. The whole bar, `go tool
-lateregate`, passes: 16 gates, 3 skipped for features this repository
-does not have.
+`runtime/native` 93.4% (566/606). Six statements are left: the timeout
+arms of `waitPhase` and `touchStampsActivity`, which a driver that
+reaches its phase does not take, and `Run`'s per-capability subtest,
+which a driver declaring nothing without a case does not open.
+`go test -race ./runtime/...` passes. On the whole bar, `go tool
+lateregate`, 16 gates pass and 3 are skipped for features this
+repository does not have.
 
 Two divergences from the design above, both amended in it: `Options.Down`
 and `Options.Up` take no argument, because they act on the data plane the
