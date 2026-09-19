@@ -19,6 +19,7 @@ const (
 	ReasonAutoDelete        = "AutoDelete"
 	ReasonAutoStop          = "AutoStop"
 	ReasonLost              = "Lost"
+	ReasonCreateFailed      = "CreateFailed"
 	ReasonRecoveryExhausted = "RecoveryExhausted"
 )
 
@@ -229,7 +230,7 @@ func (c *Controller) stopLocked(ctx context.Context, id, reason string) error {
 		return err
 	}
 	obj.Status.Reason = reason
-	return c.persist(ctx, obj, MutationUpdated)
+	return c.persist(ctx, obj, MutationStopped)
 }
 
 // deleteLocked writes the Deleting intent with its reason before it calls the

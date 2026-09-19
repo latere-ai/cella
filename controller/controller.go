@@ -65,6 +65,9 @@ type Options struct {
 	// RecoveryAttempts is how many times a lost sandbox is recreated before
 	// it is Failed with reason RecoveryExhausted. Zero takes the default.
 	RecoveryAttempts int
+	// Events is design 009's emission seam, set only where the store keeps
+	// no journal of its own. See the Events interface.
+	Events Events
 }
 type Controller struct {
 	mu            sync.Mutex
@@ -91,6 +94,7 @@ type Controller struct {
 	lost             map[string]time.Time
 	attempts         map[string]int
 	retry            map[string]time.Time
+	events           Events
 }
 
 // Open restores desired state from an operator-supplied store, or the provisional
@@ -131,6 +135,7 @@ func Open(o Options) (*Controller, error) {
 		lifecycle: o.Lifecycle, touched: map[string]time.Time{},
 		lostGrace: o.LostGrace, recoveryAttempts: o.RecoveryAttempts,
 		lost: map[string]time.Time{}, attempts: map[string]int{}, retry: map[string]time.Time{},
+		events: o.Events,
 	}
 	// A store of design 010 takes one conditional write per object and
 	// carries the journal; one that is also durable is what lets the lost
@@ -189,8 +194,14 @@ func (c *Controller) persist(ctx context.Context, obj v1.Sandbox, mutation strin
 		} else {
 			delete(c.objects, id)
 		}
+		return err
 	}
-	return err
+	// A durable store journaled the record inside the write above. A
+	// snapshot store has no journal, so the emitter takes the act here.
+	if c.durable == nil {
+		c.emit(ctx, mutation, clone(obj))
+	}
+	return nil
 }
 
 // forget drops one object and records the mutation that ended it.
@@ -203,10 +214,16 @@ func (c *Controller) forget(ctx context.Context, id, mutation string) error {
 	} else {
 		err = c.store.Save(c.objects)
 	}
-	if err != nil && held {
-		c.objects[id] = previous
+	if err != nil {
+		if held {
+			c.objects[id] = previous
+		}
+		return err
 	}
-	return err
+	if c.durable == nil {
+		c.emit(ctx, mutation, previous)
+	}
+	return nil
 }
 
 // Create atomically reserves the owner's name and quota before calling runtime.
@@ -251,11 +268,11 @@ func (c *Controller) Create(ctx context.Context, obj v1.Sandbox, owner string, m
 	_, err = c.driver.Create(ctx, specOf(obj, lifecycle))
 	if err != nil {
 		obj.Status.Phase = PhaseFailed
-		obj.Status.Reason = "RuntimeCreateFailed"
-		return obj, errors.Join(err, c.persist(ctx, obj, MutationUpdated))
+		obj.Status.Reason = ReasonCreateFailed
+		return obj, errors.Join(err, c.persist(ctx, obj, MutationFailed))
 	}
 	obj, err = c.refresh(ctx, obj)
-	return clone(obj), errors.Join(err, c.persist(ctx, obj, MutationUpdated))
+	return clone(obj), errors.Join(err, c.persist(ctx, obj, MutationStatus))
 }
 
 // specOf derives the driver's create spec from one resolved manifest and the
@@ -424,7 +441,16 @@ func (c *Controller) Act(ctx context.Context, id, verb string) (v1.Sandbox, erro
 	if err != nil {
 		return obj, err
 	}
-	return clone(obj), c.persist(ctx, obj, MutationUpdated)
+	return clone(obj), c.persist(ctx, obj, verbMutation(verb))
+}
+
+// verbMutation is the act one API verb performed, which is the type of the
+// record it produces.
+func verbMutation(verb string) string {
+	if verb == "start" {
+		return MutationStarted
+	}
+	return MutationStopped
 }
 func (c *Controller) Exec(ctx context.Context, id string, req driver.ExecRequest) (driver.Exec, error) {
 	return c.driver.Exec(ctx, id, req)

@@ -48,18 +48,30 @@ type Durable interface {
 	Rebuild(ctx context.Context, environment string, states []driver.State) error
 }
 
-// The mutations the controller appends to the journal, one per act it takes on
-// a sandbox. Design 009 fixes the event vocabulary a sink receives; these are
-// the names in the journal until it lands.
+// The mutations the controller appends to the journal, one per act it takes
+// on a sandbox. Each name that design 009 has in its event vocabulary is
+// delivered to the operator's sink; the three that it does not are journaled
+// and never delivered, because design 010 keeps one row per mutation and
+// design 009 does not make an event of every write.
+//
+// MutationDeleting is the intent written before the driver is asked, and
+// MutationStatus the status written back after a driver read. Neither is a
+// change a reader of the feed acts on: the delete is reported when it
+// completes, and the status is what a read of the sandbox already says.
+// MutationSaved is the snapshot store's whole-map write.
 const (
 	MutationCreated    = "sandbox.created"
 	MutationUpdated    = "sandbox.updated"
-	MutationSaved      = "sandbox.saved"
-	MutationDeleting   = "sandbox.deleting"
+	MutationStarted    = "sandbox.started"
+	MutationStopped    = "sandbox.stopped"
+	MutationFailed     = "sandbox.failed"
 	MutationDeleted    = "sandbox.deleted"
 	MutationLost       = "sandbox.lost"
 	MutationRecovering = "sandbox.recovering"
 	MutationRecovered  = "sandbox.recovered"
+	MutationSaved      = "sandbox.saved"
+	MutationDeleting   = "sandbox.deleting"
+	MutationStatus     = "sandbox.status"
 )
 
 type fileStore struct {
