@@ -15,6 +15,7 @@ package storetest
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"testing"
@@ -24,41 +25,55 @@ import (
 	driver "latere.ai/x/cella/runtime"
 )
 
+// TB is the part of testing.TB the cases use. testing.TB cannot be implemented
+// outside package testing, so the suite's own test drives the cases through a
+// recorder that implements this instead: a suite that only ever passes says
+// nothing about the adapter it would catch.
+type TB interface {
+	Helper()
+	Errorf(format string, args ...any)
+	Fatalf(format string, args ...any)
+	Cleanup(func())
+}
+
 // Opener returns an empty store sealing secret values under key, which is nil
 // for a store opened without one. The suite closes what it opens.
-type Opener func(t *testing.T, key []byte) store.Store
+type Opener func(t TB, key []byte) store.Store
 
 // Key is the secret key the suite opens its stores with: 32 bytes, fixed, so
 // a failure is reproducible.
 var Key = []byte("0123456789abcdef0123456789abcdef")
 
-// Run applies the whole contract to one adapter.
+// cases is the contract, one function per part of it.
+var cases = []struct {
+	name string
+	run  func(TB, Opener)
+}{
+	{"Versions", versions},
+	{"Names", names},
+	{"Count", count},
+	{"Lists", lists},
+	{"Status", status},
+	{"Transactions", transactions},
+	{"Observed", observed},
+	{"Journal", journal},
+	{"Leases", leases},
+	{"Values", values},
+	{"Ready", ready},
+}
+
+// Run applies the whole contract to one adapter, one subtest per case.
 func Run(t *testing.T, open Opener) {
 	t.Helper()
-	for _, c := range []struct {
-		name string
-		run  func(*testing.T, Opener)
-	}{
-		{"Versions", versions},
-		{"Names", names},
-		{"Count", count},
-		{"Lists", lists},
-		{"Status", status},
-		{"Transactions", transactions},
-		{"Observed", observed},
-		{"Journal", journal},
-		{"Leases", leases},
-		{"Values", values},
-		{"Ready", ready},
-	} {
+	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) { c.run(t, open) })
 	}
 }
 
 // versions: a conditional write refuses a row that moved.
-func versions(t *testing.T, open Opener) {
+func versions(t TB, open Opener) {
 	s := opened(t, open, Key)
-	ctx := t.Context()
+	ctx := context.Background()
 	first := put(t, s, object("sbx_a", "alice", "one"), 0)
 	if first != 1 {
 		t.Fatalf("a create took version %d, want 1", first)
@@ -90,9 +105,9 @@ func versions(t *testing.T, open Opener) {
 }
 
 // names: one live name per owner and kind, reusable after a delete.
-func names(t *testing.T, open Opener) {
+func names(t TB, open Opener) {
 	s := opened(t, open, Key)
-	ctx := t.Context()
+	ctx := context.Background()
 	put(t, s, object("sbx_a", "alice", "shared"), 0)
 	put(t, s, object("sbx_b", "bob", "shared"), 0)
 	fails(t, s, store.ErrNameTaken, "a second live row of one name", func(tx store.Tx) error {
@@ -128,9 +143,9 @@ func names(t *testing.T, open Opener) {
 
 // count: the ceiling of design 007 counts live rows that are not on their way
 // out.
-func count(t *testing.T, open Opener) {
+func count(t TB, open Opener) {
 	s := opened(t, open, Key)
-	ctx := t.Context()
+	ctx := context.Background()
 	put(t, s, object("sbx_a", "alice", "one"), 0)
 	put(t, s, object("sbx_b", "alice", "two"), 0)
 	deleting := object("sbx_c", "alice", "three")
@@ -153,9 +168,9 @@ func count(t *testing.T, open Opener) {
 }
 
 // lists: the filters and the page cursor.
-func lists(t *testing.T, open Opener) {
+func lists(t TB, open Opener) {
 	s := opened(t, open, Key)
-	ctx := t.Context()
+	ctx := context.Background()
 	for _, o := range []store.Object{
 		labelled(object("sbx_a", "alice", "one"), "prod", "Running", "env_one"),
 		labelled(object("sbx_b", "alice", "two"), "prod", "Stopped", "env_one"),
@@ -180,49 +195,45 @@ func lists(t *testing.T, open Opener) {
 		{"ids", store.Filter{IDs: []string{"sbx_b", "sbx_c"}}, []string{"sbx_b", "sbx_c"}},
 		{"nothing matches", store.Filter{Owner: "nobody"}, nil},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			with(t, s, func(tx store.Tx) error {
-				rows, next, err := tx.Desired().List(ctx, store.KindSandbox, tc.f, store.Page{})
-				if err != nil {
-					return err
-				}
-				if next != "" {
-					t.Errorf("one page held everything and handed out the cursor %q", next)
-				}
-				if got := ids(rows); !equal(got, tc.want) {
-					t.Errorf("list = %v, want %v", got, tc.want)
-				}
-				return nil
-			})
+		with(t, s, func(tx store.Tx) error {
+			rows, next, err := tx.Desired().List(ctx, store.KindSandbox, tc.f, store.Page{})
+			if err != nil {
+				return err
+			}
+			if next != "" {
+				t.Errorf("the %s list held everything and handed out the cursor %q", tc.name, next)
+			}
+			if got := ids(rows); !equal(got, tc.want) {
+				t.Errorf("the %s list = %v, want %v", tc.name, got, tc.want)
+			}
+			return nil
 		})
 	}
-	t.Run("pages", func(t *testing.T) {
-		var seen []string
-		cursor := ""
-		for range 4 {
-			with(t, s, func(tx store.Tx) error {
-				rows, next, err := tx.Desired().List(ctx, store.KindSandbox, store.Filter{}, store.Page{Limit: 2, Cursor: cursor})
-				if err != nil {
-					return err
-				}
-				seen = append(seen, ids(rows)...)
-				cursor = next
-				return nil
-			})
-			if cursor == "" {
-				break
+	var seen []string
+	cursor := ""
+	for range 4 {
+		with(t, s, func(tx store.Tx) error {
+			rows, next, err := tx.Desired().List(ctx, store.KindSandbox, store.Filter{}, store.Page{Limit: 2, Cursor: cursor})
+			if err != nil {
+				return err
 			}
+			seen = append(seen, ids(rows)...)
+			cursor = next
+			return nil
+		})
+		if cursor == "" {
+			break
 		}
-		if want := []string{"sbx_a", "sbx_b", "sbx_c"}; !equal(seen, want) {
-			t.Errorf("the pages read %v, want %v", seen, want)
-		}
-	})
+	}
+	if want := []string{"sbx_a", "sbx_b", "sbx_c"}; !equal(seen, want) {
+		t.Errorf("the pages read %v, want %v", seen, want)
+	}
 }
 
 // status: the controller's own column, and the last applied desired state.
-func status(t *testing.T, open Opener) {
+func status(t TB, open Opener) {
 	s := opened(t, open, Key)
-	ctx := t.Context()
+	ctx := context.Background()
 	version := put(t, s, object("sbx_a", "alice", "one"), 0)
 	with(t, s, func(tx store.Tx) error {
 		if err := tx.Desired().PutStatus(ctx, store.KindSandbox, "sbx_a", []byte(`{"phase":"Running"}`)); err != nil {
@@ -267,9 +278,9 @@ func status(t *testing.T, open Opener) {
 }
 
 // transactions: everything inside one commits together or not at all.
-func transactions(t *testing.T, open Opener) {
+func transactions(t TB, open Opener) {
 	s := opened(t, open, Key)
-	ctx := t.Context()
+	ctx := context.Background()
 	boom := errors.New("the caller failed between two writes")
 	err := s.Tx(ctx, func(tx store.Tx) error {
 		if _, err := tx.Desired().Put(ctx, object("sbx_a", "alice", "one"), 0); err != nil {
@@ -311,9 +322,9 @@ func transactions(t *testing.T, open Opener) {
 }
 
 // observed: the index one environment's list rebuilds.
-func observed(t *testing.T, open Opener) {
+func observed(t TB, open Opener) {
 	s := opened(t, open, Key)
-	ctx := t.Context()
+	ctx := context.Background()
 	put(t, s, object("sbx_a", "alice", "one"), 0)
 	with(t, s, func(tx store.Tx) error {
 		return tx.Desired().PutStatus(ctx, store.KindSandbox, "sbx_a", []byte(`{"phase":"Running"}`))
@@ -382,9 +393,9 @@ func observed(t *testing.T, open Opener) {
 }
 
 // journal: one sequence per object, newest first, pruned by age.
-func journal(t *testing.T, open Opener) {
+func journal(t TB, open Opener) {
 	s := opened(t, open, Key)
-	ctx := t.Context()
+	ctx := context.Background()
 	for _, tc := range []struct {
 		object, event string
 		want          int64
@@ -427,59 +438,55 @@ func journal(t *testing.T, open Opener) {
 		sameJSON(t, newest.Payload, []byte(`{"reason":"Test"}`), "the event payload")
 		return nil
 	})
-	t.Run("pages", func(t *testing.T) {
-		var seen []int64
-		cursor := ""
-		for range 4 {
-			with(t, s, func(tx store.Tx) error {
-				events, next, err := tx.Journal().ByObject(ctx, "sbx_a", store.Page{Limit: 2, Cursor: cursor})
-				if err != nil {
-					return err
-				}
-				for _, e := range events {
-					seen = append(seen, e.Seq)
-				}
-				cursor = next
-				return nil
-			})
-			if cursor == "" {
-				break
-			}
-		}
-		if len(seen) != 3 || seen[0] != 3 || seen[2] != 1 {
-			t.Errorf("the pages read %v, want 3, 2, 1", seen)
-		}
-	})
-	t.Run("prune", func(t *testing.T) {
-		old := time.Now().UTC().Add(-48 * time.Hour)
+	var seen []int64
+	cursor := ""
+	for range 4 {
 		with(t, s, func(tx store.Tx) error {
-			_, err := tx.Journal().Append(ctx, store.Event{ObjectID: "sbx_old", Type: "sandbox.created", At: old})
-			return err
-		})
-		with(t, s, func(tx store.Tx) error {
-			n, err := tx.Journal().Prune(ctx, time.Now().UTC().Add(-24*time.Hour))
+			events, next, err := tx.Journal().ByObject(ctx, "sbx_a", store.Page{Limit: 2, Cursor: cursor})
 			if err != nil {
 				return err
 			}
-			if n != 1 {
-				t.Errorf("pruning dropped %d event(s), want the one older than the window", n)
+			for _, e := range events {
+				seen = append(seen, e.Seq)
 			}
-			events, _, err := tx.Journal().ByObject(ctx, "sbx_a", store.Page{})
-			if err != nil {
-				return err
-			}
-			if len(events) != 3 {
-				t.Errorf("pruning by age dropped %d of the three recent events", 3-len(events))
-			}
+			cursor = next
 			return nil
 		})
+		if cursor == "" {
+			break
+		}
+	}
+	if len(seen) != 3 || seen[0] != 3 || seen[2] != 1 {
+		t.Errorf("the pages read %v, want 3, 2, 1", seen)
+	}
+	old := time.Now().UTC().Add(-48 * time.Hour)
+	with(t, s, func(tx store.Tx) error {
+		_, err := tx.Journal().Append(ctx, store.Event{ObjectID: "sbx_old", Type: "sandbox.created", At: old})
+		return err
+	})
+	with(t, s, func(tx store.Tx) error {
+		n, err := tx.Journal().Prune(ctx, time.Now().UTC().Add(-24*time.Hour))
+		if err != nil {
+			return err
+		}
+		if n != 1 {
+			t.Errorf("pruning dropped %d event(s), want the one older than the window", n)
+		}
+		events, _, err := tx.Journal().ByObject(ctx, "sbx_a", store.Page{})
+		if err != nil {
+			return err
+		}
+		if len(events) != 3 {
+			t.Errorf("pruning by age dropped %d of the three recent events", 3-len(events))
+		}
+		return nil
 	})
 }
 
 // leases: one holder at a time, renewal by the holder, and a term that lapses.
-func leases(t *testing.T, open Opener) {
+func leases(t TB, open Opener) {
 	s := opened(t, open, Key)
-	ctx := t.Context()
+	ctx := context.Background()
 	const term = 400 * time.Millisecond
 	held(t, s, "reaper", "replica-one", term, true, "the first holder")
 	held(t, s, "reaper", "replica-two", term, false, "a second holder while the first holds")
@@ -501,9 +508,9 @@ func leases(t *testing.T, open Opener) {
 }
 
 // values: the envelope, and a store with no key.
-func values(t *testing.T, open Opener) {
+func values(t TB, open Opener) {
 	s := opened(t, open, Key)
-	ctx := t.Context()
+	ctx := context.Background()
 	secret := []byte("s3cret-value")
 	with(t, s, func(tx store.Tx) error {
 		version, err := tx.Values().Put(ctx, "sec_a", secret)
@@ -547,24 +554,25 @@ func values(t *testing.T, open Opener) {
 }
 
 // ready: an open store answers its readiness check, and a closed one does not.
-func ready(t *testing.T, open Opener) {
+func ready(t TB, open Opener) {
+	ctx := context.Background()
 	s := open(t, Key)
-	if err := s.Ready(t.Context()); err != nil {
+	if err := s.Ready(ctx); err != nil {
 		t.Errorf("an open store is not ready: %v", err)
 	}
 	if err := s.Close(); err != nil {
 		t.Errorf("closing the store: %v", err)
 	}
-	if err := s.Ready(t.Context()); err == nil {
-		t.Error("a closed store reports itself ready")
+	if err := s.Ready(ctx); err == nil {
+		t.Errorf("a closed store reports itself ready")
 	}
-	if err := s.Tx(t.Context(), func(store.Tx) error { return nil }); err == nil {
-		t.Error("a closed store ran a transaction")
+	if err := s.Tx(ctx, func(store.Tx) error { return nil }); err == nil {
+		t.Errorf("a closed store ran a transaction")
 	}
 }
 
 // opened returns a store the test closes.
-func opened(t *testing.T, open Opener, key []byte) store.Store {
+func opened(t TB, open Opener, key []byte) store.Store {
 	t.Helper()
 	s := open(t, key)
 	t.Cleanup(func() {
@@ -576,9 +584,9 @@ func opened(t *testing.T, open Opener, key []byte) store.Store {
 }
 
 // with runs one transaction and fails the test when it does not commit.
-func with(t *testing.T, s store.Store, fn func(store.Tx) error) {
+func with(t TB, s store.Store, fn func(store.Tx) error) {
 	t.Helper()
-	if err := s.Tx(t.Context(), fn); err != nil {
+	if err := s.Tx(context.Background(), fn); err != nil {
 		t.Fatalf("the transaction did not commit: %v", err)
 	}
 }
@@ -586,9 +594,9 @@ func with(t *testing.T, s store.Store, fn func(store.Tx) error) {
 // fails runs one statement in its own transaction and asserts the error it
 // reports. Every expected failure is its own transaction, because a statement
 // that fails ends the transaction it ran in.
-func fails(t *testing.T, s store.Store, want error, what string, fn func(store.Tx) error) {
+func fails(t TB, s store.Store, want error, what string, fn func(store.Tx) error) {
 	t.Helper()
-	err := s.Tx(t.Context(), fn)
+	err := s.Tx(context.Background(), fn)
 	if !errors.Is(err, want) {
 		t.Errorf("%s: %v, want %v", what, err, want)
 	}
@@ -596,9 +604,9 @@ func fails(t *testing.T, s store.Store, want error, what string, fn func(store.T
 
 // refuses is fails for a condition with no sentinel: the call reports
 // something, and what it reports is the adapter's own sentence.
-func refuses(t *testing.T, s store.Store, what string, fn func(store.Tx) error) {
+func refuses(t TB, s store.Store, what string, fn func(store.Tx) error) {
 	t.Helper()
-	if err := s.Tx(t.Context(), fn); err == nil {
+	if err := s.Tx(context.Background(), fn); err == nil {
 		t.Errorf("%s was accepted", what)
 	}
 }
@@ -606,7 +614,7 @@ func refuses(t *testing.T, s store.Store, what string, fn func(store.Tx) error) 
 // sameJSON compares two JSON columns as documents. A store keeps the value and
 // not the spelling: Postgres re-renders jsonb, and a caller that compared
 // bytes would be asserting the server's formatter.
-func sameJSON(t *testing.T, got, want []byte, what string) {
+func sameJSON(t TB, got, want []byte, what string) {
 	t.Helper()
 	var read, expected any
 	if err := json.Unmarshal(got, &read); err != nil {
@@ -630,36 +638,36 @@ func sameJSON(t *testing.T, got, want []byte, what string) {
 }
 
 // put writes one object and returns the version it took.
-func put(t *testing.T, s store.Store, obj store.Object, ifVersion int64) int64 {
+func put(t TB, s store.Store, obj store.Object, ifVersion int64) int64 {
 	t.Helper()
 	var version int64
 	with(t, s, func(tx store.Tx) error {
 		var err error
-		version, err = tx.Desired().Put(t.Context(), obj, ifVersion)
+		version, err = tx.Desired().Put(context.Background(), obj, ifVersion)
 		return err
 	})
 	return version
 }
 
 // get reads one object.
-func get(t *testing.T, s store.Store, id string) store.Object {
+func get(t TB, s store.Store, id string) store.Object {
 	t.Helper()
 	var obj store.Object
 	with(t, s, func(tx store.Tx) error {
 		var err error
-		obj, err = tx.Desired().Get(t.Context(), store.KindSandbox, id)
+		obj, err = tx.Desired().Get(context.Background(), store.KindSandbox, id)
 		return err
 	})
 	return obj
 }
 
 // held asserts what one acquisition of a lease reports.
-func held(t *testing.T, s store.Store, name, holder string, ttl time.Duration, want bool, what string) {
+func held(t TB, s store.Store, name, holder string, ttl time.Duration, want bool, what string) {
 	t.Helper()
 	var got bool
 	with(t, s, func(tx store.Tx) error {
 		var err error
-		got, err = tx.Leases().Acquire(t.Context(), name, holder, ttl)
+		got, err = tx.Leases().Acquire(context.Background(), name, holder, ttl)
 		return err
 	})
 	if got != want {

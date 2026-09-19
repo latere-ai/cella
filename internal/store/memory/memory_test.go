@@ -7,10 +7,12 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"latere.ai/x/cella/internal/store"
 	"latere.ai/x/cella/internal/store/memory"
 	"latere.ai/x/cella/internal/store/storetest"
+	driver "latere.ai/x/cella/runtime"
 )
 
 // TestMemoryStore runs the whole contract of design 010 against the in-process
@@ -19,7 +21,7 @@ func TestMemoryStore(t *testing.T) {
 	storetest.Run(t, open)
 }
 
-func open(t *testing.T, key []byte) store.Store {
+func open(t storetest.TB, key []byte) store.Store {
 	t.Helper()
 	s, err := memory.Open(memory.Options{Key: key})
 	if err != nil {
@@ -66,7 +68,9 @@ func TestMemoryRefusesAWriteAfterClose(t *testing.T) {
 }
 
 // TestMemoryHonoursACancelledContext: a cancelled caller does not write, in
-// the transaction and in the statements inside it.
+// the transaction and in every statement inside it. The memory adapter holds
+// the same rule Postgres holds for free, so a caller that gave up reads the
+// same answer whichever store it opened.
 func TestMemoryHonoursACancelledContext(t *testing.T) {
 	s := open(t, storetest.Key)
 	defer func() {
@@ -74,14 +78,48 @@ func TestMemoryHonoursACancelledContext(t *testing.T) {
 			t.Errorf("closing the store: %v", err)
 		}
 	}()
-	ctx, cancel := context.WithCancel(t.Context())
+	gone, cancel := context.WithCancel(t.Context())
 	cancel()
-	if err := s.Tx(ctx, func(store.Tx) error { return nil }); !errors.Is(err, context.Canceled) {
+	if err := s.Tx(gone, func(store.Tx) error { return nil }); !errors.Is(err, context.Canceled) {
 		t.Fatalf("a transaction on a cancelled context: %v", err)
 	}
+	obj := store.Object{Kind: store.KindSandbox, ID: "sbx_a", Owner: "alice", Name: "one"}
 	if err := s.Tx(t.Context(), func(tx store.Tx) error {
-		if _, err := tx.Desired().Put(ctx, store.Object{Kind: store.KindSandbox, ID: "sbx_a"}, 0); !errors.Is(err, context.Canceled) {
-			t.Errorf("a write on a cancelled context: %v", err)
+		for _, tc := range []struct {
+			name string
+			call func() error
+		}{
+			{"a write", func() error { _, err := tx.Desired().Put(gone, obj, 0); return err }},
+			{"a read", func() error { _, err := tx.Desired().Get(gone, store.KindSandbox, "sbx_a"); return err }},
+			{"a read by name", func() error { _, err := tx.Desired().ByName(gone, store.KindSandbox, "alice", "one"); return err }},
+			{"a list", func() error {
+				_, _, err := tx.Desired().List(gone, store.KindSandbox, store.Filter{}, store.Page{})
+				return err
+			}},
+			{"a delete", func() error { return tx.Desired().Delete(gone, store.KindSandbox, "sbx_a") }},
+			{"a count", func() error { _, err := tx.Desired().Count(gone, store.KindSandbox, "alice"); return err }},
+			{"a status", func() error { return tx.Desired().PutStatus(gone, store.KindSandbox, "sbx_a", nil) }},
+			{"the last applied state", func() error { _, err := tx.Desired().LastApplied(gone, "sbx_a"); return err }},
+			{"a last applied write", func() error { return tx.Desired().SetLastApplied(gone, "sbx_a", nil) }},
+			{"an observed write", func() error { return tx.Observed().Put(gone, "env_one", driver.State{ID: "sbx_a"}) }},
+			{"an observed read", func() error { _, _, err := tx.Observed().Get(gone, "sbx_a"); return err }},
+			{"an observed list", func() error { _, _, err := tx.Observed().List(gone, store.Filter{}, store.Page{}); return err }},
+			{"a rebuild", func() error { return tx.Observed().Rebuild(gone, "env_one", nil) }},
+			{"a journal append", func() error {
+				_, err := tx.Journal().Append(gone, store.Event{ObjectID: "sbx_a", Type: "sandbox.created"})
+				return err
+			}},
+			{"a journal read", func() error { _, _, err := tx.Journal().ByObject(gone, "sbx_a", store.Page{}); return err }},
+			{"a journal prune", func() error { _, err := tx.Journal().Prune(gone, time.Now()); return err }},
+			{"a value write", func() error { _, err := tx.Values().Put(gone, "sec_a", []byte("value")); return err }},
+			{"a value read", func() error { _, _, err := tx.Values().Open(gone, "sec_a"); return err }},
+			{"a value delete", func() error { return tx.Values().Delete(gone, "sec_a") }},
+			{"a lease", func() error { _, err := tx.Leases().Acquire(gone, "reaper", "replica-one", time.Second); return err }},
+			{"a lease release", func() error { return tx.Leases().Release(gone, "reaper", "replica-one") }},
+		} {
+			if err := tc.call(); !errors.Is(err, context.Canceled) {
+				t.Errorf("%s on a cancelled context: %v", tc.name, err)
+			}
 		}
 		return nil
 	}); err != nil {

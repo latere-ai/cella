@@ -263,6 +263,38 @@ func TestBridgeReportsTheStore(t *testing.T) {
 	}
 }
 
+// TestBridgeReportsARowItCannotRead: a row this binary did not write is a
+// read failure and not an empty sandbox, because an empty sandbox is desired
+// state the controller would act on.
+func TestBridgeReportsARowItCannotRead(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		row  store.Object
+	}{
+		{"an object that is not a sandbox", store.Object{
+			Kind: store.KindSandbox, ID: "sbx_a", Owner: "alice", Name: "one",
+			Environment: "default", Data: []byte(`"not a sandbox"`),
+		}},
+		{"a status that is not a status", store.Object{
+			Kind: store.KindSandbox, ID: "sbx_b", Owner: "alice", Name: "two",
+			Environment: "default", Data: []byte(`{}`), Status: []byte(`"not a status"`),
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, s := bound(t)
+			if err := s.Tx(t.Context(), func(tx store.Tx) error {
+				_, err := tx.Desired().Put(t.Context(), tc.row, 0)
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := c.Load(); err == nil {
+				t.Fatal("the row was read as a sandbox")
+			}
+		})
+	}
+}
+
 // TestBridgeReportsAStoreFailure: a store that does not answer fails the
 // controller's call rather than losing the write quietly.
 func TestBridgeReportsAStoreFailure(t *testing.T) {

@@ -45,7 +45,7 @@ func TestMain(m *testing.M) {
 // TestPostgresStore runs the whole contract of design 010 against Postgres.
 func TestPostgresStore(t *testing.T) {
 	admin := server(t)
-	storetest.Run(t, func(t *testing.T, key []byte) store.Store {
+	storetest.Run(t, func(t storetest.TB, key []byte) store.Store {
 		return open(t, database(t, admin), key, time.Hour)
 	})
 }
@@ -231,9 +231,9 @@ func TestDurable(t *testing.T) {
 
 // open is one store on one database, closed by the test that opened it unless
 // it closes it itself.
-func open(t *testing.T, dsn string, key []byte, renew time.Duration) *postgres.Store {
+func open(t storetest.TB, dsn string, key []byte, renew time.Duration) *postgres.Store {
 	t.Helper()
-	s, err := postgres.Open(t.Context(), postgres.Options{URL: dsn, Key: key, RenewEvery: renew})
+	s, err := postgres.Open(context.Background(), postgres.Options{URL: dsn, Key: key, RenewEvery: renew})
 	if err != nil {
 		t.Fatalf("opening the store: %v", err)
 	}
@@ -270,15 +270,15 @@ func execute(t *testing.T, dsn, statement string) {
 
 // database creates an empty database on the server and returns its URL, so
 // one case cannot read another's rows and the migrations run on each.
-func database(t *testing.T, admin string) string {
+func database(t storetest.TB, admin string) string {
 	t.Helper()
 	name := "cella_" + strings.ToLower(rand.Text()[:12])
-	conn, err := pgx.Connect(t.Context(), admin)
+	conn, err := pgx.Connect(context.Background(), admin)
 	if err != nil {
 		t.Fatalf("connecting to the server: %v", err)
 	}
 	defer func() { _ = conn.Close(context.Background()) }()
-	if _, err := conn.Exec(t.Context(), "create database "+name); err != nil {
+	if _, err := conn.Exec(context.Background(), "create database "+name); err != nil {
 		t.Fatalf("creating the database: %v", err)
 	}
 	t.Cleanup(func() {
