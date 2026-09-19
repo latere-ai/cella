@@ -7,13 +7,14 @@ packages.
 
 | Page | |
 |---|---|
+| [Native quickstart](native.md) | Create and execute trusted local workspaces with the implemented API |
 | Install | not written yet; owned by the [release and installation spec](../specs/014-release-and-installation.md) |
-| Configuration | the table in the [repository scaffold spec](../specs/002-repository-scaffold.md) until `docs/configuration.md` is generated from the code |
+| Configuration | the table in the [repository scaffold spec](../specs/.archive/002-repository-scaffold.md) until `docs/configuration.md` is generated from the code |
 | Identity | the [section in the README](../README.md#identity) is what an operator needs: the issuers, the authorizer, the signing key and its rotation |
 
 Trying it out before there is anything to install takes one command and
 one issuer, `CELLA_OIDC_ISSUERS=<url> make run`: the server on loopback,
-serving its probes and the key set it signs with. `cellad` verifies
+serving the native workspace API, probes, and the key set it signs with. `cellad` verifies
 every caller, so it does not start without an issuer to verify against;
 the stub issuer that makes `make run` self-contained is the
 [test stubs spec](../specs/012-test-stubs-and-tiers.md)'s.

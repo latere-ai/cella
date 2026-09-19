@@ -6,6 +6,9 @@ cover:
   trim_prefix: latere.ai/x/cella/
 
 spec:
+  archive:
+    dir: .archive
+    statuses: [complete, superseded]
   status:
     - vague
     - drafted

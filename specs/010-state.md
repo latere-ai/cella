@@ -1,6 +1,6 @@
 ---
 title: "State: desired and observed, the store contract, transactions, secret values, the journal, queues and operations, optional Postgres"
-status: validated
+status: in-progress
 track: core
 depends_on:
   - specs/003-manifest-contract.md
@@ -9,7 +9,7 @@ depends_on:
 affects: [internal/store/, internal/config/, migrations/]
 effort: large
 created: 2026-09-12
-updated: 2026-09-12
+updated: 2026-09-19
 author: changkun
 ---
 
@@ -39,7 +39,9 @@ are satisfied by an adapter in `internal/serve` over this store.
 
 ## Current state
 
-Not built. The hosted platform kept all product state in Postgres and
+[[026-direct-control-plane]] adds a provisional, exclusively locked local development snapshot through `controller.Store`. It is not the memory/Postgres implementation below, and does not implement distributed transactions, leases, journals, queues, or replicated recovery.
+
+Design provenance: The hosted platform kept all product state in Postgres and
 read runtime truth from labels; the split into desired and observed is
 what this spec adds, so that a durable store recovers a sandbox instead
 of merely remembering it.

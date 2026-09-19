@@ -20,13 +20,15 @@ control plane that platform is built on, and anyone can run it.
 
 ## Status
 
-Design. The specs are written and the repository passes its quality
-gate. `cellad` serves its probes, verifies a caller against the issuers
-you list, signs the identities it hands to sandboxes and workers, and
-asks your authorizer or its own owner policy what a caller may do. It
-creates nothing yet; the [build order](specs/README.md#build-order) says
-what lands when. The schema below may still change before the first
-tagged release, and the CHANGELOG names every change to it.
+The first executable slice supports trusted native workspaces: authenticated
+create, list, inspect, exec, files, logs, stop, start, and delete, with local state that
+survives a server restart. Native execution has **no isolation** and requires
+`CELLA_ALLOW_UNSAFE_NATIVE=true`; it is for development and tests.
+
+The full contract below remains the target. Container drivers, credential
+egress, independent volumes, queued scheduling, workers, and application
+ports are not implemented yet. Unsupported manifest fields are refused.
+The [build order](specs/README.md#build-order) tracks the remaining work.
 
 ## The problem
 
@@ -45,7 +47,7 @@ written against that vendor.
 Cella makes the environment a document and the control plane a
 component you run.
 
-## How it works
+## Planned contract
 
 - **One manifest, one meaning.** `apiVersion: cella.latere.ai/v1beta1`,
   `kind: Sandbox`, and beside it `Secret`, `Volume`, `SandboxSet`, and
@@ -104,16 +106,12 @@ CELLA_OIDC_ISSUERS=<your issuer url> make run   # cellad on loopback
 make                                            # the quality gate
 ```
 
-Today `make run` serves the probes at `http://127.0.0.1:8081/readyz` and
-the key set at `http://127.0.0.1:8080/.well-known/jwks.json`. It needs
-an issuer that answers, because `cellad` reads its discovery document
-and its key set before it listens; it generates the signing key once
-under `out/run/` and keeps it. Once the stubs of the
-[test stubs spec](specs/012-test-stubs-and-tiers.md) land, `make run`
-starts an issuer of its own and needs nothing from you. Once the drivers
-and the API land it starts the egress gateway, the authorizer, and the
-sink beside the server and prints a token to apply the manifest above
-with.
+`make run` opts into native execution and binds loopback. It needs a reachable
+OIDC issuer and generates the local signing key once under `out/run/`.
+The public listener serves `/v1/sandboxes` and the key set; the internal
+listener serves probes. Follow [the native quickstart](docs/native.md) for
+the currently implemented manifest and API. The larger manifest and client
+commands above describe the planned contract.
 
 ## Identity
 
@@ -183,11 +181,11 @@ CELLA_ADMIN_SUBJECTS='https://login.example.com|alice' \
 | `CELLA_ADMIN_SUBJECTS` | | | rendered subjects the owner policy lets act on everything; read and unused with an authorizer set |
 | `CELLA_ENVIRONMENT_KEY_TTL` | | `8760h` | how long a worker's environment key lives |
 
-The [repository scaffold spec](specs/002-repository-scaffold.md) is the
+The [repository scaffold spec](specs/.archive/002-repository-scaffold.md) is the
 whole table, identity and everything else; the
 [identity spec](specs/006-identity.md) is why each rule is what it is.
 
-## What you get
+## Remaining target capabilities
 
 - Five kinds with strict decoding, server-side defaults, and a
   `status` the server writes, evolving under written rules.

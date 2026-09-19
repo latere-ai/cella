@@ -1,6 +1,6 @@
 ---
 title: "Direct control plane: durable native workspace lifecycle and authorized HTTP API"
-status: in-progress
+status: complete
 track: core
 depends_on: []
 affects: [manifest/, controller/, internal/api/]

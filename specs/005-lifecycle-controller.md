@@ -1,6 +1,6 @@
 ---
 title: "Lifecycle controller: desired to observed, the phase machine, create and update, the reaper, recovery, cascade"
-status: validated
+status: in-progress
 track: core
 depends_on:
   - specs/003-manifest-contract.md
@@ -8,7 +8,7 @@ depends_on:
 affects: [controller/, internal/config/]
 effort: large
 created: 2026-09-12
-updated: 2026-09-12
+updated: 2026-09-19
 author: changkun
 ---
 
@@ -32,7 +32,9 @@ since it imports nothing under `internal/` ([[001-architecture]]).
 
 ## Current state
 
-Not built. The reaper's rules come from the hosted platform, where
+[[026-direct-control-plane]] implements synchronous native create, inspect, list, start, stop, and delete with durable intent. Reconciliation, lifecycle timers, recovery, updates, and cascade below remain to build.
+
+Design provenance: The reaper's rules come from the hosted platform, where
 they have run for months; the phase machine, the ordered create with
 undo, recovery from desired state, and the cascade are written down
 here for the first time.

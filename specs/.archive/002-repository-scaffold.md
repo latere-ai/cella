@@ -150,6 +150,7 @@ deployment that sets one before its spec lands is not refused.
 |---|---|---|---|
 | `CELLA_PUBLIC_ADDR`, `CELLA_INTERNAL_ADDR` | no | `:8080`, `:8081` | listen addresses; a test binds `127.0.0.1:0`; the two must differ unless both ask for port 0 |
 | `CELLA_DATA_DIR` | no | `/var/lib/cella` | local disk cellad keeps state on: the readiness write test, the native and local drivers' sandboxes and volumes (004, 019); created at start |
+| `CELLA_ALLOW_UNSAFE_NATIVE` | no | `false` | explicit consent to native execution without isolation; required with `CELLA_RUNTIME=native` (028) |
 | `CELLA_RUNTIME` | no | `k8s` | the in-process driver of the default environment: `k8s`, `podman`, `native`, and from 004 `local`, `vm`, or `none` for a control plane that serves only workers |
 | `CELLA_PUBLIC_URL` | yes, from 006 | none | the absolute URL callers reach the public listener at; the issuer of workload and environment tokens and the base of every URL in a response |
 | `CELLA_KUBECONFIG`, `CELLA_NAMESPACE`, `CELLA_K8S_RUNTIME_CLASS`, `CELLA_K8S_RUNTIME_CLASS_ISOLATION` | 004 | in-cluster, `cella`, unset, `container` | the cluster and namespace the k8s driver creates in, the runtime class every Pod gets, and the isolation class the operator declares that class provides (`container` or `vm`); never inferred |
@@ -174,7 +175,7 @@ deployment that sets one before its spec lands is not refused.
 | `CELLA_ENVIRONMENT_OFFLINE` | 021 | `2m` | how long without a worker heartbeat, or with the in-process driver not ready, before an environment is `Offline` |
 | `CELLA_DEFAULT_ENVIRONMENT`, `CELLA_CAPACITY`, `CELLA_GATEWAY` | 021 | `default`, `auto` on k8s, unset | the name of the default environment; the seed of its `spec.capacity` and `spec.gateway` at first start, with `CELLA_SCHEDULING_MODE` and `CELLA_POOL_*` seeding the rest |
 | `CELLA_OIDC_ISSUERS` | yes, from 006 | none | comma separated issuer URLs whose tokens are accepted |
-| `CELLA_OIDC_AUDIENCE` | 006 | `cella` | the audience a caller token must contain; the tokens cellad mints carry it |
+| `CELLA_OIDC_AUDIENCE` | 006 | `cella` | comma-separated accepted external audiences; locally minted tokens carry only the first (027) |
 | `CELLA_OIDC_INSECURE_ISSUERS` | 006 | unset | issuers from the list that may use `http://` on a host other than loopback; set by the test stubs, never in production |
 | `CELLA_TOKEN_KEY` | yes, from 006 | none | one or two PEM-encoded RSA private keys of at least 2048 bits; the first signs workload tokens and environment keys, every block is in the key set, so rotation is prepending a key and later removing the old block; required in every mode |
 | `CELLA_AUTHORIZER_URL`, `CELLA_AUTHORIZER_TOKEN` | 006 | unset | the operator's authorization endpoint and the bearer cellad sends it; unset selects the built-in owner policy; the URL without the token is a start-up failure |

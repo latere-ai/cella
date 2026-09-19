@@ -48,15 +48,15 @@ later.
 | # | Spec | Effort | Status | Builds on |
 |---|---|---|---|---|
 | [001](001-architecture.md) | Architecture: control plane and data plane, packages, extension points, invariants | medium | validated | - |
-| [002](002-repository-scaffold.md) | Repository scaffold: module, binary, configuration, gate, images, workflows | small | complete | - |
-| [003](003-manifest-contract.md) | Manifest contract: the Sandbox kind, decoding, validation, defaulting, resolve, the boundary check | large | validated | 001 |
-| [004](004-runtime-contract.md) | Runtime contract: the Driver interface, optional interfaces, isolation classes, capabilities, the six drivers, conformance | large | validated | 001, 003 |
-| [005](005-lifecycle-controller.md) | Lifecycle controller: desired to observed, the phase machine, create and update, the reaper, recovery, cascade | large | validated | 003, 004 |
+| [002](.archive/002-repository-scaffold.md) | Repository scaffold: module, binary, configuration, gate, images, workflows | small | complete | - |
+| [003](003-manifest-contract.md) | Manifest contract: the Sandbox kind, decoding, validation, defaulting, resolve, the boundary check | large | in-progress | 001 |
+| [004](004-runtime-contract.md) | Runtime contract: the Driver interface, optional interfaces, isolation classes, capabilities, the six drivers, conformance | large | in-progress | 001, 003 |
+| [005](005-lifecycle-controller.md) | Lifecycle controller: desired to observed, the phase machine, create and update, the reaper, recovery, cascade | large | in-progress | 003, 004 |
 | [006](006-identity.md) | Identity: OIDC issuers, workload and environment tokens, the authorizer webhook, the owner policy | medium | in-progress | 001, 002 |
 | [007](007-admission.md) | Admission: AdmitFunc, defaults and ceilings, the admission webhook, the count ceiling | small | validated | 003, 006 |
-| [008](008-api.md) | API: the /v1 kinds, addressing and concurrency, streams, the error table, OpenAPI | large | validated | 003, 005, 006, 007, 010 |
+| [008](008-api.md) | API: the /v1 kinds, addressing and concurrency, streams, the error table, OpenAPI | large | in-progress | 003, 005, 006, 007, 010 |
 | [009](009-events.md) | Events: one signed record per mutation and operation, typed, ordered per object, to the operator's sink | small | validated | 005, 006, 010 |
-| [010](010-state.md) | State: desired and observed, the store contract, transactions, secret values, the journal, queues and operations, optional Postgres | large | validated | 003, 004, 005 |
+| [010](010-state.md) | State: desired and observed, the store contract, transactions, secret values, the journal, queues and operations, optional Postgres | large | in-progress | 003, 004, 005 |
 | [011](011-agent-client.md) | Agent client: the cella command, its client package, exit codes, output, the skill | medium | validated | 002, 003, 006, 008, 018, 019, 020, 021, 023 |
 | [012](012-test-stubs-and-tiers.md) | Test stubs and tiers: the stubs, the bootstrap of make run, the driver tiers, the kind overlay, CI jobs | medium | validated | 002, 004, 006, 007, 009, 010, 018, 021 |
 | [013](013-security-and-threat-model.md) | Security and threat model: assets, adversaries, every control with its test, what is out of scope | medium | validated | 001, 003, 004, 006, 007, 008, 009, 010, 011, 018, 019, 021, 022, 023 |
@@ -243,6 +243,11 @@ wikilinks. No em dashes; the technical register throughout.
 
 ## Consolidation slices
 
-| Spec | State | Deliverable |
+| Spec | Status | Deliverable |
 |---|---|---|
-| [[027-configured-audience-set]] | complete | External audience sets with one local signing audience |
+| [025-native-runtime-migration.md](.archive/025-native-runtime-migration.md) | complete | Native lifecycle, execution and archive transfer; partial spec 004 |
+| [026-direct-control-plane.md](.archive/026-direct-control-plane.md) | complete | Strict manifest subset and durable direct sandbox API |
+| [027-configured-audience-set.md](.archive/027-configured-audience-set.md) | complete | External audience sets with one local signing audience |
+| [028-runnable-native-control-plane.md](.archive/028-runnable-native-control-plane.md) | complete | Server wiring and authenticated native lifecycle end-to-end |
+| [029-workspace-files-and-logs.md](.archive/029-workspace-files-and-logs.md) | complete | Authorized tar import/export and process log routes |
+| [030-native-main-process.md](.archive/030-native-main-process.md) | complete | Main command supervision and persisted output |

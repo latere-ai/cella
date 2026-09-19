@@ -1,13 +1,13 @@
 ---
 title: "Manifest contract: the Sandbox kind, decoding, validation, defaulting, resolve, the boundary check"
-status: validated
+status: in-progress
 track: core
 depends_on:
   - specs/001-architecture.md
 affects: [manifest/, manifest/v1/, docs/]
 effort: large
 created: 2026-09-12
-updated: 2026-09-12
+updated: 2026-09-19
 author: changkun
 ---
 
@@ -37,7 +37,9 @@ nothing a workload does inside it later can widen that boundary.
 
 ## Current state
 
-Not built. The schema descends from a manifest that has served a
+A strict JSON Sandbox subset is implemented by [[026-direct-control-plane]]: metadata, the configured environment, and native execution fields. The complete resolver, other kinds, defaults, admission, and boundary algebra below remain to build.
+
+Design provenance: The schema descends from a manifest that has served a
 hosted platform for months, with these changes: the platform's own
 services are no longer fields; volumes, secrets, an egress section with
 rules, ports, mesh and spawn rights, scheduling, and an environment

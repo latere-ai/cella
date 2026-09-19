@@ -1,6 +1,6 @@
 ---
 title: "Runtime contract: the Driver interface, optional interfaces, isolation classes, capabilities, the six drivers, conformance"
-status: validated
+status: in-progress
 track: core
 depends_on:
   - specs/001-architecture.md
@@ -8,7 +8,7 @@ depends_on:
 affects: [runtime/, runtime/k8s/, runtime/podman/, runtime/native/, runtime/local/, runtime/vm/, runtime/remote/, runtime/runtimetest/, internal/config/]
 effort: large
 created: 2026-09-12
-updated: 2026-09-12
+updated: 2026-09-19
 author: changkun
 ---
 
@@ -30,7 +30,9 @@ the suite.
 
 ## Current state
 
-Not built. The interface descends from one that three container
+The initial native implementation is in `runtime/native` ([[025-native-runtime-migration]]). The exported package and capability types follow this design; the other drivers and remaining native capabilities below are not complete.
+
+Design provenance: The interface descends from one that three container
 drivers have implemented in the hosted platform; the changes are that
 optional behaviour is declared and typed rather than discovered by
 assertion alone, that the k8s driver takes decorators instead of

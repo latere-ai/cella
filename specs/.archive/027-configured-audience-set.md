@@ -1,7 +1,7 @@
 ---
 title: Configured audience set
 status: complete
-track: foundations
+track: core
 depends_on: [specs/006-identity.md]
 affects: [internal/config, internal/auth, cmd/cellad]
 effort: small

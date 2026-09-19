@@ -6,6 +6,21 @@ refused before it is pushed.
 
 ## Unreleased
 
+- Native workloads can start a main command, report its exit, restart it, and
+  stream timestamp-filtered or tailed logs. File routes import and export tar
+  archives with authorization, upload bounds, and path containment.
+- The first native workspace API is executable: create, list, inspect, execute,
+  stop, start, and delete through authenticated `/v1/sandboxes` routes. The
+  controller preserves ownership and desired objects across a server restart.
+  This is a single-node development store; replicated state and recovery remain
+  unimplemented.
+- `runtime/native` provides process-group cancellation, durable workspace
+  metadata, and confined archive paths. Native execution has no isolation and
+  now requires `CELLA_ALLOW_UNSAFE_NATIVE=true`. Unimplemented runtime selections
+  fail startup. `make run` explicitly opts into trusted native execution.
+- JSON request bodies default to 64 KiB and tar uploads to 1 GiB, configurable
+  with `CELLA_MAX_BODY_BYTES` and `CELLA_MAX_UPLOAD_BYTES`.
+
 - `CELLA_OIDC_AUDIENCE` accepts a comma-separated set for external callers.
   The first entry remains the audience of locally signed workload and
   environment tokens. Empty and repeated entries fail startup.

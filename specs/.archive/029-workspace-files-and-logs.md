@@ -1,6 +1,6 @@
 ---
 title: "Workspace operations: authorized tar transfer and process logs"
-status: in-progress
+status: complete
 track: core
 depends_on: []
 affects: [controller/, internal/api/]
