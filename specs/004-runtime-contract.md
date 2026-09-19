@@ -162,7 +162,7 @@ type Capabilities struct {
 | Resize | CPU and memory in place where the cluster allows | CPU and memory | memory balloon | no | no | the worker's |
 | Pool | yes | no | yes | no | no | the worker's |
 | Files | yes, through a helper Pod | yes, through the volume | yes | yes | yes | the worker's |
-| Detach | no | no | no | yes: the handle is a pid, a start time, and a log path | yes: a pid and a record | no |
+| Detach | no | yes: the container, the workspace volume and the record volume are the whole of a sandbox, so a second driver over the engine reads it back ([[035-podman-driver]]) | no | yes: the handle is a pid, a start time, and a log path | yes: a pid and a record | no |
 
 Every driver enforces the workload token and CA projection, the
 labels, the env, the workdir, and the lifecycle timestamps, so these
@@ -281,6 +281,14 @@ and one container per sandbox, rootless when the socket is a user's.
 engine's port publishing on loopback. Network is a per-sandbox network
 whose only route is the gateway, and one network per mesh with the
 engine's DNS resolving peers.
+
+Podman fixes an object's labels at create, so the mutable half of the
+stamped identity is a second, unmounted volume the driver replaces with
+a generation rather than a label it edits, and the driver holds no
+sandbox state in its own process ([[035-podman-driver]]). `Attach`,
+`Dial`, the networks and the mesh are not built yet; what is built is
+the lifecycle, `Exec`, `Logs`, the archive transfers and the stamped
+identity.
 
 ### The vm driver
 
@@ -417,7 +425,7 @@ requests ([[023-computer-use-operations]]); the microVM driver's design
 |---|---|---|
 | `native` passes the whole conformance suite in the unit suite | `TestNativeConformance` | passing for the cases built, [[032-runtime-conformance-suite]] |
 | `local` passes it on a machine with the sandbox runtime installed, with `Attach`, `Dial`, `Mesh`, `Display`, `Input`, `Resize`, `Pool` and the `open` egress case skipped as undeclared, and is skipped whole with the remediation printed where the runtime is absent | `TestLocalConformance` | not built |
-| `podman` passes it in the podman tier; `k8s` against kind; `remote` through a worker running `native` | `TestPodmanConformance`, `TestClusterConformance`, `TestWorkerConformance` | not built |
+| `podman` passes it in the podman tier; `k8s` against kind; `remote` through a worker running `native` | `TestPodmanConformance`, `TestClusterConformance`, `TestWorkerConformance` | `podman` passing against a real engine, skipped where no socket answers, [[035-podman-driver]]; `k8s` and `remote` not built |
 | A driver that declares a capability without its interface, or one the suite finds not to hold, fails | `TestConformanceCatchesAFalseCapability` with three lying wrappers | passing, [[032-runtime-conformance-suite]] |
 | Every stamped label value is a legal Kubernetes label value and every key a legal key, for an owner with `@` and a user label with a `/` | `TestStampedIdentityIsLegal` | not built |
 | A decorator that removes the token mount, sets `privileged`, adds `hostNetwork` or `shareProcessNamespace`, or mounts a service account token is refused with `decorator_violation` naming the field | `TestDecoratorCannotWeakenTheBaseline`, table-driven over the baseline | not built |
@@ -425,4 +433,4 @@ requests ([[023-computer-use-operations]]); the microVM driver's design
 | `Ingress` is declared only with an `Exposer` installed, and a `public` port then has a URL that answers | `TestIngressNeedsAnExposer`, e2e `IngressURL` | not built |
 | In `local`, a stage cannot read any path in the always-deny table, asserted per entry inside a real sandbox; `workspace.path` is rewritten with a warning; `Attach` and stdin are `capability_unsupported` | `TestLocalDenyTable`, `TestLocalPathRewrite`, `TestLocalRefusesAttach` | not built |
 | `vm` exists, declares its class, and reports not ready with a message naming [[024-vm-driver]] | `TestVMIsAStub` | not built |
-| Every variable in the Selection section is in [[002-repository-scaffold]]'s table with the same default | `TestConfigTableAgrees` reading both files | not built |
+| Every variable in the Selection section is in [[002-repository-scaffold]]'s table with the same default | `TestConfigTableAgrees` reading both files | not built; `CELLA_PODMAN_SOCKET` agrees with that table as of [[035-podman-driver]] |

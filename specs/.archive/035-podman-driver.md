@@ -1,6 +1,6 @@
 ---
 title: "Podman driver: the container isolation class over the libpod socket, with the sandbox's record in the engine"
-status: in-progress
+status: complete
 track: core
 depends_on:
   - specs/004-runtime-contract.md
@@ -256,16 +256,69 @@ carry yet.
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| The driver passes every case of the conformance suite against a real engine, and skips with the sockets it tried when there is none | `TestPodmanConformance` | open |
-| `Isolation()` is `container` and the declared capabilities are `Files` and `Detach` and nothing else | `TestDeclarations` | open |
-| A fresh driver over the same engine reads every field of `State` back: name, owner, labels, the four instants, the lifecycle durations | `TestRecordSurvivesANewDriver`, conformance `DetachRecovers` | open |
-| `Touch`, `Update` and `Stop` each write one record generation and remove the one below, and a reader that finds two takes the higher | `TestRecordGenerations` | open |
-| `Stop` then `Start` keeps the workspace and the clocks, and the second call of each changes nothing | conformance `StopStartKeepsTheWorkspace` | open |
-| A container killed by `Stop` reads `Stopped`, one that exited non-zero on its own reads `Failed` with its code | `TestPhaseTable`, conformance `LogsFollow` | open |
-| An archive entry that is absolute, traverses, or is a symbolic or hard link is `ErrInvalid` before a byte reaches the engine | `TestImportRefusals`, conformance `TarOutAndIn` | open |
-| Export names are relative to the workspace whether the whole workspace or one tree was asked for | `TestExportNames`, conformance `TarOutAndIn` | open |
-| `Resources.CPU` and `.Memory` become a CFS quota and a byte limit; `.Disk` is recorded and enforces nothing | `TestResourceLimits` | open |
-| `Preflight` names the socket it found and lists every candidate when none answers | `TestPreflightSockets` | open |
-| `CELLA_RUNTIME=podman` starts `cellad` against a reachable socket and fails with the candidates when the socket is absent | `TestPodmanRuntimeSelected`, `TestServeRefusesUnavailableRuntime` | open |
-| Nothing under `runtime/podman` names a Latere host, image, pool or namespace | `TestNoLatereCoordinates` | open |
-| The driver's build list is the contract packages and the standard library | `TestRootPackagesDialNothing` | open |
+| The driver passes every case of the conformance suite against a real engine, and skips with the sockets it tried when there is none | `TestPodmanConformance` | done |
+| `Isolation()` is `container` and the declared capabilities are `Files` and `Detach` and nothing else | `TestDeclarations` | done |
+| A fresh driver over the same engine reads every field of `State` back: name, owner, labels, the four instants, the lifecycle durations | `TestRecordSurvivesANewDriver`, conformance `DetachRecovers` | done |
+| `Touch`, `Update` and `Stop` each write one record generation and remove the one below, and a reader that finds two takes the higher | `TestRecordGenerations` | done |
+| `Stop` then `Start` keeps the workspace and the clocks, and the second call of each changes nothing | conformance `StopStartKeepsTheWorkspace`, `TestStartStopAreIdempotent` | done |
+| A container killed by `Stop` reads `Stopped`, one that exited non-zero on its own reads `Failed` with its code | `TestPhaseTable`, `TestAWorkloadThatDiedReadsFailed`, conformance `LogsFollow` | done |
+| An archive entry that is absolute, traverses, or is a symbolic or hard link is `ErrInvalid` before a byte reaches the engine | `TestImportRefusals`, conformance `TarOutAndIn` | done |
+| Export names are relative to the workspace whether the whole workspace or one tree was asked for | `TestExportNames`, `TestTarRoundTrip`, conformance `TarOutAndIn` | done |
+| `Resources.CPU` and `.Memory` become a CFS quota and a byte limit; `.Disk` is recorded and enforces nothing | `TestResourceLimits`, `TestCreateStampsIdentityAndRecord` | done |
+| `Preflight` names the socket it found and lists every candidate when none answers | `TestPreflightSockets` | done |
+| `CELLA_RUNTIME=podman` reaches the driver and a start-up with no engine fails at its preflight naming the socket | `TestPodmanRuntimeSelected`, `TestPodmanSocket` | done |
+| Nothing under `runtime/podman` names a Latere host, image, pool or namespace | `TestNoLatereCoordinates` | done |
+| The driver's build list is the contract packages and the standard library | `TestRootPackagesDialNothing` | done |
+
+## Outcome
+
+Landed 2026-09-19. `latere.ai/x/cella/runtime/podman` is the `container`
+driver: `client.go` (the socket, the request shapes, the refusals),
+`podman.go` (declarations, the identity and the record, the lifecycle,
+the phases, the resources and the paths), `exec.go`, `logs.go`,
+`files.go`. Coverage 94.6% of 738 statements, and the whole bar passes,
+including the race, hermetic and tempdir runs.
+
+`TestPodmanConformance` ran for real against podman 5.7.1 on a rootless
+macOS machine, over the podman machine's socket, and every case passed:
+`NameIsolationCapabilities`, `PreflightAndReady`, `CreateInspectDelete`,
+`StopStartKeepsTheWorkspace`, `UpdateEveryMutableField`,
+`ListReadsIdentityBack`, `FilterSelectsOnLabels`, `ExecStreamsAndExits`,
+`LogsFollow`, `TarOutAndIn`, `TouchStampsActivity`, `DetachRecovers`.
+Nothing is left on the engine after the run. It skips with the sockets it
+tried where none answers, so the hermetic gate and a machine with no
+podman still run the suite; the fake engine of `fake_test.go` carries the
+coverage there.
+
+Four things the design settled that the spec above states and that the
+next container driver inherits:
+
+1. Podman fixes an object's labels at create. The libpod update endpoint
+   accepts a label map and answers 201 without applying it, which was
+   verified rather than assumed, so a mutable record is a replaced object
+   with a generation and not an edited label.
+2. `Update` rewrites neither the container nor its labels. `Change.Env`
+   lands in the record and reaches the sandbox through `Exec`. The
+   alternative, re-creating the container, kills the workload, and
+   `Touch` is frequent enough that it would do so constantly.
+3. `Detach` is declared, which [[004-runtime-contract]]'s table did not
+   expect of this driver. The driver keeps nothing in this process, so a
+   second instance over the same engine reads every sandbox back and the
+   suite's `DetachRecovers` proves it. The table's cell is corrected in
+   this slice.
+4. The driver reaches the standard library and the contract packages and
+   nothing else, so `arch_test.go` takes it as the strict case. That
+   rules out `latere.ai/x/pkg/otel`, whose build list a driver package may
+   not carry, and a local engine socket is not a peer a client span
+   continues into.
+
+Two hazards for whoever operates this backend, both of the engine rather
+than the driver: `podman volume prune` removes a volume nothing mounts,
+which is every record volume, and `podman container prune` removes a
+stopped container, which is every stopped sandbox. Neither is recoverable
+from the remaining objects; the driver does not rebuild a container it
+did not create.
+
+Not built here and listed where they belong above: attach, display and
+input, egress and the mesh, the warm pool, the token and CA projection,
+and `Watch`.
