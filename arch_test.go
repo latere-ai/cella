@@ -31,6 +31,7 @@ var engines = map[string][]string{
 	"./manifest/v1":    nil,
 	"./runtime":        nil,
 	"./runtime/native": nil, // the native driver runs host processes: no client
+	"./runtime/podman": nil, // the podman driver speaks libpod over net/http: no client module
 	"./controller":     nil,
 }
 
