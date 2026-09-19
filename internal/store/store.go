@@ -123,9 +123,9 @@ type Page struct {
 // DefaultPageLimit is the page a caller that names none gets.
 const DefaultPageLimit = 200
 
-// Limit is the page size to read, bounded so a caller cannot ask for the
-// whole table in one statement.
-func (p Page) limit() int {
+// Size is the page to read, bounded so a caller cannot ask for the whole
+// table in one statement.
+func (p Page) Size() int {
 	switch {
 	case p.Limit <= 0:
 		return DefaultPageLimit
@@ -143,7 +143,7 @@ const MaxPageLimit = 1000
 // the page, so a full page with nothing behind it ends the list rather than
 // handing out a cursor onto no rows.
 func PageOf[T any](rows []T, p Page, key func(T) string) ([]T, string) {
-	limit := p.limit()
+	limit := p.Size()
 	if len(rows) <= limit {
 		return rows, ""
 	}

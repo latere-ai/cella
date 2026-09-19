@@ -5,9 +5,17 @@
 // runs it and the adapters are therefore interchangeable: what the memory
 // store answers is what the Postgres store answers, and a controller written
 // against one runs on the other.
+//
+// Two rules the suite holds every adapter to, because Postgres holds them and
+// a memory store that did not would be the weaker contract. A statement that
+// fails ends its transaction: the caller rolls back and retries rather than
+// writing on. And a JSON column is a value and not a byte string: what comes
+// back is the same document, not the same spelling of it.
 package storetest
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -59,22 +67,26 @@ func versions(t *testing.T, open Opener) {
 	if second != first+1 {
 		t.Fatalf("a write at version %d took %d, want %d", first, second, first+1)
 	}
-	with(t, s, func(tx store.Tx) error {
-		if _, err := tx.Desired().Put(ctx, object("sbx_a", "alice", "one"), first); !errors.Is(err, store.ErrVersionConflict) {
-			t.Errorf("a write at the stale version %d: %v, want a conflict", first, err)
-		}
-		if _, err := tx.Desired().Put(ctx, object("sbx_a", "alice", "one"), 0); !errors.Is(err, store.ErrVersionConflict) {
-			t.Errorf("a create over a live row: %v, want a conflict", err)
-		}
-		if _, err := tx.Desired().Put(ctx, object("sbx_gone", "alice", "gone"), 7); !errors.Is(err, store.ErrNotFound) {
-			t.Errorf("a write at a version of a row that is not there: %v, want not found", err)
-		}
-		return nil
+	fails(t, s, store.ErrVersionConflict, "a write at a stale version", func(tx store.Tx) error {
+		_, err := tx.Desired().Put(ctx, object("sbx_a", "alice", "one"), first)
+		return err
+	})
+	fails(t, s, store.ErrVersionConflict, "a create over a live row", func(tx store.Tx) error {
+		_, err := tx.Desired().Put(ctx, object("sbx_a", "alice", "one"), 0)
+		return err
+	})
+	fails(t, s, store.ErrNotFound, "a write at a version of a row that is not there", func(tx store.Tx) error {
+		_, err := tx.Desired().Put(ctx, object("sbx_gone", "alice", "gone"), 7)
+		return err
 	})
 	got := get(t, s, "sbx_a")
 	if got.Version != second || got.Owner != "alice" || got.Name != "one" {
 		t.Fatalf("the row reads back %+v", got)
 	}
+	fails(t, s, store.ErrNotFound, "a read of a row that is not there", func(tx store.Tx) error {
+		_, err := tx.Desired().Get(ctx, store.KindSandbox, "sbx_gone")
+		return err
+	})
 }
 
 // names: one live name per owner and kind, reusable after a delete.
@@ -83,29 +95,34 @@ func names(t *testing.T, open Opener) {
 	ctx := t.Context()
 	put(t, s, object("sbx_a", "alice", "shared"), 0)
 	put(t, s, object("sbx_b", "bob", "shared"), 0)
+	fails(t, s, store.ErrNameTaken, "a second live row of one name", func(tx store.Tx) error {
+		_, err := tx.Desired().Put(ctx, object("sbx_c", "alice", "shared"), 0)
+		return err
+	})
 	with(t, s, func(tx store.Tx) error {
-		if _, err := tx.Desired().Put(ctx, object("sbx_c", "alice", "shared"), 0); !errors.Is(err, store.ErrNameTaken) {
-			t.Errorf("a second live row of one name: %v, want the name taken", err)
-		}
-		if err := tx.Desired().Delete(ctx, store.KindSandbox, "sbx_a"); err != nil {
+		return tx.Desired().Delete(ctx, store.KindSandbox, "sbx_a")
+	})
+	put(t, s, object("sbx_c", "alice", "shared"), 0)
+	fails(t, s, store.ErrNotFound, "a deleted row", func(tx store.Tx) error {
+		_, err := tx.Desired().Get(ctx, store.KindSandbox, "sbx_a")
+		return err
+	})
+	with(t, s, func(tx store.Tx) error {
+		got, err := tx.Desired().ByName(ctx, store.KindSandbox, "alice", "shared")
+		if err != nil {
 			return err
 		}
-		if _, err := tx.Desired().Put(ctx, object("sbx_c", "alice", "shared"), 0); err != nil {
-			t.Errorf("the name of a deleted row was not free: %v", err)
-		}
-		if _, err := tx.Desired().Get(ctx, store.KindSandbox, "sbx_a"); !errors.Is(err, store.ErrNotFound) {
-			t.Errorf("a deleted row reads back: %v", err)
-		}
-		if _, err := tx.Desired().ByName(ctx, store.KindSandbox, "alice", "shared"); err != nil {
-			t.Errorf("the live row of a reused name: %v", err)
-		}
-		if err := tx.Desired().Delete(ctx, store.KindSandbox, "sbx_a"); !errors.Is(err, store.ErrNotFound) {
-			t.Errorf("a second delete of one row: %v, want not found", err)
-		}
-		if _, err := tx.Desired().ByName(ctx, store.KindSandbox, "alice", "nothing"); !errors.Is(err, store.ErrNotFound) {
-			t.Errorf("a name nobody holds: %v, want not found", err)
+		if got.ID != "sbx_c" {
+			t.Errorf("the live row of the reused name is %s", got.ID)
 		}
 		return nil
+	})
+	fails(t, s, store.ErrNotFound, "a second delete of one row", func(tx store.Tx) error {
+		return tx.Desired().Delete(ctx, store.KindSandbox, "sbx_a")
+	})
+	fails(t, s, store.ErrNotFound, "a name nobody holds", func(tx store.Tx) error {
+		_, err := tx.Desired().ByName(ctx, store.KindSandbox, "alice", "nothing")
+		return err
 	})
 }
 
@@ -211,15 +228,10 @@ func status(t *testing.T, open Opener) {
 		if err := tx.Desired().PutStatus(ctx, store.KindSandbox, "sbx_a", []byte(`{"phase":"Running"}`)); err != nil {
 			return err
 		}
-		if err := tx.Desired().SetLastApplied(ctx, "sbx_a", []byte(`{"image":"one"}`)); err != nil {
-			return err
-		}
-		return nil
+		return tx.Desired().SetLastApplied(ctx, "sbx_a", []byte(`{"image":"one"}`))
 	})
 	got := get(t, s, "sbx_a")
-	if string(got.Status) != `{"phase":"Running"}` {
-		t.Errorf("the status reads back %q", got.Status)
-	}
+	sameJSON(t, got.Status, []byte(`{"phase":"Running"}`), "the status")
 	if got.Version != version {
 		t.Errorf("a status write moved the version from %d to %d", version, got.Version)
 	}
@@ -228,19 +240,18 @@ func status(t *testing.T, open Opener) {
 		if err != nil {
 			return err
 		}
-		if string(applied) != `{"image":"one"}` {
-			t.Errorf("the last applied state reads back %q", applied)
-		}
-		if err := tx.Desired().PutStatus(ctx, store.KindSandbox, "sbx_gone", nil); !errors.Is(err, store.ErrNotFound) {
-			t.Errorf("a status on a row that is not there: %v, want not found", err)
-		}
-		if _, err := tx.Desired().LastApplied(ctx, "sbx_gone"); !errors.Is(err, store.ErrNotFound) {
-			t.Errorf("the last applied state of a row that is not there: %v, want not found", err)
-		}
-		if err := tx.Desired().SetLastApplied(ctx, "sbx_gone", nil); !errors.Is(err, store.ErrNotFound) {
-			t.Errorf("a last applied write on a row that is not there: %v, want not found", err)
-		}
+		sameJSON(t, applied, []byte(`{"image":"one"}`), "the last applied state")
 		return nil
+	})
+	fails(t, s, store.ErrNotFound, "a status on a row that is not there", func(tx store.Tx) error {
+		return tx.Desired().PutStatus(ctx, store.KindSandbox, "sbx_gone", nil)
+	})
+	fails(t, s, store.ErrNotFound, "the last applied state of a row that is not there", func(tx store.Tx) error {
+		_, err := tx.Desired().LastApplied(ctx, "sbx_gone")
+		return err
+	})
+	fails(t, s, store.ErrNotFound, "a last applied write on a row that is not there", func(tx store.Tx) error {
+		return tx.Desired().SetLastApplied(ctx, "sbx_gone", nil)
 	})
 	// A write of the object keeps the last applied state, which the update
 	// diff of design 005 reads after the object it is diffed against moved.
@@ -250,9 +261,7 @@ func status(t *testing.T, open Opener) {
 		if err != nil {
 			return err
 		}
-		if string(applied) != `{"image":"one"}` {
-			t.Errorf("a write of the object erased the last applied state: %q", applied)
-		}
+		sameJSON(t, applied, []byte(`{"image":"one"}`), "the last applied state after a write of the object")
 		return nil
 	})
 }
@@ -274,10 +283,11 @@ func transactions(t *testing.T, open Opener) {
 	if !errors.Is(err, boom) {
 		t.Fatalf("the transaction returned %v, want the caller's error", err)
 	}
+	fails(t, s, store.ErrNotFound, "the object of a failed transaction", func(tx store.Tx) error {
+		_, err := tx.Desired().Get(ctx, store.KindSandbox, "sbx_a")
+		return err
+	})
 	with(t, s, func(tx store.Tx) error {
-		if _, err := tx.Desired().Get(ctx, store.KindSandbox, "sbx_a"); !errors.Is(err, store.ErrNotFound) {
-			t.Errorf("the object of a failed transaction is there: %v", err)
-		}
 		events, _, err := tx.Journal().ByObject(ctx, "sbx_a", store.Page{})
 		if err != nil {
 			return err
@@ -322,10 +332,11 @@ func observed(t *testing.T, open Opener) {
 		if environment != "env_one" || got.Phase != "Running" || got.Labels["tier"] != "prod" {
 			t.Errorf("the observed row is %+v on %q", got, environment)
 		}
-		if _, _, err := tx.Observed().Get(ctx, "sbx_gone"); !errors.Is(err, store.ErrNotFound) {
-			t.Errorf("an observed row that is not there: %v, want not found", err)
-		}
 		return nil
+	})
+	fails(t, s, store.ErrNotFound, "an observed row that is not there", func(tx store.Tx) error {
+		_, _, err := tx.Observed().Get(ctx, "sbx_gone")
+		return err
 	})
 	// Rebuild replaces the rows of one environment and no other's.
 	with(t, s, func(tx store.Tx) error {
@@ -348,8 +359,10 @@ func observed(t *testing.T, open Opener) {
 		}
 		return nil
 	})
-	if got := get(t, s, "sbx_a"); string(got.Status) != `{"phase":"Running"}` || got.Version != 1 {
-		t.Errorf("a rebuild moved the desired row: %+v", got)
+	after := get(t, s, "sbx_a")
+	sameJSON(t, after.Status, []byte(`{"phase":"Running"}`), "the status after a rebuild")
+	if after.Version != 1 {
+		t.Errorf("a rebuild moved the desired row to version %d", after.Version)
 	}
 	// A rebuild with nothing empties the environment: an environment whose
 	// driver reports no object has none, and the lost rule reads that.
@@ -392,10 +405,11 @@ func journal(t *testing.T, open Opener) {
 			return nil
 		})
 	}
+	refuses(t, s, "an event with no object", func(tx store.Tx) error {
+		_, err := tx.Journal().Append(ctx, store.Event{Type: "sandbox.created"})
+		return err
+	})
 	with(t, s, func(tx store.Tx) error {
-		if _, err := tx.Journal().Append(ctx, store.Event{Type: "sandbox.created"}); err == nil {
-			t.Error("an event with no object was appended")
-		}
 		events, next, err := tx.Journal().ByObject(ctx, "sbx_a", store.Page{})
 		if err != nil {
 			return err
@@ -406,9 +420,11 @@ func journal(t *testing.T, open Opener) {
 		if next != "" {
 			t.Errorf("one page held everything and handed out the cursor %q", next)
 		}
-		if events[0].Type != "sandbox.stopped" || string(events[0].Payload) != `{"reason":"Test"}` || events[0].ID == "" || events[0].At.IsZero() {
-			t.Errorf("the newest event is %+v", events[0])
+		newest := events[0]
+		if newest.Type != "sandbox.stopped" || newest.ID == "" || newest.At.IsZero() {
+			t.Errorf("the newest event is %+v", newest)
 		}
+		sameJSON(t, newest.Payload, []byte(`{"reason":"Test"}`), "the event payload")
 		return nil
 	})
 	t.Run("pages", func(t *testing.T) {
@@ -480,7 +496,7 @@ func leases(t *testing.T, open Opener) {
 	// A term that lapses hands the lease to whoever asks next, which is what
 	// a replica that died without releasing leaves behind.
 	held(t, s, "pool:env_one", "replica-one", 150*time.Millisecond, true, "a short term")
-	time.Sleep(250 * time.Millisecond)
+	time.Sleep(300 * time.Millisecond)
 	held(t, s, "pool:env_one", "replica-two", term, true, "after the term lapsed")
 }
 
@@ -501,7 +517,7 @@ func values(t *testing.T, open Opener) {
 		if err != nil {
 			return err
 		}
-		if string(plaintext) != string(secret) || version != 1 {
+		if !bytes.Equal(plaintext, secret) || version != 1 {
 			t.Errorf("the value reads back %q at version %d", plaintext, version)
 		}
 		version, err = tx.Values().Put(ctx, "sec_a", []byte("rotated"))
@@ -511,23 +527,22 @@ func values(t *testing.T, open Opener) {
 		if version != 2 {
 			t.Errorf("the second value took version %d, want 2", version)
 		}
-		if _, _, err := tx.Values().Open(ctx, "sec_gone"); !errors.Is(err, store.ErrNotFound) {
-			t.Errorf("a value that is not there: %v, want not found", err)
-		}
-		if err := tx.Values().Delete(ctx, "sec_a"); err != nil {
-			return err
-		}
-		if err := tx.Values().Delete(ctx, "sec_a"); !errors.Is(err, store.ErrNotFound) {
-			t.Errorf("a second delete of one value: %v, want not found", err)
-		}
 		return nil
 	})
+	fails(t, s, store.ErrNotFound, "a value that is not there", func(tx store.Tx) error {
+		_, _, err := tx.Values().Open(ctx, "sec_gone")
+		return err
+	})
+	with(t, s, func(tx store.Tx) error {
+		return tx.Values().Delete(ctx, "sec_a")
+	})
+	fails(t, s, store.ErrNotFound, "a second delete of one value", func(tx store.Tx) error {
+		return tx.Values().Delete(ctx, "sec_a")
+	})
 	keyless := opened(t, open, nil)
-	with(t, keyless, func(tx store.Tx) error {
-		if _, err := tx.Values().Put(ctx, "sec_a", secret); !errors.Is(err, store.ErrNoSecretKey) {
-			t.Errorf("a store with no key sealed a value: %v", err)
-		}
-		return nil
+	fails(t, keyless, store.ErrNoSecretKey, "a store with no key", func(tx store.Tx) error {
+		_, err := tx.Values().Put(ctx, "sec_a", secret)
+		return err
 	})
 }
 
@@ -565,6 +580,52 @@ func with(t *testing.T, s store.Store, fn func(store.Tx) error) {
 	t.Helper()
 	if err := s.Tx(t.Context(), fn); err != nil {
 		t.Fatalf("the transaction did not commit: %v", err)
+	}
+}
+
+// fails runs one statement in its own transaction and asserts the error it
+// reports. Every expected failure is its own transaction, because a statement
+// that fails ends the transaction it ran in.
+func fails(t *testing.T, s store.Store, want error, what string, fn func(store.Tx) error) {
+	t.Helper()
+	err := s.Tx(t.Context(), fn)
+	if !errors.Is(err, want) {
+		t.Errorf("%s: %v, want %v", what, err, want)
+	}
+}
+
+// refuses is fails for a condition with no sentinel: the call reports
+// something, and what it reports is the adapter's own sentence.
+func refuses(t *testing.T, s store.Store, what string, fn func(store.Tx) error) {
+	t.Helper()
+	if err := s.Tx(t.Context(), fn); err == nil {
+		t.Errorf("%s was accepted", what)
+	}
+}
+
+// sameJSON compares two JSON columns as documents. A store keeps the value and
+// not the spelling: Postgres re-renders jsonb, and a caller that compared
+// bytes would be asserting the server's formatter.
+func sameJSON(t *testing.T, got, want []byte, what string) {
+	t.Helper()
+	var read, expected any
+	if err := json.Unmarshal(got, &read); err != nil {
+		t.Errorf("%s is not JSON: %q", what, got)
+		return
+	}
+	if err := json.Unmarshal(want, &expected); err != nil {
+		t.Fatalf("the expected %s is not JSON: %q", what, want)
+	}
+	left, err := json.Marshal(read)
+	if err != nil {
+		t.Fatalf("re-encoding %s: %v", what, err)
+	}
+	right, err := json.Marshal(expected)
+	if err != nil {
+		t.Fatalf("re-encoding the expected %s: %v", what, err)
+	}
+	if !bytes.Equal(left, right) {
+		t.Errorf("%s reads back %s, want %s", what, left, right)
 	}
 }
 
