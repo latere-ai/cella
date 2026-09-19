@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,6 +26,7 @@ type execution struct {
 	code           int
 	err            error
 	once           sync.Once
+	pid            int
 }
 
 func (e *execution) Stdout() io.Reader { return e.stdout }
@@ -56,6 +58,9 @@ func (d *Driver) Exec(ctx context.Context, id string, req driver.ExecRequest) (d
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	return d.execLocked(ctx, id, req)
+}
+func (d *Driver) execLocked(ctx context.Context, id string, req driver.ExecRequest) (*execution, error) {
 	r, err := d.load(id)
 	if err != nil {
 		return nil, err
@@ -75,13 +80,13 @@ func (d *Driver) Exec(ctx context.Context, id string, req driver.ExecRequest) (d
 	if err != nil {
 		return nil, err
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 	// Validate the requested directory before launching the unconfined process.
 	dir, err := root.Open(rel)
 	if err != nil {
 		return nil, err
 	}
-	defer dir.Close()
+	defer func() { _ = dir.Close() }()
 	runctx, cancel := context.WithCancel(ctx)
 	if req.Timeout > 0 {
 		cancel()
@@ -93,12 +98,8 @@ func (d *Driver) Exec(ctx context.Context, id string, req driver.ExecRequest) (d
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
 	cmd.WaitDelay = time.Second
 	env := map[string]string{"PATH": os.Getenv("PATH"), "HOME": filepath.Join(d.dir(id), "workspace")}
-	for k, v := range r.Env {
-		env[k] = v
-	}
-	for k, v := range req.Env {
-		env[k] = v
-	}
+	maps.Copy(env, r.Env)
+	maps.Copy(env, req.Env)
 	for k, v := range env {
 		cmd.Env = append(cmd.Env, k+"="+v)
 	}
@@ -116,12 +117,16 @@ func (d *Driver) Exec(ctx context.Context, id string, req driver.ExecRequest) (d
 		_ = errW.Close()
 		return nil, err
 	}
+	e.pid = cmd.Process.Pid
 	if d.active[id] == nil {
 		d.active[id] = make(map[*execution]struct{})
 	}
 	d.active[id][e] = struct{}{}
 	go func() {
 		err := cmd.Wait()
+		// A command may exit while its descendants keep running with detached IO.
+		// Every execution owns the entire process group, including that case.
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 		if runctx.Err() != nil {
 			e.err = runctx.Err()
 		} else if exit, ok := errors.AsType[*exec.ExitError](err); ok {

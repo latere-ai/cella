@@ -14,6 +14,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	driver "latere.ai/x/cella/runtime"
@@ -26,10 +27,8 @@ func workspacePath(p string) (string, error) {
 	if strings.Contains(p, "\x00") || !path.IsAbs(p) {
 		return "", driver.ErrInvalid
 	}
-	for _, part := range strings.Split(p, "/") {
-		if part == ".." {
-			return "", driver.ErrInvalid
-		}
+	if slices.Contains(strings.Split(p, "/"), "..") {
+		return "", driver.ErrInvalid
 	}
 	p = path.Clean(p)
 	if p == driver.DefaultWorkdir {
@@ -64,7 +63,7 @@ func (d *Driver) ImportTar(ctx context.Context, id, dest string, src io.Reader) 
 	if err != nil {
 		return err
 	}
-	defer base.Close()
+	defer func() { _ = base.Close() }()
 	if err = base.MkdirAll(rel, 0700); err != nil {
 		return err
 	}
@@ -72,7 +71,7 @@ func (d *Driver) ImportTar(ctx context.Context, id, dest string, src io.Reader) 
 	if err != nil {
 		return err
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 	tr := tar.NewReader(src)
 	var total int64
 	for {
@@ -95,7 +94,7 @@ func (d *Driver) ImportTar(ctx context.Context, id, dest string, src io.Reader) 
 			if err = root.MkdirAll(name, 0755); err != nil {
 				return err
 			}
-		case tar.TypeReg, tar.TypeRegA:
+		case tar.TypeReg:
 			if h.Size < 0 || h.Size > MaxArchiveBytes-total {
 				return fmt.Errorf("%w: archive size", driver.ErrInvalid)
 			}
@@ -118,7 +117,7 @@ func importFile(ctx context.Context, root *os.Root, name string, mode os.FileMod
 	if err != nil {
 		return err
 	}
-	defer root.Remove(temp)
+	defer func() { _ = root.Remove(temp) }()
 	_, err = io.Copy(f, &contextReader{ctx: ctx, r: src})
 	if err == nil {
 		err = f.Chmod(mode)
@@ -149,7 +148,7 @@ func (d *Driver) ExportTar(ctx context.Context, id string, paths []string, dst i
 	if err != nil {
 		return err
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 	tw := tar.NewWriter(dst)
 	if len(paths) == 0 {
 		paths = []string{driver.DefaultWorkdir}

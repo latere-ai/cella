@@ -51,6 +51,8 @@ type State struct {
 	Name           string            `json:"name"`
 	Owner          string            `json:"owner"`
 	Phase          string            `json:"phase"`
+	Reason         string            `json:"reason,omitempty"`
+	ExitCode       *int              `json:"exitCode,omitempty"`
 	Isolation      string            `json:"isolation"`
 	Labels         map[string]string `json:"labels,omitempty"`
 	CreatedAt      time.Time         `json:"createdAt"`

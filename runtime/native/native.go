@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"maps"
 	"os"
 	"path/filepath"
@@ -23,9 +22,11 @@ import (
 )
 
 type record struct {
-	State   driver.State
-	Env     map[string]string
-	Workdir string
+	State         driver.State
+	Env           map[string]string
+	Workdir       string
+	Command, Args []string
+	PID           int
 }
 
 // Driver owns directory-backed environments and all executions it starts.
@@ -34,6 +35,7 @@ type Driver struct {
 	root   string
 	mu     sync.Mutex
 	active map[string]map[*execution]struct{}
+	mains  map[string]*mainProcess
 }
 
 var _ driver.Driver = (*Driver)(nil)
@@ -50,7 +52,28 @@ func New(root string) (*Driver, error) {
 	if err = os.MkdirAll(abs, 0700); err != nil {
 		return nil, err
 	}
-	return &Driver{root: abs, active: make(map[string]map[*execution]struct{})}, nil
+	d := &Driver{root: abs, active: make(map[string]map[*execution]struct{}), mains: make(map[string]*mainProcess)}
+	entries, err := os.ReadDir(abs)
+	if err != nil {
+		return nil, err
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || !validID.MatchString(entry.Name()) {
+			continue
+		}
+		r, err := d.load(entry.Name())
+		if err != nil {
+			return nil, err
+		}
+		if len(r.Command) > 0 && r.State.Phase == driver.Running {
+			r.State.Phase = "Lost"
+			r.State.Reason = "ProcessUnrecoverable"
+			if err := d.save(entry.Name(), r); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return d, nil
 }
 func (d *Driver) Name() string                        { return "native" }
 func (d *Driver) Isolation() string                   { return driver.IsolationNone }
@@ -97,8 +120,11 @@ func (d *Driver) Create(ctx context.Context, s driver.CreateSpec) (driver.Ref, e
 	if !validID.MatchString(s.ID) || s.Lifecycle.TTL < 0 || s.Lifecycle.AutoStop < 0 || s.Lifecycle.AutoDelete < 0 {
 		return driver.Ref{}, driver.ErrInvalid
 	}
-	if s.Image != "" || len(s.Command) > 0 || len(s.Args) > 0 {
+	if s.Image != "" {
 		return driver.Ref{}, driver.ErrUnsupported
+	}
+	if len(s.Args) > 0 && len(s.Command) == 0 {
+		return driver.Ref{}, driver.ErrInvalid
 	}
 	if s.Workdir == "" {
 		s.Workdir = driver.DefaultWorkdir
@@ -124,12 +150,17 @@ func (d *Driver) Create(ctx context.Context, s driver.CreateSpec) (driver.Ref, e
 		return driver.Ref{}, err
 	}
 	now := time.Now().UTC()
-	r := record{State: driver.State{ID: s.ID, Name: s.Name, Owner: s.Owner, Phase: driver.Running, Isolation: driver.IsolationNone, Labels: maps.Clone(s.Labels), CreatedAt: now, StartedAt: now, LastActivityAt: now, AutoStop: s.Lifecycle.AutoStop, AutoDelete: s.Lifecycle.AutoDelete}, Env: maps.Clone(s.Env), Workdir: s.Workdir}
+	r := record{State: driver.State{ID: s.ID, Name: s.Name, Owner: s.Owner, Phase: driver.Running, Isolation: driver.IsolationNone, Labels: maps.Clone(s.Labels), CreatedAt: now, StartedAt: now, LastActivityAt: now, AutoStop: s.Lifecycle.AutoStop, AutoDelete: s.Lifecycle.AutoDelete}, Env: maps.Clone(s.Env), Workdir: s.Workdir, Command: slices.Clone(s.Command), Args: slices.Clone(s.Args)}
 	if s.Lifecycle.TTL > 0 {
 		r.State.ExpiresAt = now.Add(s.Lifecycle.TTL)
 	}
 	if err := d.save(s.ID, r); err != nil {
 		return driver.Ref{}, err
+	}
+	if len(r.Command) > 0 {
+		if err := d.startMainLocked(s.ID, &r); err != nil {
+			return driver.Ref{}, err
+		}
 	}
 	ok = true
 	return driver.Ref{ID: s.ID}, nil
@@ -184,23 +215,52 @@ func (d *Driver) edit(ctx context.Context, id string, fn func(*record)) error {
 	return d.save(id, r)
 }
 func (d *Driver) Start(ctx context.Context, id string) error {
-	return d.edit(ctx, id, func(r *record) {
-		if r.State.Phase != driver.Running {
-			r.State.Phase = driver.Running
-			r.State.StartedAt = time.Now().UTC()
-			r.State.LastActivityAt = r.State.StartedAt
-			r.State.StoppedAt = time.Time{}
-		}
-	})
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	r, err := d.load(id)
+	if err != nil {
+		return err
+	}
+	if r.State.Phase == driver.Running {
+		return nil
+	}
+	if r.State.Phase == "Lost" {
+		return driver.ErrUnsupported
+	}
+	if len(r.Command) > 0 {
+		return d.startMainLocked(id, &r)
+	}
+	r.State.Phase = driver.Running
+	r.State.StartedAt = time.Now().UTC()
+	r.State.LastActivityAt = r.State.StartedAt
+	r.State.StoppedAt = time.Time{}
+	return d.save(id, r)
 }
 func (d *Driver) Stop(ctx context.Context, id string) error {
-	return d.edit(ctx, id, func(r *record) {
-		d.cancel(id)
-		if r.State.Phase != driver.Stopped {
-			r.State.Phase = driver.Stopped
-			r.State.StoppedAt = time.Now().UTC()
-		}
-	})
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	r, err := d.load(id)
+	if err != nil {
+		return err
+	}
+	if r.State.Phase == "Lost" {
+		return driver.ErrUnsupported
+	}
+	if main := d.mains[id]; main != nil {
+		main.stopping = true
+	}
+	d.cancel(id)
+	if r.State.Phase != driver.Stopped {
+		r.State.Phase = driver.Stopped
+		r.State.StoppedAt = time.Now().UTC()
+	}
+	return d.save(id, r)
 }
 func (d *Driver) cancel(id string) {
 	for e := range d.active[id] {
@@ -249,17 +309,24 @@ func (d *Driver) Update(ctx context.Context, id string, c driver.Change) error {
 	})
 }
 
-// Logs is unsupported until the native driver supports a persistent main process.
-func (d *Driver) Logs(context.Context, string, driver.LogsRequest) (io.ReadCloser, error) {
-	return nil, driver.ErrUnsupported
-}
-
-// Close cancels all managed executions. Environment directories remain reusable.
+// Close cancels all executions and waits for main-process state to be saved.
 func (d *Driver) Close() error {
 	d.mu.Lock()
-	defer d.mu.Unlock()
 	for id := range d.active {
+		if main := d.mains[id]; main != nil {
+			main.stopping = true
+		}
 		d.cancel(id)
 	}
-	return nil
+	mains := make([]*mainProcess, 0, len(d.mains))
+	for _, main := range d.mains {
+		mains = append(mains, main)
+	}
+	d.mu.Unlock()
+	var result error
+	for _, main := range mains {
+		<-main.done
+		result = errors.Join(result, main.err)
+	}
+	return result
 }

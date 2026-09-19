@@ -160,7 +160,7 @@ func TestInvalidAndUnsupported(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, s := range []driver.CreateSpec{{ID: "one"}, {ID: "two", Image: "image"}, {ID: "two", Command: []string{"sh"}}, {ID: "two", Args: []string{"arg"}}, {ID: "two", Workdir: "/tmp"}, {ID: "two", Lifecycle: driver.Lifecycle{TTL: -1}}} {
+	for _, s := range []driver.CreateSpec{{ID: "one"}, {ID: "two", Image: "image"}, {ID: "two", Args: []string{"arg"}}, {ID: "two", Workdir: "/tmp"}, {ID: "two", Lifecycle: driver.Lifecycle{TTL: -1}}} {
 		if _, err := d.Create(ctx, s); err == nil {
 			t.Fatal(s)
 		}
@@ -179,9 +179,9 @@ func TestInvalidAndUnsupported(t *testing.T) {
 	if !errors.Is(err, driver.ErrNotRunning) {
 		t.Fatal(err)
 	}
-	if _, err = d.Logs(ctx, "one", driver.LogsRequest{}); !errors.Is(err, driver.ErrUnsupported) {
-		t.Fatal(err)
-	}
+	logs, err := d.Logs(ctx, "one", driver.LogsRequest{})
+	check(t, err)
+	check(t, logs.Close())
 	if err = d.Update(ctx, "one", driver.Change{Lifecycle: &driver.Lifecycle{AutoStop: -1}}); !errors.Is(err, driver.ErrInvalid) {
 		t.Fatal(err)
 	}
