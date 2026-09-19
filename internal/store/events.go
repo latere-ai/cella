@@ -52,10 +52,10 @@ func (j eventJournal) Append(ctx context.Context, r events.Record) error {
 	})
 }
 
-func (j eventJournal) Pending(ctx context.Context, limit int) ([]events.Pending, error) {
+func (j eventJournal) Pending(ctx context.Context, limit int, now time.Time) ([]events.Pending, error) {
 	var out []events.Pending
 	err := j.store.Tx(ctx, func(tx Tx) error {
-		rows, err := tx.Journal().Pending(ctx, limit, time.Now().UTC())
+		rows, err := tx.Journal().Pending(ctx, limit, now)
 		if err != nil {
 			return err
 		}
@@ -72,20 +72,16 @@ func (j eventJournal) Pending(ctx context.Context, limit int) ([]events.Pending,
 	return out, err
 }
 
-func (j eventJournal) Acknowledge(ctx context.Context, id string) error {
-	return j.store.Tx(ctx, func(tx Tx) error {
-		return tx.Journal().Acknowledge(ctx, id, time.Now().UTC())
-	})
+func (j eventJournal) Acknowledge(ctx context.Context, id string, at time.Time) error {
+	return j.store.Tx(ctx, func(tx Tx) error { return tx.Journal().Acknowledge(ctx, id, at) })
 }
 
 func (j eventJournal) Defer(ctx context.Context, id string, next time.Time) error {
 	return j.store.Tx(ctx, func(tx Tx) error { return tx.Journal().Defer(ctx, id, next) })
 }
 
-func (j eventJournal) Drop(ctx context.Context, id string) error {
-	return j.store.Tx(ctx, func(tx Tx) error {
-		return tx.Journal().Drop(ctx, id, time.Now().UTC())
-	})
+func (j eventJournal) Drop(ctx context.Context, id string, at time.Time) error {
+	return j.store.Tx(ctx, func(tx Tx) error { return tx.Journal().Drop(ctx, id, at) })
 }
 
 // journalRow splits one record into the columns and the payload. A record of

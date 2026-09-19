@@ -166,7 +166,8 @@ func (d *Deliverer) Pass(ctx context.Context) (int, error) {
 	if !held {
 		return 0, nil
 	}
-	rows, err := d.o.Journal.Pending(ctx, BatchSize)
+	now := d.o.Clock.Now()
+	rows, err := d.o.Journal.Pending(ctx, BatchSize, now)
 	if err != nil {
 		return 0, fmt.Errorf("events: reading what is pending: %w", err)
 	}
@@ -178,24 +179,25 @@ func (d *Deliverer) Pass(ctx context.Context) (int, error) {
 		go func(p Pending) {
 			defer wg.Done()
 			defer func() { <-slots }()
-			d.deliver(ctx, p)
+			d.deliver(ctx, p, now)
 		}(row)
 	}
 	wg.Wait()
 	return len(rows), nil
 }
 
-// deliver posts one record and records the outcome on its row.
-func (d *Deliverer) deliver(ctx context.Context, p Pending) {
+// deliver posts one record and records the outcome on its row. now is the
+// pass's instant, so every record of one pass is signed and aged by one
+// clock.
+func (d *Deliverer) deliver(ctx context.Context, p Pending, now time.Time) {
 	body, err := Body(p.Record)
 	if err != nil {
 		// A record that does not marshal will not marshal tomorrow.
-		d.drop(ctx, p, "the record could not be encoded: "+err.Error())
+		d.drop(ctx, p, now, "the record could not be encoded: "+err.Error())
 		return
 	}
-	now := d.o.Clock.Now()
 	if now.Sub(p.Record.Time) >= d.o.RetryWindow {
-		d.drop(ctx, p, fmt.Sprintf("unacknowledged for %s, past the %s retry window",
+		d.drop(ctx, p, now, fmt.Sprintf("unacknowledged for %s, past the %s retry window",
 			now.Sub(p.Record.Time).Round(time.Second), d.o.RetryWindow))
 		return
 	}
@@ -203,7 +205,7 @@ func (d *Deliverer) deliver(ctx context.Context, p Pending) {
 	defer cancel()
 	req, err := http.NewRequestWithContext(attempt, http.MethodPost, d.o.URL, bytes.NewReader(body))
 	if err != nil {
-		d.drop(ctx, p, "the sink URL is not usable: "+err.Error())
+		d.drop(ctx, p, now, "the sink URL is not usable: "+err.Error())
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -219,7 +221,7 @@ func (d *Deliverer) deliver(ctx context.Context, p Pending) {
 	_ = resp.Body.Close()
 	switch {
 	case resp.StatusCode >= 200 && resp.StatusCode < 300:
-		if err := d.o.Journal.Acknowledge(ctx, p.Record.ID); err != nil {
+		if err := d.o.Journal.Acknowledge(ctx, p.Record.ID, now); err != nil {
 			d.o.Log.WarnContext(ctx, "the delivered event was not acknowledged",
 				"event", p.Record.ID, "error", err)
 			return
@@ -233,7 +235,7 @@ func (d *Deliverer) deliver(ctx context.Context, p Pending) {
 		// record is held and the fault is made loud.
 		d.retry(ctx, p, now, "the sink refused the signature; CELLA_EVENTS_SECRET and the sink's disagree", true)
 	case resp.StatusCode >= 400 && resp.StatusCode < 500:
-		d.drop(ctx, p, fmt.Sprintf("the sink refused the record with %d", resp.StatusCode))
+		d.drop(ctx, p, now, fmt.Sprintf("the sink refused the record with %d", resp.StatusCode))
 	default:
 		d.retry(ctx, p, now, fmt.Sprintf("the sink answered %d", resp.StatusCode), false)
 	}
@@ -244,7 +246,7 @@ func (d *Deliverer) deliver(ctx context.Context, p Pending) {
 func (d *Deliverer) retry(ctx context.Context, p Pending, now time.Time, why string, loud bool) {
 	next := now.Add(backoff(p.Attempts))
 	if next.Sub(p.Record.Time) >= d.o.RetryWindow {
-		d.drop(ctx, p, why+", and the retry window has closed")
+		d.drop(ctx, p, now, why+", and the retry window has closed")
 		return
 	}
 	level := slog.LevelWarn
@@ -264,11 +266,11 @@ func (d *Deliverer) retry(ctx context.Context, p Pending, now time.Time, why str
 
 // drop ends a record and says so, because a dropped record is the one
 // failure this pipeline cannot make good later.
-func (d *Deliverer) drop(ctx context.Context, p Pending, why string) {
+func (d *Deliverer) drop(ctx context.Context, p Pending, at time.Time, why string) {
 	d.o.Log.ErrorContext(ctx, "the event was dropped",
 		"event", p.Record.ID, "type", p.Record.Type, "object", p.Record.Object.ID,
 		"attempts", p.Attempts, "reason", why)
-	if err := d.o.Journal.Drop(ctx, p.Record.ID); err != nil {
+	if err := d.o.Journal.Drop(ctx, p.Record.ID, at); err != nil {
 		d.o.Log.WarnContext(ctx, "the dropped event was not marked", "event", p.Record.ID, "error", err)
 		return
 	}

@@ -20,16 +20,17 @@ import (
 type Journal interface {
 	Append(ctx context.Context, r Record) error
 	// Pending returns at most limit records, at most one per object, each
-	// the lowest unacknowledged sequence of its object and due now. A
+	// the lowest unacknowledged sequence of its object and due at now. A
 	// deferred record holds the records behind it for that object and no
-	// other.
-	Pending(ctx context.Context, limit int) ([]Pending, error)
+	// other. The instant is the deliverer's, not the store's, so one clock
+	// decides the backoff and the due time.
+	Pending(ctx context.Context, limit int, now time.Time) ([]Pending, error)
 	// Acknowledge marks a record the sink took.
-	Acknowledge(ctx context.Context, id string) error
+	Acknowledge(ctx context.Context, id string, at time.Time) error
 	// Defer records one failed attempt and when the next one is due.
 	Defer(ctx context.Context, id string, next time.Time) error
 	// Drop ends a record: the sink refused it, or the retry window closed.
-	Drop(ctx context.Context, id string) error
+	Drop(ctx context.Context, id string, at time.Time) error
 }
 
 // Pending is one record waiting for the sink and the delivery state the
