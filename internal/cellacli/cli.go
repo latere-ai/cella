@@ -14,6 +14,7 @@ import (
 	"io"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -64,18 +65,11 @@ func usagef(format string, args ...any) error {
 }
 
 // exitError carries an exit code a command decided on directly, which is
-// how a child's own code leaves the process.
-type exitError struct {
-	code int
-	err  error
-}
+// how the code of a command that ran inside a sandbox leaves this process.
+// It is not a failure and nothing prints it.
+type exitError struct{ code int }
 
-func (e exitError) Error() string {
-	if e.err == nil {
-		return fmt.Sprintf("exit %d", e.code)
-	}
-	return e.err.Error()
-}
+func (e exitError) Error() string { return "the command inside exited " + strconv.Itoa(e.code) }
 
 // Run is the command. It returns the process exit code and writes every
 // byte to the streams it was handed.
@@ -185,9 +179,6 @@ func (c *invocation) report(err error) int {
 	}
 	var exit exitError
 	if errors.As(err, &exit) {
-		if exit.err != nil {
-			c.write(exit.err)
-		}
 		return exit.code
 	}
 	c.write(err)

@@ -1,0 +1,1 @@
+{"items":[{"principal":"sbx_1","at":"2026-09-20T10:00:00Z","door":"proxy","host":"api.example.com","port":443,"decision":"allow","substituted":["api"]}]}

@@ -1,0 +1,2 @@
+AT                    DOOR   HOST                 DECISION  REASON  SECRETS
+2026-09-20T10:00:00Z  proxy  api.example.com:443  allow     -       api

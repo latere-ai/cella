@@ -9,6 +9,7 @@ import (
 	"errors"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"unsafe"
 )
@@ -113,9 +114,15 @@ func (t *osTerminal) Resized() (<-chan struct{}, func()) {
 			}
 		}
 	}()
+	// Ending the watch twice is the ordinary case: a session ends it on its
+	// way out and again from a deferred call, and the second end does
+	// nothing rather than closing a channel that is already closed.
+	var once sync.Once
 	return changed, func() {
-		signal.Stop(signals)
-		close(done)
+		once.Do(func() {
+			signal.Stop(signals)
+			close(done)
+		})
 	}
 }
 

@@ -1,0 +1,2 @@
+NAME  PHASE    READY  IMAGE            AGE  OWNER                            ID     ENVIRONMENT  DRIVER
+dev   Running  True   example/image:1  1h   https://login.example.com|alice  sbx_1  default      native
