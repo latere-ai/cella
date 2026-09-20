@@ -57,6 +57,18 @@ tempdir:
 # recorded here, one row per role package as the roles land.
 depcheck:
   packages:
+    latere.ai/x/cella/cmd/cella:
+      decision: >-
+        the agent client of spec 011 reaches the standard library and the
+        error envelope of latere.ai/x/pkg/httpjson, and nothing else: it runs
+        where agents run, so every module in its build list is a module a
+        sandbox image carries. The WebSocket of spec 008's exec and attach
+        streams is this repository's own RFC 6455 implementation for the same
+        reason, and the object shapes are manifest/v1, which is this module's
+        own package and no dependency at all
+      allow:
+        latere.ai/x/pkg: the error envelope of spec 008, latere.ai/x/pkg/httpjson (spec 011)
+        github.com/google/uuid: request ids in latere.ai/x/pkg/httpjson
     latere.ai/x/cella/cmd/cellad:
       decision: >-
         the server reaches latere.ai/x/pkg and the standard library, and

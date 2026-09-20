@@ -14,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"latere.ai/x/cella/egress"
 	v1 "latere.ai/x/cella/manifest/v1"
 )
 
@@ -245,16 +244,40 @@ func (c *Client) Logs(ctx context.Context, ref string, o LogOptions) (io.ReadClo
 	return c.stream(ctx, http.MethodGet, KindSandbox.Path()+"/"+url.PathEscape(ref)+"/logs", q, nil, "")
 }
 
+// EgressRecord is one connection the gateway reported, as the route
+// answers it (design 018). The boundary package's own type is not imported
+// here: the build list of this command is the standard library, this
+// module's contract types and the error envelope, and a record is a row to
+// read rather than a boundary to compile.
+type EgressRecord struct {
+	Principal string    `json:"principal"`
+	At        time.Time `json:"at"`
+	Door      string    `json:"door"`
+	Host      string    `json:"host"`
+	Port      int       `json:"port"`
+	Decision  string    `json:"decision"`
+	Reason    string    `json:"reason,omitempty"`
+	// Substituted names the secrets whose values replaced a placeholder on
+	// this connection. Names, never values.
+	Substituted []string `json:"substituted,omitempty"`
+	Method      string   `json:"method,omitempty"`
+	Path        string   `json:"path,omitempty"`
+	Status      int      `json:"status,omitempty"`
+	BytesOut    int64    `json:"bytesOut,omitempty"`
+	BytesIn     int64    `json:"bytesIn,omitempty"`
+	DurationMS  int64    `json:"durationMs,omitempty"`
+}
+
 // EgressRecords reads what the gateway reported for one sandbox, newest
 // first.
-func (c *Client) EgressRecords(ctx context.Context, ref string, limit int) ([]egress.Record, []byte, error) {
+func (c *Client) EgressRecords(ctx context.Context, ref string, limit int) ([]EgressRecord, []byte, error) {
 	q := url.Values{"limit": []string{limitValue(limit)}}
 	raw, err := c.send(ctx, http.MethodGet, KindSandbox.Path()+"/"+url.PathEscape(ref)+"/egress", q, nil, "")
 	if err != nil {
 		return nil, nil, err
 	}
 	var answer struct {
-		Items []egress.Record `json:"items"`
+		Items []EgressRecord `json:"items"`
 	}
 	if err = json.Unmarshal(raw, &answer); err != nil {
 		return nil, nil, fmt.Errorf("the egress answer is no record list: %w", err)
