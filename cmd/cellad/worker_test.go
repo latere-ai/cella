@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"maps"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -166,4 +167,51 @@ func (p *plane) environment(t *testing.T) v1.Environment {
 		t.Fatalf("the environment did not decode: %v", err)
 	}
 	return obj
+}
+
+// TestWorkerSelectsItsDriver proves each of the three drivers is reached from
+// the worker's own configuration: the role fails at that driver's preflight,
+// naming what it was pointed at, rather than at the selection.
+func TestWorkerSelectsItsDriver(t *testing.T) {
+	socket := filepath.Join(t.TempDir(), "absent.sock")
+	kubeconfig := filepath.Join(t.TempDir(), "absent")
+	for _, tc := range []struct {
+		name  string
+		env   map[string]string
+		names string
+	}{
+		{"podman", map[string]string{"CELLA_RUNTIME": "podman", "CELLA_PODMAN_SOCKET": socket}, socket},
+		{"k8s", map[string]string{"CELLA_RUNTIME": "k8s", "CELLA_K8S_KUBECONFIG": kubeconfig}, "kubeconfig"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := map[string]string{
+				"CELLA_URL":             "http://127.0.0.1:1",
+				"CELLA_ENVIRONMENT_KEY": "a-key",
+				"CELLA_DATA_DIR":        t.TempDir(),
+			}
+			maps.Copy(e, tc.env)
+			var out, errOut syncBuffer
+			ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+			defer cancel()
+			code := run(ctx, []string{"worker"}, env(e), &out, &errOut)
+			if code != 1 {
+				t.Fatalf("a worker whose driver cannot work exited %d; stderr %q", code, errOut.String())
+			}
+			if !strings.Contains(errOut.String(), tc.names) {
+				t.Errorf("the refusal does not name %s: %q", tc.names, errOut.String())
+			}
+		})
+	}
+}
+
+// TestUnknownSubcommand holds spec 002's usage rule: a name that is not a
+// role is a usage error naming every role, and never a silent start.
+func TestUnknownSubcommand(t *testing.T) {
+	var out, errOut syncBuffer
+	if code := run(t.Context(), []string{"teleport"}, env(nil), &out, &errOut); code != 2 {
+		t.Errorf("an unknown subcommand exited %d, want 2", code)
+	}
+	if !strings.Contains(errOut.String(), "worker") {
+		t.Errorf("the usage error does not name the worker role: %q", errOut.String())
+	}
 }
