@@ -118,6 +118,17 @@ jobs:
           digest=$(jq -r '."containerimage.digest"' out/image.json)
           echo "the candidate is ${REGISTRY}/${OWNER}/${IMAGE}@${digest}"
           echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+      # The test stubs image of spec 012, which the two kind jobs below run
+      # beside the candidate. It is built from this checkout, pushed under
+      # the tag, and neither signed nor attested: nothing an operator
+      # deploys depends on it, deploy/base never names it, and its labels
+      # say it is test only.
+      - name: The test stubs image
+        env:
+          OWNER: ${{ steps.owner.outputs.owner }}
+        run: |
+          docker buildx build --platform linux/amd64 -f Dockerfile.stubs \
+            -t "${REGISTRY}/${OWNER}/cella-stubs:${GITHUB_REF_NAME}" --push .
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
       - name: Sign the image by digest with the workflow's identity
         env:
@@ -185,10 +196,14 @@ jobs:
   # check an installation, where it must name the unreachable issuer and
   # exit 1.
   #
-  # What does not run: the kind stack of spec 012 and the API conformance
-  # suite of spec 015. Neither is built. When they are, this job brings the
-  # stack up from the published digest and runs `TestContract` against it,
-  # which is what spec 014's diagram names.
+  # Then the kind stack of spec 012, brought up from the published images:
+  # the overlay deploy/examples/kind-stubs runs `cella-stubs` beside
+  # `cellad` in one Pod, and the kind tier drives the whole lifecycle
+  # through the API with a token from the stub issuer.
+  #
+  # What still does not run: the API conformance suite of spec 015, which
+  # is not built. When it is, `TestContract` joins this job against the
+  # same stack, which is what spec 014'"'"'s diagram names.
   conformance:
     name: the candidate passes what is built
     needs: build
@@ -272,6 +287,36 @@ jobs:
             echo "$out" | grep -q "^$line *skip" || { echo "$line is not reported as not configured" >&2; exit 1; }
           done
           echo "$out" | grep -q '^data directory *ok' || { echo "the data directory is not writable in the image" >&2; exit 1; }
+      - uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2 # v1.15.0
+        with:
+          install_only: true
+      # The cluster runs the bytes this tag published, under the names the
+      # overlay gives them: the candidate is pulled by digest and the stubs
+      # image by tag, and neither is built here.
+      - name: The published images under the names the overlay runs
+        run: |
+          docker pull "${REGISTRY}/${OWNER}/${IMAGE}@${DIGEST}"
+          docker tag "${REGISTRY}/${OWNER}/${IMAGE}@${DIGEST}" cellad:dev
+          docker pull "${REGISTRY}/${OWNER}/cella-stubs:${GITHUB_REF_NAME}"
+          docker tag "${REGISTRY}/${OWNER}/cella-stubs:${GITHUB_REF_NAME}" cella-stubs:dev
+      - name: The kind stack of spec 012
+        env:
+          CELLA_KIND_BUILD: '0'
+        run: |
+          bash deploy/examples/kind-stubs/up.sh -name cella >> "$GITHUB_ENV"
+          echo "CELLA_TEST_SINK=http://localhost:30082" >> "$GITHUB_ENV"
+      - name: The lifecycle through the API of the stack
+        shell: bash
+        run: |
+          set -o pipefail
+          go test -tags=e2e -count=1 -v -timeout 30m -run '^TestCluster' ./test/kind/... 2>&1 | tee /tmp/kind.log
+          grep -q -- '--- PASS: TestClusterLifecycle' /tmp/kind.log
+      - name: The cluster's state, for a failed run
+        if: failure()
+        run: |
+          kubectl -n cella get all || true
+          kubectl -n cella logs deploy/cellad --tail=200 || true
+          kubectl -n cella logs deploy/cellad -c stubs --tail=200 || true
 
   # 4. Only now the digest gets the :<tag> reference, and the release is
   # created with every artifact and the CHANGELOG section as its body, read
@@ -329,15 +374,13 @@ jobs:
   # archive unpacked on a runner that has nothing of the checkout but the
   # document, and the image pulled by tag.
   #
-  # The walk against a kind cluster needs an OpenID Connect issuer the
-  # cluster can reach, and cellad ships none: the stub issuer is spec 012's
-  # and is not built, so a `cellad serve` in a cluster has nothing to
-  # verify a token against and cannot become ready. Until that lands, this
-  # job proves what the artifacts alone can prove: the archive unpacks,
-  # every overlay renders against the published digest, and the image an
-  # operator would apply is the one the release published. The repository
-  # variable RELEASE_INSTALL_KIND set to 1 runs the cluster walk as well,
-  # for an installation that has an issuer of its own to point it at.
+  # The walk needs an OpenID Connect issuer the cluster can reach, and
+  # cellad ships none. The stub issuer of spec 012 is what this tag
+  # published beside the candidate, and the overlay
+  # deploy/examples/kind-stubs runs it in the control plane's own Pod, so
+  # the walk runs here on every tag: the archive unpacks, every overlay
+  # renders against the published digest, and then the document's own
+  # blocks run against a cluster built from the published images.
   install-release:
     name: the install document against the published artifacts
     needs: [build, publish]
@@ -373,26 +416,50 @@ jobs:
               || { echo "$overlay of the archive does not name the published image" >&2; exit 1; }
           done
           echo "the archive's overlays render against ${REGISTRY}/${OWNER}/${IMAGE}@${DIGEST}"
+      # The document itself is the checkout's, and everything it applies is
+      # the archive's. The walk needs the issuer the installation verifies
+      # against, which is the stub issuer this tag published beside the
+      # candidate, so it runs on every tag and not behind a variable.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: vars.RELEASE_INSTALL_KIND == '1'
         with:
           path: checkout
       - uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2 # v1.15.0
-        if: vars.RELEASE_INSTALL_KIND == '1'
         with:
           install_only: true
-      - name: Walk the document against a kind cluster
-        if: vars.RELEASE_INSTALL_KIND == '1'
-        env:
-          CELLA_INSTALL_IMAGE: ${{ env.REGISTRY }}/${{ needs.build.outputs.owner }}/cellad:${{ github.ref_name }}
-          CELLA_INSTALL_MANIFESTS: deploy
-          CELLA_INSTALL_ISSUER: ${{ vars.RELEASE_INSTALL_ISSUER }}
+      - name: The published images under the names the archive's overlay runs
         run: |
           cd work
+          docker pull "${REGISTRY}/${OWNER}/cella-stubs:${GITHUB_REF_NAME}"
+          docker tag "${REGISTRY}/${OWNER}/cella-stubs:${GITHUB_REF_NAME}" cella-stubs:dev
+          docker tag "${REGISTRY}/${OWNER}/${IMAGE}:${GITHUB_REF_NAME}" cellad:dev
+          # The archive's base pins the published digest, which the step
+          # above already proved every overlay renders. The cluster runs the
+          # same bytes under the name this runner loaded them with, so the
+          # node pulls nothing and a private package is not a failed walk.
+          sed -i -e "s#newName: ${REGISTRY}/${OWNER}/${IMAGE}#newName: cellad#" \
+                 -e "s#digest: .*#newTag: dev#" deploy/base/kustomization.yaml
+      - name: The cluster, the stubs and the control plane of the archive
+        env:
+          CELLA_KIND_BUILD: '0'
+        run: |
+          bash checkout/deploy/examples/kind-stubs/up.sh -name cella -manifests work/deploy >> "$GITHUB_ENV"
+      - name: Walk the document against the cluster
+        env:
+          CELLA_INSTALL_IMAGE: cellad:dev
+          CELLA_INSTALL_MANIFESTS: deploy
+          CELLA_INSTALL_OVERLAY: examples/kind-stubs
+          CELLA_INSTALL_ISSUER: http://127.0.0.1:9080
+          CELLA_INSTALL_ADMIN: http://127.0.0.1:9080|dev
+        run: |
+          cd work
+          export CELLA_INSTALL_TOKEN="${CELLA_TEST_TOKEN}"
           bash ../checkout/tools/docs/run-blocks.sh ../checkout/docs/install.md
       - name: The cluster's state, for a failed run
-        if: failure() && vars.RELEASE_INSTALL_KIND == '1'
-        run: kubectl -n cella get all; kubectl -n cella logs deploy/cellad --tail=200
+        if: failure()
+        run: |
+          kubectl -n cella get all || true
+          kubectl -n cella logs deploy/cellad --tail=200 || true
+          kubectl -n cella logs deploy/cellad -c stubs --tail=200 || true
 
   # 6. From a clean runner with no checkout: every asset downloaded in one
   # call, the checksums and their signature, the image's signature and
