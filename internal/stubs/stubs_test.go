@@ -59,7 +59,7 @@ func loopback(o stubs.Options) stubs.Options {
 // start runs the roles for one test and stops them with it.
 func start(t *testing.T, o stubs.Options) *stubs.Stubs {
 	t.Helper()
-	s, err := stubs.Start(loopback(o))
+	s, err := stubs.Start(t.Context(), loopback(o))
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -155,7 +155,7 @@ func TestEveryRoleListensAndIsLogged(t *testing.T) {
 // TestARoleWithNoAddressIsNotStarted: a tier that needs one endpoint runs
 // one listener, and the roles it turned off answer nowhere.
 func TestARoleWithNoAddressIsNotStarted(t *testing.T) {
-	s, err := stubs.Start(stubs.Options{Sink: stubs.SinkOptions{Addr: "127.0.0.1:0", Secrets: []string{"one"}}})
+	s, err := stubs.Start(t.Context(), stubs.Options{Sink: stubs.SinkOptions{Addr: "127.0.0.1:0", Secrets: []string{"one"}}})
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -195,7 +195,7 @@ func TestStartRefusesWhatItCannotServe(t *testing.T) {
 		"an address in use":     {Issuer: stubs.IssuerOptions{Addr: "256.0.0.1:1"}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			s, err := stubs.Start(o)
+			s, err := stubs.Start(t.Context(), o)
 			if err == nil {
 				_ = s.Close(context.Background())
 				t.Fatal("the options were accepted, and a stub that cannot answer must not start")
@@ -207,7 +207,7 @@ func TestStartRefusesWhatItCannotServe(t *testing.T) {
 // TestCloseTwiceIsOneStop: a binary that defers Close and calls it on a
 // signal calls it twice, and the second is not an error.
 func TestCloseTwiceIsOneStop(t *testing.T) {
-	s, err := stubs.Start(loopback(stubs.Options{}))
+	s, err := stubs.Start(t.Context(), loopback(stubs.Options{}))
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -223,7 +223,7 @@ func TestCloseTwiceIsOneStop(t *testing.T) {
 // parks the request, and closing the process releases it rather than
 // leaking the goroutine that serves it.
 func TestTheTimeoutModeIsReleasedByClose(t *testing.T) {
-	s, err := stubs.Start(loopback(stubs.Options{
+	s, err := stubs.Start(t.Context(), loopback(stubs.Options{
 		Admission: stubs.AdmissionOptions{Addr: "127.0.0.1:0", Fail: stubs.FailTimeout},
 	}))
 	if err != nil {

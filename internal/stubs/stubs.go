@@ -86,8 +86,9 @@ type Stubs struct {
 
 // Start listens for every configured role and serves it. The listeners
 // are open when Start returns, so a caller may read URL and dial at once,
-// and a port of 0 is resolved to the port the kernel gave.
-func Start(o Options) (*Stubs, error) {
+// and a port of 0 is resolved to the port the kernel gave. The context
+// bounds the listening and not the serving: a stub runs until Close.
+func Start(ctx context.Context, o Options) (*Stubs, error) {
 	s := &Stubs{log: o.Log, addrs: map[Role]string{}, servers: map[Role]*http.Server{}}
 	build := map[Role]func(addr string) (http.Handler, func(), error){
 		RoleIssuer:     func(addr string) (http.Handler, func(), error) { return newIssuer(addr, o.Issuer) },
@@ -103,8 +104,10 @@ func Start(o Options) (*Stubs, error) {
 		if strings.TrimSpace(addrs[role]) == "" {
 			continue
 		}
-		if err := s.serve(role, addrs[role], build[role]); err != nil {
-			_ = s.Close(context.Background())
+		if err := s.serve(ctx, role, addrs[role], build[role]); err != nil {
+			// The roles that did start are stopped on a context of their
+			// own: the caller's may already be the reason this failed.
+			_ = s.Close(context.WithoutCancel(ctx))
 			return nil, fmt.Errorf("%s: %w", role, err)
 		}
 	}
@@ -115,8 +118,9 @@ func Start(o Options) (*Stubs, error) {
 }
 
 // serve opens one role's listener and runs its handler on it.
-func (s *Stubs) serve(role Role, addr string, build func(addr string) (http.Handler, func(), error)) error {
-	ln, err := net.Listen("tcp", addr)
+func (s *Stubs) serve(ctx context.Context, role Role, addr string, build func(addr string) (http.Handler, func(), error)) error {
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", addr)
 	if err != nil {
 		return err
 	}

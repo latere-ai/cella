@@ -49,21 +49,21 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return usage(stderr, err)
 	}
 	o.Log = stderr
-	s, err := stubs.Start(*o)
+	s, err := stubs.Start(ctx, *o)
 	if err != nil {
-		fmt.Fprintf(stderr, "cella-stubs: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "cella-stubs: %v\n", err)
 		return 1
 	}
 	for _, role := range stubs.RoleOrder {
 		if url := s.URL(role); url != "" {
-			fmt.Fprintf(stdout, "%s %s\n", role, url)
+			_, _ = fmt.Fprintf(stdout, "%s %s\n", role, url)
 		}
 	}
 	<-ctx.Done()
 	// The signal is what asked for the stop, so the shutdown runs on a
 	// context of its own and not on the cancelled one.
 	if err := s.Close(context.WithoutCancel(ctx)); err != nil {
-		fmt.Fprintf(stderr, "cella-stubs: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "cella-stubs: %v\n", err)
 		return 1
 	}
 	return 0
@@ -71,7 +71,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 
 // usage reports a bad flag as the exit code a shell reads for one.
 func usage(stderr io.Writer, err error) int {
-	fmt.Fprintf(stderr, "cella-stubs: %v\n", err)
+	_, _ = fmt.Fprintf(stderr, "cella-stubs: %v\n", err)
 	return 2
 }
 
