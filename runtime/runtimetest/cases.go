@@ -45,6 +45,27 @@ func nameIsolationCapabilities(t tb, open func() runtime.Driver, _ Options) {
 	case !d.Capabilities().Files && store:
 		t.Errorf("the driver implements runtime.FileStore and does not declare Files")
 	}
+	_, screen := d.(runtime.DisplayDriver)
+	switch {
+	case d.Capabilities().Display && !screen:
+		t.Errorf("the driver declares Display and does not implement runtime.DisplayDriver")
+	case !d.Capabilities().Display && screen:
+		t.Errorf("the driver implements runtime.DisplayDriver and does not declare Display")
+	}
+	_, pointer := d.(runtime.InputDriver)
+	switch {
+	case d.Capabilities().Input && !pointer:
+		t.Errorf("the driver declares Input and does not implement runtime.InputDriver")
+	case !d.Capabilities().Input && pointer:
+		t.Errorf("the driver implements runtime.InputDriver and does not declare Input")
+	}
+	_, dialer := d.(runtime.Dialer)
+	switch {
+	case d.Capabilities().Dial && !dialer:
+		t.Errorf("the driver declares Dial and does not implement runtime.Dialer")
+	case !d.Capabilities().Dial && dialer:
+		t.Errorf("the driver implements runtime.Dialer and does not declare Dial")
+	}
 }
 
 func preflightAndReady(t tb, open func() runtime.Driver, opts Options) {

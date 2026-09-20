@@ -8,7 +8,30 @@ package v1
 // operations contract.
 type Network struct {
 	Egress Egress `json:"egress,omitzero"`
+	Ports  []Port `json:"ports,omitempty"`
 }
+
+// Port is one port the sandbox declares something runs on inside it, and how
+// far that port may be reached from.
+type Port struct {
+	Name   string `json:"name"`
+	Port   int    `json:"port"`
+	Expose Expose `json:"expose,omitempty"`
+}
+
+// Expose is how far a declared port reaches.
+type Expose string
+
+// The three reaches of spec 023. None is the default: the port is reachable
+// through the control plane's own routes and from nowhere else.
+const (
+	ExposeNone   Expose = "none"
+	ExposeMesh   Expose = "mesh"
+	ExposePublic Expose = "public"
+)
+
+// Exposes is every reach a port may declare, in the order spec 003 lists them.
+var Exposes = []Expose{ExposeNone, ExposeMesh, ExposePublic}
 
 // Egress declares the sandbox's reach. The mode is the rule and the two lists
 // are its argument: allowedHosts belongs to allowlist and deniedHosts to open,

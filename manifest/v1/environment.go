@@ -61,15 +61,6 @@ type PoolSpec struct {
 	Display   *Display  `json:"display,omitempty"`
 }
 
-// Display is a virtual desktop's geometry, as a sandbox and a pool entry each
-// declare it. A pool entry and a create match on it because the desktop is
-// already up at the entry's resolution and a running one cannot be resized
-// into another (spec 023).
-type Display struct {
-	Width  int `json:"width,omitempty"`
-	Height int `json:"height,omitempty"`
-}
-
 // EnvironmentStatus is what the control plane observed of the driver serving
 // the environment.
 type EnvironmentStatus struct {

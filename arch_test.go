@@ -29,7 +29,8 @@ const module = "latere.ai/x/cella"
 // everything that imports it. Each is itself held to this rule, so importing
 // one opens no connection.
 var shared = []string{
-	module + "/manifest", module + "/manifest/v1", module + "/runtime", module + "/egress",
+	module + "/manifest", module + "/manifest/v1", module + "/runtime",
+	module + "/runtime/display", module + "/egress",
 	"latere.ai/x/pkg/hostmatch", "latere.ai/x/pkg/egress/placeholder",
 }
 
@@ -38,10 +39,11 @@ var shared = []string{
 // engine it drives and nothing else; a role package reaches none. A slice that
 // ports a driver adds its row, and an empty list is the strict case.
 var engines = map[string][]string{
-	"./manifest":       nil,
-	"./manifest/v1":    nil,
-	"./runtime":        nil,
-	"./runtime/native": nil, // the native driver runs host processes: no client
+	"./manifest":        nil,
+	"./manifest/v1":     nil,
+	"./runtime":         nil,
+	"./runtime/display": nil, // the desktop vocabulary: the standard library alone
+	"./runtime/native":  nil, // the native driver runs host processes: no client
 	// The podman driver speaks libpod over net/http, so it needs no client
 	// module; fileshell is the file programs it shares with the other
 	// container driver.

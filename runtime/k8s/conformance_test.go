@@ -6,6 +6,7 @@ package k8s
 import (
 	"cmp"
 	"context"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -22,9 +23,10 @@ import (
 // is the caller's: this package names no cluster, no namespace of an
 // installation and no image of one.
 const (
-	envKubeconfig = "CELLA_TEST_KUBECONFIG"
-	envNamespace  = "CELLA_TEST_NAMESPACE"
-	envImage      = "CELLA_TEST_IMAGE"
+	envKubeconfig   = "CELLA_TEST_KUBECONFIG"
+	envNamespace    = "CELLA_TEST_NAMESPACE"
+	envImage        = "CELLA_TEST_IMAGE"
+	envDisplayImage = "CELLA_TEST_DISPLAY_IMAGE"
 )
 
 // TestClusterConformance runs the whole contract of spec 004 against a real
@@ -43,6 +45,9 @@ func TestClusterConformance(t *testing.T) {
 	options := Options{
 		Namespace:  namespace,
 		Kubeconfig: kubeconfig,
+		// The desktop's image is the operator's: with none named this driver
+		// declares no Display and the suite skips every case about a screen.
+		DisplayImage: os.Getenv(envDisplayImage),
 		// A first pull and a volume that binds on first use both happen
 		// inside Create, so the budget is the cluster's, not the suite's.
 		ReadyTimeout: 3 * time.Minute,
@@ -69,7 +74,19 @@ func TestClusterConformance(t *testing.T) {
 			t.Fatal(err)
 		}
 		return d
-	}, runtimetest.Options{Image: image, Shell: []string{"sh", "-c"}})
+	}, runtimetest.Options{
+		Image: image, Shell: []string{"sh", "-c"},
+		// The desktop the display cases drive is the display container's, so
+		// the sandbox's own image is the same one every other case uses.
+		DisplayImage: cmp.Or(os.Getenv(envDisplayImage), ""),
+		Listen:       listenCommand,
+	})
+}
+
+// listenCommand binds one port inside a sandbox. What binds a port belongs to
+// the image, not to the contract, and this is what the suite's own image has.
+func listenCommand(port int) []string {
+	return []string{"sh", "-c", fmt.Sprintf("nc -l -p %d || sleep 600", port)}
 }
 
 // sweep removes every object this contract owns in the namespace, so a run

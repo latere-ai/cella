@@ -4,6 +4,7 @@
 package podman
 
 import (
+	"fmt"
 	"os"
 	"testing"
 
@@ -15,6 +16,11 @@ import (
 // published image name, not a coordinate of any installation, and an operator
 // running the suite elsewhere overrides it.
 const conformanceImage = "docker.io/library/alpine:latest"
+
+// envDisplayImage names an image carrying the desktop's tools, which is what
+// the display cases need. It is the caller's: this package builds no image and
+// names no registry, and with none set every case about a screen skips.
+const envDisplayImage = "CELLA_TEST_DISPLAY_IMAGE"
 
 // TestPodmanConformance runs the shared driver contract against a real engine.
 // It skips, naming every socket it tried, where none answers, so a machine
@@ -35,5 +41,12 @@ func TestPodmanConformance(t *testing.T) {
 		t.Cleanup(func() { _ = d.Close() })
 		return d
 	}
-	runtimetest.Run(t, open, runtimetest.Options{Image: conformanceImage})
+	runtimetest.Run(t, open, runtimetest.Options{
+		Image: conformanceImage, DisplayImage: os.Getenv(envDisplayImage),
+		// What binds a port belongs to the image: this is what the suite's
+		// own image has.
+		Listen: func(port int) []string {
+			return []string{"sh", "-c", fmt.Sprintf("nc -l -p %d || sleep 600", port)}
+		},
+	})
 }

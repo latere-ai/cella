@@ -23,6 +23,7 @@ import (
 
 	"latere.ai/x/cella/manifest"
 	driver "latere.ai/x/cella/runtime"
+	"latere.ai/x/cella/runtime/display"
 )
 
 // prefix qualifies every label and annotation key the driver writes. The
@@ -391,7 +392,31 @@ func (d *Driver) pod(s driver.CreateSpec, now time.Time, token bool) (*corev1.Po
 		container := &pod.Spec.Containers[0]
 		container.VolumeMounts = append(container.VolumeMounts, mount)
 	}
+	// The desktop of spec 023 is a second container sharing the workload's
+	// /tmp, which is where the X socket lands. The workload is told which
+	// screen to draw on and needs none of the desktop's own tools.
+	if s.Display != nil {
+		desktop, err := d.displayContainer(*s.Display)
+		if err != nil {
+			return nil, err
+		}
+		pod.Spec.Containers = append(pod.Spec.Containers, desktop)
+		workload := &pod.Spec.Containers[0]
+		workload.Env = env(withDisplayEnv(environment))
+	}
 	return pod, nil
+}
+
+// withDisplayEnv adds what a workload beside the desktop needs to address the
+// screen. The geometry and the home are the desktop's own and are not set on
+// the workload, whose home is its image's.
+func withDisplayEnv(environment map[string]string) map[string]string {
+	out := maps.Clone(environment)
+	if out == nil {
+		out = map[string]string{}
+	}
+	out[display.DisplayEnv] = display.DisplayValue
+	return out
 }
 
 // hardened is the container half of the baseline: no new privileges, no

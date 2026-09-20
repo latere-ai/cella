@@ -359,7 +359,7 @@ func TestUndeclaredCapabilitiesAreSkippedNotAsserted(t *testing.T) {
 // equal to the capabilities today's Driver has no operation for. A capability
 // that gains an operation is removed here and gains a case.
 func TestDeclaredWithoutCaseNamesEveryUncheckedCapability(t *testing.T) {
-	if got := declaredWithoutCase(runtime.Capabilities{Files: true, Attach: true, Detach: true, Pool: true}); len(got) != 0 {
+	if got := declaredWithoutCase(runtime.Capabilities{Files: true, Attach: true, Detach: true, Pool: true, Display: true, Input: true}); len(got) != 0 {
 		t.Errorf("the capabilities with cases are reported as unchecked: %v", got)
 	}
 	all := runtime.Capabilities{
@@ -367,7 +367,7 @@ func TestDeclaredWithoutCaseNamesEveryUncheckedCapability(t *testing.T) {
 		Volumes: true, Snapshots: true, Attach: true, Dial: true, Display: true,
 		Input: true, Resize: true, Pool: true, Files: true, Detach: true,
 	}
-	want := []string{"Egress", "Mesh", "Ingress", "Volumes", "Snapshots", "Dial", "Display", "Input", "Resize"}
+	want := []string{"Egress", "Mesh", "Ingress", "Volumes", "Snapshots", "Dial", "Resize"}
 	if got := declaredWithoutCase(all); !slices.Equal(got, want) {
 		t.Errorf("declaredWithoutCase reports %v, want %v", got, want)
 	}

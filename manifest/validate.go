@@ -25,6 +25,14 @@ const (
 	// and annotation keys, stamped by the server and never taken from a body.
 	ReservedKeyDomain = "cella.latere.ai"
 
+	// The desktop bounds of spec 003's field table. They are stated here
+	// rather than read from runtime/display, which holds the same numbers for
+	// the drivers, because this package reaches no driver package.
+	minDisplayWidth  = 320
+	maxDisplayWidth  = 7680
+	minDisplayHeight = 240
+	maxDisplayHeight = 4320
+
 	maxNameLength           = 63
 	maxAnnotationValueBytes = 4 << 10
 	maxAnnotationBytes      = 64 << 10
@@ -130,7 +138,32 @@ func validateSpec(s v1.SandboxSpec) error {
 	if err := validateNetwork(s.Network); err != nil {
 		return err
 	}
+	if err := validateDisplay(s.Display); err != nil {
+		return err
+	}
 	return validateEnv(s.Env)
+}
+
+// validateDisplay holds a desktop to the bounds of spec 003. Both dimensions
+// are given or neither is: half a geometry names no screen, and defaulting the
+// other half would hand back a desktop of a size nobody asked for.
+func validateDisplay(d *v1.Display) error {
+	if d == nil {
+		return nil
+	}
+	if (d.Width == 0) != (d.Height == 0) {
+		return failPaths("invalid_field", "A display is a width and a height together.",
+			[]string{"spec.display.width", "spec.display.height"})
+	}
+	switch {
+	case d.Width == 0:
+		return failAt("missing_field", "spec.display", "A display names a width and a height.")
+	case d.Width < minDisplayWidth || d.Width > maxDisplayWidth:
+		return failAt("invalid_field", "spec.display.width", fmt.Sprintf("The width is between %d and %d pixels.", minDisplayWidth, maxDisplayWidth))
+	case d.Height < minDisplayHeight || d.Height > maxDisplayHeight:
+		return failAt("invalid_field", "spec.display.height", fmt.Sprintf("The height is between %d and %d pixels.", minDisplayHeight, maxDisplayHeight))
+	}
+	return nil
 }
 
 // validateUser accepts a uid, a uid:gid pair, or a user name the image knows.

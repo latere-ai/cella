@@ -159,6 +159,29 @@ const (
 	OperationMove   = "move"
 )
 
+// Screenshot is the data of sandbox.screenshot: the frame's size and how it
+// was encoded. No pixel of it is here.
+type Screenshot struct {
+	Width  int    `json:"width"`
+	Height int    `json:"height"`
+	Format string `json:"format"`
+}
+
+// Input is the data of sandbox.input: how many events the batch carried. What
+// was clicked, which key was pressed and what was typed are not here, because
+// a password is typed the same way a search term is.
+type Input struct {
+	Events int `json:"events"`
+}
+
+// Screen is the data of sandbox.screen, written when the session closes: how
+// long it ran and how much moved each way. No frame is here.
+type Screen struct {
+	DurationMS int64 `json:"durationMs"`
+	BytesIn    int64 `json:"bytesIn"`
+	BytesOut   int64 `json:"bytesOut"`
+}
+
 // Created is the data of sandbox.created: the manifest as the resolver left
 // it, with every environment value dropped to its key and every mounted
 // secret dropped to its name. A value belongs to the sandbox and never to a

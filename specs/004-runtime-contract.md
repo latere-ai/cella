@@ -30,7 +30,7 @@ the suite.
 
 ## Current state
 
-The initial native implementation is in `runtime/native` ([[025-native-runtime-migration]]), and the container driver of the server-side default is in `runtime/k8s` ([[036-k8s-driver]]) with the lifecycle, execution, logs, archive transfer and stamped identity of this contract and none of its optional capabilities. The exported package and capability types follow this design; the other drivers and remaining native capabilities below are not complete.
+The initial native implementation is in `runtime/native` ([[025-native-runtime-migration]]), and the container driver of the server-side default is in `runtime/k8s` ([[036-k8s-driver]]) with the lifecycle, execution, logs, archive transfer and stamped identity of this contract. `DisplayDriver` and `InputDriver` are implemented by `runtime/podman` and `runtime/k8s`, with `State.Ports` and the `DisplayReady` condition ([[041-display-and-input]]); `Dialer` is declared and implemented by none. The exported package and capability types follow this design; the other drivers and remaining native capabilities below are not complete.
 
 Design provenance: The interface descends from one that three container
 drivers have implemented in the hosted platform; the changes are that
@@ -396,7 +396,8 @@ is skipped and reported:
 | `DialReachesAPort` | a listener inside is reachable |
 | `VolumeLifecycle`, `VolumeAttachDetachWhileStopped`, `AttachFailureIsClean` | `VolumeDriver`; a failing attach leaves no sandbox |
 | `SnapshotAndRestore` | a snapshot becomes a new volume's source |
-| `DisplayReadyScreenshotInput` | `DisplayReady`, a PNG of the geometry, typed text visible in the next frame |
+| `DisplayScreenshot`, `ScreenStream`, `InputAcceptsAndRefuses` | `DisplayReady`, a PNG and a JPEG of the declared geometry at the requested scale, a paced frame off the stream, a gesture inside the desktop accepted and one outside it refused whole ([[041-display-and-input]]) |
+| `PortsReportListening` | a declared port a process inside holds reads `listening` and one nothing holds reads `closed` |
 | `PrewarmAndAdoptIsExclusive` | two concurrent `Adopt` of one entry yield one success |
 | `EgressAllowlistEnforced`, `MeshReachability`, `IngressURL` | against the gateway and upstream of [[012-test-stubs-and-tiers]]; a disallowed host fails, a peer is reachable, a public URL answers |
 | `DetachRecovers` | a second driver instance recovers the sandbox from its record |
@@ -408,8 +409,13 @@ of [[012-test-stubs-and-tiers]].
 
 The package is built ([[032-runtime-conformance-suite]]) with the cases
 that today's `Driver` has an operation for; the `Attacher` cases came with
-that interface ([[034-terminal-attach]]) and the `Files*` cases with
-`FileStore` ([[033-file-operations]]). `Watch`, the remaining
+that interface ([[034-terminal-attach]]), the `Files*` cases with
+`FileStore` ([[033-file-operations]]), and the display, screen, input and
+port cases with `DisplayDriver` and `InputDriver`
+([[041-display-and-input]]). The display cases need an image carrying a
+desktop and the port case a command that binds one, both named in the
+suite's options, and each skips with that reason where the caller named
+none. `Watch`, the remaining
 optional interfaces, and `PhaseTableMatchesPackageDoc` have no operation on
 it yet; a declared capability among them is reported by the suite as
 declared without a case, so a driver's run lists what it claims and the
@@ -442,7 +448,7 @@ requests ([[023-computer-use-operations]]); the microVM driver's design
 |---|---|---|
 | `native` passes the whole conformance suite in the unit suite | `TestNativeConformance` | passing for the cases built, [[032-runtime-conformance-suite]], including the `Attacher` cases of [[034-terminal-attach]], the `FileStore` cases of [[033-file-operations]] and the `Pool` cases of [[038-environment-pools]] |
 | `local` passes it on a machine with the sandbox runtime installed, with `Attach`, `Dial`, `Mesh`, `Display`, `Input`, `Resize`, `Pool` and the `open` egress case skipped as undeclared, and is skipped whole with the remediation printed where the runtime is absent | `TestLocalConformance` | not built |
-| `podman` passes it in the podman tier; `k8s` against kind; `remote` through a worker running `native` | `TestPodmanConformance`, `TestClusterConformance`, `TestWorkerConformance` | `podman` passing against a real engine, the `Attacher` and `FileStore` cases included, skipped where no socket answers, [[035-podman-driver]], [[034-terminal-attach]], [[033-file-operations]]; `TestClusterConformance` built and skipped where no cluster is configured, [[036-k8s-driver]]; both declare `Pool` and pass its cases, [[038-environment-pools]]; `remote` not built |
+| `podman` passes it in the podman tier; `k8s` against kind; `remote` through a worker running `native` | `TestPodmanConformance`, `TestClusterConformance`, `TestWorkerConformance` | `podman` passing against a real engine, the `Attacher`, `FileStore`, display, screen, input and port cases included, skipped where no socket answers, [[035-podman-driver]], [[034-terminal-attach]], [[033-file-operations]], [[041-display-and-input]]; `TestClusterConformance` built and skipped where no cluster is configured, [[036-k8s-driver]]; both declare `Pool` and pass its cases, [[038-environment-pools]]; `remote` not built |
 | A driver that declares a capability without its interface, implements one it does not declare, or declares one the suite finds not to hold, fails | `TestConformanceCatchesAFalseCapability` with nine lying wrappers | passing, [[032-runtime-conformance-suite]], [[034-terminal-attach]], [[033-file-operations]], [[045-workload-tokens]] |
 | Every stamped label value is a legal Kubernetes label value and every key a legal key, for an owner with `@` and a user label with a `/` | `TestStampedIdentityIsLegal` | passing, [[036-k8s-driver]] |
 | The workload token a create carries is a file inside the sandbox its owner alone reads, at `/run/cella/token` or at the path `CELLA_TOKEN_FILE` names where the driver has no mount namespace of its own, and `Change.Token` is what the next read returns | the `TokenProjection` case of the conformance suite | passing on `native` and on `podman` against a real engine; on `k8s` over the client double, and in the cluster run where one is configured ([[045-workload-tokens]]) |

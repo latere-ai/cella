@@ -313,6 +313,11 @@ func (c *Controller) matchesPool(obj v1.Sandbox) bool {
 		return false
 	case spec.Resources != c.pool.Resources:
 		return false
+	case !sameDisplay(spec.Display, c.pool.Display):
+		// The entry's X server sized its frame buffer when the entry came
+		// up, and a running desktop cannot be resized into another, so an
+		// entry is adopted only into the geometry it already has.
+		return false
 	case len(spec.Command) > 0 || len(spec.Args) > 0:
 		// The entry is already running what the driver starts for a
 		// sandbox with no command, and a process cannot be replaced
@@ -333,6 +338,15 @@ func (c *Controller) matchesPool(obj v1.Sandbox) bool {
 // samePath reads an unset path as the contract's default, which is what every
 // driver renders it as.
 func samePath(p, fallback string) bool { return p == "" || p == fallback }
+
+// sameDisplay reports whether a manifest asks for the desktop an entry was
+// prewarmed with: both without one, or both at one geometry.
+func sameDisplay(a, b *v1.Display) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
+}
 
 // makeRoom frees a slot for a real create where the environment has a ceiling
 // and entries hold it. The oldest entries go first, and a create that does not

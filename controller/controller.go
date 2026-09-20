@@ -455,6 +455,8 @@ func specOf(obj v1.Sandbox, lifecycle driver.Lifecycle, boundary driver.Egress, 
 		Workspace: driver.Workspace{Path: obj.Spec.Workspace.Path},
 		Lifecycle: lifecycle,
 		Egress:    boundary,
+		Display:   geometryOf(obj.Spec.Display),
+		Ports:     portsOf(obj.Spec.Network.Ports),
 		Token:     []byte(token),
 	}
 }
@@ -539,6 +541,13 @@ func (c *Controller) refresh(ctx context.Context, obj v1.Sandbox) (v1.Sandbox, e
 	}
 	obj.Status.Phase = state.Phase
 	obj.Status.ExitCode = state.ExitCode
+	// The driver owns the conditions it writes and the probe of every
+	// declared port, so a read of the sandbox carries what the environment
+	// actually built rather than what the manifest asked for.
+	for _, condition := range state.Conditions {
+		obj.Status.Conditions = setCondition(obj.Status.Conditions, condition)
+	}
+	obj.Status.Ports = portStatusOf(state.Ports)
 	obj.Status.StartedAt = state.StartedAt
 	obj.Status.StoppedAt = state.StoppedAt
 	obj.Status.LastActivityAt = state.LastActivityAt

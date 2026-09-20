@@ -191,6 +191,18 @@ func (f *fake) labelsOf(t *testing.T, volume string) map[string]string {
 	return maps.Clone(l)
 }
 
+// containerOf is the container the engine holds for one sandbox.
+func (f *fake) containerOf(t *testing.T, id string) *fakeContainer {
+	t.Helper()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	c, ok := f.containers[containerName(id)]
+	if !ok {
+		t.Fatalf("no container for %s", id)
+	}
+	return c
+}
+
 // volumeNames lists every volume the engine holds, sorted.
 func (f *fake) volumeNames() []string {
 	f.mu.Lock()

@@ -92,6 +92,11 @@ func New(o Options) (http.Handler, error) {
 	h.mux.HandleFunc("POST /v1/sandboxes/{id}/{verb}", h.item)
 	h.mux.HandleFunc("GET /v1/sandboxes/{id}/exec", h.execSocket)
 	h.mux.HandleFunc("GET /v1/sandboxes/{id}/attach", h.attachSocket)
+	h.mux.HandleFunc("GET /v1/sandboxes/{id}/display", h.display)
+	h.mux.HandleFunc("GET /v1/sandboxes/{id}/screenshot", h.screenshot)
+	h.mux.HandleFunc("GET /v1/sandboxes/{id}/screen", h.screen)
+	h.mux.HandleFunc("POST /v1/sandboxes/{id}/input", h.input)
+	h.mux.HandleFunc("GET /v1/sandboxes/{id}/ports", h.ports)
 	h.mux.HandleFunc("POST /v1/secrets", h.createSecret)
 	h.mux.HandleFunc("GET /v1/secrets", h.listSecrets)
 	h.mux.HandleFunc("PUT /v1/secrets/{key}", h.applySecret)
@@ -162,14 +167,18 @@ func (h *handler) readBody(w http.ResponseWriter, r *http.Request) ([]byte, erro
 }
 
 // resolveOptions is what one apply hands the resolver: the environment
-// this node drives, the secrets this caller may mount, the operator's
-// defaults, and the admission step of design 007 with everything that
-// step is told about the caller. The request id is the one this response
-// already carries, so a refusal at the endpoint and the error a caller
-// reads name the same apply.
+// this node drives with the capabilities its driver declares, the secrets
+// this caller may mount, the operator's defaults, and the admission step of
+// design 007 with everything that step is told about the caller. The
+// capabilities are what a field asking for an optional behaviour resolves
+// against, so a manifest asking for a desktop where the driver declares no
+// Display is refused at the field rather than at create. Defaults and
+// admission run on every apply, whatever the environment declares. The
+// request id is the one this response already carries, so a refusal at the
+// endpoint and the error a caller reads name the same apply.
 func (h *handler) resolveOptions(w http.ResponseWriter, r *http.Request) (manifest.Options, error) {
 	c := caller(r)
-	o := manifest.NativeOptions(h.Controller.Environment(), h.secretLookup(r))
+	o := manifest.DriverOptions(h.Controller.Environment(), h.Controller.Capabilities(), h.secretLookup(r))
 	o.Actor = manifestActor(r)
 	o.Claims = c.Claims
 	o.Defaults = h.Defaults

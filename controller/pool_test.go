@@ -299,6 +299,42 @@ func TestPoolPrewarmMatchesItsOwnShape(t *testing.T) {
 	}
 }
 
+// TestPoolMatchesOnTheDesktop holds the display half of the match rule. A
+// desktop is sized when the entry comes up and a running X server cannot be
+// resized, so a manifest asking for a geometry the entry does not have takes
+// the slow path rather than a sandbox with no screen.
+func TestPoolMatchesOnTheDesktop(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		pool, wanted  *v1.Display
+		wantAdoptable bool
+	}{
+		{"neither", nil, nil, true},
+		{"theEntryHasNone", nil, &v1.Display{Width: 1280, Height: 800}, false},
+		{"theManifestAsksForNone", &v1.Display{Width: 1280, Height: 800}, nil, false},
+		{"otherGeometry", &v1.Display{Width: 1280, Height: 800}, &v1.Display{Width: 1920, Height: 1080}, false},
+		{"theSameGeometry", &v1.Display{Width: 1280, Height: 800}, &v1.Display{Width: 1280, Height: 800}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, d, _ := newPool(t, poolOptions(1))
+			c.pool.Image = "registry.example.com/base:1"
+			c.pool.Display = tc.pool
+			if _, err := c.Refill(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			obj := workspace()
+			obj.Spec.Image = c.pool.Image
+			obj.Spec.Resources = c.pool.Resources
+			obj.Spec.Workdir = ""
+			obj.Spec.Display = tc.wanted
+			entries := c.poolEntries(t.Context())
+			if got := c.matchEntry(entries, obj) != nil; got != tc.wantAdoptable {
+				t.Fatalf("the entry is adoptable = %v, want %v: %+v", got, tc.wantAdoptable, d.entries())
+			}
+		})
+	}
+}
+
 // TestPoolRefillBounds holds what a tick does on bad news: a list it cannot
 // read acts on nothing, and one create that fails ends the tick's prewarming
 // rather than opening the rest.

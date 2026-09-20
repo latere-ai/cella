@@ -115,6 +115,14 @@ type CreateSpec struct {
 	Resources                       Resources
 	Workspace                       Workspace
 	Egress                          Egress
+	// Display is the virtual desktop the sandbox asks for, nil for a sandbox
+	// with no screen. The geometry is fixed at create: the X server sizes its
+	// frame buffer once and the manifest field is immutable (spec 003).
+	Display *Geometry `json:"display,omitempty"`
+	// Ports are what the manifest declares runs inside the sandbox. The
+	// driver records them, probes them at Inspect, and reaches nothing a
+	// caller named that is not in this list.
+	Ports []Port `json:"ports,omitempty"`
 	// Token is the workload token the driver projects at TokenPath, empty
 	// for a control plane that mints none. It is never serialized: a driver
 	// that keeps the create spec beside the sandbox keeps the shape of the
@@ -157,21 +165,28 @@ type Ref struct {
 	ID string `json:"id"`
 }
 type State struct {
-	ID             string            `json:"id"`
-	Name           string            `json:"name"`
-	Owner          string            `json:"owner"`
-	Phase          string            `json:"phase"`
-	Reason         string            `json:"reason,omitempty"`
-	ExitCode       *int              `json:"exitCode,omitempty"`
-	Isolation      string            `json:"isolation"`
-	Labels         map[string]string `json:"labels,omitempty"`
-	CreatedAt      time.Time         `json:"createdAt"`
-	StartedAt      time.Time         `json:"startedAt"`
-	StoppedAt      time.Time         `json:"stoppedAt,omitzero"`
-	LastActivityAt time.Time         `json:"lastActivityAt"`
-	ExpiresAt      time.Time         `json:"expiresAt,omitzero"`
-	AutoStop       time.Duration     `json:"autoStop,omitempty"`
-	AutoDelete     time.Duration     `json:"autoDelete,omitempty"`
+	ID        string            `json:"id"`
+	Name      string            `json:"name"`
+	Owner     string            `json:"owner"`
+	Phase     string            `json:"phase"`
+	Reason    string            `json:"reason,omitempty"`
+	ExitCode  *int              `json:"exitCode,omitempty"`
+	Isolation string            `json:"isolation"`
+	Labels    map[string]string `json:"labels,omitempty"`
+	// Ports is one entry per declared port with the driver's own probe at
+	// this Inspect, and Conditions is what the driver says about the
+	// environment it built: the contract's Ready, WorkspaceReady,
+	// EgressEnforced, VolumesAttached and DisplayReady. A condition the
+	// driver does not write is absent rather than unknown.
+	Ports          []PortState    `json:"ports,omitempty"`
+	Conditions     []v1.Condition `json:"conditions,omitempty"`
+	CreatedAt      time.Time      `json:"createdAt"`
+	StartedAt      time.Time      `json:"startedAt"`
+	StoppedAt      time.Time      `json:"stoppedAt,omitzero"`
+	LastActivityAt time.Time      `json:"lastActivityAt"`
+	ExpiresAt      time.Time      `json:"expiresAt,omitzero"`
+	AutoStop       time.Duration  `json:"autoStop,omitempty"`
+	AutoDelete     time.Duration  `json:"autoDelete,omitempty"`
 	// Pool reports a prewarmed entry: a sandbox the control plane made for
 	// nobody, which no caller owns until it is adopted (spec 020).
 	Pool bool `json:"pool,omitempty"`
