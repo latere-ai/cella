@@ -2,8 +2,11 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # The developer image: compiles cellad inside the image so `docker build .`
-# from a checkout is enough. The release image of spec 014 copies a binary
-# the pipeline already built and attested; its runtime stage is this one.
+# from a checkout is enough. Dockerfile.ci is the release image: it copies a
+# binary the pipeline already built, checksummed, signed and attested, and
+# its runtime stage is the one between the two markers below, byte for byte,
+# which TestRuntimeStagesMatch reads. A released image therefore differs from
+# a developer's in where the binary came from and in nothing else.
 
 FROM golang:1.27-alpine AS build
 WORKDIR /src
@@ -19,11 +22,13 @@ RUN CGO_ENABLED=0 go build -trimpath \
 
 # >>> shared runtime base <<<
 # cellad forks no binary of its own, so the runtime stage is distroless:
-# CA roots for the OIDC issuers and webhooks it dials, nothing else.
+# CA roots for the OIDC issuers and webhooks it dials, nothing else. It runs
+# as the image's non-root user, with both listeners' ports exposed and the
+# data directory a volume.
 FROM gcr.io/distroless/static-debian12:nonroot
-COPY --from=build /out/cellad /usr/local/bin/cellad
 VOLUME ["/var/lib/cella"]
 EXPOSE 8080 8081
 USER nonroot:nonroot
-ENTRYPOINT ["/usr/local/bin/cellad"]
 # <<< shared runtime base >>>
+COPY --from=build /out/cellad /usr/local/bin/cellad
+ENTRYPOINT ["/usr/local/bin/cellad"]

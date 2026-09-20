@@ -1,0 +1,466 @@
+# SPDX-FileCopyrightText: 2026 Latere AI
+# SPDX-License-Identifier: Apache-2.0
+#
+# The release pipeline of spec 014, on a v* tag: the tag's commit must have
+# passed verify; the binaries, the archives and the image are built, the
+# image pushed by digest and under no tag, signed, given a bill of
+# materials and a provenance attestation; the candidate is exercised; only
+# then is the digest tagged and the GitHub release created with the
+# CHANGELOG section as its body; and after that the published artifacts are
+# walked and verified from clean runners.
+#
+# Nothing here pushes to the default branch, no job carries a permission
+# another needs, and the image namespace is the repository owner's, so a
+# fork's tag publishes under the fork's. Every third-party action is pinned
+# by commit with its version in a comment.
+#
+# The reusable pipelines of latere-ai/ci do not fit this shape:
+# notes-release builds nothing, cli-release is goreleaser, and
+# service-release deploys to a cluster and smokes a live host. The one
+# piece that is shared is the release-note reader, `lateregate
+# release-notes`, which is the reader the pre-push hook runs.
+name: release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE: cellad
+
+jobs:
+  # 1. The verify run for the push of this very commit concluded success.
+  # `lateregate release` pushes the branch and the tag in one push, so the
+  # run exists by now and may still be running; a tag on a commit whose
+  # gate never ran, or ran red, fails here and publishes nothing.
+  gate-green:
+    name: the tag's commit passed verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Wait for the verify run on this commit and require success
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for i in $(seq 1 110); do
+            conclusions=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/verify.yml/runs?head_sha=${GITHUB_SHA}&event=push&per_page=20" \
+              --jq '[.workflow_runs[] | .conclusion // "running"] | join(" ")')
+            case " $conclusions " in
+              *" success "*) echo "verify concluded success on ${GITHUB_SHA}"; exit 0 ;;
+              *" failure "*|*" cancelled "*|*" timed_out "*|*" startup_failure "*|*" action_required "*)
+                echo "verify concluded '$conclusions' on ${GITHUB_SHA}; a release is cut from a green tree" >&2; exit 1 ;;
+            esac
+            if [ -z "$conclusions" ] && [ "$i" -gt 10 ]; then
+              echo "no verify run exists for the push of ${GITHUB_SHA}; tag a commit whose gate ran" >&2; exit 1
+            fi
+            sleep 30
+          done
+          echo "verify did not conclude on ${GITHUB_SHA} within the hour" >&2; exit 1
+
+  # 2. Everything the release carries, built once from this checkout. The
+  # image is pushed by digest and under no tag, so a run that stops before
+  # publish leaves one unreferenced digest and nothing an operator could
+  # pull by accident.
+  build:
+    name: the archives and the image by digest
+    needs: gate-green
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      owner: ${{ steps.owner.outputs.owner }}
+      digest: ${{ steps.image.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      # The namespace is the account that pushed the tag, lowered, read
+      # here and written nowhere in the tree. A repository variable
+      # overrides it, for an installation that publishes elsewhere.
+      - name: The image namespace is the repository owner's
+        id: owner
+        env:
+          OVERRIDE: ${{ vars.RELEASE_IMAGE_NAMESPACE }}
+        run: |
+          owner=${OVERRIDE:-$GITHUB_REPOSITORY_OWNER}
+          echo "owner=$(printf '%s' "$owner" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+      - name: The tag has a CHANGELOG section
+        run: go tool lateregate release-notes "${GITHUB_REF_NAME}" > /dev/null
+      - name: Build the binaries and the archives
+        run: tools/release/build.sh "${GITHUB_REF_NAME}" dist
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      - name: Build and push the image by digest, under no tag
+        id: image
+        env:
+          OWNER: ${{ steps.owner.outputs.owner }}
+        run: |
+          mkdir -p out
+          docker buildx build --platform linux/amd64,linux/arm64 -f Dockerfile.ci \
+            --output "type=image,name=${REGISTRY}/${OWNER}/${IMAGE},push-by-digest=true,name-canonical=true,push=true" \
+            --metadata-file out/image.json .
+          digest=$(jq -r '."containerimage.digest"' out/image.json)
+          echo "the candidate is ${REGISTRY}/${OWNER}/${IMAGE}@${digest}"
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: Sign the image by digest with the workflow's identity
+        env:
+          OWNER: ${{ steps.owner.outputs.owner }}
+        run: cosign sign --yes "${REGISTRY}/${OWNER}/${IMAGE}@${{ steps.image.outputs.digest }}"
+      - name: The bill of materials of the module graph
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
+        with:
+          path: .
+          format: spdx-json
+          output-file: dist/sbom-module.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+      - name: The bill of materials of the image
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
+        with:
+          image: ${{ env.REGISTRY }}/${{ steps.owner.outputs.owner }}/cellad@${{ steps.image.outputs.digest }}
+          format: spdx-json
+          output-file: dist/sbom-cellad.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+      - name: Attest the image's bill of materials
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ steps.owner.outputs.owner }}/cellad
+          subject-digest: ${{ steps.image.outputs.digest }}
+          sbom-path: dist/sbom-cellad.spdx.json
+          push-to-registry: true
+      - name: Attest the image's provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ steps.owner.outputs.owner }}/cellad
+          subject-digest: ${{ steps.image.outputs.digest }}
+          push-to-registry: true
+      # The deploy archive: the base with the image pinned to this release
+      # by digest, the bootstrap templates and both examples, under one
+      # deploy/ directory. The overlays are rendered here, so an archive
+      # that does not build never reaches the release page.
+      - name: The deploy archive with the image pinned by digest
+        env:
+          OWNER: ${{ steps.owner.outputs.owner }}
+        run: |
+          rm -f dist/cellad_linux_amd64 dist/cellad_linux_arm64
+          printf 'images:\n  - name: %s\n    newName: %s/%s/%s\n    digest: %s\n' \
+            "${IMAGE}" "${REGISTRY}" "${OWNER}" "${IMAGE}" "${{ steps.image.outputs.digest }}" \
+            >> deploy/base/kustomization.yaml
+          for overlay in deploy/base deploy/examples/kind deploy/examples/generic; do
+            kubectl kustomize "$overlay" | grep -q "image: ${REGISTRY}/${OWNER}/${IMAGE}@${{ steps.image.outputs.digest }}" \
+              || { echo "$overlay does not render the published image" >&2; exit 1; }
+          done
+          tar -czf "dist/deploy-${GITHUB_REF_NAME}.tar.gz" deploy
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  # 3. The candidate exercised before anything is tagged.
+  #
+  # What runs for real: the race tier over the whole module at the tag,
+  # which carries the driver conformance suite of runtime/runtimetest over
+  # the native driver and over podman with the engine this job starts; and
+  # the published image itself, asked for its identity and then asked to
+  # check an installation, where it must name the unreachable issuer and
+  # exit 1.
+  #
+  # What does not run: the kind stack of spec 012 and the API conformance
+  # suite of spec 015. Neither is built. When they are, this job brings the
+  # stack up from the published digest and runs `TestContract` against it,
+  # which is what spec 014's diagram names.
+  conformance:
+    name: the candidate passes what is built
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read
+    env:
+      OWNER: ${{ needs.build.outputs.owner }}
+      DIGEST: ${{ needs.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      # ubuntu-latest ships Podman, so the container driver's conformance
+      # run is a real one rather than a skip.
+      - name: A rootless engine for the container driver's suite
+        run: |
+          podman system service --time=0 "unix://${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/podman/podman.sock" &
+          for _ in $(seq 1 50); do podman info >/dev/null 2>&1 && break; sleep 0.2; done
+          podman info --format '{{.Host.RemoteSocket.Path}}'
+      - name: The race tier at the tag
+        run: go test -race -count=1 ./...
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: The image reports the identity this tag pins
+        run: |
+          got=$(docker run --rm "${REGISTRY}/${OWNER}/${IMAGE}@${DIGEST}" version)
+          echo "$got"
+          case "$got" in
+            "cellad ${GITHUB_REF_NAME} ("*) ;;
+            *) echo "the image reports '$got' and the tag is ${GITHUB_REF_NAME}" >&2; exit 1 ;;
+          esac
+      # `cellad check` from the published image, against an installation
+      # whose issuer is not there: it must name the issuer, report every
+      # optional dependency as not configured, and exit 1. The positive
+      # path is the package's own suite, which runs a real issuer; this is
+      # the proof that the subcommand is in the image an operator pulls,
+      # reads that Pod's environment, and fails closed.
+      - name: The image checks an installation and fails closed
+        run: |
+          key=$(openssl genrsa 2048 2>/dev/null)
+          set +e
+          out=$(docker run --rm \
+            -e CELLA_OIDC_ISSUERS=http://127.0.0.1:1 \
+            -e CELLA_PUBLIC_URL=http://127.0.0.1:8080 \
+            -e CELLA_TOKEN_KEY="$key" \
+            -e CELLA_RUNTIME=native -e CELLA_ALLOW_UNSAFE_NATIVE=true \
+            -e CELLA_DATA_DIR=/tmp/cella \
+            "${REGISTRY}/${OWNER}/${IMAGE}@${DIGEST}" check)
+          code=$?
+          set -e
+          echo "$out"
+          [ "$code" -eq 1 ] || { echo "check exited $code, want 1" >&2; exit 1; }
+          echo "$out" | grep -q '^identity *FAIL' || { echo "the issuer that does not answer is not the failing line" >&2; exit 1; }
+          for line in admission sink store gateway; do
+            echo "$out" | grep -q "^$line *skip" || { echo "$line is not reported as not configured" >&2; exit 1; }
+          done
+          echo "$out" | grep -q '^data directory *ok' || { echo "the data directory is not writable in the image" >&2; exit 1; }
+
+  # 4. Only now the digest gets the :<tag> reference, and the release is
+  # created with every artifact and the CHANGELOG section as its body, read
+  # with the rule the pre-push hook enforces.
+  publish:
+    name: tag the digest and create the release
+    needs: [build, conformance]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+    env:
+      OWNER: ${{ needs.build.outputs.owner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dist
+          path: dist
+      - name: The release notes are the CHANGELOG section for the tag
+        run: |
+          mkdir -p out
+          go tool lateregate release-notes "${GITHUB_REF_NAME}" > out/notes.md
+          test -s out/notes.md
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: The assets, their checksums, and the signature over them
+        run: |
+          mkdir -p release
+          cp dist/*.tar.gz dist/*.spdx.json release/
+          (cd release && sha256sum ./*.tar.gz > checksums.txt && cat checksums.txt)
+          # One Sigstore bundle carries the signature and the certificate;
+          # cosign 3 writes nothing to the separate output flags.
+          cosign sign-blob --yes --bundle release/checksums.txt.sigstore.json release/checksums.txt
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Tag the digest
+        run: |
+          docker buildx imagetools create -t "${REGISTRY}/${OWNER}/${IMAGE}:${GITHUB_REF_NAME}" \
+            "${REGISTRY}/${OWNER}/${IMAGE}@${{ needs.build.outputs.digest }}"
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" --verify-tag --title "${GITHUB_REF_NAME}" --notes-file out/notes.md release/*
+
+  # 5. The install document against the published artifacts: the deploy
+  # archive unpacked on a runner that has nothing of the checkout but the
+  # document, and the image pulled by tag.
+  #
+  # The walk against a kind cluster needs an OpenID Connect issuer the
+  # cluster can reach, and cellad ships none: the stub issuer is spec 012's
+  # and is not built, so a `cellad serve` in a cluster has nothing to
+  # verify a token against and cannot become ready. Until that lands, this
+  # job proves what the artifacts alone can prove: the archive unpacks,
+  # every overlay renders against the published digest, and the image an
+  # operator would apply is the one the release published. The repository
+  # variable RELEASE_INSTALL_KIND set to 1 runs the cluster walk as well,
+  # for an installation that has an issuer of its own to point it at.
+  install-release:
+    name: the install document against the published artifacts
+    needs: [build, publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read
+    env:
+      OWNER: ${{ needs.build.outputs.owner }}
+      DIGEST: ${{ needs.build.outputs.digest }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: The published artifacts, and nothing from the checkout
+        run: |
+          mkdir -p work && cd work
+          gh release download "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" \
+            -p "deploy-${GITHUB_REF_NAME}.tar.gz" -p "cellad_${GITHUB_REF_NAME}_linux_amd64.tar.gz"
+          tar -xzf "deploy-${GITHUB_REF_NAME}.tar.gz"
+          tar -xzf "cellad_${GITHUB_REF_NAME}_linux_amd64.tar.gz"
+          ./cellad version
+          docker pull "${REGISTRY}/${OWNER}/${IMAGE}:${GITHUB_REF_NAME}"
+      - name: Every overlay of the archive renders against the published image
+        run: |
+          cd work
+          for overlay in deploy/base deploy/examples/kind deploy/examples/generic; do
+            kubectl kustomize "$overlay" | grep -q "image: ${REGISTRY}/${OWNER}/${IMAGE}@${DIGEST}" \
+              || { echo "$overlay of the archive does not name the published image" >&2; exit 1; }
+          done
+          echo "the archive's overlays render against ${REGISTRY}/${OWNER}/${IMAGE}@${DIGEST}"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: vars.RELEASE_INSTALL_KIND == '1'
+        with:
+          path: checkout
+      - uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2 # v1.15.0
+        if: vars.RELEASE_INSTALL_KIND == '1'
+        with:
+          install_only: true
+      - name: Walk the document against a kind cluster
+        if: vars.RELEASE_INSTALL_KIND == '1'
+        env:
+          CELLA_INSTALL_IMAGE: ${{ env.REGISTRY }}/${{ needs.build.outputs.owner }}/cellad:${{ github.ref_name }}
+          CELLA_INSTALL_MANIFESTS: deploy
+          CELLA_INSTALL_ISSUER: ${{ vars.RELEASE_INSTALL_ISSUER }}
+        run: |
+          cd work
+          bash ../checkout/tools/docs/run-blocks.sh ../checkout/docs/install.md
+      - name: The cluster's state, for a failed run
+        if: failure() && vars.RELEASE_INSTALL_KIND == '1'
+        run: kubectl -n cella get all; kubectl -n cella logs deploy/cellad --tail=200
+
+  # 6. From a clean runner with no checkout: every asset downloaded in one
+  # call, the checksums and their signature, the image's signature and
+  # attestations, the image's binary against the archive's, and the body
+  # against the CHANGELOG section at the tag.
+  release-verify:
+    name: verify the release from a clean runner
+    needs: [build, publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: read
+    env:
+      OWNER: ${{ needs.build.outputs.owner }}
+      GH_TOKEN: ${{ github.token }}
+      IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/release.yml@${{ github.ref }}
+      ISSUER: https://token.actions.githubusercontent.com
+    steps:
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Download every asset in one call
+        run: |
+          mkdir assets && cd assets
+          gh release download "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}"
+          ls -l
+          for os in linux darwin; do
+            for arch in amd64 arm64; do
+              test -f "cellad_${GITHUB_REF_NAME}_${os}_${arch}.tar.gz" \
+                || { echo "the release lacks cellad_${GITHUB_REF_NAME}_${os}_${arch}.tar.gz" >&2; exit 1; }
+            done
+          done
+          for name in "deploy-${GITHUB_REF_NAME}.tar.gz" checksums.txt checksums.txt.sigstore.json \
+                      sbom-module.spdx.json sbom-cellad.spdx.json; do
+            test -f "$name" || { echo "the release lacks ${name}" >&2; exit 1; }
+          done
+      - name: The checksums verify and their signature names this workflow
+        run: |
+          cd assets
+          cosign verify-blob --bundle checksums.txt.sigstore.json \
+            --certificate-identity "${IDENTITY}" --certificate-oidc-issuer "${ISSUER}" checksums.txt
+          sha256sum -c checksums.txt
+          # Four binary archives and the deploy archive.
+          [ "$(grep -c . checksums.txt)" -eq 5 ] || { echo "checksums.txt lists $(grep -c . checksums.txt) archives, want 5" >&2; exit 1; }
+      - name: The image verifies and its attestations answer
+        run: |
+          cosign verify --certificate-identity "${IDENTITY}" --certificate-oidc-issuer "${ISSUER}" \
+            "${REGISTRY}/${OWNER}/${IMAGE}:${GITHUB_REF_NAME}" > /dev/null
+          gh attestation verify "oci://${REGISTRY}/${OWNER}/${IMAGE}:${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}"
+      - name: The image carries the archive's binary
+        run: |
+          # The reference is a multi-arch index. Creating a container from
+          # it with --platform stores each platform under the index digest
+          # and refuses the second, so each platform's own manifest digest
+          # is resolved from the index and used directly.
+          platform() {
+            docker buildx imagetools inspect --raw "$1" | jq -r --arg a "$2" \
+              '.manifests[] | select(.platform.os == "linux" and .platform.architecture == $a) | .digest'
+          }
+          for arch in amd64 arm64; do
+            id=$(docker create "${REGISTRY}/${OWNER}/${IMAGE}@$(platform "${REGISTRY}/${OWNER}/${IMAGE}:${GITHUB_REF_NAME}" "$arch")")
+            docker cp "$id:/usr/local/bin/cellad" "cellad_image_${arch}"
+            docker rm "$id" >/dev/null
+            tar -xzOf "assets/cellad_${GITHUB_REF_NAME}_linux_${arch}.tar.gz" cellad > "cellad_archive_${arch}"
+            cmp "cellad_image_${arch}" "cellad_archive_${arch}" \
+              && echo "cellad linux/${arch}: the image and the archive carry the same bytes"
+          done
+      - name: The body is the CHANGELOG section for the tag
+        run: |
+          # One reading for both sides: carriage returns out, blank lines
+          # off both ends. `lateregate release` writes `## vX.Y.Z - date`
+          # followed by the blank line that stood under `## Unreleased`, so
+          # the extracted section opens blank, and the reader that wrote
+          # the body trims it. Trimming one side alone reads that blank
+          # line as a difference.
+          normalise() {
+            tr -d '\r' | sed -e '/./,$!d' | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}'
+          }
+          gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --json body --jq .body > body.md
+          gh api "repos/${GITHUB_REPOSITORY}/contents/CHANGELOG.md?ref=${GITHUB_REF_NAME}" \
+            -H 'Accept: application/vnd.github.raw+json' > CHANGELOG.md
+          awk -v tag="${GITHUB_REF_NAME}" '/^## /{p = ($2 == tag)} p' CHANGELOG.md | tail -n +2 | normalise > section.md
+          test -s section.md
+          if ! diff <(normalise < body.md) section.md; then
+            echo "the release body differs from the CHANGELOG section" >&2; exit 1
+          fi

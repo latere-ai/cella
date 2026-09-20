@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Latere AI
+# SPDX-License-Identifier: Apache-2.0
+#
+# Builds what a release carries, from one checkout (spec 014): cellad for
+# the four os/arch pairs the project supports, with the -ldflags of spec
+# 002 setting internal/version, and one archive each. The two Linux
+# binaries are also left unarchived under dist/, the very bytes the
+# archives carry, for Dockerfile.ci to copy, so the image and the archive
+# are one compilation:
+#
+#	tools/release/build.sh v0.2.0 [DIST]
+#
+# Every build is CGO_ENABLED=0 and -trimpath, so the bytes depend on the
+# source and the toolchain and on nothing else.
+#
+# The agent client of spec 011 has no package in this tree yet. When
+# cmd/cella lands it joins the loop below and the release carries its four
+# archives too.
+set -euo pipefail
+
+tag=${1:?usage: build.sh TAG [DIST]}
+dist=${2:-dist}
+module=$(go list -m)
+commit=$(git rev-parse --short HEAD 2>/dev/null || echo none)
+date=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+ldflags="-X $module/internal/version.Version=$tag -X $module/internal/version.Commit=$commit -X $module/internal/version.Date=$date"
+
+mkdir -p "$dist"
+for os in linux darwin; do
+  for arch in amd64 arm64; do
+    CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -trimpath -ldflags "$ldflags" -o "$dist/cellad" ./cmd/cellad
+    if [ "$os" = linux ]; then
+      cp "$dist/cellad" "$dist/cellad_linux_$arch"
+    fi
+    tar -C "$dist" -czf "$dist/cellad_${tag}_${os}_${arch}.tar.gz" cellad
+    rm "$dist/cellad"
+    echo "build: $dist/cellad_${tag}_${os}_${arch}.tar.gz"
+  done
+done

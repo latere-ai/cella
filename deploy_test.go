@@ -336,3 +336,7 @@ func TestNoCredentialIsSharedBetweenTwoVariables(t *testing.T) {
 		}
 	}
 }
+
+// unmarshalYAML reads a YAML document into a tree, which the workflow
+// tests share with the manifest tests.
+func unmarshalYAML(data []byte, o *object) error { return yaml.Unmarshal(data, o) }

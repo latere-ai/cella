@@ -1,0 +1,30 @@
+# SPDX-FileCopyrightText: 2026 Latere AI
+# SPDX-License-Identifier: Apache-2.0
+
+# The release image of spec 014: no build stage. The runtime stage is the
+# developer image's between the two markers, byte for byte, and this file's
+# own instructions are the COPY of the binary the release pipeline built,
+# checksummed, signed and attested, and the entry point. The image and the
+# archive therefore carry one compilation, which the release-verify job
+# proves by pulling the binary back out and comparing it byte for byte.
+#
+# dist/cellad_linux_${TARGETARCH} is the file buildx substitutes per
+# platform, so one
+#
+#	docker buildx build --platform linux/amd64,linux/arm64 -f Dockerfile.ci .
+#
+# produces one multi-arch index over the two binaries already measured.
+
+# >>> shared runtime base <<<
+# cellad forks no binary of its own, so the runtime stage is distroless:
+# CA roots for the OIDC issuers and webhooks it dials, nothing else. It runs
+# as the image's non-root user, with both listeners' ports exposed and the
+# data directory a volume.
+FROM gcr.io/distroless/static-debian12:nonroot
+VOLUME ["/var/lib/cella"]
+EXPOSE 8080 8081
+USER nonroot:nonroot
+# <<< shared runtime base >>>
+ARG TARGETARCH
+COPY dist/cellad_linux_${TARGETARCH} /usr/local/bin/cellad
+ENTRYPOINT ["/usr/local/bin/cellad"]

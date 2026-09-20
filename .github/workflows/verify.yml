@@ -50,3 +50,35 @@ jobs:
       - name: The image reports its version
         run: |
           docker run --rm cellad:candidate -version | grep -q '^cellad '
+
+  # The deploy tree of spec 014 on every push. kubectl is on the runner, so
+  # the render here is the same one the Go test runs where kubectl is
+  # present and skips where it is not, and this job is the run that always
+  # has it.
+  #
+  # Spec 014 also puts the walk of docs/install.md against a kind cluster
+  # in this job. It is not here yet: a `cellad serve` in a cluster verifies
+  # every caller against an OpenID Connect issuer, cellad ships none, and
+  # the stub issuer is spec 012's and is not built, so a Pod in a CI
+  # cluster has nothing to verify against and cannot become ready. The
+  # walk joins this job with that spec; the release pipeline's
+  # `install-release` says the same about the published artifacts.
+  install:
+    name: every deploy overlay renders
+    if: "!startsWith(github.ref, 'refs/tags/')"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      # The assertions over the rendered tree live in deploy_test.go, which
+      # skips where kubectl is absent. This step is what makes that skip
+      # impossible: the runner has kubectl, so a run that skipped these
+      # tests is a run that is not doing its job.
+      - run: kubectl version --client
+      - name: The base and every example render
+        run: |
+          go test -count=1 -v . 2>&1 | tee out.txt
+          ! grep -q -- '--- SKIP' out.txt
