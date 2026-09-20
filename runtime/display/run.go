@@ -120,8 +120,9 @@ func NewSession() string { return strings.ToLower(rand.Text()[:16]) }
 
 // Frames reads length-prefixed frames off one screen session and sends them
 // on a channel with room for one. A frame that finds the channel full is
-// dropped rather than queued, so a consumer that has fallen behind sees the
-// newest frame it can keep up with and never a backlog of old ones.
+// dropped rather than queued, which is the rule spec 023 states: a consumer
+// behind by one frame loses the frame that arrived while it was behind, and
+// the session never builds a backlog of frames nobody will look at.
 //
 // The channel closes when the stream ends, which is the session ending, the
 // sandbox stopping or the context being cancelled. end is the driver's own
