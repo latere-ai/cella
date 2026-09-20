@@ -77,6 +77,10 @@ type Registry struct {
 	mu     sync.Mutex
 	leases map[string]bool
 	pool   map[string]int
+	// gateways is the hub's connection count, attached after construction
+	// because the hub is built after the registry. Its family is registered
+	// on the first attachment and never again.
+	gateways func() int
 }
 
 // New builds the registry: every instrument of the table whose owning spec
@@ -183,6 +187,34 @@ func (r *Registry) gauges(o Options) {
 			})
 		}
 		return out
+	})
+}
+
+// WithGateways registers the gateway gauge after construction, for a control
+// plane whose hub is built after the registry. A second call replaces the
+// closure and publishes no second family: one family per name is what makes
+// the exposition parseable.
+func (r *Registry) WithGateways(connected func() int) {
+	if connected == nil {
+		return
+	}
+	r.mu.Lock()
+	first := r.gateways == nil
+	r.gateways = connected
+	r.mu.Unlock()
+	if !first {
+		return
+	}
+	connected = func() int {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		return r.gateways()
+	}
+	r.reg.Gauge("cella_gateways_connected", help["cella_gateways_connected"], func() []pkgmetrics.LabeledValue {
+		return []pkgmetrics.LabeledValue{{
+			Labels: map[string]string{"environment": r.environment},
+			Value:  float64(connected()),
+		}}
 	})
 }
 

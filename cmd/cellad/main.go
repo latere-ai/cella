@@ -33,6 +33,7 @@ import (
 	"latere.ai/x/cella/internal/config"
 	"latere.ai/x/cella/internal/egressd"
 	"latere.ai/x/cella/internal/events"
+	"latere.ai/x/cella/internal/metrics"
 	"latere.ai/x/cella/internal/store"
 	"latere.ai/x/cella/internal/store/memory"
 	"latere.ai/x/cella/internal/store/postgres"
@@ -112,6 +113,12 @@ func egressRole(ctx context.Context, args []string, getenv config.Getenv, stdout
 	if err != nil {
 		return fail(stderr, err)
 	}
+	// The gateway opens its two doors and one outbound stream and no
+	// listener of its own, so it serves no scrape surface: its spans, its
+	// logs and its process telemetry leave over OTLP, and its connection
+	// counts are the control plane's (spec 017).
+	tel := startTelemetry(ctx, "cellad-egress", stderr)
+	defer tel.shutdown()
 	gateway, err := egressd.New(ctx, egressd.Options{
 		URL: cfg.URL, Key: cfg.EnvironmentKey,
 		ProxyAddr: cfg.ProxyAddr, ReverseAddr: cfg.ReverseAddr,
@@ -120,8 +127,8 @@ func egressRole(ctx context.Context, args []string, getenv config.Getenv, stdout
 	if err != nil {
 		return fail(stderr, fmt.Errorf("egress: %w", err))
 	}
-	_, _ = fmt.Fprintf(stdout, "cellad: %s egress proxy=%s reverse=%s environment=%s control-plane=%s\n",
-		version.Version, gateway.ProxyAddr(), gateway.ReverseAddr(), gateway.Environment(), cfg.URL)
+	_, _ = fmt.Fprintf(stdout, "cellad: %s egress proxy=%s reverse=%s environment=%s control-plane=%s telemetry=%s\n",
+		version.Version, gateway.ProxyAddr(), gateway.ReverseAddr(), gateway.Environment(), cfg.URL, tel.mode)
 	if err = gateway.Run(ctx); err != nil {
 		return fail(stderr, err)
 	}
@@ -146,6 +153,11 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	if err != nil {
 		return fail(stderr, err)
 	}
+	// Telemetry comes up before anything else is built: a collaborator made
+	// earlier captures the slog default as it stands, and design 017's
+	// redaction is applied by replacing that default (spec 017).
+	tel := startTelemetry(ctx, "cellad", stderr)
+	defer tel.shutdown()
 	if err := os.MkdirAll(cfg.DataDir, 0o750); err != nil {
 		return fail(stderr, fmt.Errorf("CELLA_DATA_DIR: %w", err))
 	}
@@ -182,6 +194,40 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	// them as long as the tokens it minted live, which is the process.
 	revocations := store.NewRevocations(journal)
 
+	// The one registry of design 017. The pull gauges read an index that is
+	// already current: the controller's map of desired sandboxes, the hub's
+	// connection count, and the journal's backlog. Neither the controller
+	// nor the hub exists yet, so each closure reads a variable this function
+	// assigns below and the goroutines that serve a scrape are started after
+	// both, which is what orders the write before the read.
+	var control *controller.Controller
+	registry := metrics.New(metrics.Options{
+		Environment: cfg.DefaultEnvironment,
+		Driver:      string(cfg.Runtime),
+		Sandboxes: func() map[string]int {
+			if control == nil {
+				return nil
+			}
+			phases := make([]string, 0, 16)
+			for _, obj := range control.List() {
+				phases = append(phases, obj.Status.Phase)
+			}
+			return phaseCounts(phases)
+		},
+		Pending: func() int {
+			n, err := store.EventJournal(journal, delivery).Undelivered(ctx)
+			if err != nil {
+				tel.log.WarnContext(ctx, "the journal's backlog could not be read", "err", err)
+				return 0
+			}
+			return n
+		},
+	})
+	// The store measures itself where it is design 010's, which is the one
+	// that carries a transaction worth timing.
+	if bound, ok := desired.(*store.Controlled); ok {
+		bound.Measure(registry)
+	}
 	// Identity comes up before the listeners, so a deployment whose
 	// issuer or signing key is wrong fails to start rather than binding
 	// a port and refusing every request (spec 006).
@@ -201,6 +247,7 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	if err != nil {
 		return fail(stderr, err)
 	}
+	identity.Authorizer.Measure(registry)
 	// Every sandbox carries the identity spec 006 gives it: minted here at
 	// create, projected by the driver, re-minted before it expires and
 	// revoked with the sandbox.
@@ -225,16 +272,19 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		Environment: cfg.DefaultEnvironment,
 		AckTimeout:  cfg.Gateway.AckTimeout,
 		RecordsCap:  cfg.Gateway.RecordsCap,
+		Metrics:     registry,
 	})
+	registry.WithGateways(hub.Connected)
 	if _, transactional := desired.(*store.Controlled); !transactional {
 		controllerEvents = emitter
 	}
-	control, err := controller.Open(controller.Options{
+	control, err = controller.Open(controller.Options{
 		Store: desired, Driver: runtimeDriver, Environment: cfg.DefaultEnvironment,
 		Lease: lease, ReapInterval: cfg.ReapInterval, TouchInterval: cfg.TouchInterval,
 		LostGrace: cfg.LostGrace, Events: controllerEvents, Tokens: tokens,
 		Egress: hub, Gateway: controller.GatewayAddresses{Proxy: cfg.Gateway.ProxyAddr, Reverse: cfg.Gateway.ReverseAddr},
 		Pool: cfg.Scheduling.Pool, PoolInFlight: cfg.Scheduling.PoolInFlight, PoolGrace: cfg.Scheduling.PoolGrace,
+		Metrics: registry,
 	})
 	if err != nil {
 		return fail(stderr, fmt.Errorf("controller: %w", err))
@@ -261,7 +311,7 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	defer stopLoops()
 	// Stage 3 of every resolve: the operator's endpoint where one is
 	// configured, and the identity step where none is (spec 007).
-	admit, err := admissionStep(cfg)
+	admit, err := admissionStep(cfg, registry)
 	if err != nil {
 		return fail(stderr, err)
 	}
@@ -270,6 +320,7 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		MaxBodyBytes: cfg.MaxBodyBytes, MaxUploadBytes: cfg.MaxUploadBytes,
 		Egress: hub, Events: emitter,
 		Admit: admit, Defaults: manifest.Defaults{Image: cfg.Admission.DefaultImage},
+		Metrics: registry,
 	})
 	if err != nil {
 		return fail(stderr, fmt.Errorf("API: %w", err))
@@ -282,6 +333,7 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 			Journal: store.EventJournal(journal, store.Delivered), Lease: lease,
 			URL: cfg.Events.URL, Secrets: cfg.Events.Secrets,
 			Timeout: cfg.Events.Timeout, RetryWindow: cfg.Events.RetryWindow,
+			Metrics: registry,
 		})
 		if err != nil {
 			return fail(stderr, err)
@@ -326,6 +378,13 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		_, _ = fmt.Fprintln(w, version.String())
 	})
 
+	// Design 002's internal listener answers the probes and, from design
+	// 017, the scrape surface. It is the internal address alone: the numbers
+	// are the installation's and not a caller's.
+	internal := http.NewServeMux()
+	internal.Handle("GET /metrics", registry)
+	internal.Handle("/", probes)
+
 	var lc net.ListenConfig
 	publicLn, err := lc.Listen(ctx, "tcp", cfg.PublicAddr)
 	if err != nil {
@@ -336,13 +395,13 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		_ = publicLn.Close()
 		return fail(stderr, fmt.Errorf("CELLA_INTERNAL_ADDR: %w", err))
 	}
-	_, _ = fmt.Fprintf(stdout, "cellad: %s listening public=%s internal=%s runtime=%s issuers=%d authorizer=%s admission=%s %s\n",
+	_, _ = fmt.Fprintf(stdout, "cellad: %s listening public=%s internal=%s runtime=%s issuers=%d authorizer=%s admission=%s %s telemetry=%s\n",
 		version.Version, publicLn.Addr(), internalLn.Addr(), cfg.Runtime, len(cfg.OIDCIssuers), identity.Mode,
-		cfg.Admission.Mode(), recovery(cfg, control))
+		cfg.Admission.Mode(), recovery(cfg, control), tel.mode)
 
 	servers := []*http.Server{
 		{Handler: public, ReadHeaderTimeout: 10 * time.Second},
-		{Handler: probes, ReadHeaderTimeout: 10 * time.Second},
+		{Handler: internal, ReadHeaderTimeout: 10 * time.Second},
 	}
 	errc := make(chan error, len(servers))
 	for i, ln := range []net.Listener{publicLn, internalLn} {
@@ -411,17 +470,37 @@ func openRuntime(cfg config.Config) (runtime.Driver, func() error, error) {
 // nil, which the resolver reads as the identity: the core carries no policy
 // of its own. With it set, every apply is one call to that endpoint, which
 // fails closed and is never retried.
-func admissionStep(cfg config.Config) (manifest.AdmitFunc, error) {
+func admissionStep(cfg config.Config, registry *metrics.Registry) (manifest.AdmitFunc, error) {
 	if !cfg.Admission.Enabled() {
 		return nil, nil
 	}
 	client, err := admission.New(admission.Options{
 		URL: cfg.Admission.URL, Token: cfg.Admission.Token, Timeout: cfg.Admission.Timeout,
+		// Design 007's own seam is design 017's admission row: one call, its
+		// result and how long it took.
+		Observe: func(result string, seconds float64) {
+			registry.Decision(metrics.EndpointAdmission, admissionOutcome(result),
+				time.Duration(seconds*float64(time.Second)))
+		},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("admission: %w", err)
 	}
 	return client.Admit, nil
+}
+
+// admissionOutcome maps design 007's three results onto design 017's decision
+// vocabulary: a manifest came back, a policy refused, or the endpoint gave no
+// decision at all.
+func admissionOutcome(result string) string {
+	switch result {
+	case admission.ResultAllow:
+		return metrics.OutcomeAllow
+	case admission.ResultRefused:
+		return metrics.OutcomeDeny
+	default:
+		return metrics.OutcomeUnavailable
+	}
 }
 
 // openStore opens desired state: the Postgres of spec 010 where CELLA_DB_URL

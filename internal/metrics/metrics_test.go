@@ -342,3 +342,22 @@ func TestConcurrentRecordingIsSafe(t *testing.T) {
 		t.Errorf("the counter did not reach 400:\n%s", exposition(t, r))
 	}
 }
+
+// TestWithGatewaysPublishesOneFamily is the rule that makes the exposition
+// parseable: a name is one family however often the wiring attaches to it.
+func TestWithGatewaysPublishesOneFamily(t *testing.T) {
+	r := metrics.New(metrics.Options{Environment: "default"})
+	r.WithGateways(nil)
+	if strings.Contains(exposition(t, r), "cella_gateways_connected") {
+		t.Error("a nil closure published the gateway gauge")
+	}
+	r.WithGateways(func() int { return 1 })
+	r.WithGateways(func() int { return 4 })
+	out := exposition(t, r)
+	if n := strings.Count(out, "# TYPE cella_gateways_connected gauge"); n != 1 {
+		t.Errorf("the exposition carries %d gateway families, want one:\n%s", n, out)
+	}
+	if !series(t, r, `cella_gateways_connected{environment="default"} 4`) {
+		t.Errorf("the second attachment did not replace the first:\n%s", out)
+	}
+}
