@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -328,10 +329,10 @@ func TestStreamURL(t *testing.T) {
 // subprotocol rule: a control plane of another release refuses the upgrade or
 // answers another vocabulary, and either way the worker does not go on.
 func TestWorkerRefusesAControlPlaneThatDoesNotSpeakTheProtocol(t *testing.T) {
-	registered := 0
+	var registered atomic.Int64
 	mute := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/workers") {
-			registered++
+			registered.Add(1)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusCreated)
 			_, _ = w.Write([]byte(`{"worker":"wrk_1","environment":"env_a"}`))
@@ -350,13 +351,13 @@ func TestWorkerRefusesAControlPlaneThatDoesNotSpeakTheProtocol(t *testing.T) {
 	done := make(chan struct{})
 	go func() { defer close(done); _ = w.Run(ctx) }()
 	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) && registered < 2 {
+	for time.Now().Before(deadline) && registered.Load() < 2 {
 		time.Sleep(20 * time.Millisecond)
 	}
 	cancel()
 	<-done
-	if registered < 2 {
-		t.Errorf("the worker tried %d times against a control plane with no stream, want a retry", registered)
+	if tries := registered.Load(); tries < 2 {
+		t.Errorf("the worker tried %d times against a control plane with no stream, want a retry", tries)
 	}
 }
 
