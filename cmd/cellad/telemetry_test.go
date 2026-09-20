@@ -426,13 +426,14 @@ func TestEgressRoleServesNoScrapeSurface(t *testing.T) {
 	proxyAddr, reverseAddr := freePort(t), freePort(t)
 	plane := startPlane(t, proxyAddr, reverseAddr)
 
+	key := plane.environmentKey(t)
 	var out syncBuffer
 	ctx, cancel := context.WithCancel(t.Context())
 	codec := make(chan int, 1)
 	go func() {
 		codec <- run(ctx, []string{"egress"}, env(map[string]string{
 			"CELLA_URL":                 plane.url,
-			"CELLA_ENVIRONMENT_KEY":     plane.environmentKey(t),
+			"CELLA_ENVIRONMENT_KEY":     key,
 			"CELLA_EGRESS_PROXY_ADDR":   proxyAddr,
 			"CELLA_EGRESS_REVERSE_ADDR": reverseAddr,
 		}), &out, io.Discard)

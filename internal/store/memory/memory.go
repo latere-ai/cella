@@ -18,6 +18,7 @@ import (
 	"slices"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -107,6 +108,10 @@ type data struct {
 	// used is the spawn ledger of design 022: how many children each sandbox
 	// has created in total.
 	used map[string]int
+	// operations is the worker queue of design 021 and workers the
+	// registrations its phase is computed from, keyed environment/worker.
+	operations map[string]store.Operation
+	workers    map[string]store.Worker
 }
 
 type observedRow struct {
@@ -135,6 +140,9 @@ func newData() *data {
 		leases:   map[string]leaseRow{},
 		revoked:  map[string]time.Time{},
 		used:     map[string]int{},
+
+		operations: map[string]store.Operation{},
+		workers:    map[string]store.Worker{},
 	}
 }
 
@@ -164,6 +172,10 @@ func (d *data) clone() *data {
 	maps.Copy(n.leases, d.leases)
 	maps.Copy(n.revoked, d.revoked)
 	maps.Copy(n.used, d.used)
+	for k, v := range d.operations {
+		n.operations[k] = cloneOperation(v)
+	}
+	maps.Copy(n.workers, d.workers)
 	return n
 }
 
@@ -200,6 +212,7 @@ func (t *txn) Leases() store.Leases     { return leases{t.d} }
 
 func (t *txn) Revocations() store.Revocations { return revocations{t.d} }
 func (t *txn) Ledger() store.Ledger           { return ledger{t.d} }
+func (t *txn) Operations() store.Operations   { return operations{t.d} }
 
 type desired struct{ d *data }
 
@@ -761,4 +774,176 @@ func (x ledger) Forget(ctx context.Context, parentID string) error {
 	}
 	delete(x.d.used, parentID)
 	return nil
+}
+
+// operations is the worker queue of design 021 in memory: the rows a worker
+// claims from, and the registrations an environment's phase is computed from.
+type operations struct{ d *data }
+
+func (x operations) Enqueue(ctx context.Context, op store.Operation) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if op.ID == "" || op.Environment == "" || op.Type == "" {
+		return errors.New("store: an operation names an id, an environment and a type")
+	}
+	if _, held := x.d.operations[op.ID]; held {
+		return store.ErrVersionConflict
+	}
+	row := cloneOperation(op)
+	if row.State == "" {
+		row.State = store.OperationQueued
+	}
+	if row.CreatedAt.IsZero() {
+		row.CreatedAt = time.Now().UTC()
+	}
+	x.d.operations[op.ID] = row
+	return nil
+}
+
+func (x operations) Claim(ctx context.Context, environment, worker string, n int, lapsed time.Time) ([]store.Operation, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if environment == "" || worker == "" {
+		return nil, errors.New("store: a claim names an environment and a worker")
+	}
+	if n <= 0 {
+		return nil, nil
+	}
+	// The lease is read from the workers table, not from the row: a claim
+	// held by a worker still heartbeating is that worker's however old it
+	// is, and one held by a worker that went away is anybody's.
+	live := map[string]bool{}
+	for _, w := range x.d.workers {
+		if w.Environment == environment {
+			live[w.Worker] = !w.LastHeartbeat.Before(lapsed)
+		}
+	}
+	claimable := make([]store.Operation, 0, n)
+	for _, op := range x.d.operations {
+		switch {
+		case op.Environment != environment:
+		case op.State == store.OperationQueued:
+			claimable = append(claimable, op)
+		case op.State == store.OperationClaimed && op.ClaimedBy != worker && !live[op.ClaimedBy]:
+			claimable = append(claimable, op)
+		}
+	}
+	slices.SortFunc(claimable, func(a, b store.Operation) int {
+		if a.CreatedAt.Equal(b.CreatedAt) {
+			return strings.Compare(a.ID, b.ID)
+		}
+		return a.CreatedAt.Compare(b.CreatedAt)
+	})
+	if len(claimable) > n {
+		claimable = claimable[:n]
+	}
+	now := time.Now().UTC()
+	out := make([]store.Operation, 0, len(claimable))
+	for _, op := range claimable {
+		op.State, op.ClaimedBy, op.ClaimedAt = store.OperationClaimed, worker, now
+		op.Attempts++
+		x.d.operations[op.ID] = op
+		out = append(out, cloneOperation(op))
+	}
+	return out, nil
+}
+
+func (x operations) Acknowledge(ctx context.Context, opID string, result []byte) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	op, held := x.d.operations[opID]
+	if !held {
+		return store.ErrNotFound
+	}
+	if op.State == store.OperationDone {
+		return nil // the answer the caller was given stands
+	}
+	op.State, op.Result = store.OperationDone, slices.Clone(result)
+	x.d.operations[opID] = op
+	return nil
+}
+
+func (x operations) Get(ctx context.Context, opID string) (store.Operation, error) {
+	if err := ctx.Err(); err != nil {
+		return store.Operation{}, err
+	}
+	op, held := x.d.operations[opID]
+	if !held {
+		return store.Operation{}, store.ErrNotFound
+	}
+	return cloneOperation(op), nil
+}
+
+func (x operations) Register(ctx context.Context, w store.Worker) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if w.Environment == "" || w.Worker == "" {
+		return errors.New("store: a registration names an environment and a worker")
+	}
+	if w.LastHeartbeat.IsZero() {
+		w.LastHeartbeat = time.Now()
+	}
+	w.LastHeartbeat = w.LastHeartbeat.UTC()
+	x.d.workers[w.Environment+"/"+w.Worker] = w
+	return nil
+}
+
+func (x operations) Heartbeat(ctx context.Context, environment, worker string, at time.Time) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	key := environment + "/" + worker
+	w, held := x.d.workers[key]
+	if !held {
+		return store.ErrNotFound
+	}
+	w.LastHeartbeat = at.UTC()
+	x.d.workers[key] = w
+	return nil
+}
+
+func (x operations) Workers(ctx context.Context, environment string) ([]store.Worker, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	out := make([]store.Worker, 0, len(x.d.workers))
+	for _, w := range x.d.workers {
+		if w.Environment == environment {
+			out = append(out, w)
+		}
+	}
+	slices.SortFunc(out, func(a, b store.Worker) int { return strings.Compare(a.Worker, b.Worker) })
+	return out, nil
+}
+
+func (x operations) Forget(ctx context.Context, environment, worker string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	delete(x.d.workers, environment+"/"+worker)
+	return nil
+}
+
+func (x operations) Prune(ctx context.Context, before time.Time) (int, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	n := 0
+	for id, op := range x.d.operations {
+		if op.State == store.OperationDone && op.CreatedAt.Before(before) {
+			delete(x.d.operations, id)
+			n++
+		}
+	}
+	return n, nil
+}
+
+func cloneOperation(op store.Operation) store.Operation {
+	op.Payload = slices.Clone(op.Payload)
+	op.Result = slices.Clone(op.Result)
+	return op
 }

@@ -63,6 +63,9 @@ var cases = []struct {
 	{"Leases", leases},
 	{"Revocations", revocations},
 	{"Ledger", ledger},
+	{"Operations", operations},
+	{"Redelivery", redelivery},
+	{"Workers", workers},
 	{"Values", values},
 	{"Rewrap", rewrap},
 	{"Ready", ready},
@@ -1104,4 +1107,218 @@ func spawned(t TB, s store.Store, id string) int {
 		return err
 	})
 	return used
+}
+
+// operations: the worker queue of design 021. Enqueue, claim, acknowledge,
+// and the registrations an environment's phase is computed from.
+func operations(t TB, open Opener) {
+	ctx := context.Background()
+	s := opened(t, open, nil)
+	now := time.Now().UTC().Truncate(time.Second)
+	register(t, s, store.Worker{Environment: "env_a", Worker: "wrk_one", Replica: "r1", LastHeartbeat: now})
+
+	with(t, s, func(tx store.Tx) error {
+		for _, id := range []string{"op_1", "op_2", "op_3"} {
+			err := tx.Operations().Enqueue(ctx, store.Operation{
+				ID: id, Environment: "env_a", SandboxID: "sbx_1", Type: "Inspect",
+				Payload: []byte(`{"id":"sbx_1"}`), CreatedAt: now.Add(time.Duration(id[3]) * time.Millisecond),
+			})
+			if err != nil {
+				return err
+			}
+		}
+		// One row on another environment, which no claim of env_a takes.
+		return tx.Operations().Enqueue(ctx, store.Operation{ID: "op_9", Environment: "env_b", Type: "Inspect"})
+	})
+	fails(t, s, store.ErrVersionConflict, "an operation id already in the table", func(tx store.Tx) error {
+		return tx.Operations().Enqueue(ctx, store.Operation{ID: "op_1", Environment: "env_a", Type: "Inspect"})
+	})
+	refuses(t, s, "an operation with no type", func(tx store.Tx) error {
+		return tx.Operations().Enqueue(ctx, store.Operation{ID: "op_x", Environment: "env_a"})
+	})
+
+	claimed := claim(t, s, "env_a", "wrk_one", 2, now.Add(-time.Minute))
+	if len(claimed) != 2 || claimed[0].ID != "op_1" || claimed[1].ID != "op_2" {
+		t.Fatalf("the claim took %v, want the two oldest rows of the environment", operationIDs(claimed))
+	}
+	for _, op := range claimed {
+		if op.State != store.OperationClaimed || op.ClaimedBy != "wrk_one" || op.Attempts != 1 {
+			t.Errorf("a claimed row reads %s/%s at attempt %d, want claimed/wrk_one at 1", op.State, op.ClaimedBy, op.Attempts)
+		}
+		sameJSON(t, op.Payload, []byte(`{"id":"sbx_1"}`), "the claimed row's payload")
+	}
+	// A second claim by the same worker takes what is left and never its own
+	// rows again, however long it has held them.
+	again := claim(t, s, "env_a", "wrk_one", 10, now.Add(-time.Minute))
+	if len(again) != 1 || again[0].ID != "op_3" {
+		t.Errorf("the second claim took %v, want only the row nobody held", operationIDs(again))
+	}
+
+	with(t, s, func(tx store.Tx) error {
+		return tx.Operations().Acknowledge(ctx, "op_1", []byte(`{"ok":true}`))
+	})
+	done := operation(t, s, "op_1")
+	if done.State != store.OperationDone {
+		t.Errorf("the acknowledged row reads %s, want %s", done.State, store.OperationDone)
+	}
+	sameJSON(t, done.Result, []byte(`{"ok":true}`), "the acknowledged row's result")
+	// An acknowledgement that raced a redelivery never overwrites the answer
+	// the caller was already given.
+	with(t, s, func(tx store.Tx) error {
+		return tx.Operations().Acknowledge(ctx, "op_1", []byte(`{"ok":false}`))
+	})
+	sameJSON(t, operation(t, s, "op_1").Result, []byte(`{"ok":true}`),
+		"the result after a second acknowledgement")
+	fails(t, s, store.ErrNotFound, "acknowledging an operation nobody enqueued", func(tx store.Tx) error {
+		return tx.Operations().Acknowledge(ctx, "op_absent", nil)
+	})
+	fails(t, s, store.ErrNotFound, "reading an operation nobody enqueued", func(tx store.Tx) error {
+		_, err := tx.Operations().Get(ctx, "op_absent")
+		return err
+	})
+
+	swept := prune(t, s, now.Add(time.Hour))
+	if swept != 1 {
+		t.Errorf("the sweep dropped %d rows, want the one that was done", swept)
+	}
+	if left := claim(t, s, "env_a", "wrk_one", 10, now.Add(-time.Minute)); len(left) != 0 {
+		t.Errorf("the sweep left claimable rows behind: %v", operationIDs(left))
+	}
+}
+
+// redelivery: a claim held by a worker whose heartbeat lapsed goes to a live
+// worker, exactly once, which is what a dropped connection costs.
+func redelivery(t TB, open Opener) {
+	ctx := context.Background()
+	s := opened(t, open, nil)
+	now := time.Now().UTC().Truncate(time.Second)
+	register(t, s, store.Worker{Environment: "env_a", Worker: "wrk_gone", LastHeartbeat: now.Add(-time.Hour)})
+	register(t, s, store.Worker{Environment: "env_a", Worker: "wrk_live", LastHeartbeat: now})
+	with(t, s, func(tx store.Tx) error {
+		return tx.Operations().Enqueue(ctx, store.Operation{ID: "op_1", Environment: "env_a", Type: "Start", CreatedAt: now})
+	})
+
+	if got := claim(t, s, "env_a", "wrk_gone", 10, now.Add(-time.Minute)); len(got) != 1 {
+		t.Fatalf("the first worker claimed %d rows, want the one that was queued", len(got))
+	}
+	// While the first worker is inside its lease the row is its own.
+	if got := claim(t, s, "env_a", "wrk_live", 10, now.Add(-2*time.Hour)); len(got) != 0 {
+		t.Errorf("a live claim was redelivered: %v", operationIDs(got))
+	}
+	// Past the lease it is redelivered, once, with the attempt counted.
+	got := claim(t, s, "env_a", "wrk_live", 10, now.Add(-time.Minute))
+	if len(got) != 1 || got[0].ID != "op_1" {
+		t.Fatalf("the lapsed claim was not redelivered: %v", operationIDs(got))
+	}
+	if got[0].ClaimedBy != "wrk_live" || got[0].Attempts != 2 {
+		t.Errorf("the redelivered row reads %s at attempt %d, want wrk_live at 2", got[0].ClaimedBy, got[0].Attempts)
+	}
+	if twice := claim(t, s, "env_a", "wrk_gone", 10, now.Add(-time.Minute)); len(twice) != 0 {
+		t.Errorf("the row was delivered a second time to the worker that lost it: %v", operationIDs(twice))
+	}
+
+	// A worker the control plane forgot holds nothing: its rows are claimable
+	// at once rather than at the end of a lease it will never renew.
+	with(t, s, func(tx store.Tx) error { return tx.Operations().Forget(ctx, "env_a", "wrk_live") })
+	back := claim(t, s, "env_a", "wrk_gone", 10, now.Add(-time.Minute))
+	if len(back) != 1 {
+		t.Errorf("a forgotten worker's row was not claimable: %v", operationIDs(back))
+	}
+}
+
+// workers: registration, the heartbeat that renews it, and the read the
+// environment's phase is computed from.
+func workers(t TB, open Opener) {
+	ctx := context.Background()
+	s := opened(t, open, nil)
+	now := time.Now().UTC().Truncate(time.Second)
+	register(t, s, store.Worker{Environment: "env_a", Worker: "wrk_b", Replica: "r2", LastHeartbeat: now})
+	register(t, s, store.Worker{Environment: "env_a", Worker: "wrk_a", Replica: "r1", LastHeartbeat: now})
+	register(t, s, store.Worker{Environment: "env_b", Worker: "wrk_c", LastHeartbeat: now})
+
+	rows := workerRows(t, s, "env_a")
+	if len(rows) != 2 || rows[0].Worker != "wrk_a" || rows[1].Worker != "wrk_b" {
+		t.Fatalf("the environment's workers read %v, want wrk_a then wrk_b", rows)
+	}
+	if rows[0].Replica != "r1" || !rows[0].LastHeartbeat.Equal(now) {
+		t.Errorf("the registration reads replica %q at %s", rows[0].Replica, rows[0].LastHeartbeat)
+	}
+
+	later := now.Add(time.Minute)
+	with(t, s, func(tx store.Tx) error { return tx.Operations().Heartbeat(ctx, "env_a", "wrk_a", later) })
+	if got := workerRows(t, s, "env_a")[0]; !got.LastHeartbeat.Equal(later) {
+		t.Errorf("the heartbeat left the stamp at %s, want %s", got.LastHeartbeat, later)
+	}
+	// A registration replaces the row rather than adding one, so a worker
+	// that restarted under the same id is one row and not two.
+	register(t, s, store.Worker{Environment: "env_a", Worker: "wrk_a", Replica: "r3", LastHeartbeat: later})
+	if rows = workerRows(t, s, "env_a"); len(rows) != 2 || rows[0].Replica != "r3" {
+		t.Errorf("re-registering wrote %d rows with replica %q", len(rows), rows[0].Replica)
+	}
+	fails(t, s, store.ErrNotFound, "stamping a worker that never registered", func(tx store.Tx) error {
+		return tx.Operations().Heartbeat(ctx, "env_a", "wrk_absent", later)
+	})
+	refuses(t, s, "a registration that names no worker", func(tx store.Tx) error {
+		return tx.Operations().Register(ctx, store.Worker{Environment: "env_a"})
+	})
+	// Forgetting a worker nobody registered is not an error: a disconnect
+	// that races the sweep writes the same call twice.
+	with(t, s, func(tx store.Tx) error { return tx.Operations().Forget(ctx, "env_a", "wrk_absent") })
+}
+
+func register(t TB, s store.Store, w store.Worker) {
+	t.Helper()
+	with(t, s, func(tx store.Tx) error { return tx.Operations().Register(context.Background(), w) })
+}
+
+func claim(t TB, s store.Store, environment, worker string, n int, lapsed time.Time) []store.Operation {
+	t.Helper()
+	var out []store.Operation
+	with(t, s, func(tx store.Tx) error {
+		var err error
+		out, err = tx.Operations().Claim(context.Background(), environment, worker, n, lapsed)
+		return err
+	})
+	return out
+}
+
+func operation(t TB, s store.Store, id string) store.Operation {
+	t.Helper()
+	var out store.Operation
+	with(t, s, func(tx store.Tx) error {
+		var err error
+		out, err = tx.Operations().Get(context.Background(), id)
+		return err
+	})
+	return out
+}
+
+func workerRows(t TB, s store.Store, environment string) []store.Worker {
+	t.Helper()
+	var out []store.Worker
+	with(t, s, func(tx store.Tx) error {
+		var err error
+		out, err = tx.Operations().Workers(context.Background(), environment)
+		return err
+	})
+	return out
+}
+
+func prune(t TB, s store.Store, before time.Time) int {
+	t.Helper()
+	var n int
+	with(t, s, func(tx store.Tx) error {
+		var err error
+		n, err = tx.Operations().Prune(context.Background(), before)
+		return err
+	})
+	return n
+}
+
+func operationIDs(rows []store.Operation) []string {
+	out := make([]string, len(rows))
+	for i, op := range rows {
+		out[i] = op.ID
+	}
+	return out
 }

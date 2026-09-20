@@ -202,9 +202,10 @@ jobs:
   # `cellad` in one Pod, and the kind tier drives the whole lifecycle
   # through the API with a token from the stub issuer.
   #
-  # What still does not run: the API conformance suite of spec 015, which
-  # is not built. When it is, `TestContract` joins this job against the
-  # same stack, which is what spec 014'"'"'s diagram names.
+  # Then the API conformance suite of spec 015 against that stack, which is
+  # what spec 014'"'"'s diagram names: every case of the contract, from the
+  # images this tag published, with the gaps this server declares read from
+  # test/conformance/known.json.
   conformance:
     name: the candidate passes what is built
     needs: build
@@ -312,6 +313,15 @@ jobs:
           set -o pipefail
           go test -tags=e2e -count=1 -v -timeout 30m -run '^TestCluster' ./test/kind/... 2>&1 | tee /tmp/kind.log
           grep -q -- '--- PASS: TestClusterLifecycle' /tmp/kind.log
+      - name: The conformance suite against the published images
+        shell: bash
+        run: |
+          set -o pipefail
+          go test -tags=e2e -count=1 -v -timeout 30m -run '^TestContract$' ./test/conformance -args \
+            -url "${CELLA_TEST_URL}" -issuer http://localhost:30081 -sink "${CELLA_TEST_SINK}" \
+            -image docker.io/library/alpine:3.22 -capabilities files,pool \
+            -known test/conformance/known.json 2>&1 | tee /tmp/conformance.log
+          grep -q -- '--- PASS: TestContract' /tmp/conformance.log
       - name: The cluster's state, for a failed run
         if: failure()
         run: |

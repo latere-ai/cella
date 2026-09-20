@@ -6,6 +6,33 @@ refused before it is pushed.
 
 ## Unreleased
 
+- The API is now an executable contract. `test/conformance` runs one case per
+  rule the `/v1` API states against any server that claims to serve it, and
+  prints what held, what failed with the request and the answer that
+  disagreed, and what was skipped and why. Run it against an installation of
+  your own with `go test -tags=e2e -run '^TestContract$' ./test/conformance
+  -args -url <address> -token <bearer>`; it creates objects under a prefix of
+  its own, deletes the ids it made and nothing else, and leaves a server
+  carrying other work alone. A server that does not answer a case yet can
+  declare it, with the reason, and the run stays green while the report names
+  each declaration. Every push runs the suite against this server, and every
+  tag runs it against the images it published. `docs/conformance.md` is the
+  page for whoever runs it or writes a server of their own.
+- A self-hosted data plane. `cellad worker` runs beside your own sandboxes,
+  on your own engine or cluster, and connects outbound to a control plane
+  somebody else operates; nothing ever dials it, so it needs no inbound
+  port and no public address. It authenticates with an environment key,
+  which an administrator now mints through `POST
+  /v1/environments/{id}/keys` (shown once) and ends through `DELETE
+  /v1/environments/{id}/keys/{jti}`; the same key is what `cellad egress`
+  carries, so a gateway no longer needs one signed by hand. The worker
+  checks its own driver before it registers, declares what that driver
+  provides, and reconnects with a backoff when the connection drops,
+  keeping the sandboxes it is already running. The `Environment` kind
+  gains the full shape an operator declares, with a refusal per field, and
+  `/v1/environments` serves it. [Self-hosting a data plane](docs/workers.md)
+  is the walkthrough, with the Kubernetes manifest to apply.
+
 ## v0.2.1 - 2026-09-20
 
 - A mesh works on a rootless Podman engine. A sandbox in a mesh is created in
