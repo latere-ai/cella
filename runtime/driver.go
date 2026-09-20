@@ -121,8 +121,9 @@ type CreateSpec struct {
 	// sandbox and not the credential it was started with.
 	Token []byte `json:"-"`
 	// Prewarm makes a pool entry rather than a sandbox: no owner, no name,
-	// no token, no boundary, the image's own entrypoint and an empty
-	// workspace, stamped PoolLabel and Running. An Update carrying an
+	// no token, no boundary, an empty workspace, and whatever this driver
+	// runs for a sandbox that names no command, stamped PoolLabel and
+	// Running. An Update carrying an
 	// Adoption turns it into one caller's sandbox (spec 020). A driver that
 	// declares no Pool capability refuses it with ErrUnsupported.
 	Prewarm bool `json:"prewarm,omitempty"`
@@ -199,9 +200,9 @@ type Change struct {
 
 // CheckPrewarm refuses a create spec that asks for a pool entry and for one
 // caller's sandbox at once. An entry has no owner, no name, no identity and no
-// boundary until it is adopted, and it runs the image's own entrypoint, so a
-// spec that carries any of those is a caller's create with a flag set by
-// mistake rather than a prewarm.
+// boundary until it is adopted, and it runs what its driver runs for a sandbox
+// with no command, so a spec that carries any of those is a caller's create
+// with a flag set by mistake rather than a prewarm.
 func (s CreateSpec) CheckPrewarm() error {
 	if !s.Prewarm {
 		return nil
