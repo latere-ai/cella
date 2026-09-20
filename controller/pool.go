@@ -4,6 +4,7 @@
 package controller
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -116,20 +117,17 @@ func (c *Controller) Refill(ctx context.Context) (int, error) {
 	}
 	keep, drop := c.sortPool(entries, now)
 	target := c.poolTarget(live)
-	// The surplus is the oldest, so an entry that has been ready longest is
-	// the one a lowered size or a filling environment gives up.
-	if len(keep) > target {
-		drop = append(drop, keep[:len(keep)-target]...)
-		keep = keep[len(keep)-target:]
-	}
+	keep, drop = takeSurplus(keep, drop, target)
 	acted := 0
 	var failed error
+	shape := c.poolShape()
 	for _, entry := range drop {
 		if err := c.driver.Delete(ctx, entry.ID); err != nil && !errors.Is(err, driver.ErrNotFound) {
 			failed = errors.Join(failed, fmt.Errorf("pool: deleting the entry %s: %w", entry.ID, err))
 			continue
 		}
-		c.log.InfoContext(ctx, "the pool deleted an entry", "sandbox", entry.ID, "reason", poolDropReason(entry, c.poolShape(), now, c.poolGrace))
+		c.log.InfoContext(ctx, "the pool deleted an entry", "sandbox", entry.ID,
+			"reason", cmp.Or(poolDropReason(entry, shape, now, c.poolGrace), ReasonSurplus))
 		acted++
 	}
 	for range min(target-len(keep), c.poolInFlight) {
@@ -143,6 +141,30 @@ func (c *Controller) Refill(ctx context.Context) (int, error) {
 		acted++
 	}
 	return acted, failed
+}
+
+// takeSurplus moves the entries above the target out of the kept set, oldest
+// first and only ones that are ready.
+//
+// An entry that is still coming up is never the surplus. It is what the grace
+// protects, and a tick that gave it up would make and unmake an entry on
+// alternating ticks: the one that was just created is the youngest, and the
+// one the pool wants to give up is the one that has been waiting longest.
+func takeSurplus(keep, drop []driver.State, target int) ([]driver.State, []driver.State) {
+	surplus := len(keep) - target
+	if surplus <= 0 {
+		return keep, drop
+	}
+	kept := make([]driver.State, 0, len(keep))
+	for _, entry := range keep {
+		if surplus > 0 && entry.Phase == driver.Running {
+			drop = append(drop, entry)
+			surplus--
+			continue
+		}
+		kept = append(kept, entry)
+	}
+	return kept, drop
 }
 
 // poolTarget is how many entries this environment should hold: the declared
@@ -176,6 +198,14 @@ func (c *Controller) sortPool(entries []driver.State, now time.Time) (keep, drop
 	return keep, drop
 }
 
+// The reasons an entry leaves the pool, which the log line carries so an
+// operator reads why the pool gave one up rather than only that it did.
+const (
+	ReasonShapeDrift = "ShapeDrift"
+	ReasonNotRunning = "NotRunning"
+	ReasonSurplus    = "Surplus"
+)
+
 // poolDropReason says why an entry is no longer one the pool wants, or the
 // empty string for one it does. Drift and the orphan are one rule read two
 // ways: the shape changed under the entry, or the engine moved it out of
@@ -185,9 +215,9 @@ func poolDropReason(entry driver.State, shape string, now time.Time, grace time.
 	case now.Sub(entry.CreatedAt) < grace:
 		return ""
 	case entry.Labels[PoolShapeLabel] != shape:
-		return "ShapeDrift"
+		return ReasonShapeDrift
 	case entry.Phase != driver.Running:
-		return "NotRunning"
+		return ReasonNotRunning
 	}
 	return ""
 }
@@ -284,8 +314,9 @@ func (c *Controller) matchesPool(obj v1.Sandbox) bool {
 	case spec.Resources != c.pool.Resources:
 		return false
 	case len(spec.Command) > 0 || len(spec.Args) > 0:
-		// The entry is already running the image's entrypoint, and a
-		// process cannot be replaced under a container that is up.
+		// The entry is already running what the driver starts for a
+		// sandbox with no command, and a process cannot be replaced
+		// under a container that is up.
 		return false
 	case spec.User != "":
 		return false
@@ -345,6 +376,12 @@ func adoptionOf(obj v1.Sandbox, lifecycle driver.Lifecycle, boundary driver.Egre
 		Token:     []byte(token),
 		Egress:    boundary,
 	}
+}
+
+// without is the entries less the one an adoption lost, which is what the
+// create that follows may still take capacity from.
+func without(entries []driver.State, id string) []driver.State {
+	return slices.DeleteFunc(slices.Clone(entries), func(s driver.State) bool { return s.ID == id })
 }
 
 // adoptionLost reports whether the driver's answer to an adoption means the

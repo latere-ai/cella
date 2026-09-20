@@ -471,6 +471,34 @@ func TestPoolOrphans(t *testing.T) {
 	}
 }
 
+// TestPoolSurplusIsReadyFirst holds what the surplus is: the oldest entry that
+// is ready. One still coming up is what the grace protects, and a lowered size
+// that gave it up would make and unmake an entry on alternating ticks.
+func TestPoolSurplusIsReadyFirst(t *testing.T) {
+	c, d, _ := newPool(t, poolOptions(2))
+	if _, err := c.Refill(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	entries := d.entries()
+	// The oldest is the one still coming up, so the rule that takes the
+	// oldest and the rule that takes a ready one disagree, and the test says
+	// which holds.
+	coming, ready := entries[0].ID, entries[1].ID
+	d.set(func(f *fakeDriver) {
+		s := f.states[coming]
+		s.Phase = driver.Pending
+		f.states[coming] = s
+	})
+	c.pool.Size = 1
+	if _, err := c.Refill(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	_, deletes, _ := d.acted()
+	if !slices.Contains(deletes, ready) || slices.Contains(deletes, coming) {
+		t.Fatalf("the loop deleted %v, want the ready entry %s and not the one still coming up %s", deletes, ready, coming)
+	}
+}
+
 // TestReaperLeavesPoolEntries is the rule the two loops share: the deadline
 // rules are not asked of an entry at all, even one a driver stamped a deadline
 // on, because an entry's lifecycle is the refill loop's.

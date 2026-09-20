@@ -322,7 +322,7 @@ func (c *Controller) Create(ctx context.Context, obj v1.Sandbox, owner string, m
 	if entry != nil && err != nil && adoptionLost(err) {
 		c.log.InfoContext(ctx, "the pool entry could not be adopted; this create takes the slow path",
 			"entry", entry.ID, "err", err)
-		return c.createLocked(ctx, obj, owner, max, warnings, lifecycle, nil, nil)
+		return c.createLocked(ctx, obj, owner, max, warnings, lifecycle, without(entries, entry.ID), nil)
 	}
 	return out, err
 }
