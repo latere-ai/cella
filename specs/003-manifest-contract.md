@@ -37,7 +37,7 @@ nothing a workload does inside it later can widen that boundary.
 
 ## Current state
 
-A strict JSON Sandbox subset is implemented by [[026-direct-control-plane]]: metadata, the configured environment, and native execution fields. [[044-manifest-fields]] added `user`, `resources`, `workspace.path`, `lifecycle`, the full `metadata` and `env` rules, `status.expiresAt` and `status.warnings`, the quantity and duration parsers, and the staged `Resolve` with `Defaults`, `Ceilings`, `Limits`, `Admit`, `Existing` and `NewName`, over a `Lookup` that answers `Environment`. [[039-egress-gateway]] added `network.egress` with the host rule, the mode inference, the `narrow` rule a workload cannot widen, `status.conditions`, and the egress row of the capability check. [[046-secret-kind]] added `secrets[]` with its environment-key rules, `status.secrets`, `Lookup.Secret` and reference resolution, and the `Secret` kind's own decode, defaults and validation. YAML decoding, the volume, port, mesh, scheduling and display fields, `workspace.git`, the spawn boundary check, and the golden corpus remain to build.
+A strict JSON Sandbox subset is implemented by [[026-direct-control-plane]]: metadata, the configured environment, and native execution fields. [[044-manifest-fields]] added `user`, `resources`, `workspace.path`, `lifecycle`, the full `metadata` and `env` rules, `status.expiresAt` and `status.warnings`, the quantity and duration parsers, and the staged `Resolve` with `Defaults`, `Ceilings`, `Limits`, `Admit`, `Existing` and `NewName`, over a `Lookup` that answers `Environment`. [[039-egress-gateway]] added `network.egress` with the host rule, the mode inference, the `narrow` rule a workload cannot widen, `status.conditions`, and the egress row of the capability check. [[046-secret-kind]] added `secrets[]` with its environment-key rules, `status.secrets`, `Lookup.Secret` and reference resolution, and the `Secret` kind's own decode, defaults and validation. [[047-admission-client]] added the image rule that closes stage 3, `Defaults.Image`, `Actor.Issuer` and `.Sub`, and the `Claims`, `Workload` and `RequestID` an admission step reads. YAML decoding, the volume, port, mesh, scheduling and display fields, `workspace.git`, the spawn boundary check, and the golden corpus remain to build.
 
 Design provenance: The schema descends from a manifest that has served a
 hosted platform for months, with these changes: the platform's own
@@ -167,7 +167,7 @@ caller may narrow, only a non-workload actor may widen); `stopped`
 | Field | Type | Default | Mutable | Rule |
 |---|---|---|---|---|
 | `environment` | string | the environment `CELLA_DEFAULT_ENVIRONMENT` names ([[021-data-plane-workers]]) | no | the name of a registered `Environment` the caller may use; `Lookup.Environment` answers `not_found` otherwise |
-| `image` | string | none, required | no | an OCI reference: registry optional, repository, tag or digest optional; the driver resolves `latest`; on a `native` environment, a local root file system or a command |
+| `image` | string | `Defaults.Image`, from `CELLA_DEFAULT_IMAGE` | no | an OCI reference: registry optional, repository, tag or digest optional; the driver resolves `latest`. Required after stage 3 where the environment runs images and refused where it runs none, which closes stage 3 |
 | `command`, `args` | []string | the image's | no | `args` without `command` appends to the image's entrypoint |
 | `workdir` | string | `workspace.path` | no | absolute path |
 | `user` | string | the image's | no | a uid, `uid:gid`, or a name |
@@ -334,7 +334,17 @@ The stages, in order, each one total before the next begins:
    object to continue with or an error. It may change any field,
    including ones the caller set; it may not change `apiVersion`,
    `kind`, `status`, or `metadata.name` on update. Its output goes
-   through stage 1 again.
+   through stage 1 again. An error the step names a code on keeps that
+   code: `admission_refused` is a policy refusal and
+   `admission_unavailable` is no decision at all, and the two are never
+   folded together ([[007-admission]]).
+   Stage 3 closes with the image rule, which is why it is here and not
+   at stage 1: `spec.image` is required where the environment runs images
+   and refused where it runs none, and an image catalogue is exactly the
+   admission step that supplies one ([[007-admission]]). A manifest that
+   still names none after `Defaults.Image` and the admission step is
+   `missing_field`; one that names one on an environment of the `none`
+   isolation class is `capability_unsupported`.
 4. Reference resolution, through `Lookup`: the environment, every
    `Secret`, every `Volume`. Each mounted secret's hosts join the allow
    list. Two secrets scoping one host is `secret_host_conflict`. A
@@ -484,7 +494,9 @@ mapping and user sentences of the errors ([[008-api]]).
 | Every syntax rule in the field table has a refusing case: quantity, duration and `never`, RFC 3339, DNS-1123 names, port range and uniqueness, display ranges, OCI reference, absolute paths | `TestFieldSyntax`, table-driven | partial: `TestFieldSyntax`, `TestParseQuantity` and `TestParseDuration` over the fields that exist |
 | Every default in the table is applied and returned; a field the caller set is never overwritten; `mode` is inferred from hosts and secrets; an absent name comes from `NewName` | `TestDefaultsFillOnlyAbsentFields`, `TestModeInference`, `TestNameGeneration` | partial: `TestDefaultsFillOnlyAbsentFields`, `TestNameGeneration`, `TestModeInference` ([[039-egress-gateway]]) and `TestModeInferenceFromASecret` ([[046-secret-kind]]); the fields the later kinds add wait on them |
 | Each `exclusive_fields`, `path_conflict`, and `missing_field` case in the table is refused with the code | `TestExclusiveMissingAndPathConflicts` | partial: `TestEgressExclusiveFields` with [[039-egress-gateway]]; the path and missing-field cases wait on volumes |
-| An admission function's output is validated again; one that changes `kind` or `metadata.name` on update is `admission_refused` | `TestAdmissionOutputIsValidated` | built |
+| An admission function's output is validated again; one that changes `kind` or `metadata.name` on update is `admission_refused` | `TestAdmissionOutputIsValidated`, `TestReturnedManifestIsDecodedStrictly` | built |
+| An admission step's error keeps the code it named: a refusal is `admission_refused` and no decision is `admission_unavailable` | `TestAdmissionErrorsKeepTheirCode`, `TestAdmissionRefusalAndOutageAreTheirOwnAnswers` | built |
+| The image rule of stage 3: required where the environment runs images, refused where it runs none, `Defaults.Image` applied at stage 2 only where it is required | `TestImageIsRequiredAfterAdmission` | built |
 | Every mounted secret's hosts join the allow list; two secrets on one host are `secret_host_conflict`; a clone secret without the clone host, or with an `ssh://` URL, is `secret_out_of_scope`; companion names collide with `env` and other entries | `TestSecretReferences` | partial: `TestSecretReferences` and `TestTheMapCarriesTheValue` over the mounts, the conflict and the companion names ([[046-secret-kind]]); the join is the compiler's, and the clone secret waits on `workspace.git` |
 | `Lookup` returning not-found and refused both surface as `not_found`; unavailable surfaces as `authorizer_unavailable` | `TestLookupErrors` | partial: `TestLookupErrors` over `Environment`, the one reference the interface carries |
 | A `single` volume attached read-write elsewhere is `volume_busy`; a volume in another environment is `invalid_field` | `TestVolumeReferences` | not built |

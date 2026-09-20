@@ -22,7 +22,7 @@ author: changkun
 [[044-manifest-fields]] built stage 3 of `Resolve` and the `AdmitFunc`
 seam it calls. Nothing fills that seam: every `cellad` runs with
 `Options.Admit` nil, which is the identity, so an installation that wants
-an image catalog, a plan shape or a policy profile has no way to express
+an image catalogue, a plan shape or a policy profile has no way to express
 one. This slice of [[031-hosted-sandbox-consolidation]] builds the client
 half of [[007-admission]]'s webhook: one `POST` per `Sandbox` apply to
 `CELLA_ADMISSION_URL`, the mutated manifest back or a refusal, fail
@@ -35,7 +35,7 @@ what that endpoint reads rather than by what the Go type in
 the two disagreed.
 
 Two rules move with the client. `spec.image` becomes required after
-admission rather than before it, because a catalog that pins an alias is
+admission rather than before it, because a catalogue that pins an alias is
 exactly the thing that supplies one; and the per-subject count ceiling
 gets the single definition [[007-admission]] states, with the
 `authorizer` package's second definition withdrawn.
@@ -86,7 +86,7 @@ sequenceDiagram
     W-->>D: {allow, manifest, warnings}
     D->>D: decode the manifest strictly
     D-->>R: the object to continue with, warnings
-    R->>R: stage 1 again, image rule, stages 4 to 7
+    R->>R: stage 1 again, the image rule, stages 4 to 7
     R-->>A: Resolved
     A-->>C: 201, the mutated manifest
   else 200 allow false
@@ -182,8 +182,8 @@ returned and an endpoint cannot raise a value or open a boundary.
 
 `spec.image` is required by [[003-manifest-contract]]'s field table and
 was never checked, and where it had been checked, at stage 1, no endpoint
-could supply one. It becomes a step of its own between admission and
-reference resolution, keyed on the environment's isolation class:
+could supply one. It becomes the closing rule of stage 3,
+keyed on the environment's isolation class:
 
 | Environment isolation | `spec.image` absent | `spec.image` present |
 |---|---|---|
@@ -193,7 +193,7 @@ reference resolution, keyed on the environment's isolation class:
 The `none` row is the refusal [[026-direct-control-plane]] wrote after
 `Resolve` returned, moved inside it: an environment that runs no image
 neither requires one nor admits one. The other row is the required check,
-now after admission, so a catalog may supply the image and a manifest
+now after admission, so a catalogue may supply the image and a manifest
 that still names none after both the operator's default and the endpoint
 is `missing_field`.
 
@@ -212,7 +212,12 @@ unset and sets only `CELLA_MAX_*`: the endpoint supplies the defaults,
 and the ceilings stay the operator's own second check over whatever the
 endpoint returned. Every `CELLA_DEFAULT_*` is optional and
 `CELLA_DEFAULT_IMAGE` is added as one more. [[002-repository-scaffold]]'s
-table records the rule beside the variables.
+table records the rule beside the variables, and its six resource and
+lifecycle rows change from baked-in figures to `unset`: a figure stage 2
+applied whether or not an operator asked for it is a field the endpoint
+then cannot default, because an endpoint cannot tell a defaulted field
+from a written one. `manifest.Defaults` has always read an empty value as
+"leave the field absent"; the table now says the same.
 
 ### The count ceiling
 
