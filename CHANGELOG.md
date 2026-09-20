@@ -6,6 +6,21 @@ refused before it is pushed.
 
 ## Unreleased
 
+- An environment can keep sandboxes ready, so a create that matches one
+  starts in milliseconds instead of waiting for an image pull and a container
+  start. `CELLA_POOL_SIZE` with `CELLA_POOL_IMAGE`, `CELLA_POOL_CPU`,
+  `CELLA_POOL_MEMORY` and `CELLA_POOL_DISK` says how many to keep and what
+  shape they are; nothing is kept without them. The acceleration is
+  transparent: a manifest never asks for it and never refuses it, and a
+  sandbox that came from a prewarmed one is the caller's own in every respect,
+  with its own boundary, its own identity, its own labels and a creation time
+  of its own. `status.conditions[Scheduled]` reads `FromPool` where it
+  happened and `Placed` where the sandbox was created outright. A manifest
+  that names a command, a user, another image, other resources or a workspace
+  of its own is created outright, because none of those can be changed under a
+  container that is already running. `CELLA_SCHEDULING_MODE` accepts `direct`,
+  which is what this control plane does: a create starts now or fails.
+
 - A sandbox reaches the services it needs and holds none of their
   credentials. The new `Secret` kind at `/v1/secrets` takes a value, the hosts
   that value may be sent to, and where in a request it goes: a header, a query
