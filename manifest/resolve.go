@@ -479,11 +479,14 @@ func clone(obj *v1.Sandbox) v1.Sandbox {
 	out.Spec.Env = maps.Clone(obj.Spec.Env)
 	out.Spec.Network.Egress.AllowedHosts = slices.Clone(obj.Spec.Network.Egress.AllowedHosts)
 	out.Spec.Network.Egress.DeniedHosts = slices.Clone(obj.Spec.Network.Egress.DeniedHosts)
+	out.Spec.Secrets = slices.Clone(obj.Spec.Secrets)
 	out.Status.Conditions = slices.Clone(obj.Status.Conditions)
+	out.Status.Secrets.Mounted = slices.Clone(obj.Status.Secrets.Mounted)
+	out.Status.Secrets.NotInjectable = slices.Clone(obj.Status.Secrets.NotInjectable)
 	out.Status.Warnings = slices.Clone(obj.Status.Warnings)
 	if obj.Status.EgressState != nil {
 		state := *obj.Status.EgressState
-		state.Placeholders = maps.Clone(obj.Status.EgressState.Placeholders)
+		state.Secrets = slices.Clone(obj.Status.EgressState.Secrets)
 		out.Status.EgressState = &state
 	}
 	if obj.Status.ExitCode != nil {
