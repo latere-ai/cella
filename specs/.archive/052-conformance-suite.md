@@ -200,14 +200,15 @@ no server change.
 
 | Tier | What it runs against | Where |
 |---|---|---|
-| unit | an in-process node: `internal/auth`'s identity over the stub issuer and the stub authorizer, `internal/admission` over the stub admission endpoint, the events emitter over the stub sink, `internal/api` over the controller with the native driver | every push, untagged, in the gate |
+| unit | `cellad serve` in this process, over the native driver, with the stubs of [[012-test-stubs-and-tiers]] beside it: the issuer, the authorizer and the admission endpoint behind the suite's control route, and the sink. The test lives in `cmd/cellad`, where the serve entry point is, and reads the suite as a package | every push, untagged, in the gate |
 | make run | the development stack of [[049-stubs-and-tiers]], brought up by `tools/run/up.sh` | `test/run`, behind the `e2e` tag, in `verify.yml`'s `install` job |
 | kind | the stack of `deploy/examples/kind-stubs`, with tokens minted at the stub issuer's node port | `TestContract` in `verify.yml`'s `install` job |
 | release | the same stack from the published images | `release.yml`'s `conformance` job, before `publish` |
 
-The unit tier is what makes the suite a gate on this repository rather
-than a document: it runs on every push, against the components `cellad
-serve` wires, and it asserts that the declared gap list is exact.
+The unit tier is what makes the suite a gate on this repository rather than
+a document: it runs on every push, against the node `cellad serve` builds and
+not against a copy of its wiring, and it asserts that the declared gap list is
+exact in both directions.
 
 ## Not in this spec
 
@@ -313,7 +314,7 @@ run against the node.
 | A case run against a server that answers one field wrong is reported failed with the request and the response that disagreed | `TestAWrongServerIsReportedFailed` | passing |
 | A capability the environment does not declare is reported skipped with the capability named, and a case the configuration has no input for is reported skipped with the input named | `TestGroupsAndSkips` | passing |
 | A declared gap is reported apart from a failure and does not fail the run; a declared case that passes fails the run | `TestADeclaredGapIsNotAFailure` | passing |
-| A run against this repository's own server passes every case it does not declare, and the declaration is exact | `TestSuiteAgainstThisServer` | passing: 36 passed, 8 skipped, 7 declared, 0 failed against the in-process node |
+| A run against this repository's own server passes every case it does not declare, and the declaration is exact | `TestTheConformanceSuiteHoldsAgainstThisServer` in `cmd/cellad` | passing: 36 passed, 8 skipped, 7 declared, 0 failed against `cellad serve` in this process |
 | A run creates objects under its own prefix, deletes every id it made, and leaves the ids of a concurrent run alone | `TestRunCleansUp` | passing |
 | The report carries the version the server reports and the suite's own | `TestTheReportCarriesTheMarker` | passing |
 | `verify.yml` runs the suite against the development stack and against the kind stack, and `release.yml` runs it against the stack from the published images | `TestTheInstallJobWalksTheDocument`, `TestTheReleaseRunsTheStubsAndTheStack` | passing |
