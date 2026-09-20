@@ -136,6 +136,42 @@ func (r *socketReader) ended(t *testing.T) (string, int) {
 	return last, closed.Code
 }
 
+// endedOrTorn is ended for a connection the server may have torn instead of
+// closing: it reports whether a close frame arrived, and the code when one
+// did. A reset or an unexpected end of file is the torn case.
+func (r *socketReader) endedOrTorn(t *testing.T) (last string, code int, closed bool) {
+	t.Helper()
+	select {
+	case <-r.done:
+	case <-time.After(10 * time.Second):
+		t.Fatalf("the connection stayed open; it wrote %q and %v", r.text(), r.frames())
+	}
+	if frames := r.frames(); len(frames) > 0 {
+		last = frames[len(frames)-1]
+	}
+	var ce *websocket.CloseError
+	if errors.As(r.closeErr(), &ce) {
+		return last, ce.Code, true
+	}
+	if torn(r.closeErr()) {
+		return last, 0, false
+	}
+	t.Fatalf("the connection ended with %v, not a close frame", r.closeErr())
+	return "", 0, false
+}
+
+// torn reports an error a peer sees when the other side closed with data
+// still in flight: a reset, a broken pipe, or an end of file mid-frame.
+func torn(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE) {
+		return true
+	}
+	return strings.Contains(err.Error(), "connection reset") || strings.Contains(err.Error(), "broken pipe") || strings.Contains(err.Error(), "unexpected EOF")
+}
+
 func typeIn(t *testing.T, conn *websocket.Conn, line string) {
 	t.Helper()
 	if err := conn.WriteMessage(websocket.BinaryMessage, []byte(line+"\n")); err != nil {
@@ -288,11 +324,22 @@ func TestAttachBadFirstFrame(t *testing.T) {
 		}
 		defer func() { _ = conn.Close() }()
 		big := `{"command":["sh"],"env":{"BIG":"` + strings.Repeat("x", 70000) + `"}}`
+		// The server refuses the frame as soon as its length is read and
+		// closes the connection with the rest of it unread; the kernel then
+		// resets a peer still writing, so the refusal may reach this client
+		// as a close code or as a torn connection. Both are the refusal.
 		if err = conn.WriteMessage(websocket.TextMessage, []byte(big)); err != nil {
-			t.Fatal(err)
+			if !torn(err) {
+				t.Fatal(err)
+			}
+			return
 		}
-		if _, code := readSocket(conn).ended(t); code != websocket.CloseMessageTooBig {
-			t.Fatalf("the close code is %d, want %d", code, websocket.CloseMessageTooBig)
+		last, code, closed := readSocket(conn).endedOrTorn(t)
+		if !closed {
+			return
+		}
+		if code != websocket.CloseMessageTooBig {
+			t.Fatalf("the close code is %d (last frame %q), want %d", code, last, websocket.CloseMessageTooBig)
 		}
 	})
 }
