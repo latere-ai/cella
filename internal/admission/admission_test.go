@@ -377,6 +377,10 @@ func TestFailsClosedWithoutRetry(t *testing.T) {
 		name   string
 		answer func(http.ResponseWriter, []byte)
 		wrong  bool // the bearer the endpoint expects is not the one sent
+		// short runs the case at the smallest timeout the client accepts;
+		// only the case about the timeout itself needs it, every other one
+		// asks a question a slow machine must not turn into a timeout.
+		short bool
 	}{
 		{name: "a bad bearer", answer: fixed(http.StatusOK, `{"allow":true}`), wrong: true},
 		{name: "a rejected envelope", answer: fixed(http.StatusBadRequest, `{"code":"bad_request"}`)},
@@ -385,7 +389,7 @@ func TestFailsClosedWithoutRetry(t *testing.T) {
 		{name: "a body that is not JSON", answer: fixed(http.StatusOK, "not json")},
 		{name: "a body with no allow", answer: fixed(http.StatusOK, `{"manifest":null}`)},
 		{name: "an oversized body", answer: fixed(http.StatusOK, string(oversized))},
-		{name: "a timeout", answer: func(w http.ResponseWriter, _ []byte) {
+		{name: "a timeout", short: true, answer: func(w http.ResponseWriter, _ []byte) {
 			time.Sleep(200 * time.Millisecond)
 			_, _ = w.Write([]byte(`{"allow":true}`))
 		}},
@@ -396,7 +400,11 @@ func TestFailsClosedWithoutRetry(t *testing.T) {
 			if tc.wrong {
 				token = "another core's token"
 			}
-			c := client(t, e, Options{Token: token, Timeout: MinTimeout})
+			timeout := DefaultTimeout
+			if tc.short {
+				timeout = MinTimeout
+			}
+			c := client(t, e, Options{Token: token, Timeout: timeout})
 			_, _, err := c.Admit(t.Context(), sandbox(), admitRequest())
 			var known *manifest.Error
 			if !errors.As(err, &known) || known.Code != manifest.CodeAdmissionUnavailable {

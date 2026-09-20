@@ -439,9 +439,21 @@ func (e *Env) sandbox(ctx context.Context, c *client, mutate ...func(body map[st
 // deadline passes. It never sleeps for a state.
 func (e *Env) await(ctx context.Context, c *client, id string, phases ...string) (object, error) {
 	var last object
+	want := "phase " + strings.Join(phases, " or ") + " before the case's deadline"
 	for {
 		x, err := c.get(ctx, "/v1/sandboxes/"+id)
 		if err != nil {
+			// A deadline that cuts the read is the same fact as one that
+			// cuts the poll: the phase did not arrive in time. The report
+			// names the phase the case wanted and the last one it saw, not
+			// the transport's sentence.
+			if ctx.Err() != nil {
+				seen := "no answer read"
+				if last.Status.Phase != "" {
+					seen = "phase " + last.Status.Phase
+				}
+				return last, &Disagreement{Method: http.MethodGet, Path: "/v1/sandboxes/" + id, Want: want, Got: seen}
+			}
 			return last, err
 		}
 		if err := x.status(http.StatusOK); err != nil {
@@ -458,7 +470,7 @@ func (e *Env) await(ctx context.Context, c *client, id string, phases ...string)
 		}
 		select {
 		case <-ctx.Done():
-			return last, x.disagree("phase "+strings.Join(phases, " or ")+" before the case's deadline", "phase "+last.Status.Phase)
+			return last, x.disagree(want, "phase "+last.Status.Phase)
 		case <-time.After(pollInterval):
 		}
 	}
