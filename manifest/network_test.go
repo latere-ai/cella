@@ -20,7 +20,7 @@ func enforcing(name string) v1.Environment {
 	return env
 }
 
-func enforcingOptions() Options { return Options{Lookup: FixedEnvironment(enforcing("default"))} }
+func enforcingOptions() Options { return environmentOptions(enforcing("default")) }
 
 // withEgress is a manifest whose only interesting field is its boundary.
 func withEgress(e v1.Egress) v1.Sandbox {
@@ -203,7 +203,7 @@ func TestEgressCapability(t *testing.T) {
 	t.Run("aModeTheEnvironmentDoesNotEnforce", func(t *testing.T) {
 		env := container("default")
 		env.Status.Capabilities.Egress = []v1.EgressMode{v1.EgressNone, v1.EgressAllowlist}
-		o := Options{Lookup: FixedEnvironment(env)}
+		o := environmentOptions(env)
 		err := refusal(t, withEgress(v1.Egress{Mode: v1.EgressOpen, DeniedHosts: []string{"a.example.com"}}), o)
 		if err.Code != "capability_unsupported" || err.Path != pathEgressMode {
 			t.Fatalf("error = %+v, want capability_unsupported at the mode", err)

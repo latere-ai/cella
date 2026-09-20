@@ -1,6 +1,6 @@
 ---
 title: "Admission: AdmitFunc, defaults and ceilings, the admission webhook, the count ceiling"
-status: validated
+status: in-progress
 track: core
 depends_on:
   - specs/003-manifest-contract.md
@@ -8,7 +8,7 @@ depends_on:
 affects: [manifest/, internal/admission/, internal/api/, internal/config/, test/stubs/]
 effort: small
 created: 2026-09-12
-updated: 2026-09-12
+updated: 2026-09-20
 author: changkun
 ---
 
@@ -41,9 +41,11 @@ Declared in `manifest`, so an importer supplies its own and
 `internal/admission` supplies the one built from configuration:
 
 ```go
-// AdmitRequest is what an admission step knows beyond the manifest.
+// AdmitRequest is what an admission step knows beyond the manifest. It is
+// the in-process type and not the JSON shape: the wire flattens Actor into
+// three members and carries RequestID under request.
 type AdmitRequest struct {
-	Actor       Actor                 // 006's rendered subject and whether it is a workload
+	Actor       Actor                 // 006's rendered subject, its two halves, and whether it is a workload
 	Claims      map[string]any        // the caller's OIDC claims, verbatim
 	Workload    *v1.SandboxStatus     // the calling sandbox's status when Actor.Workload
 	Action      string                // "create" or "update"
@@ -86,7 +88,42 @@ carries no named policies: a platform expresses profiles through its
 webhook, keyed off the labels a manifest carries, so one mechanism
 serves every policy and the schema carries no field for it.
 
+Stage 2 runs before stage 3, and a webhook cannot tell a field the caller
+wrote from one stage 2 defaulted. A deployment whose policy lives in a
+webhook therefore leaves every `CELLA_DEFAULT_*` unset and sets only
+`CELLA_MAX_*`: the webhook supplies the defaults, and the ceilings stay
+the operator's own second check over whatever the webhook returned. Every
+`CELLA_DEFAULT_*` is optional, `CELLA_DEFAULT_IMAGE` included.
+
+### The image rule
+
+`spec.image` is required by [[003-manifest-contract]]'s field table, and
+the requirement is checked after stage 3 rather than at stage 1: an image
+catalogue is exactly the webhook that supplies one, and a check before
+admission would refuse the manifest the catalogue was going to complete.
+The rule is keyed on the environment's isolation class.
+
+| Environment isolation | `spec.image` absent | `spec.image` present |
+|---|---|---|
+| `none` | pass | `capability_unsupported` at `spec.image` |
+| anything else | `missing_field` at `spec.image` | pass |
+
+`CELLA_DEFAULT_IMAGE` is the operator's fallback, unset by default, with
+no value this project ships. It is applied at stage 2 where the
+environment runs images, so a deployment with no webhook can still serve a
+manifest that names none, and one whose environment runs none is
+unaffected by an operator who set it. A manifest that still names no
+image after the default and the webhook is `missing_field`.
+
 ### The webhook
+
+The body flattens `Actor` into `subject`, `issuer` and `sub`, and carries
+the request id under `request`. `workload`, `existing`, `parent` and `set`
+are present and `null` where they are absent, never omitted, so a webhook
+reads a fixed shape. `environment` is the summary below and not the whole
+`Environment` object, and `request` carries the id alone: the peer address
+and the user agent belong to the authorizer's envelope
+([[006-identity]]) and not to this one.
 
 ```
 POST {CELLA_ADMISSION_URL}
@@ -122,9 +159,12 @@ Response, 200:
 
 Rules:
 
-- The returned `manifest` replaces the input and goes through stage 1
-  again, so a webhook that returns an unknown field or a bad quantity
-  yields `invalid_field` naming the path, not a crash and not a pass.
+- The returned `manifest` replaces the input and is decoded the way a
+  caller's manifest is decoded, strictly, and then goes through stage 1
+  again. A webhook that returns an unknown field yields `unknown_field`
+  naming it and one that returns a bad quantity yields `invalid_field`
+  naming the path, each [[003-manifest-contract]]'s own code, and neither
+  a crash nor a pass.
 - The webhook may not change `apiVersion`, `kind`, `status`, or, on
   update, `metadata.name` or any field [[003-manifest-contract]] marks
   immutable: stage 5 compares the admission output against `existing`,
@@ -138,8 +178,9 @@ Rules:
   256 characters each, appended to the resolved manifest's. A response
   carries no `limits`; those are the authorizer's ([[006-identity]]).
   The response body is capped at 1 MiB.
-- `allow: false` is `admission_refused` with the `reason` as the
-  developer detail.
+- `allow: false` is `admission_refused` with the `reason` as the developer
+  detail, verbatim. The `reason` is a stable code, optionally followed by
+  a colon and a figure; the core neither parses it nor changes its case.
 - Everything that is not a parsed 200 with `allow` present is
   `admission_unavailable`, 503, and never a pass: connection refused, a
   TLS failure, a non-200 status, a body that does not parse, a body
@@ -187,15 +228,17 @@ so every rule above is drivable.
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| A nil `AdmitFunc` is the identity; `Defaults` and `Ceilings` apply with and without a webhook | `TestDefaultsAndCeilingsApplyRegardless` | not built |
+| A nil `AdmitFunc` is the identity; `Defaults` and `Ceilings` apply with and without a webhook | `TestDefaultsFillOnlyAbsentFields`, `TestCeilings` | partial: both apply with and without a step; the six `CELLA_DEFAULT_*` and four `CELLA_MAX_*` are loaded by nothing yet |
 | The environment's `defaultQueue` wins over `CELLA_DEFAULT_*`; a caller's value wins over both | `TestDefaultsPrecedence` | not built |
-| With no webhook, `Admit` returns its input unchanged | `TestBuiltInAdmitIsIdentity` | not built |
-| The webhook receives every field of the request shape, `workload` and `parent` set for a spawn, `set` for a replica | `TestAdmissionRequestShape` against the stub | not built |
-| The webhook's returned manifest is what the driver gets; an absent `manifest` leaves the input unchanged; warnings land in `status.warnings` | `TestWebhookOutputIsWhatRuns` | not built |
-| A webhook that returns an unknown field is `invalid_field`; one that changes `kind`, or `image` on update, is `admission_refused` naming the path; one that pins `image` at create passes | `TestWebhookOutputIsValidated` with `-fail-mode unknown-field`, `change-kind`, `-rewrite` | not built |
+| With no webhook, `Admit` returns its input unchanged | `TestAdmissionOutputIsValidated`, `TestServeWithoutAdmissionSaysBuiltin` | built |
+| The webhook receives every field of the request shape, `workload` and `parent` set for a spawn, `set` for a replica | `TestEnvelopeMatchesTheEndpoint`, `TestAdmitCarriesTheWorkloadAndTheExisting`, `TestCreatePassesTheCallerToAdmission` | partial: every member is sent and `workload` is set; `parent` and `set` wait on specs 022 and 020 |
+| The webhook's returned manifest is what the driver gets; an absent `manifest` leaves the input unchanged; warnings land in `status.warnings` | `TestAllowMutationReachesTheCaller`, `TestAllowWithoutAManifestLeavesTheInput`, `TestServeWithAdmission` | built |
+| A webhook that returns an unknown field is `unknown_field`; one that changes `kind`, or `image` on update, is refused naming the path; one that pins `image` at create passes | `TestReturnedManifestIsDecodedStrictly`, `TestAdmissionOutputIsValidated`, `TestImageIsRequiredAfterAdmission` | built |
 | A webhook that widens a child's boundary is `boundary_exceeded` | `TestAdmissionCannotOpenABoundary` | not built |
-| Each of the seven failure modes is `admission_unavailable` and never a pass; nothing is retried | `TestAdmissionFailsClosed`, table-driven over the stub's `-fail-mode` values | not built |
-| A non-loopback `http://` URL and a URL without a token are start-up failures | `TestAdmissionStartupRules` | not built |
-| A webhook cannot raise a value above `CELLA_MAX_*` | `TestCeilingsAreAFloorOnStrictness` | not built |
-| The count ceiling refuses the (n+1)th sandbox with `quota_exceeded`, counts `Queued` and `Stopped`, admits after a delete, and holds under two concurrent creates at the ceiling; a spawned child counts against the root's owner | `TestCountCeiling`, `TestCountCeilingIsAtomic`, `TestSpawnCountsAgainstTheRoot` | not built |
-| A set of eight replicas produces eight admission calls, each with its index | `TestSetReplicasAreAdmittedEach` | not built |
+| Each failure mode is `admission_unavailable` and never a pass; nothing is retried | `TestFailsClosedWithoutRetry`, `TestServeWithAdmission` | built |
+| A non-loopback `http://` URL and a URL without a token are start-up failures | `TestAdmissionStartupRules`, `TestServeRefusesAnEndpointWithoutABearer` | built |
+| A webhook cannot raise a value above `CELLA_MAX_*` | `TestCeilingsAreAFloorOnStrictness` | built at the resolver; the variables themselves are loaded by nothing yet |
+| The count ceiling refuses the (n+1)th sandbox with `quota_exceeded`, counts `Queued` and `Stopped`, admits after a delete, and holds under two concurrent creates at the ceiling; a spawned child counts against the root's owner | `TestCountCeilingCountsEveryDesiredSandbox` | partial: the count, the stopped sandbox and the delete are proven and the count is taken under the controller's own lock; the spawn row waits on spec 022 |
+| A set of eight replicas produces eight admission calls, each with its index | `TestSetReplicasAreAdmittedEach` | not built: waits on spec 020 |
+| An image is required after admission and not before: a webhook may supply one, `CELLA_DEFAULT_IMAGE` supplies one without a webhook, and a manifest with neither is `missing_field` | `TestImageIsRequiredAfterAdmission`, `TestDefaultImageReachesTheResolver` | built |
+| A policy refusal is a 200 with `allow: false` and reaches the caller as `admission_refused` carrying the webhook's code verbatim | `TestRefusalCarriesTheCode`, `TestAdmissionRefusalAndOutageAreTheirOwnAnswers` | built |

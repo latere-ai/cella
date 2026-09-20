@@ -189,11 +189,19 @@ deployment that sets one before its spec lands is not refused.
 | `CELLA_AUTHORIZER_TIMEOUT`, `CELLA_AUTHORIZER_CACHE` | 006 | `5s`, `60s` | one decision's deadline and how long an allow is cached per subject, action, and resource; the cache follows the answer's `ttl` bounded by this value, capped at `600s`, and a deny is held five seconds |
 | `CELLA_ENVIRONMENT_KEY_TTL` | 006 | `8760h` | the lifetime of an environment key from mint |
 | `CELLA_ADMIN_SUBJECTS` | 006 | unset | comma separated subjects the built-in owner policy lets act on every sandbox; read and unused when an authorizer is set |
-| `CELLA_ADMISSION_URL`, `CELLA_ADMISSION_TOKEN`, `CELLA_ADMISSION_TIMEOUT` | 007 | unset, unset, `3s` | the operator's admission endpoint, its bearer, and one call's deadline; the URL unset selects the built-in named policies; the URL without the token, or a non-loopback `http://` URL, is a start-up failure |
-| `CELLA_MAX_SANDBOXES_PER_SUBJECT` | 007 | `0` | the count ceiling per subject; `0` is none |
-| `CELLA_DEFAULT_CPU`, `CELLA_DEFAULT_MEMORY`, `CELLA_DEFAULT_DISK` | 007 | `1`, `2Gi`, `10Gi` | the resources a manifest gets when it names none |
-| `CELLA_DEFAULT_AUTOSTOP`, `CELLA_DEFAULT_TTL`, `CELLA_DEFAULT_AUTODELETE` | 007 | `15m`, `24h`, `72h` | the lifecycle a manifest gets when it names none |
+| `CELLA_ADMISSION_URL`, `CELLA_ADMISSION_TOKEN`, `CELLA_ADMISSION_TIMEOUT` | 007 | unset, unset, `3s` | the operator's admission endpoint, its bearer, and one call's deadline, between `100ms` and `30s`; the URL unset selects the built-in identity step; the URL without the token, or a non-loopback `http://` URL, is a start-up failure |
+| `CELLA_MAX_SANDBOXES_PER_SUBJECT` | 007 | `0` | the count ceiling per subject: every desired sandbox of the subject whose phase is not `Deleting`, a queued and a stopped one included; `0` is none |
+| `CELLA_DEFAULT_CPU`, `CELLA_DEFAULT_MEMORY`, `CELLA_DEFAULT_DISK` | 007 | unset | the resources a manifest gets when it names none |
+| `CELLA_DEFAULT_AUTOSTOP`, `CELLA_DEFAULT_TTL`, `CELLA_DEFAULT_AUTODELETE` | 007 | unset | the lifecycle a manifest gets when it names none |
+| `CELLA_DEFAULT_IMAGE` | 007 | unset | the image a manifest gets when it names none, where the environment runs images; an installation with an admission endpoint lets that endpoint supply it, and this project ships no value |
 | `CELLA_MAX_CPU`, `CELLA_MAX_MEMORY`, `CELLA_MAX_DISK`, `CELLA_MAX_TTL` | 007 | unset | ceilings a resolved manifest may not exceed; unset is no ceiling |
+
+Every `CELLA_DEFAULT_*` is optional. Stage 2 of a resolve runs before the
+admission step of 007 and that step cannot tell a field the caller wrote
+from one stage 2 defaulted, so a deployment whose policy lives in an
+admission endpoint leaves all seven unset and sets only the `CELLA_MAX_*`
+ceilings: the endpoint supplies the defaults, and the ceilings stay the
+operator's own second check over whatever the endpoint returned.
 | `CELLA_EVENTS_URL`, `CELLA_EVENTS_SECRET` | 009 | unset | the event sink and one or two comma-separated HMAC secrets; events are off when the URL is unset and the journal still holds them; the URL without a secret, a secret without the URL, or a non-loopback `http://` URL without `CELLA_EVENTS_INSECURE_SINK=1`, is a start-up failure |
 | `CELLA_EVENTS_TIMEOUT`, `CELLA_EVENTS_PORTS`, `CELLA_EVENTS_INSECURE_SINK` | 009 | `10s`, unset, unset | one delivery's deadline; `1` emits a `sandbox.port` event per proxied request; `1` admits an `http://` sink, set by the stubs only |
 | `CELLA_EVENTS_RETRY_WINDOW` | 009 | `24h` | how long a record the sink has not taken is retried before it is dropped and counted; at least `1m` |

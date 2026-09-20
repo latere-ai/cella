@@ -17,8 +17,10 @@ type Limits struct {
 	// RequestsPerMinute overrides CELLA_REQUESTS_PER_MINUTE for this
 	// subject (spec 008); 0 keeps the configured rate.
 	RequestsPerMinute int
-	// MaxSandboxes overrides CELLA_MAX_SANDBOXES_PER_SUBJECT, the live
-	// sandboxes one subject holds (spec 007); 0 is no ceiling.
+	// MaxSandboxes overrides CELLA_MAX_SANDBOXES_PER_SUBJECT, the count
+	// spec 007 defines: every desired sandbox of the subject whose phase
+	// is not Deleting, a queued and a stopped one included, because each
+	// holds a name and a workspace. 0 is no ceiling.
 	MaxSandboxes int
 	// MaxPriority caps scheduling.priority and reaches Resolve as the
 	// manifest's Limits.MaxPriority (spec 003, spec 020); 0 is no

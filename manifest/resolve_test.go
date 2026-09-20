@@ -27,7 +27,25 @@ func container(name string) v1.Environment {
 	return env
 }
 
-func containerOptions() Options { return Options{Lookup: FixedEnvironment(container("default"))} }
+// fixtureImage is what the container fixtures default spec.image to. An
+// environment that runs images requires one after admission, so a fixture
+// about another field carries the operator's default rather than repeating
+// the image in every manifest.
+const fixtureImage = "registry.example/base:1"
+
+func containerOptions() Options { return environmentOptions(container("default")) }
+
+// environmentOptions resolves against one environment, with the operator's
+// image default set: an environment that runs images requires one after
+// admission, so a fixture about another field takes the default rather than
+// naming an image in every manifest.
+func environmentOptions(env v1.Environment) Options {
+	o := Options{Lookup: FixedEnvironment(env)}
+	if env.Status.Isolation != v1.IsolationNone {
+		o.Defaults.Image = fixtureImage
+	}
+	return o
+}
 func nativeOptions() Options {
 	return Options{Lookup: FixedEnvironment(NativeEnvironment("default"))}
 }
@@ -54,7 +72,7 @@ func refusal(t *testing.T, obj v1.Sandbox, o Options) *Error {
 
 func TestDefaultsFillOnlyAbsentFields(t *testing.T) {
 	o := containerOptions()
-	o.Defaults = Defaults{CPU: "1", Memory: "2Gi", Disk: "10Gi", AutoStop: "15m", TTL: "24h", AutoDelete: "72h"}
+	o.Defaults = Defaults{CPU: "1", Memory: "2Gi", Disk: "10Gi", AutoStop: "15m", TTL: "24h", AutoDelete: "72h", Image: fixtureImage}
 	obj := sandbox()
 	obj.Spec.Resources.Memory = "8Gi"
 	obj.Spec.Lifecycle.TTL = "1h"
@@ -495,7 +513,7 @@ func TestStatusIsIgnoredOnApply(t *testing.T) {
 
 func TestResolveIsDeterministic(t *testing.T) {
 	o := containerOptions()
-	o.Defaults = Defaults{CPU: "1", Memory: "2Gi", Disk: "10Gi", AutoStop: "15m", TTL: "24h", AutoDelete: "72h"}
+	o.Defaults = Defaults{CPU: "1", Memory: "2Gi", Disk: "10Gi", AutoStop: "15m", TTL: "24h", AutoDelete: "72h", Image: fixtureImage}
 	o.NewName = func() string { return "brave-otter-1a2b" }
 	in := sandbox()
 	in.Metadata.Name = ""
@@ -596,5 +614,131 @@ func TestResolveNative(t *testing.T) {
 	obj.Spec.Command, obj.Spec.Args = []string{"sh"}, []string{"-c", "true"}
 	if _, err = ResolveNative(t.Context(), obj, "default"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestAdmissionRequestCarriesTheCaller: the admission step of spec 007 reads
+// the actor apart, the caller's claims verbatim, the calling sandbox when
+// there is one, and the request id the answer's failure is logged under.
+func TestAdmissionRequestCarriesTheCaller(t *testing.T) {
+	o := containerOptions()
+	o.Actor = Actor{Subject: "https://login.example.com|alice", Issuer: "https://login.example.com", Sub: "alice"}
+	o.Claims = map[string]any{"org_id": "org-one"}
+	o.Workload = &v1.SandboxStatus{ID: "sb_1", Phase: "Running"}
+	o.RequestID = "req_1"
+	var seen AdmitRequest
+	o.Admit = func(_ context.Context, in *v1.Sandbox, req AdmitRequest) (*v1.Sandbox, []string, error) {
+		seen = req
+		out := *in
+		return &out, nil, nil
+	}
+	resolve(t, sandbox(), o)
+	if seen.Actor != o.Actor || seen.RequestID != "req_1" || seen.Claims["org_id"] != "org-one" {
+		t.Fatalf("request = %+v", seen)
+	}
+	if seen.Workload == nil || seen.Workload.ID != "sb_1" {
+		t.Fatalf("workload = %+v, want the calling sandbox", seen.Workload)
+	}
+}
+
+// TestAdmissionErrorsKeepTheirCode: a step that could not reach its endpoint
+// answers admission_unavailable, not admission_refused. Folding the two would
+// tell a caller its request was declined when the server could not decide.
+func TestAdmissionErrorsKeepTheirCode(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		code string
+	}{
+		{"unavailable", &Error{Code: "admission_unavailable", Detail: "the endpoint refused the connection"}, "admission_unavailable"},
+		{"refused with a code", &Error{Code: "admission_refused", Detail: "ceiling_exceeded: spec.resources.cpu is 8, above the plan's 4"}, "admission_refused"},
+		{"an unknown field the endpoint wrote", &Error{Code: "unknown_field", Detail: "spec.nonesuch"}, "unknown_field"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			o := containerOptions()
+			o.Admit = func(context.Context, *v1.Sandbox, AdmitRequest) (*v1.Sandbox, []string, error) {
+				return nil, nil, tc.err
+			}
+			got := refusal(t, sandbox(), o)
+			if got.Code != tc.code {
+				t.Fatalf("code = %q, want %q", got.Code, tc.code)
+			}
+			if tc.code == "admission_refused" && !strings.HasPrefix(got.Detail, "ceiling_exceeded:") {
+				t.Fatalf("detail = %q, want the endpoint's code verbatim", got.Detail)
+			}
+		})
+	}
+}
+
+// TestImageIsRequiredAfterAdmission is the rule of spec 047: an environment
+// that runs images requires one, and the requirement is checked after the
+// admission step, so an image catalogue may supply it.
+func TestImageIsRequiredAfterAdmission(t *testing.T) {
+	bare := Options{Lookup: FixedEnvironment(container("default"))}
+	if got := refusal(t, sandbox(), bare); got.Code != "missing_field" || got.Path != "spec.image" {
+		t.Fatalf("got %q at %q, want missing_field at spec.image", got.Code, got.Path)
+	}
+	// The operator's default supplies it where no admission step does.
+	withDefault := bare
+	withDefault.Defaults.Image = fixtureImage
+	if got := resolve(t, sandbox(), withDefault).Sandbox; got.Spec.Image != fixtureImage {
+		t.Fatalf("image = %q, want the operator's default", got.Spec.Image)
+	}
+	// An admission step supplies it where the operator's default is unset,
+	// which is the image catalogue of spec 007.
+	catalogue := bare
+	catalogue.Admit = func(_ context.Context, in *v1.Sandbox, _ AdmitRequest) (*v1.Sandbox, []string, error) {
+		out := *in
+		if out.Spec.Image == "" {
+			out.Spec.Image = "registry.example/base@sha256:" + strings.Repeat("a", 64)
+		}
+		return &out, nil, nil
+	}
+	if got := resolve(t, sandbox(), catalogue).Sandbox; !strings.HasPrefix(got.Spec.Image, "registry.example/base@sha256:") {
+		t.Fatalf("image = %q, want the catalogue's pinned reference", got.Spec.Image)
+	}
+	// A caller's image wins over the operator's default, and an environment
+	// that runs none refuses one whoever named it.
+	obj := sandbox()
+	obj.Spec.Image = "registry.example/other:2"
+	if got := resolve(t, obj, withDefault).Sandbox; got.Spec.Image != "registry.example/other:2" {
+		t.Fatalf("image = %q, want the caller's", got.Spec.Image)
+	}
+	if got := refusal(t, obj, nativeOptions()); got.Code != "capability_unsupported" || got.Path != "spec.image" {
+		t.Fatalf("got %q at %q, want capability_unsupported at spec.image", got.Code, got.Path)
+	}
+	// The operator's default is not applied where the environment runs no
+	// image, so setting it does not refuse every manifest there.
+	native := nativeOptions()
+	native.Defaults.Image = fixtureImage
+	if got := resolve(t, sandbox(), native).Sandbox; got.Spec.Image != "" {
+		t.Fatalf("image = %q, want none on an environment that runs none", got.Spec.Image)
+	}
+	// An admission step that names an image on such an environment is
+	// refused as well: the driver would run a process and ignore it.
+	native.Admit = func(_ context.Context, in *v1.Sandbox, _ AdmitRequest) (*v1.Sandbox, []string, error) {
+		out := *in
+		out.Spec.Image = "registry.example/base:1"
+		return &out, nil, nil
+	}
+	if got := refusal(t, sandbox(), native); got.Code != "capability_unsupported" || got.Path != "spec.image" {
+		t.Fatalf("got %q at %q, want capability_unsupported at spec.image", got.Code, got.Path)
+	}
+}
+
+// TestCeilingsAreAFloorOnStrictness: stage 5 runs after admission, so an
+// endpoint that writes a figure above the operator's ceiling is refused by
+// the operator's own check and cannot raise one.
+func TestCeilingsAreAFloorOnStrictness(t *testing.T) {
+	o := containerOptions()
+	o.Ceilings = Ceilings{CPU: "4", TTL: "24h"}
+	o.Admit = func(_ context.Context, in *v1.Sandbox, _ AdmitRequest) (*v1.Sandbox, []string, error) {
+		out := *in
+		out.Spec.Resources.CPU = "8"
+		return &out, nil, nil
+	}
+	got := refusal(t, sandbox(), o)
+	if got.Code != "ceiling_exceeded" || got.Path != "spec.resources.cpu" {
+		t.Fatalf("got %q at %q, want ceiling_exceeded at spec.resources.cpu", got.Code, got.Path)
 	}
 }

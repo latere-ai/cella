@@ -22,10 +22,14 @@ const (
 	WarningUserNotApplied       = "The native environment runs the workload as the server's own user; spec.user is not applied."
 )
 
-// Actor is who is applying: the subject, and whether it is a sandbox acting
-// through its workload token.
+// Actor is who is applying: the rendered subject, its two halves, and whether
+// it is a sandbox acting through its workload token. Issuer and Sub are the
+// verified claims the subject was rendered from, carried apart because an
+// admission step reads them apart (spec 006, spec 007).
 type Actor struct {
 	Subject  string
+	Issuer   string
+	Sub      string
 	Workload bool
 }
 
@@ -54,6 +58,11 @@ var ErrNotFound = errors.New("object not found")
 type Defaults struct {
 	CPU, Memory, Disk         v1.Quantity
 	AutoStop, TTL, AutoDelete v1.Duration
+	// Image is the reference a manifest that names none takes, where the
+	// environment runs images. It is the fallback of an installation with
+	// no admission step; an installation with one lets that step supply
+	// the image instead, which is what an image catalog is (spec 007).
+	Image string
 }
 
 // Ceilings are the values a resolved field may not exceed. An empty value is
@@ -68,13 +77,26 @@ type Limits struct {
 	MaxPriority int
 }
 
-// AdmitRequest is what an admission step knows beyond the manifest. Claims,
-// Workload, Parent, Set and RequestID join it with the specs that carry them.
+// AdmitRequest is what an admission step knows beyond the manifest. Parent
+// and Set join it with the specs that carry them, the spawn of spec 022 and
+// the replicas of spec 020.
 type AdmitRequest struct {
-	Actor       Actor
-	Action      string // create or update
-	Existing    *v1.Sandbox
+	Actor Actor
+	// Claims are the caller's verified claims, verbatim. An admission step
+	// reads whichever its policy needs; the control plane reads none.
+	Claims map[string]any
+	// Workload is the calling sandbox's status when the actor is a
+	// workload, and nil otherwise. An admission step that will not grant a
+	// workload the authority of its owner needs to see that it is one.
+	Workload *v1.SandboxStatus
+	Action   string // create or update
+	Existing *v1.Sandbox
+	// Environment is the environment the manifest names, with the
+	// capabilities the driver serving it declared.
 	Environment *v1.Environment
+	// RequestID is spec 008's X-Request-Id, which ties a refusal at the
+	// admission step to the apply that drew it.
+	RequestID string
 }
 
 // AdmitFunc returns the object to continue with, warnings for status.warnings,
@@ -91,7 +113,13 @@ type Options struct {
 	Ceilings Ceilings
 	Limits   Limits
 	Admit    AdmitFunc
-	Existing *v1.Sandbox // the current object on update; nil on create
+	// Claims, Workload and RequestID are what the admission step of spec
+	// 007 knows beyond the manifest and the actor. They reach it through
+	// AdmitRequest and no other stage reads them.
+	Claims    map[string]any
+	Workload  *v1.SandboxStatus
+	RequestID string
+	Existing  *v1.Sandbox // the current object on update; nil on create
 	// Now is the clock a stage that computes a deadline reads. The spawn
 	// boundary check is its first reader.
 	Now     func() time.Time
@@ -111,9 +139,9 @@ type Resolved struct {
 // Resolve turns a decoded manifest into the fully defaulted, validated form
 // the data plane is asked for. The stages run in order, each total before the
 // next begins: structural validation, defaulting, admission and its
-// revalidation, reference resolution, semantic validation, and the capability
-// check. It never mutates its input and is deterministic: the same manifest,
-// options, and lookup answers produce byte-identical output.
+// revalidation, the image rule, reference resolution, semantic validation, and
+// the capability check. It never mutates its input and is deterministic: the
+// same manifest, options, and lookup answers produce byte-identical output.
 func Resolve(ctx context.Context, in *v1.Sandbox, o Options) (*Resolved, error) {
 	if in == nil {
 		return nil, errors.New("manifest: Resolve needs a manifest")
@@ -138,6 +166,9 @@ func Resolve(ctx context.Context, in *v1.Sandbox, o Options) (*Resolved, error) 
 	}
 	warnings, err := admit(ctx, &obj, env, o)
 	if err != nil {
+		return nil, err
+	}
+	if err = imageRule(&obj, env); err != nil {
 		return nil, err
 	}
 	secrets, err := references(ctx, &obj, o)
@@ -179,6 +210,13 @@ func defaulting(ctx context.Context, obj *v1.Sandbox, o Options) (*v1.Environmen
 		if *field.value == "" {
 			*field.value = defaultDuration(field.path, o.Defaults)
 		}
+	}
+	// The image default is the operator's fallback for an installation with
+	// no admission step, and it is read only where the environment runs an
+	// image at all: one that runs none refuses the field, so defaulting it
+	// there would refuse every manifest.
+	if obj.Spec.Image == "" && runsImages(env) {
+		obj.Spec.Image = o.Defaults.Image
 	}
 	if obj.Spec.Workspace.Path == "" {
 		obj.Spec.Workspace.Path = DefaultWorkspacePath
@@ -230,8 +268,20 @@ func admit(ctx context.Context, obj *v1.Sandbox, env *v1.Environment, o Options)
 		action = "update"
 	}
 	in := clone(obj)
-	out, warnings, err := o.Admit(ctx, &in, AdmitRequest{Actor: o.Actor, Action: action, Existing: o.Existing, Environment: env})
+	out, warnings, err := o.Admit(ctx, &in, AdmitRequest{
+		Actor: o.Actor, Claims: o.Claims, Workload: o.Workload, Action: action,
+		Existing: o.Existing, Environment: env, RequestID: o.RequestID,
+	})
 	if err != nil {
+		// A step that named a code named it for a reason: a refusal, an
+		// endpoint that could not be reached, a returned manifest the
+		// schema refuses. Folding all three into admission_refused would
+		// tell a caller its request was declined when the server could
+		// not decide at all.
+		var known *Error
+		if errors.As(err, &known) {
+			return nil, known
+		}
 		return nil, fail("admission_refused", upperFirst(err.Error()))
 	}
 	if out == nil {
@@ -250,6 +300,29 @@ func admit(ctx context.Context, obj *v1.Sandbox, env *v1.Environment, o Options)
 	}
 	*obj = next
 	return slices.Clone(warnings), nil
+}
+
+// runsImages reports whether the environment runs an image at all. An
+// environment that confines nothing runs a host process, which no image
+// describes.
+func runsImages(env *v1.Environment) bool { return env.Status.Isolation != v1.IsolationNone }
+
+// imageRule holds spec.image to what the environment can do with it. It runs
+// after admission, not at stage 1, because an image catalog is exactly the
+// admission step that supplies one: a manifest that names no image is refused
+// once the operator's default and the admission step have both had their turn,
+// and not before.
+func imageRule(obj *v1.Sandbox, env *v1.Environment) error {
+	if !runsImages(env) {
+		if obj.Spec.Image != "" {
+			return failAt("capability_unsupported", "spec.image", "Native environments do not run images.")
+		}
+		return nil
+	}
+	if obj.Spec.Image == "" {
+		return failAt("missing_field", "spec.image", "The sandbox names no image, and this server supplies none.")
+	}
+	return nil
 }
 
 // semantic runs the rules that need the defaulted object: the operator's
@@ -506,9 +579,6 @@ func ResolveNativeWith(ctx context.Context, obj v1.Sandbox, o Options) (v1.Sandb
 		return obj, nil, err
 	}
 	out := resolved.Sandbox
-	if out.Spec.Image != "" {
-		return obj, nil, failAt("capability_unsupported", "spec.image", "Native environments do not run images.")
-	}
 	if len(out.Spec.Command) == 0 && len(out.Spec.Args) > 0 {
 		return obj, nil, failAt("invalid_field", "spec.args", "Arguments need a command on a native environment.")
 	}

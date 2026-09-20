@@ -53,7 +53,7 @@ later.
 | [004](004-runtime-contract.md) | Runtime contract: the Driver interface, optional interfaces, isolation classes, capabilities, the six drivers, conformance | large | in-progress | 001, 003 |
 | [005](005-lifecycle-controller.md) | Lifecycle controller: desired to observed, the phase machine, create and update, the reaper, recovery, cascade | large | in-progress | 003, 004 |
 | [006](006-identity.md) | Identity: OIDC issuers, workload and environment tokens, the authorizer webhook, the owner policy | medium | in-progress | 001, 002 |
-| [007](007-admission.md) | Admission: AdmitFunc, defaults and ceilings, the admission webhook, the count ceiling | small | validated | 003, 006 |
+| [007](007-admission.md) | Admission: AdmitFunc, defaults and ceilings, the admission webhook, the count ceiling | small | in-progress | 003, 006 |
 | [008](008-api.md) | API: the /v1 kinds, addressing and concurrency, streams, the error table, OpenAPI | large | in-progress | 003, 005, 006, 007, 010 |
 | [009](009-events.md) | Events: one signed record per mutation and operation, typed, ordered per object, to the operator's sink | small | validated | 005, 006, 010 |
 | [010](010-state.md) | State: desired and observed, the store contract, transactions, secret values, the journal, queues and operations, optional Postgres | large | in-progress | 003, 004, 005 |
@@ -274,3 +274,4 @@ The map, the order, and the rule for a slice are in 031.
 | [045-workload-tokens.md](.archive/045-workload-tokens.md) | complete | The workload token minted at create, projected by every driver, rotated at two thirds of its life, revoked by jti |
 | [046-secret-kind.md](.archive/046-secret-kind.md) | complete | The Secret kind, its stored value, and the substitution that value reaches a sandbox's request by |
 | [048-release-and-check.md](.archive/048-release-and-check.md) | complete | The v* tag pipeline, the deploy tree an operator installs from, the install walk, and `cellad check` |
+| [047-admission-client.md](.archive/047-admission-client.md) | complete | The admission webhook client over `CELLA_ADMISSION_URL`, the image rule that closes stage 3, and the count ceiling's one definition |
