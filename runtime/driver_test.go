@@ -5,6 +5,7 @@ package runtime_test
 
 import (
 	"errors"
+	"regexp"
 	"testing"
 
 	runtime "latere.ai/x/cella/runtime"
@@ -116,6 +117,47 @@ func TestEgressIsZero(t *testing.T) {
 	} {
 		if e.IsZero() {
 			t.Fatalf("%+v reads as the zero boundary", e)
+		}
+	}
+}
+
+// TestMeshObjectName holds the name a driver derives from a mesh id to the
+// label syntax every substrate names objects by: lowercase letters, digits
+// and dashes, starting and ending with an alphanumeric.
+func TestMeshObjectName(t *testing.T) {
+	label := regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
+	for _, tc := range []struct{ id, want string }{
+		{"msh_01j9zk2p7q8r9s0t1u2v3w4x5y", "mesh-01j9zk2p7q8r9s0t1u2v3w4x5y"},
+		{"msh_01J9ZK2P", "mesh-01j9zk2p"},
+		{"plain", "mesh-plain"},
+	} {
+		got := runtime.MeshObjectName(tc.id)
+		if got != tc.want {
+			t.Errorf("MeshObjectName(%q) = %q, want %q", tc.id, got, tc.want)
+		}
+		if len(got) > 63 || !label.MatchString(got) {
+			t.Errorf("MeshObjectName(%q) = %q, which is no DNS label", tc.id, got)
+		}
+	}
+}
+
+// TestFilterSelectsTheTree: the two stamped fields of spec 022 narrow a list
+// the way every other field of the filter does.
+func TestFilterSelectsTheTree(t *testing.T) {
+	member := runtime.State{ID: "a", MeshID: "msh_1", Parent: "sbx_root"}
+	for _, tc := range []struct {
+		name   string
+		filter runtime.Filter
+		want   bool
+	}{
+		{"its own mesh", runtime.Filter{MeshID: "msh_1"}, true},
+		{"another mesh", runtime.Filter{MeshID: "msh_2"}, false},
+		{"its own parent", runtime.Filter{Parent: "sbx_root"}, true},
+		{"another parent", runtime.Filter{Parent: "sbx_other"}, false},
+		{"neither named", runtime.Filter{}, true},
+	} {
+		if got := tc.filter.Selects(member); got != tc.want {
+			t.Errorf("%s: Selects = %v, want %v", tc.name, got, tc.want)
 		}
 	}
 }

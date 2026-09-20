@@ -317,3 +317,13 @@ func TestListSkipsADirectoryWithoutARecord(t *testing.T) {
 		t.Fatalf("List = %d states, want none", len(states))
 	}
 }
+
+// TestNativeDeclaresNoMesh: the native environment confines nothing and gives
+// peers no way to reach each other, so it declares no Mesh and a manifest
+// that asks for one is refused at resolve rather than recorded here.
+func TestNativeDeclaresNoMesh(t *testing.T) {
+	d, _ := fresh(t)
+	if d.Capabilities().Mesh {
+		t.Error("the native driver declares Mesh")
+	}
+}

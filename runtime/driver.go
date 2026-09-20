@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strings"
 	"time"
 
 	v1 "latere.ai/x/cella/manifest/v1"
@@ -115,6 +116,13 @@ type CreateSpec struct {
 	Resources                       Resources
 	Workspace                       Workspace
 	Egress                          Egress
+	// Mesh is the mesh this sandbox is a member of, and Parent the sandbox
+	// that spawned it (spec 022). A driver that declares the Mesh capability
+	// puts a member on the mesh's own network and gives it a name its peers
+	// resolve; one that declares none records neither and runs the sandbox
+	// as it runs any other.
+	Mesh   Mesh
+	Parent string
 	// Token is the workload token the driver projects at TokenPath, empty
 	// for a control plane that mints none. It is never serialized: a driver
 	// that keeps the create spec beside the sandbox keeps the shape of the
@@ -127,6 +135,25 @@ type CreateSpec struct {
 	// Adoption turns it into one caller's sandbox (spec 020). A driver that
 	// declares no Pool capability refuses it with ErrUnsupported.
 	Prewarm bool `json:"prewarm,omitempty"`
+}
+
+// Mesh is one mesh as a driver receives it: the control plane's id for it,
+// empty for a sandbox in none. The driver derives every object name it makes
+// from that id, so two drivers asked for one mesh name one thing.
+type Mesh struct {
+	ID string `json:"id,omitempty"`
+}
+
+// MeshObjectName is the name a driver gives the network, the policy or the
+// service it makes for one mesh. A mesh id carries a prefix separator and is
+// no DNS-1123 label; this is, so an object named from it is accepted by every
+// substrate that names objects that way.
+func MeshObjectName(meshID string) string {
+	_, id, found := strings.Cut(meshID, "_")
+	if !found {
+		id = meshID
+	}
+	return "mesh-" + strings.ToLower(id)
 }
 
 // Adoption is what one pool entry becomes: the half of a sandbox the match
@@ -175,10 +202,18 @@ type State struct {
 	// Pool reports a prewarmed entry: a sandbox the control plane made for
 	// nobody, which no caller owns until it is adopted (spec 020).
 	Pool bool `json:"pool,omitempty"`
+	// MeshID is the mesh this sandbox is a member of and Parent the sandbox
+	// that spawned it, both as the driver stamped them at create (spec 022).
+	MeshID string `json:"meshID,omitempty"`
+	Parent string `json:"parent,omitempty"`
 }
 type Filter struct {
 	Owner, Phase string
 	IDs          []string
+	// MeshID selects the members of one mesh and Parent the children of one
+	// sandbox. Both read the stamped identity, so a substrate answers them
+	// without reading every object.
+	MeshID, Parent string
 	// Pool selects prewarmed entries when true and sandboxes a caller owns
 	// when false. Nil is every sandbox of the environment, entries included,
 	// which is what the reaper's list reads.
@@ -237,6 +272,10 @@ func (f Filter) Selects(s State) bool {
 	case f.Phase != "" && s.Phase != f.Phase:
 		return false
 	case f.Pool != nil && s.Pool != *f.Pool:
+		return false
+	case f.MeshID != "" && s.MeshID != f.MeshID:
+		return false
+	case f.Parent != "" && s.Parent != f.Parent:
 		return false
 	case len(f.IDs) > 0 && !slices.Contains(f.IDs, s.ID):
 		return false

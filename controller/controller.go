@@ -488,6 +488,8 @@ func specOf(obj v1.Sandbox, lifecycle driver.Lifecycle, boundary driver.Egress, 
 		Workspace: driver.Workspace{Path: obj.Spec.Workspace.Path},
 		Lifecycle: lifecycle,
 		Egress:    boundary,
+		Mesh:      driver.Mesh{ID: obj.Status.Mesh},
+		Parent:    obj.Status.Parent,
 		Token:     []byte(token),
 	}
 }
