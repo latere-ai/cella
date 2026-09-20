@@ -61,9 +61,11 @@ type FileStore interface {
 	// Stat describes one file or directory.
 	Stat(ctx context.Context, id, path string) (FileInfo, error)
 
-	// List returns the immediate entries of a directory, sorted by name. A
-	// path that is not a directory is ErrInvalid.
-	List(ctx context.Context, id, path string) ([]FileInfo, error)
+	// ReadDir returns the immediate entries of a directory, sorted by name.
+	// A path that is not a directory is ErrInvalid. It is not called List
+	// because Driver.List is the substrate's own listing and one type
+	// implements both.
+	ReadDir(ctx context.Context, id, path string) ([]FileInfo, error)
 
 	// Open streams one file and describes it. The caller closes the reader,
 	// which ends the transfer wherever it is.

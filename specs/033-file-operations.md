@@ -84,7 +84,7 @@ type WriteRequest struct {
 // Capabilities.Files.
 type FileStore interface {
 	Stat(ctx context.Context, id, path string) (FileInfo, error)
-	List(ctx context.Context, id, path string) ([]FileInfo, error)
+	ReadDir(ctx context.Context, id, path string) ([]FileInfo, error)
 	Open(ctx context.Context, id, path string) (io.ReadCloser, FileInfo, error)
 	Write(ctx context.Context, id string, req WriteRequest) (int64, error)
 	Mkdir(ctx context.Context, id, path string) error
@@ -93,8 +93,10 @@ type FileStore interface {
 }
 ```
 
-Every path is absolute and inside the workspace. `List` returns the
-immediate entries of a directory sorted by name. `Open` hands back a
+Every path is absolute and inside the workspace. `ReadDir` returns the
+immediate entries of a directory sorted by name; it is not `List`,
+because `Driver.List` is the substrate's own listing and one type
+implements both interfaces. `Open` hands back a
 stream the caller closes and the entry it describes. `Write` returns the
 bytes written. `Mkdir` creates the missing parents. `Remove` deletes a
 file or a directory tree. `Move` renames to the exact destination and
