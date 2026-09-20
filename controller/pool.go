@@ -78,6 +78,7 @@ func (c *Controller) RunPool(ctx context.Context) {
 func (c *Controller) poolTick(ctx context.Context) {
 	lease := PoolLease(c.environment)
 	held, err := c.lease.Acquire(ctx, lease, LeaseTTL)
+	c.metrics.LeaseHeld(MetricLeasePool, err == nil && held)
 	if err != nil {
 		c.log.WarnContext(ctx, "pool lease unavailable", "lease", lease, "err", err)
 		return
@@ -118,6 +119,7 @@ func (c *Controller) Refill(ctx context.Context) (int, error) {
 	keep, drop := c.sortPool(entries, now)
 	target := c.poolTarget(live)
 	keep, drop = takeSurplus(keep, drop, target)
+	c.metrics.PoolSize(readyFilling(keep))
 	acted := 0
 	var failed error
 	shape := c.poolShape()

@@ -127,6 +127,7 @@ func (c *Controller) graceLocked(ctx context.Context, obj v1.Sandbox, now time.T
 	}
 	c.log.InfoContext(ctx, "reaper ended a lost sandbox", "sandbox", id, "reason", ReasonLost,
 		"grace", c.lostGrace)
+	c.metrics.ReaperAction(ReasonLost, ActionDeleted)
 	return true, c.deleteLocked(ctx, id, ReasonLost)
 }
 
@@ -155,6 +156,7 @@ func (c *Controller) recoverLocked(ctx context.Context, obj v1.Sandbox, now time
 		obj.Status.Phase = PhaseFailed
 		obj.Status.Reason = ReasonRecoveryExhausted
 		c.log.WarnContext(ctx, "recovery exhausted", "sandbox", id, "attempts", c.recoveryAttempts)
+		c.metrics.RecoveryAttempt(MetricExhausted)
 		delete(c.retry, id)
 		delete(c.attempts, id)
 		delete(c.lost, id)
@@ -216,6 +218,7 @@ func (c *Controller) recoverLocked(ctx context.Context, obj v1.Sandbox, now time
 	delete(c.lost, id)
 	obj, err = c.refresh(ctx, obj)
 	c.log.InfoContext(ctx, "recovered a lost sandbox", "sandbox", id, "attempt", attempt, "phase", obj.Status.Phase)
+	c.metrics.RecoveryAttempt(MetricRecovered)
 	return true, errors.Join(err, c.persist(ctx, obj, MutationRecovered), c.revokeToken(ctx, previous))
 }
 
