@@ -52,7 +52,7 @@ ones without a default before you start.
 ```sh
 # The release you are installing, and where you unpacked its deploy
 # archive, a path relative to this directory.
-export CELLA_INSTALL_IMAGE="${CELLA_INSTALL_IMAGE:?set CELLA_INSTALL_IMAGE to the release's image, ghcr.io/<owner>/cellad:<tag>}"
+export CELLA_INSTALL_IMAGE="${CELLA_INSTALL_IMAGE:?set CELLA_INSTALL_IMAGE to the image of the release, ghcr.io/<owner>/cellad:<tag>}"
 export CELLA_INSTALL_MANIFESTS="${CELLA_INSTALL_MANIFESTS:-deploy}"
 # The overlay to apply, a directory under the deploy tree. The default is
 # the laptop cluster this walk describes; an installation that keeps an
@@ -61,9 +61,9 @@ export CELLA_INSTALL_OVERLAY="${CELLA_INSTALL_OVERLAY:-examples/kind}"
 # Your issuer, and a token from it with the audience cella. The subject
 # that token renders to, <issuer>|<sub>, is the administrator of this
 # installation under the built-in owner policy.
-export CELLA_INSTALL_ISSUER="${CELLA_INSTALL_ISSUER:?set CELLA_INSTALL_ISSUER to your OpenID Connect issuer's URL}"
+export CELLA_INSTALL_ISSUER="${CELLA_INSTALL_ISSUER:?set CELLA_INSTALL_ISSUER to the URL of your OpenID Connect issuer}"
 export CELLA_INSTALL_TOKEN="${CELLA_INSTALL_TOKEN:?set CELLA_INSTALL_TOKEN to a token from that issuer with the audience cella}"
-export CELLA_INSTALL_ADMIN="${CELLA_INSTALL_ADMIN:?set CELLA_INSTALL_ADMIN to that token's subject, <issuer>|<sub>}"
+export CELLA_INSTALL_ADMIN="${CELLA_INSTALL_ADMIN:?set CELLA_INSTALL_ADMIN to the subject of that token, <issuer>|<sub>}"
 # The namespace everything lands in, and the address the control plane is
 # reachable at from this machine.
 export CELLA_INSTALL_NAMESPACE="${CELLA_INSTALL_NAMESPACE:-cella}"
