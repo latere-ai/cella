@@ -337,7 +337,7 @@ func (c *Controller) createLocked(ctx context.Context, obj v1.Sandbox, owner str
 	// on a container driver, which cannot be renamed, so carrying it forward
 	// is what makes the boundary's principal, the token's subject and the
 	// driver's stamped identity name one thing.
-	id := ""
+	var id string
 	if entry != nil {
 		id = entry.ID
 	} else {

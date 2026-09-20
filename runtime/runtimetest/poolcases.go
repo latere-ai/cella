@@ -24,14 +24,12 @@ func prewarm(t tb, d runtime.Driver, opts Options, id string, labels map[string]
 	return waitPhase(t, d, id, runtime.Running)
 }
 
-// pooled reports whether the driver declares the capability, skipping the case
-// with the contract's sentence where it does not.
+// pooled reports whether the driver declares the capability. A case reads it
+// to choose between the contract it holds a declaring driver to and the
+// refusal it holds every other one to.
 func pooled(t tb, d runtime.Driver) bool {
 	t.Helper()
-	if d.Capabilities().Pool {
-		return true
-	}
-	return false
+	return d.Capabilities().Pool
 }
 
 // prewarmIsNotOwned holds the shape of an entry: nobody's sandbox until it is
