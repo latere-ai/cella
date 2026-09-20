@@ -403,3 +403,9 @@ condition.
    sandbox stopping. The bound exists because a container engine cannot end
    an exec session it started; a close reason that names it would need a
    frame the design does not have.
+8. [[023-computer-use-operations]] fixes which frame a consumer behind by one
+   loses: the newest, so what it reads on resuming is the frame it was
+   already behind on and the stream then leaps forward. Replacing the stale
+   frame with the newest is the behaviour a live viewer wants, and it is a
+   different sentence in that spec rather than a defect here, so this slice
+   implements what the spec says.
