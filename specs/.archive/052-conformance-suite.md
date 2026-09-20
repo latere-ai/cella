@@ -232,8 +232,9 @@ and what the environment declares, with `Execute` free of `testing` and
 | the development stack, `TestRunConformance` behind the `e2e` tag | 32 passed, 0 failed, 12 skipped, 7 declared gaps, 14 seconds |
 | the kind stack, `TestContract` in `verify.yml`'s install job and in `release.yml`'s conformance job | the first pipeline run reports it; the command and the capability set the k8s driver declares are wired |
 
-Coverage of `test/conformance` is 90.4% of statements, from its own tests and
-from the run against the node. `go test -race` is green; the hermetic and
+Coverage of `test/conformance` is 90.5% of statements (1287 of 1422), from
+its own tests and from the run against the node; the whole bar is green, 16
+gates. `go test -race` is green; the hermetic and
 tempdir gates are clean: every run binds loopback, keeps its state under a
 temporary directory, and stops the development stack's process group.
 
