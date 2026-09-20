@@ -270,4 +270,4 @@ The map, the order, and the rule for a slice are in 031.
 | [042-events.md](.archive/042-events.md) | complete | Signed event records per mutation and operation, the journal's delivery half, the operator's sink |
 | [044-manifest-fields.md](.archive/044-manifest-fields.md) | complete | Resource, user, workspace and lifecycle manifest fields with the staged resolver |
 | [036-k8s-driver.md](.archive/036-k8s-driver.md) | complete | Kubernetes driver: a claim and a Pod per sandbox, the baseline, exec, logs, archives, identity on the objects |
-| [046-secret-kind.md](046-secret-kind.md) | in-progress | The Secret kind, its stored value, and the substitution that value reaches a sandbox's request by |
+| [046-secret-kind.md](.archive/046-secret-kind.md) | complete | The Secret kind, its stored value, and the substitution that value reaches a sandbox's request by |

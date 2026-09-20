@@ -1,6 +1,6 @@
 ---
 title: "The Secret kind: its scope, its stored value, and the substitution that value reaches a sandbox's request by"
-status: in-progress
+status: complete
 track: core
 depends_on:
   - specs/018-egress-and-secrets.md
@@ -344,3 +344,129 @@ for the kind (the platform's slice 61). The k8s NetworkPolicy
 | `/v1/secrets` serves create, read, list, update and delete under the `secret.*` actions, scoped to the actor, with `spec.value` absent from every answer and the error table's codes and sentences | `TestSecretRoutes`, `TestErrorTable` | open |
 | The canary: one `cellad serve`, one `cellad egress`, one native sandbox with one mounted secret; the value appears in no environment, no file under the data directory, no journal row, no record and no log line of either process, while a request through the proxy door to the in-scope upstream carries it | `TestSecretValuesNeverEnterASandbox` | open |
 | No file this slice adds names a Latere host, image, pool or namespace outside an example | `TestNoLatereCoordinates` | open |
+
+## Outcome
+
+A sandbox holds no credential. What its environment carries is an opaque
+token; the value lives encrypted in the store, is decrypted once per compile
+and travels in the map the environment's gateways hold, and the gateway
+swaps the token for it on the way out toward a host the secret's own owner
+named. Sent anywhere else, the token leaves verbatim.
+
+What landed, by package:
+
+| Package | What it holds now |
+|---|---|
+| `manifest/v1` | `Secret` with `spec.kind`, `scope`, `inject`, `oauth` and the write-only `value`, and `status.id/owner/version/createdAt/updatedAt/mountedBy`; `SandboxSpec.Secrets`, `SandboxStatus.Secrets`, and `EgressState.Secrets []MountedSecret` |
+| `manifest` | `DecodeSecret`, `ResolveSecret` with every rule of the table, `StripSecretValue`, `CompanionEnv`, `Lookup.Secret` with `WithSecrets` and `NativeOptions`, stage 4 over `spec.secrets[]`, the secrets row of the mode inference, and the mounts half of the narrowing rule |
+| `egress` | `SecretView` and `Entry` carry `Kind`, `Value` and `OAuth`; the package documentation says what that means for a `Map` |
+| `internal/store` | the `Secret` collection (`LoadSecrets`, `WriteSecret`, `RemoveSecret`), `OpenValue`, `Values.Rewrap` on both adapters and in the suite, and an `Envelope` whose key one rotation replaces for every copy |
+| `internal/events` | `secret.created`, `.updated` and `.deleted` with `{version, hosts}`, `OfSecret`, `Emitter.EmitSecret`, and the mounted names on `sandbox.created` |
+| `controller` | the `Secrets` seam and the kind's create, read, list, update and delete; `secretViews` and `bindMount`; `boundary` out of `compileEgress`; the placeholder projection through `specOf`; the re-push sweep on a rotation and a delete; `Sealer` and a snapshot store that holds the kind |
+| `internal/egressd` | `valueOf` with the scheme encodings, one OAuth resolver per principal and secret held across a re-push, one substitution table per entry, and placement on the reverse door |
+| `internal/api` | `/v1/secrets` under the `secret.*` actions, the per-request secret lookup that folds in `secret.mount`, and the error table's four new rows |
+
+Coverage: `manifest` 97.7%, `manifest/v1` 100%, `egress` 100%, `controller`
+93.2%, `internal/store` 91.3%, `internal/store/memory` 96.7%,
+`internal/store/postgres` 92.0%, `internal/store/storetest` 90.5%,
+`internal/events` 95.0%, `internal/egressd` 91.5%, `internal/api` 90.6%,
+`cmd/cellad` 90.5%; every package clears the gate's 90%. `go test -race
+./...` passes and every gate of `go tool lateregate` is green, the hermetic
+and tempdir gates included.
+
+The end-to-end run is `TestSecretValuesNeverEnterASandbox` in `cmd/cellad`:
+one `cellad serve` with a key against a stub issuer and a stub event sink,
+one `cellad egress` connected with an environment key, one native sandbox
+that mounts one secret. The workload's own key holds a `cph_` token and not
+the value; the value is in no environment, in no file under `/workspace` or
+`/run/cella`, in no file under the control plane's own directory, in no
+connection record, in no event the sink received, and in no log line of
+either process; a request through the reverse door to the in-scope upstream
+arrives carrying the value, and one to any other host is refused before it
+leaves. `TestLiveUpdateAndRevoke` and `TestRotationAndRevocationReachTheGateway`
+are the rotation and the withdrawal over a running sandbox.
+
+### How a value reaches the gateway
+
+In the map, on the sync stream, inside the `put` and `snapshot` frames.
+[[018-egress-and-secrets]] puts it there and [[039-egress-gateway]]'s seam
+assumed it: `Compile` is the one place a value is decrypted, and what it
+produces is the map. There is no second channel, so a gateway that connects
+holding nothing receives every value it needs in its snapshot and a rotation
+is a map at a higher version. The consequence is stated rather than hidden:
+the control plane holds decrypted values in memory, in `EgressHub.maps`, for
+as long as the sandboxes that mount them live, and nothing may build a log
+line, a record or a response out of a `Map` or an `Entry`.
+
+### What this slice reads differently, and why
+
+1. **Placement is enforced on the reverse door and not on the proxy door.**
+   `pkg/egress` substitutes a placeholder wherever it occurs in a request
+   bound for a host the entry is scoped to, and `pkg/egress.Gateway` owns the
+   proxy door's terminated connection, so this role has no seam to hold an
+   entry to the one header or query parameter its owner named there. The
+   reverse door is built here, so it holds each entry to its place. The
+   property the value depends on, the destination scope, holds on both doors:
+   a value leaves only toward a host its owner named, whichever place the
+   workload put the token in. The Open table carries a `pkg/egress`
+   `Entry.Placement` for the rest.
+2. **The proxy door's substitution is proved in two pieces rather than one.**
+   `pkg/egress.Gateway` forwards a terminated connection through a transport
+   of its own with no dial seam, so no hermetic test can point it at a
+   loopback upstream. `TestAHostWithACredentialIsTerminated` proves the
+   routing into that branch and `TestSubstitutionIsScopedAndPlaced` drives
+   the engine over the registry the store compiled, which is the same call
+   that branch makes. The end-to-end leg runs on the reverse door. The Open
+   table carries a `pkg/egress.Gateway.DialContext` for the rest.
+3. **`secret_out_of_scope` has no producer yet.** Its one caller in
+   [[003-manifest-contract]] is `workspace.git.secret`, and this manifest
+   carries no `workspace.git`. The code and its sentence are registered, and
+   the check lands with the field.
+4. **A mounted secret's hosts are not written into the manifest.** They join
+   the effective allow list in `egress.Compile`, where
+   [[039-egress-gateway]] put the join, so the manifest a caller reads back
+   is the manifest it wrote and the narrowing rule compares like with like.
+5. **`EgressState.Placeholders` became `EgressState.Secrets`.**
+   [[039-egress-gateway]] left a map from a mounted secret's name to its
+   token. A mount also needs the id it is bound to and the key it arrives
+   under, so it is one list of records. Binding is by id: a secret deleted
+   and recreated under one name is a different secret, and `mountedBy` counts
+   the sandboxes whose record holds the id.
+6. **Mode inference gained a row.** [[003-manifest-contract]] says
+   `allowlist` when any host is set or any secret is mounted; the table
+   [[039-egress-gateway]] implements reads the two host lists first, so a
+   mount tips the inference only when neither list is set.
+7. **`Rewrap` adopts the new key in this process.** [[010-state]] requires
+   `Open` to still work after a rotation, which it cannot if the store keeps
+   reading under the key the rows no longer hold.
+8. **The mounted names travel under `mounts` on `sandbox.created`.**
+   [[009-events]] asks for `spec.secrets[]` reduced to names, and the shared
+   redactor blanks every field whose key ends in `secret` or `secrets`. A
+   name is not a credential, so the field is named for what it holds.
+9. **The coordinates check's roots were not extended.**
+   `runtime/coordinates_test.go` walks `runtime/`, `controller/` and
+   `egress/`; adding `manifest/` and the `internal/` trees is an edit
+   [[043-postgres-store]] already deferred because parallel slices hold the
+   file open. Every file this slice added was scanned by hand and names no
+   host, image, pool or namespace.
+
+### The seams the next slices take
+
+- **[[019-volumes]] and the `Volume` kind.** The Secret kind's shape is the
+  one a second caller-owned kind follows: `Controlled.LoadSecrets`,
+  `WriteSecret` and `RemoveSecret` over `Desired` with a kind column, the
+  snapshot store's parallel collection, `controller.Secrets` as the seam, and
+  `/v1/secrets` as the route grammar.
+- **`workspace.git`.** The clone secret's `secret_out_of_scope` check lands
+  with the field, over the `Lookup.Secret` this slice added.
+- **The platform's screens.** Every field the console needs is on the object;
+  `status.mountedBy` is derived at read and `spec.value` is never there.
+
+### Open
+
+| What | Where it belongs |
+|---|---|
+| `pkg/egress.Entry.Placement`, so an entry is substituted only in the header or query parameter it names | a `pkg` release, then this role drops its own per-entry tables |
+| `pkg/egress.Gateway.DialContext`, so a terminated connection dials through the operator's own seam and a hermetic test can point it at loopback | a `pkg` release |
+| A `Secret` whose `inject.scheme` or `kind` changes to a two-half form on an update that carries no value leaves the stored single value incompatible; the gateway then substitutes a half-empty pair | the update path, once the store can read a value's shape without decrypting it, or a rule that such an update carries a value |
+| `Rewrap` has no operator surface: it is a store method with no command or route | [[014-release-and-installation]] |
