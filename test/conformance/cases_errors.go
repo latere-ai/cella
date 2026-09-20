@@ -165,10 +165,16 @@ func case004CapabilityGates(ctx context.Context, e *Env) error {
 		var env envelope
 		_ = json.Unmarshal(x.Body, &env)
 		refused := env.Error.Code == "capability_unsupported"
+		missing := x.Status == http.StatusNotFound || x.Status == http.StatusMethodNotAllowed
 		switch {
 		case e.caps[g.capability] && refused:
 			return x.disagree("no capability refusal where the environment declares "+g.capability,
 				"capability_unsupported")
+		case e.caps[g.capability] && missing:
+			// A declared capability whose route is not there is a declaration
+			// the server does not honour, which the gate must not excuse.
+			return x.disagree("the route of "+g.capability+", which this environment declares",
+				fmt.Sprintf("status %d", x.Status))
 		case !e.caps[g.capability] && !refused:
 			return x.disagree("capability_unsupported where the environment does not declare "+g.capability,
 				fmt.Sprintf("status %d and code %q", x.Status, cmpOr(env.Error.Code, "none")))
