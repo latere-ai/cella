@@ -346,10 +346,11 @@ now join by newline, which is the one change the real engine forced.
 
 ### Coverage
 
-`runtime/display` 96.5%, `runtime/runtimetest` 98.0%, `runtime/k8s` 93.4%,
-`runtime/podman` 93.3%, `controller` 91.3%, `internal/api` 90.7%,
-`manifest` 97.6%, `manifest/v1` 100%. The race, hermetic and tempdir runs
-pass with the rest of the bar.
+`runtime/display` 96.9%, `runtime/runtimetest` 98.2%, `runtime/podman`
+93.5%, `runtime/k8s` 93.4%, `controller` 93.5%, `internal/api` 90.9%,
+`manifest` 97.6%, `manifest/v1` 100%. The whole bar passes, the race,
+hermetic, tempdir and coverage runs included, and every one of the 23
+measured packages clears 90%.
 
 ### Two rules the port changed
 
