@@ -1,6 +1,6 @@
 ---
 title: "Conformance suite: the /v1 contract as executable cases, the report, the declared gaps, the pipeline job"
-status: in-progress
+status: complete
 track: core
 depends_on:
   - specs/015-conformance-suite.md
@@ -217,26 +217,102 @@ control endpoint of `cella-stubs` ([[012-test-stubs-and-tiers]]). The
 drift default of `internal/config` ([[015-conformance-suite]]). Any
 change to a server package: a case that fails is recorded here.
 
+## Outcome
+
+Built on 2026-09-20. The suite is `test/conformance`: 51 cases in the 18
+groups of [[015-conformance-suite]], each a function of a base URL, a caller,
+and what the environment declares, with `Execute` free of `testing` and
+`Run(t, cfg)` mirroring every result onto a subtest `<NNN>/<Name>`.
+
+### What runs where
+
+| Run | Result |
+|---|---|
+| in-process `cellad serve` with the stubs, native environment, untagged, every push | 36 passed, 0 failed, 8 skipped, 7 declared gaps, 34 objects created and deleted, 9 seconds |
+| the development stack, `TestRunConformance` behind the `e2e` tag | 32 passed, 0 failed, 12 skipped, 7 declared gaps, 14 seconds |
+| the kind stack, `TestContract` in `verify.yml`'s install job and in `release.yml`'s conformance job | the first pipeline run reports it; the command and the capability set the k8s driver declares are wired |
+
+Coverage of `test/conformance` is 90.4% of statements, from its own tests and
+from the run against the node. `go test -race` is green; the hermetic and
+tempdir gates are clean: every run binds loopback, keeps its state under a
+temporary directory, and stops the development stack's process group.
+
+### The cases this server fails
+
+Each is a rule of [[008-api]] or [[009-events]] this repository does not serve
+yet. They are declared in `test/conformance/known.json` with the reason, so
+the run is green and the report names them; a declaration that starts passing
+fails the run, so none of these lines can outlive its gap.
+
+| Case | What disagreed |
+|---|---|
+| `case003ContentTypes` | a YAML body is `unsupported_media_type`; `manifest.Decode` takes `application/json` only |
+| `case008NotAcceptable` | `Accept: application/xml` is answered with JSON and 200; no handler reads `Accept` |
+| `case008NameOnPathAndBody` | `PUT /v1/sandboxes/{name}` is not registered, so apply by name and its `metadata.name` rule have no route |
+| `case008ExecStream` | `POST .../exec` without `?wait=1` is `capability_unsupported`; the framed stream of one byte of channel, four of length and the payload is not served |
+| `case008PublicDocuments` | `/openapi.yaml` is 404; the key set answers |
+| `case009ObjectFeed` | `GET /v1/events?object=` is 404; the journal reaches the operator's sink and no caller |
+| `case004CapabilityGates` | the dial route is not registered, so an environment without `Dial` answers 404 where the gate has to answer 422 |
+
+### What the suite found beside the gaps
+
+1. The permission service's answers are cached for the ttl they carry, and an
+   answer that carries none takes the client's default. A case that reads an
+   object and then asks for a deny reads the grant it already has, so
+   `case006Forbidden` creates the object and does not read it before the deny
+   is in force. Any suite against this contract has the same constraint.
+2. Whether one subject reads another's object is the permission service's
+   answer and not the API's: under an endpoint that allows everything the read
+   succeeds, and that server is conformant. No case asserts it; the name rule
+   is asserted instead, because a name resolves among the caller's own objects
+   whatever the endpoint says.
+3. `cella-stubs` takes its failure modes as start-up flags, so the suite's
+   control contract, `POST <control>/fail` with a mode, is served by the tier
+   that owns the stub. A control endpoint in the binary is
+   [[012-test-stubs-and-tiers]]'s to add; until it is there, the kind tier
+   skips the deny, the outage and the admission cases.
+4. The development stack held no `CELLA_SECRET_KEY`, so it stored no secret
+   value. `tools/run/up.sh` now generates one beside the signing key and the
+   sink's secret. A server that still holds none answers
+   `capability_unsupported`, which the suite reports as a skip with the
+   server's own sentence rather than as a failure.
+5. [[012-test-stubs-and-tiers]]'s conformance tier row needs `-tags=e2e`: the
+   command is `go test -tags=e2e -run '^TestContract$' ./test/conformance
+   -args -url ...`, because [[015-conformance-suite]] puts `TestContract`
+   behind that tag.
+
+### What is not built
+
+`CELLA_TEST_DRIFT_DEFAULT` is a change to `internal/config` and this slice
+changes no server package, so `TestSuiteCatchesADriftedDefault` stays open.
+The suite proves the same property against a server that answers one field
+wrong, which needs no server change: `TestAServerThatAnswersTheWrongValueIsReportedFailed`.
+
+The two socket cases are proved against a real server only. The reference
+server in the package's own tests answers the routes and not the two
+WebSocket streams, so the socket cases' own error branches are covered by the
+run against the node.
+
 ## Acceptance criteria
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| The decode group holds the two content types and every refusal of the manifest's envelope: conformance cases `case003ContentTypes`, `case008UnsupportedMediaType`, `case008NotAcceptable`, `case008BodyTooLarge`, `case003MultiDocument`, `case003UnsupportedVersion`, `case003UnsupportedKind`, `case003UnknownField` | `TestSuiteAgainstThisServer` | not built |
-| The resolve group holds the defaults, the names and the admission step: conformance cases `case003DefaultsAreReturned`, `case008GeneratedName`, `case008NameTaken`, `case008NameOnPathAndBody`, `case007AdmissionRefused`, `case007AdmissionUnavailable` | `TestSuiteAgainstThisServer` | not built |
-| The lifecycle group holds the transitions and their refusals: conformance cases `case005CreateReachesRunning`, `case005StopAndStart`, `case005PhaseConflict`, `case005DeleteInEveryPhase` | `TestSuiteAgainstThisServer` | not built |
-| The identity group holds every refusal class of a caller and the authorizer's outage: conformance cases `case006Unauthenticated`, `case006Forbidden`, `case006NotFound`, `case006WorkloadTokenScope`, `case006AuthorizerUnavailable` | `TestSuiteAgainstThisServer` | not built |
-| The list group holds the envelope, the selectors and the ceiling: conformance cases `case008ListEnvelope`, `case008ListSelectors`, `case008ListLimitCeiling` | `TestSuiteAgainstThisServer` | not built |
-| The streams group holds every stream of the table with its framing: conformance cases `case008ExecWait`, `case008ExecStream`, `case008ExecSocket`, `case008AttachSocket`, `case008FilesTar`, `case008FileRoutes`, `case008Logs`, `case008Dial` | `TestSuiteAgainstThisServer` | not built |
-| The errors group holds the envelope and the two public documents: conformance cases `case008ErrorEnvelope`, `case008PublicDocuments` | `TestSuiteAgainstThisServer` | not built |
-| The events group holds the feed, the delivery and the canary: conformance cases `case009ObjectFeed`, `case009DeliveredInOrder`, `case018CanarySecret` | `TestSuiteAgainstThisServer` | not built |
-| The secrets group holds the value's write-only rule: conformance cases `case018SecretWriteOnly`, `case018SecretRotates`, `case018SecretDelete` | `TestSuiteAgainstThisServer` | not built |
-| The egress and capability groups hold the records route and the gates: conformance cases `case018EgressRecords`, `case004CapabilityGates` | `TestSuiteAgainstThisServer` | not built |
-| The groups whose kind or input this server does not serve each report one skip with its reason: conformance cases `case019VolumeLifecycle`, `case020SetRunsToCompletion`, `case021EnvironmentRead`, `case022SpawnBoundary`, `case011AgentScenario`, `case023BrowserReady`, `case001Indistinguishable` | `TestGroupsAndSkips` | not built |
-| Every marker in the specs has a case and every case a marker | `TestEveryCriterionHasACase` reading `specs/` and `specs/.archive/` | not built |
-| A case run against a server that answers one field wrong is reported failed with the request and the response that disagreed | `TestAWrongServerIsReportedFailed` | not built |
-| A capability the environment does not declare is reported skipped with the capability named, and a case the configuration has no input for is reported skipped with the input named | `TestGroupsAndSkips` | not built |
-| A declared gap is reported apart from a failure and does not fail the run; a declared case that passes fails the run | `TestADeclaredGapIsNotAFailure` | not built |
-| A run against this repository's own server passes every case it does not declare, and the declaration is exact | `TestSuiteAgainstThisServer` | not built |
-| A run creates objects under its own prefix, deletes every id it made, and leaves the ids of a concurrent run alone | `TestRunCleansUp` | not built |
-| The report carries the version the server reports and the suite's own | `TestTheReportCarriesTheMarker` | not built |
-| `verify.yml` runs the suite against the development stack and against the kind stack, and `release.yml` runs it against the stack from the published images | `TestTheInstallJobWalksTheDocument`, `TestTheReleaseRunsTheStubsAndTheStack` | not built |
+| The decode group holds the two content types and every refusal of the manifest's envelope: conformance cases `case003ContentTypes`, `case008UnsupportedMediaType`, `case008NotAcceptable`, `case008BodyTooLarge`, `case003MultiDocument`, `case003UnsupportedVersion`, `case003UnsupportedKind`, `case003UnknownField` | `TestSuiteAgainstThisServer` | passing, with `case003ContentTypes` and `case008NotAcceptable` declared gaps |
+| The resolve group holds the defaults, the names and the admission step: conformance cases `case003DefaultsAreReturned`, `case008GeneratedName`, `case008NameTaken`, `case008NameOnPathAndBody`, `case007AdmissionRefused`, `case007AdmissionUnavailable` | `TestSuiteAgainstThisServer` | passing, with `case008NameOnPathAndBody` a declared gap; the two admission cases run under the tier's control |
+| The lifecycle group holds the transitions and their refusals: conformance cases `case005CreateReachesRunning`, `case005StopAndStart`, `case005PhaseConflict`, `case005DeleteInEveryPhase` | `TestSuiteAgainstThisServer` | passing |
+| The identity group holds every refusal class of a caller and the authorizer's outage: conformance cases `case006Unauthenticated`, `case006Forbidden`, `case006NotFound`, `case006WorkloadTokenScope`, `case006AuthorizerUnavailable` | `TestSuiteAgainstThisServer` | passing; the deny and the outage run under the tier's control |
+| The list group holds the envelope, the selectors and the ceiling: conformance cases `case008ListEnvelope`, `case008ListSelectors`, `case008ListLimitCeiling` | `TestSuiteAgainstThisServer` | passing |
+| The streams group holds every stream of the table with its framing: conformance cases `case008ExecWait`, `case008ExecStream`, `case008ExecSocket`, `case008AttachSocket`, `case008FilesTar`, `case008FileRoutes`, `case008Logs`, `case008Dial` | `TestSuiteAgainstThisServer` | passing, with `case008ExecStream` a declared gap and the dial case skipped where no environment declares it |
+| The errors group holds the envelope and the two public documents: conformance cases `case008ErrorEnvelope`, `case008PublicDocuments` | `TestSuiteAgainstThisServer` | passing, with `case008PublicDocuments` a declared gap |
+| The events group holds the feed, the delivery and the canary: conformance cases `case009ObjectFeed`, `case009DeliveredInOrder`, `case018CanarySecret` | `TestSuiteAgainstThisServer` | passing, with `case009ObjectFeed` a declared gap |
+| The secrets group holds the value's write-only rule: conformance cases `case018SecretWriteOnly`, `case018SecretRotates`, `case018SecretDelete` | `TestSuiteAgainstThisServer` | passing; a server that holds no key answers `capability_unsupported` and the group skips with that sentence |
+| The egress and capability groups hold the records route and the gates: conformance cases `case018EgressRecords`, `case004CapabilityGates` | `TestSuiteAgainstThisServer` | passing, with `case004CapabilityGates` a declared gap while the dial route is unregistered |
+| The groups whose kind or input this server does not serve each report one skip with its reason: conformance cases `case019VolumeLifecycle`, `case020SetRunsToCompletion`, `case021EnvironmentRead`, `case022SpawnBoundary`, `case011AgentScenario`, `case023BrowserReady`, `case001Indistinguishable` | `TestGroupsAndSkips` | passing |
+| Every marker in the specs has a case and every case a marker | `TestEveryCriterionHasACase` reading `specs/` and `specs/.archive/` | passing |
+| A case run against a server that answers one field wrong is reported failed with the request and the response that disagreed | `TestAWrongServerIsReportedFailed` | passing |
+| A capability the environment does not declare is reported skipped with the capability named, and a case the configuration has no input for is reported skipped with the input named | `TestGroupsAndSkips` | passing |
+| A declared gap is reported apart from a failure and does not fail the run; a declared case that passes fails the run | `TestADeclaredGapIsNotAFailure` | passing |
+| A run against this repository's own server passes every case it does not declare, and the declaration is exact | `TestSuiteAgainstThisServer` | passing: 36 passed, 8 skipped, 7 declared, 0 failed against the in-process node |
+| A run creates objects under its own prefix, deletes every id it made, and leaves the ids of a concurrent run alone | `TestRunCleansUp` | passing |
+| The report carries the version the server reports and the suite's own | `TestTheReportCarriesTheMarker` | passing |
+| `verify.yml` runs the suite against the development stack and against the kind stack, and `release.yml` runs it against the stack from the published images | `TestTheInstallJobWalksTheDocument`, `TestTheReleaseRunsTheStubsAndTheStack` | passing |

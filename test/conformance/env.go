@@ -140,7 +140,7 @@ type exchange struct {
 
 // build renders one request.
 func (c *client) build(ctx context.Context, method, path string, req request) (*http.Request, error) {
-	var body io.Reader = req.Reader
+	body := req.Reader
 	if body == nil && req.Body != nil {
 		body = bytes.NewReader(req.Body)
 	}

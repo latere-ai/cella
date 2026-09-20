@@ -73,7 +73,7 @@ later.
 | [024](024-vm-driver.md) | VM driver: a hardware-isolated sandbox per environment; the design held open | large | vague | 004, 019 |
 | [031](031-hosted-sandbox-consolidation.md) | Hosted sandbox consolidation: every package of latere-ai/sandbox lands in cella, in the platform, or is dropped | large | in-progress | 001 |
 | [050](.archive/050-cella-command.md) | Cella command: the agent client over /v1, its client package, exit codes and the skill | medium | complete | 008, 011, 031, 048 |
-| [052](052-conformance-suite.md) | Conformance suite: the /v1 contract as executable cases, the report, the declared gaps, the pipeline job | large | in-progress | 008, 015, 031, 049, 050 |
+| [052](.archive/052-conformance-suite.md) | Conformance suite: the /v1 contract as executable cases, the report, the declared gaps, the pipeline job | large | complete | 008, 015, 031, 049, 050 |
 
 ## Dependency graph
 
@@ -281,3 +281,4 @@ The map, the order, and the rule for a slice are in 031.
 | [049-stubs-and-tiers.md](.archive/049-stubs-and-tiers.md) | complete | `cella-stubs`, `make run` with no issuer of your own, the unit, podman and kind tiers, the kind overlay, and the install walk on every push and every tag |
 | [041-display-and-input.md](.archive/041-display-and-input.md) | complete | The virtual desktop, the screenshot, the screen stream, the input batch, the port probe |
 | [050-cella-command.md](.archive/050-cella-command.md) | complete | The `cella` command, the typed client and its own WebSocket, the exit scheme, the columns and `--json`, the skill, and the client's four release archives |
+| [052-conformance-suite.md](.archive/052-conformance-suite.md) | complete | The `/v1` contract as 51 executable cases with a report, the declared gaps of this server, and the suite in both pipelines |

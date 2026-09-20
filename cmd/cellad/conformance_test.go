@@ -80,7 +80,6 @@ type stack struct {
 	capabilities []string
 	authorizer   *httptest.Server
 	admission    *httptest.Server
-	stop         func() int
 }
 
 // startStack brings up the stubs, the two control shims and `cellad serve`,

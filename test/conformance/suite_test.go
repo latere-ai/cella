@@ -4,6 +4,7 @@
 package conformance
 
 import (
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -259,11 +260,8 @@ func TestSubtestNames(t *testing.T) {
 	}
 }
 
-// asDisagreement is errors.As without the import in every assertion.
+// asDisagreement is errors.As under a name that reads as the question the
+// assertions ask.
 func asDisagreement(err error, into **Disagreement) bool {
-	d, ok := err.(*Disagreement)
-	if ok {
-		*into = d
-	}
-	return ok
+	return errors.As(err, into)
 }

@@ -250,7 +250,7 @@ func TestTheExchangeHelpersReadTheEnvelope(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("the answer was read as a refusal of the table: %v", err)
 			}
-			if got := y.paths(); got != nil && len(got) != 0 {
+			if got := y.paths(); len(got) != 0 {
 				t.Errorf("paths from an answer that names none: %v", got)
 			}
 		})
