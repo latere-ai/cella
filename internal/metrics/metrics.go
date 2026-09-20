@@ -333,10 +333,14 @@ func (r *Registry) Decision(endpoint, outcome string, d time.Duration) {
 // What events and the store record (designs 009 and 010)
 // ---------------------------------------------------------------------------
 
-// EventDelivery counts one delivery attempt by outcome and observes how long
-// it took.
-func (r *Registry) EventDelivery(outcome string, d time.Duration) {
+// EventDelivered counts one delivery attempt by what it produced.
+func (r *Registry) EventDelivered(outcome string) {
 	r.delivered.Inc(map[string]string{"outcome": outcome})
+}
+
+// EventDeliveryDuration observes one attempt on the sink. A record dropped
+// before a request was made is counted and not timed: nothing was attempted.
+func (r *Registry) EventDeliveryDuration(d time.Duration) {
 	r.delivery.Observe(nil, d.Seconds())
 }
 

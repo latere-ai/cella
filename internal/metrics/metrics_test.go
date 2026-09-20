@@ -196,7 +196,8 @@ func TestCountersRecordWhatTheyOwn(t *testing.T) {
 	r.TokenReminted()
 	r.Decision(metrics.EndpointAuthorizer, metrics.OutcomeAllow, 5*time.Millisecond)
 	r.Decision(metrics.EndpointAdmission, metrics.OutcomeUnavailable, time.Second)
-	r.EventDelivery(metrics.OutcomeAcknowledged, 15*time.Millisecond)
+	r.EventDelivered(metrics.OutcomeAcknowledged)
+	r.EventDeliveryDuration(15 * time.Millisecond)
 	r.StoreQuery(metrics.OpWrite, 3*time.Millisecond)
 
 	for _, want := range []string{
@@ -260,7 +261,7 @@ func TestLabelValuesAreBounded(t *testing.T) {
 	r.ReaperAction("AutoStop", "stopped")
 	r.RecoveryAttempt(metrics.OutcomeExhausted)
 	r.Decision(metrics.EndpointAdmission, metrics.OutcomeDeny, time.Millisecond)
-	r.EventDelivery(metrics.OutcomeDropped, time.Millisecond)
+	r.EventDelivered(metrics.OutcomeDropped)
 	r.StoreQuery(metrics.OpAcquire, time.Millisecond)
 	r.LeaseHeld(metrics.LeaseJournal, true)
 	r.PoolSize(1, 0)
