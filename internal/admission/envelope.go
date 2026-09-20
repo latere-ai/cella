@@ -132,7 +132,7 @@ func summaryOf(env *v1.Environment) *environmentRef {
 	return &environmentRef{
 		ID:           env.Status.ID,
 		Name:         env.Metadata.Name,
-		Isolation:    string(isolation),
+		Isolation:    isolation,
 		Capabilities: env.Status.Capabilities,
 	}
 }

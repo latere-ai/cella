@@ -610,7 +610,7 @@ func TestSummaryOfNoEnvironment(t *testing.T) {
 		t.Fatal("a nil environment rendered an object")
 	}
 	env := &v1.Environment{Metadata: v1.Metadata{Name: "default"}, Spec: v1.EnvironmentSpec{Isolation: v1.IsolationContainer}}
-	if got := summaryOf(env); got.Isolation != string(v1.IsolationContainer) {
+	if got := summaryOf(env); got.Isolation != v1.IsolationContainer {
 		t.Fatalf("isolation = %q, want the operator's declaration where no driver answered", got.Isolation)
 	}
 }
