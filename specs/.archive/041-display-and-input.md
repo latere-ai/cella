@@ -328,20 +328,21 @@ server for as long as somebody watches.
 ### What the real engine found
 
 `podman build -f images/display/Dockerfile` produced a 502 MB arm64 image
-(without the browser) in about four minutes, and `TestPodmanConformance`
-ran against podman 5.7.1 on a rootless macOS machine with
-`CELLA_TEST_DISPLAY_IMAGE` naming it. `PortsReportListening` passed on the
-first run: a `nc` listener inside the sandbox reads `listening` and the
-declared port beside it reads `closed`.
+without the browser in about four minutes, and the whole of
+`TestPodmanConformance` then ran against podman 5.7.1 on a rootless macOS
+machine with `CELLA_TEST_DISPLAY_IMAGE` naming it: thirty cases, the four
+new ones included, in 28.6 seconds. A real desktop comes up inside a
+sandbox in about a second, `Display` reports the declared geometry, a
+screenshot decodes as an 800 by 600 PNG and a half-scale one as a 400 wide
+JPEG, a frame arrives off the stream, a click and typed text land, a click
+off the screen is refused, and a `nc` listener reads `listening` beside a
+declared port that reads `closed`.
 
-The three display cases failed on the first run and found a defect no fake
-could: the install command joined its lines with semicolons, and a shell
-reads a semicolon after a background command as a syntax error, so the
-supervisor never started and `DisplayReady` stayed false for the whole
-ninety-second budget. The scripts now join by newline. The re-run of the
-three cases did not complete: the local engine stopped answering after the
-first run and a container listing did not return, so what is recorded here
-for them is the fake-engine result and the defect the real one found.
+The first run found a defect no fake could: the install command joined its
+lines with semicolons, and a shell reads a semicolon after a background
+command as a syntax error, so the supervisor never started and
+`DisplayReady` stayed false for the whole ninety-second budget. The scripts
+now join by newline, which is the one change the real engine forced.
 
 ### Coverage
 
