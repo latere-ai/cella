@@ -14,7 +14,7 @@ depends_on:
 affects: [test/stubs/, test/e2e/, test/conformance/, Makefile, Dockerfile.stubs, .github/workflows/, deploy/examples/kind/, internal/config/]
 effort: medium
 created: 2026-09-12
-updated: 2026-09-13
+updated: 2026-09-20
 author: changkun
 ---
 
@@ -32,8 +32,14 @@ sidecars of one Pod and `make run` runs it as one process.
 
 ## Current state
 
-Not built. The shape is a sibling project's stubs and kind overlay,
-with an admission stub, an upstream, and a Postgres tier added.
+Partly built. Slice 049 ([[049-stubs-and-tiers]]) built `cella-stubs` with
+the issuer, the authorizer, the admission endpoint and the sink, the
+bootstrap behind `make run`, the unit, podman and kind targets, the kind
+overlay `deploy/examples/kind-stubs`, and the two continuous integration
+jobs that walk the install document against that stack. The upstream stub,
+the native, postgres, local and worker tiers, `make run-worker` and the
+Cilium half of the kind tier are not built; each waits on the spec whose
+behaviour it exercises.
 
 ## Design
 
@@ -161,15 +167,15 @@ conformance tier runs ([[015-conformance-suite]]).
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| Each stub serves its contract and every flag in its row is driven | `TestIssuerStub`, `TestAuthorizerStub`, `TestAdmissionStub`, `TestSinkStub`, `TestUpstreamStub` | not built |
-| The sink refuses a body whose signature does not verify, a stale `t`, and accepts either secret | `TestSinkVerifiesSignature` | not built |
-| `make run` on a clean clone completes the bootstrap in order, the environment is `Ready` with the gateway connected, and the printed `curl` apply of the minimal manifest succeeds; `make run-down` stops everything; two clones run side by side | `TestMakeRun`, `TestMakeRunSideBySide` | not built |
+| Each stub serves its contract and every flag in its row is driven | `TestTheIssuerIsOneTheVerifierAccepts`, `TestTheAuthorizerPassesTheSharedConformanceSuite`, `TestTheAdmissionEndpointAnswersTheEnvelope`, `TestTheSinkVerifiesWhatTheDelivererSigns` and their neighbours in `internal/stubs` | passing for the four roles of `cella-stubs` (049); the upstream stub waits on the egress tiers |
+| The sink refuses a body whose signature does not verify, a stale `t`, and accepts either secret | `TestTheSinkRefusesWhatItCannotVerify`, `TestTheSinkVerifiesWhatTheDelivererSigns` | passing (049) |
+| `make run` on a clean clone completes the bootstrap in order, the environment is `Ready` with the gateway connected, and the printed `curl` apply of the minimal manifest succeeds; `make run-down` stops everything; two clones run side by side | `TestRunBootstrap` in `test/run`, behind the `e2e` tag | passing for the stubs and `cellad serve` (049): the bootstrap needs no issuer, mints a token and creates a sandbox with it, and an interrupt stops both. The gateway leg, `run-down` and the side-by-side run wait on the egress tier; a second clone runs today with `CELLA_RUN_PORT` |
 | `make run-worker` registers a second environment and a sandbox applied to it runs on the worker | `TestMakeRunWorker` | not built |
 | The native tier creates, execs, stops, and deletes through the API with events at the sink | `TestNativeLifecycle` | not built |
 | The postgres tier recovers a lost sandbox after a `cellad` restart and passes the store suite | `TestPostgresRecovery` | not built |
 | The local tier reaches the upstream through the gateway with its placeholder substituted and cannot reach an unlisted host; the sandbox runtime's policy names only the gateway | `TestLocalEgress` | not built |
 | The worker tier runs the lifecycle on the worker's environment while the worker opens no listening socket and `cellad` opens no connection toward it | `TestWorkerLifecycle`, `TestWorkerNoInbound` | not built |
-| The podman tier runs the lifecycle and the driver's conformance suite rootless | `TestPodmanLifecycle` | not built |
-| The kind tier runs the lifecycle with a Pod and a PVC observed, through Cilium-enforced policy, on both the in-process environment and the worker's; `up.sh` and `down.sh` leave nothing behind | `TestClusterLifecycle`, `TestClusterWorkerNoInbound` | not built |
+| The podman tier runs the lifecycle and the driver's conformance suite rootless | `TestPodmanConformance` through `make test-podman` | the driver's suite runs rootless in `verify` and in the release pipeline (048, 049); the API lifecycle over podman waits on `test/e2e` |
+| The kind tier runs the lifecycle with a Pod and a PVC observed, through Cilium-enforced policy, on both the in-process environment and the worker's; `up.sh` and `down.sh` leave nothing behind | `TestClusterLifecycle` over `deploy/examples/kind-stubs` | passing for the in-process environment (049): create, ready, exec, delete and the records at the sink, with `up.sh` and `down.sh` as the overlay's own. Cilium and the worker's half wait on the worker tier |
 | Every tier binds `:0`, keeps state under `t.TempDir()`, tears down its containers, and leaves no `srt-mux-*.sock` | `TestTiersAreIsolated` | not built |
-| The verify workflow has one job per tier with the command from the table | `TestWorkflowJobsMatchTheTable` reading `verify.yml` | not built |
+| The verify workflow has one job per tier with the command from the table | `TestTheInstallJobWalksTheDocument`, `TestTheReleaseRunsTheStubsAndTheStack` | the `install` job runs the bootstrap tier, the document's walk and the kind tier on one cluster per run, and the release pipeline runs the kind stack and publishes `cella-stubs` (049). One job per tier arrives with the tiers that are not built |

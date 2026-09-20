@@ -1,6 +1,6 @@
 ---
 title: "Stubs and tiers: cella-stubs, make run without an issuer of your own, the kind stack, the walk on every push"
-status: in-progress
+status: complete
 track: core
 depends_on:
   - specs/012-test-stubs-and-tiers.md
@@ -267,14 +267,61 @@ worker tier.
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| The issuer serves a discovery document and a key set `internal/auth`'s verifier accepts, and mints a token it verifies, under RS256 and under ES256 | `TestIssuerStubVerifies` | open |
-| The authorizer denies `authz.ProbeID`, answers the shared conformance suite, and every flag in its row changes one answer | `TestAuthorizerStubPassesTheConformanceSuite`, `TestAuthorizerStubFlags` | open |
-| The admission endpoint answers the envelope of [[007-admission]] with the operator defaults applied, refuses the image it is told to, and produces each failure mode | `TestAdmissionStubAnswersTheEnvelope`, `TestAdmissionStubRefuses` | open |
-| The sink accepts a record signed under either secret, refuses a bad signature and a stale `t`, serves what it stored, and fails the first n deliveries when asked | `TestSinkStubVerifies`, `TestSinkStubFailsFirst` | open |
-| The binary serves the four roles on the addresses it was given, logs one line per request, and stops on an interrupt | `TestStubsServeEveryRole`, `TestStubsStopOnInterrupt` | open |
-| `make run` needs no `CELLA_OIDC_ISSUERS`, brings both processes up, and a token minted at the stub issuer creates a sandbox | `TestRunBootstrap` behind the `e2e` tag | open |
-| The kind overlay renders, and its Deployment and check Job carry the stubs beside `cellad` | `TestOverlaysRender`, `TestTheStubsRunBesideTheControlPlane` | open |
-| The kind stack runs the lifecycle through the API with a token from the stub issuer, and the check Job is green | `TestClusterLifecycle` | open |
-| The install job walks `docs/install.md` against kind with the stubs on every push | the `install` job of `verify.yml`, and `TestTheInstallJobWalksTheDocument` over it | open |
-| The release pipeline builds the stubs image, runs the kind stack in `conformance`, and walks the document in `install-release` with no gate variable | `TestTheReleaseBuildsTheStubsImage`, `TestTheInstallReleaseWalkIsNotGated` | open |
-| Nothing under `deploy/` or the workflows names a Latere coordinate, and the stubs image is nowhere under `deploy/base` | `TestNoLatereCoordinatesInReleasedArtifacts`, `TestTheStubsImageIsNoInstallation` | open |
+| The issuer serves a discovery document and a key set `internal/auth`'s verifier accepts, and mints a token it verifies, under RS256 and under ES256 | `TestTheIssuerIsOneTheVerifierAccepts`, `TestTheIssuerMintsWhatItIsAskedFor`, `TestTheIssuerNamesTheAddressItIsGiven` | passing |
+| The authorizer denies `authz.ProbeID`, answers the shared conformance suite, and every flag in its row changes one answer | `TestTheAuthorizerPassesTheSharedConformanceSuite`, `TestTheAuthorizerDeniesTheProbe`, `TestTheAuthorizerAnswersWhatItsFlagsSay`, `TestTheAuthorizerDeniesOneRequestByHeader`, `TestTheAuthorizerProducesEachOutage` | passing |
+| The admission endpoint answers the envelope of [[007-admission]] with the operator defaults applied, refuses the image it is told to, and produces each failure mode | `TestTheAdmissionEndpointAnswersTheEnvelope`, `TestTheAdmissionEndpointRefuses`, `TestTheAdmissionEndpointRefusesEveryApply`, `TestTheAdmissionEndpointProducesEachOutage` | passing |
+| The sink accepts a record signed under either secret, refuses a bad signature and a stale `t`, serves what it stored, and fails the first n deliveries when asked | `TestTheSinkVerifiesWhatTheDelivererSigns`, `TestTheSinkRefusesWhatItCannotVerify`, `TestTheSinkServesWhatItHeld`, `TestTheSinkFailsTheFirstDeliveries` | passing |
+| The binary serves the four roles on the addresses it was given, logs one line per request, and stops on an interrupt | `TestEveryRoleListensAndIsLogged`, `TestARoleWithNoAddressIsNotStarted`, `TestStartRefusesWhatItCannotServe`, `TestTheBinaryServesEveryRoleAndStops`, `TestTheBinaryRefusesWhatItCannotRun` | passing |
+| `make run` needs no `CELLA_OIDC_ISSUERS`, brings both processes up, and a token minted at the stub issuer creates a sandbox | `TestRunBootstrap` behind the `e2e` tag | passing; run here and in the `install` job |
+| The kind overlay renders, and its Deployment and check Job carry the stubs beside `cellad` | `TestOverlaysRender`, `TestTheStubsRunBesideTheControlPlane` | passing |
+| The kind stack runs the lifecycle through the API with a token from the stub issuer, and the check Job is green | `TestClusterLifecycle`, and the document's own `kubectl wait` over the Job in the walk | built; it runs in the `install` job and in the release pipeline. On this machine the cluster did not come up: see below |
+| The install job walks `docs/install.md` against kind with the stubs on every push | the `install` job of `verify.yml`, and `TestTheInstallJobWalksTheDocument` over it | passing |
+| The release pipeline builds the stubs image, runs the kind stack in `conformance`, and walks the document in `install-release` with no gate variable | `TestTheReleaseRunsTheStubsAndTheStack` | passing |
+| Nothing under `deploy/` or the workflows names a Latere coordinate, and the stubs image is nowhere under `deploy/base` | `TestNoLatereCoordinatesInReleasedArtifacts`, `TestTheStubsImageIsNoInstallation` | passing |
+
+## Outcome
+
+Built on 2026-09-20 in eleven commits. Coverage: `internal/stubs` 94.9%,
+`cmd/cella-stubs` 97.8%.
+
+### What runs, and where
+
+| Piece | Today |
+|---|---|
+| `cella-stubs` | the four roles on four loopback listeners in one process, each one line of log per request, no state across a restart. The issuer is `pkg/authkit/issuertest` and the authorizer is `pkg/authz/stub`, each behind a listener of `internal/stubs`; the admission endpoint and the sink are written against specs 007 and 009 there |
+| `make run` | `tools/run/up.sh`: both binaries built, the signing key and the sink's secret generated once under `out/run/`, the stubs started and waited for, `cellad serve` wired to the issuer, the authorizer and the sink, and the mint command and the first `curl` printed. Proved by `TestRunBootstrap`, which ran here in 10 seconds: no `CELLA_OIDC_ISSUERS`, a token minted at the stub issuer, one sandbox created and deleted |
+| `make test`, `make test-podman`, `make test-kind` | the three tiers this slice carries. The podman target runs the driver's own suite, which skips where no engine answers |
+| `deploy/examples/kind-stubs` | the kind overlay: the stubs as an init container with `restartPolicy: Always` in the `cellad` Deployment and in the check Job, a startup probe over the issuer's discovery document, the two Secrets the base reads as optional keys, a ConfigMap naming the loopback issuer, and a NodePort publishing the mint route and the sink's feed to the host. `up.sh` and `down.sh` bring the cluster up and take it down |
+| `test/kind` | `TestClusterLifecycle`, behind the `e2e` tag: create, wait for `Ready`, exec, delete, and the records of spec 009 read back from the sink. It brings the stack up with `CELLA_TEST_KIND=1` and runs against a standing one with `CELLA_TEST_URL` |
+| `verify.yml` | the `install` job renders the deploy tree, runs the bootstrap tier, builds both images, brings the stack up with `up.sh`, walks `docs/install.md` against it, and then runs the kind tier against the same cluster: one cluster per run |
+| `release.yml` | `build` also pushes `ghcr.io/<owner>/cella-stubs:<tag>` from `Dockerfile.stubs`; `conformance` brings the kind stack up from the published images and runs the lifecycle through the API; `install-release` walks the document against a cluster built from the published archive and images, with `RELEASE_INSTALL_KIND` and `RELEASE_INSTALL_ISSUER` gone |
+
+`docs/install.md` gained one input, `CELLA_INSTALL_OVERLAY`, so an
+installation applies its own overlay and the walk applies the one with the
+stubs, and its image step no longer reaches for a registry when the image
+is already on the machine.
+
+### Decisions this slice made
+
+The seven rows of the Design's table, and one more the tree forced: the
+kind overlay pins the tag `dev` for both images, so a runner loads the
+bytes it built or pulled under the name the cluster resolves, and the
+release pipeline retags the published image rather than teaching the node
+to pull a digest it may not be able to reach.
+
+### Left open
+
+- The upstream stub, the gateway and worker tiers, `make run-worker`, the
+  native, postgres and local tiers, and Cilium in the kind cluster: each
+  waits on the spec whose behaviour it exercises
+  ([[018-egress-and-secrets]], [[021-data-plane-workers]]).
+- The admission role runs and nothing dials it. This tree reads no
+  admission variable; slice 047 brings the client, `CELLA_ADMISSION_URL`
+  and its bearer rule, and the wiring is one line of the bootstrap and two
+  keys of the overlay's Secret then.
+- The API conformance suite of [[015-conformance-suite]] is not built, so
+  the release pipeline's `conformance` job runs the lifecycle and not
+  `TestContract`.
+- `make run-down` and the derived ports of [[012-test-stubs-and-tiers]]:
+  the bootstrap runs in the foreground and stops both processes on an
+  interrupt, and a second clone names its port with `CELLA_RUN_PORT`.
