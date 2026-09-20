@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"time"
 
 	driver "latere.ai/x/cella/runtime"
@@ -161,12 +162,23 @@ func (c *Controller) Reap(ctx context.Context) (int, error) {
 	// lost that the driver has.
 	rebuilt := true
 	if c.durable != nil {
-		if err := c.durable.Rebuild(ctx, c.environment, states); err != nil {
+		// The index holds what desired state can be compared against, and a
+		// pool entry has no desired row, so entries are left out of it.
+		observed := slices.DeleteFunc(slices.Clone(states), func(s driver.State) bool { return s.Pool })
+		if err := c.durable.Rebuild(ctx, c.environment, observed); err != nil {
 			rebuilt = false
 			failed = errors.Join(failed, fmt.Errorf("reaper: rebuilding the observed index: %w", err))
 		}
 	}
 	for _, s := range states {
+		if s.Pool {
+			// A pool entry is not a sandbox: nobody owns it, it carries no
+			// deadline, and its lifecycle is the refill loop's (spec 020).
+			// The rules are not asked of it at all, so a driver that
+			// stamped a deadline on an entry cannot have it ended by a rule
+			// that was never meant to see it.
+			continue
+		}
 		rule := reapRule(s, now)
 		if rule == "" {
 			// The token rule is last in design 005's table and first match

@@ -71,10 +71,28 @@ type fakeDriver struct {
 	// projected is what the driver holds inside each sandbox: the token the
 	// create carried, replaced by every re-projection an update makes.
 	projected map[string]string
+	// pool says whether this fake declares the capability, adoptions counts
+	// the entries taken, and onAdopt runs inside the adoption under the
+	// driver's lock, which is where a test makes one adopter lose.
+	pool      bool
+	adoptions int
+	onAdopt   func(id string)
+	// specs is the create spec each sandbox was made from, so a test reads
+	// back what the refill loop asked for.
+	specs map[string]driver.CreateSpec
 }
 
 func newDriver(clock *fakeClock) *fakeDriver {
-	return &fakeDriver{clock: clock, states: map[string]driver.State{}, projected: map[string]string{}}
+	return &fakeDriver{clock: clock, states: map[string]driver.State{},
+		projected: map[string]string{}, specs: map[string]driver.CreateSpec{}}
+}
+
+// Capabilities declares the pool where a test asked for one, so the controller
+// branches on the declaration the way it does on a real driver.
+func (d *fakeDriver) Capabilities() driver.Capabilities {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return driver.Capabilities{Pool: d.pool}
 }
 func (d *fakeDriver) Create(_ context.Context, s driver.CreateSpec) (driver.Ref, error) {
 	d.mu.Lock()
@@ -82,10 +100,14 @@ func (d *fakeDriver) Create(_ context.Context, s driver.CreateSpec) (driver.Ref,
 	if d.createErr != nil {
 		return driver.Ref{}, d.createErr
 	}
+	if err := s.CheckPrewarm(); err != nil {
+		return driver.Ref{}, err
+	}
 	now := d.clock.Now()
 	state := driver.State{ID: s.ID, Name: s.Name, Owner: s.Owner, Phase: driver.Running, Isolation: driver.IsolationNone,
 		Labels: maps.Clone(s.Labels), CreatedAt: now, StartedAt: now, LastActivityAt: now,
-		AutoStop: s.Lifecycle.AutoStop, AutoDelete: s.Lifecycle.AutoDelete}
+		AutoStop: s.Lifecycle.AutoStop, AutoDelete: s.Lifecycle.AutoDelete, Pool: s.Prewarm}
+	d.specs[s.ID] = s
 	if s.Lifecycle.TTL > 0 {
 		state.ExpiresAt = now.Add(s.Lifecycle.TTL)
 	}
@@ -96,7 +118,7 @@ func (d *fakeDriver) Create(_ context.Context, s driver.CreateSpec) (driver.Ref,
 	}
 	return driver.Ref{ID: s.ID}, nil
 }
-func (d *fakeDriver) List(context.Context, driver.Filter) ([]driver.State, error) {
+func (d *fakeDriver) List(_ context.Context, f driver.Filter) ([]driver.State, error) {
 	d.mu.Lock()
 	if d.listErr != nil {
 		d.mu.Unlock()
@@ -104,7 +126,7 @@ func (d *fakeDriver) List(context.Context, driver.Filter) ([]driver.State, error
 	}
 	out := make([]driver.State, 0, len(d.states))
 	for _, id := range d.order {
-		if s, ok := d.states[id]; ok {
+		if s, ok := d.states[id]; ok && f.Selects(s) {
 			out = append(out, s)
 		}
 	}
@@ -225,7 +247,13 @@ func (l *fakeLease) asked() int {
 func newFake(t *testing.T, o Options) (*Controller, *fakeDriver, *fakeClock) {
 	t.Helper()
 	clock := newClock()
-	d := newDriver(clock)
+	return newFakeOver(t, o, newDriver(clock), clock)
+}
+
+// newFakeOver is newFake over a driver the caller already configured, which is
+// how a pool case declares the capability before the controller opens.
+func newFakeOver(t *testing.T, o Options, d *fakeDriver, clock *fakeClock) (*Controller, *fakeDriver, *fakeClock) {
+	t.Helper()
 	o.Driver, o.Clock, o.Environment, o.Log = d, clock, "default", slog.New(slog.DiscardHandler)
 	if o.Store == nil && o.DataDir == "" {
 		o.DataDir = t.TempDir()
