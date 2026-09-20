@@ -10,7 +10,7 @@ depends_on:
   - specs/031-hosted-sandbox-consolidation.md
   - specs/.archive/039-egress-gateway.md
   - specs/.archive/045-workload-tokens.md
-affects: [manifest/v1/, manifest/, controller/, internal/store/, internal/api/, internal/auth/, internal/worker/, runtime/remote/, cmd/cellad/, internal/config/, docs/, .lateregate.yaml]
+affects: [manifest/v1/, manifest/, internal/store/, internal/api/, internal/auth/, internal/events/, internal/worker/, runtime/remote/, cmd/cellad/, internal/config/, controller/, arch_test.go, docs/, CHANGELOG.md]
 effort: large
 created: 2026-09-20
 updated: 2026-09-20
@@ -240,6 +240,17 @@ gets.
   no row.
 - Every other method is one operation, awaited under the caller's own
   context; a cancelled context sends `cancel`.
+
+### What each half may reach
+
+`runtime/remote` reaches the standard library and this module's own
+contract packages and nothing else: the driver holds a transport its
+caller supplies and opens no connection of its own, which
+`TestRootPackagesDialNothing` holds by reading its whole build list.
+`internal/worker` is part of the `cellad` binary, so it is bounded by
+that binary's `depcheck` rows; the one module it adds to them is the
+WebSocket already admitted for the streams of [[008-api]], and it
+reaches no store and so no Postgres driver.
 
 ### Identity across the seam
 
