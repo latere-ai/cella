@@ -17,6 +17,7 @@ import (
 	"latere.ai/x/pkg/httpjson"
 
 	"latere.ai/x/cella/authorizer"
+	"latere.ai/x/cella/internal/metrics"
 	"latere.ai/x/cella/manifest"
 	v1 "latere.ai/x/cella/manifest/v1"
 	"latere.ai/x/cella/runtime"
@@ -359,9 +360,11 @@ func (h *handler) drive(r *http.Request, conn *websocket.Conn, w *frameWriter, s
 			code, err := stream.Wait(ctx)
 			cancel()
 			if err != nil {
+				h.metrics.Exec(metrics.ExitFailed)
 				w.fail(err, requestID)
 				return
 			}
+			h.metrics.Exec(metrics.ExitOf(code))
 			_ = w.writeJSON(exitFrame{Exit: code})
 			closeWith(w, websocket.CloseNormalClosure, "")
 			return

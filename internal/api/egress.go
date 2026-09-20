@@ -4,6 +4,7 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"log/slog"
@@ -54,6 +55,7 @@ type EgressHub struct {
 	conns   map[*gatewayConn]struct{}
 	waiters map[*ackWaiter]struct{}
 	records map[string][]egress.Record
+	metrics Metrics
 	ca      string
 }
 
@@ -66,7 +68,10 @@ type EgressHubOptions struct {
 	AckTimeout time.Duration
 	// RecordsCap is how many records are kept per sandbox.
 	RecordsCap int
-	Log        *slog.Logger
+	// Metrics is design 017's recorder. The connection counts are the
+	// control plane's, taken as the gateway's records arrive.
+	Metrics Metrics
+	Log     *slog.Logger
 }
 
 // NewEgressHub returns a hub holding no map and no connection. Seed it with
@@ -82,6 +87,7 @@ func NewEgressHub(o EgressHubOptions) *EgressHub {
 		conns:       map[*gatewayConn]struct{}{},
 		waiters:     map[*ackWaiter]struct{}{},
 		records:     map[string][]egress.Record{},
+		metrics:     cmp.Or(o.Metrics, Metrics(nopMetrics{})),
 	}
 	if h.ackTimeout <= 0 {
 		h.ackTimeout = DefaultAckTimeout
@@ -254,6 +260,7 @@ func (h *EgressHub) onRecord(r egress.Record) error {
 		kept = slices.Delete(kept, 0, len(kept)-h.recordsCap)
 	}
 	h.records[id] = kept
+	h.metrics.EgressConnection(r.Decision, r.Door, r.BytesIn, r.BytesOut)
 	return nil
 }
 
@@ -354,6 +361,7 @@ func (h *EgressHub) ServeGateway(w http.ResponseWriter, r *http.Request, environ
 	if !c.send(egress.Frame{Type: egress.FrameSnapshot, Snapshot: &egress.Snapshot{Maps: h.snapshot(c.principal)}}) {
 		return
 	}
+	h.metrics.GatewaySnapshot()
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 	go h.readPump(ctx, cancel, conn, c)
@@ -480,6 +488,11 @@ func writeFrame(conn *websocket.Conn, f egress.Frame) bool {
 // GET /v1/environments/{id}/egress, and answers the environment it names. It
 // is matched before the mux, because every route on the mux decides on a
 // subject and an environment key names none.
+// EgressStreamRoute is the route label and span name of the gateway's sync
+// stream. It is written as a pattern because the endpoint is matched by hand
+// before the mux, and design 017's route label is a template.
+const EgressStreamRoute = "GET /v1/environments/{id}/egress"
+
 func egressStreamPath(r *http.Request) (string, bool) {
 	if r.Method != http.MethodGet {
 		return "", false

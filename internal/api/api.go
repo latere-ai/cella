@@ -6,6 +6,7 @@ package api
 
 import (
 	"archive/tar"
+	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/json"
@@ -58,10 +59,14 @@ type Options struct {
 	// today; the six figures of design 007 reach the resolver the same
 	// way once they are loaded.
 	Defaults manifest.Defaults
+	// Metrics is design 017's recorder. It is optional: with none the API
+	// counts nothing and answers the same.
+	Metrics Metrics
 }
 type handler struct {
 	Options
-	mux *http.ServeMux
+	mux     *http.ServeMux
+	metrics Metrics
 }
 
 func New(o Options) (http.Handler, error) {
@@ -74,40 +79,48 @@ func New(o Options) (http.Handler, error) {
 	if o.MaxUploadBytes <= 0 {
 		o.MaxUploadBytes = 1 << 30
 	}
-	h := &handler{Options: o, mux: http.NewServeMux()}
-	h.mux.HandleFunc("GET /v1/sandboxes/{id}/files", h.files)
-	h.mux.HandleFunc("PUT /v1/sandboxes/{id}/files", h.filesPut)
-	h.mux.HandleFunc("DELETE /v1/sandboxes/{id}/files", h.fileRemove)
-	h.mux.HandleFunc("GET /v1/sandboxes/{id}/files/content", h.fileContent)
-	h.mux.HandleFunc("GET /v1/sandboxes/{id}/files/stat", h.fileStat)
-	h.mux.HandleFunc("GET /v1/sandboxes/{id}/files/list", h.fileList)
-	h.mux.HandleFunc("POST /v1/sandboxes/{id}/files/mkdir", h.fileMkdir)
-	h.mux.HandleFunc("POST /v1/sandboxes/{id}/files/move", h.fileMove)
-	h.mux.HandleFunc("GET /v1/sandboxes/{id}/logs", h.logs)
-	h.mux.HandleFunc("GET /v1/sandboxes/{id}/egress", h.egressRecords)
-	h.mux.HandleFunc("POST /v1/sandboxes", h.create)
-	h.mux.HandleFunc("GET /v1/sandboxes", h.list)
-	h.mux.HandleFunc("GET /v1/sandboxes/{id}", h.item)
-	h.mux.HandleFunc("DELETE /v1/sandboxes/{id}", h.item)
-	h.mux.HandleFunc("POST /v1/sandboxes/{id}/{verb}", h.item)
-	h.mux.HandleFunc("GET /v1/sandboxes/{id}/exec", h.execSocket)
-	h.mux.HandleFunc("GET /v1/sandboxes/{id}/attach", h.attachSocket)
-	h.mux.HandleFunc("GET /v1/sandboxes/{id}/display", h.display)
-	h.mux.HandleFunc("GET /v1/sandboxes/{id}/screenshot", h.screenshot)
-	h.mux.HandleFunc("GET /v1/sandboxes/{id}/screen", h.screen)
-	h.mux.HandleFunc("POST /v1/sandboxes/{id}/input", h.input)
-	h.mux.HandleFunc("GET /v1/sandboxes/{id}/ports", h.ports)
-	h.mux.HandleFunc("POST /v1/secrets", h.createSecret)
-	h.mux.HandleFunc("GET /v1/secrets", h.listSecrets)
-	h.mux.HandleFunc("PUT /v1/secrets/{key}", h.applySecret)
-	h.mux.HandleFunc("GET /v1/secrets/{key}", h.secretItem)
-	h.mux.HandleFunc("DELETE /v1/secrets/{key}", h.secretItem)
+	h := &handler{Options: o, mux: http.NewServeMux(), metrics: cmp.Or(o.Metrics, Metrics(nopMetrics{}))}
+	h.handle("GET /v1/sandboxes/{id}/files", h.files)
+	h.handle("PUT /v1/sandboxes/{id}/files", h.filesPut)
+	h.handle("DELETE /v1/sandboxes/{id}/files", h.fileRemove)
+	h.handle("GET /v1/sandboxes/{id}/files/content", h.fileContent)
+	h.handle("GET /v1/sandboxes/{id}/files/stat", h.fileStat)
+	h.handle("GET /v1/sandboxes/{id}/files/list", h.fileList)
+	h.handle("POST /v1/sandboxes/{id}/files/mkdir", h.fileMkdir)
+	h.handle("POST /v1/sandboxes/{id}/files/move", h.fileMove)
+	h.handle("GET /v1/sandboxes/{id}/logs", h.logs)
+	h.handle("GET /v1/sandboxes/{id}/egress", h.egressRecords)
+	h.handle("POST /v1/sandboxes", h.create)
+	h.handle("GET /v1/sandboxes", h.list)
+	h.handle("GET /v1/sandboxes/{id}", h.item)
+	h.handle("DELETE /v1/sandboxes/{id}", h.item)
+	h.handle("POST /v1/sandboxes/{id}/{verb}", h.item)
+	h.handle("GET /v1/sandboxes/{id}/exec", h.execSocket)
+	h.handle("GET /v1/sandboxes/{id}/attach", h.attachSocket)
+	h.handle("GET /v1/sandboxes/{id}/display", h.display)
+	h.handle("GET /v1/sandboxes/{id}/screenshot", h.screenshot)
+	h.handle("GET /v1/sandboxes/{id}/screen", h.screen)
+	h.handle("POST /v1/sandboxes/{id}/input", h.input)
+	h.handle("GET /v1/sandboxes/{id}/ports", h.ports)
+	h.handle("POST /v1/secrets", h.createSecret)
+	h.handle("GET /v1/secrets", h.listSecrets)
+	h.handle("PUT /v1/secrets/{key}", h.applySecret)
+	h.handle("GET /v1/secrets/{key}", h.secretItem)
+	h.handle("DELETE /v1/secrets/{key}", h.secretItem)
 	return h, nil
 }
 
 type callerKey struct{}
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Design 017's count is one per request, including the ones refused
+	// before the mux chose an endpoint. The slot rides the context so the
+	// wrapper behind the mux can tell this one which route it reached.
+	slot := &routeSlot{}
+	rw := &observed{ResponseWriter: w}
+	defer h.observe(slot, rw, time.Now())
+	w = rw
+	r = r.WithContext(context.WithValue(r.Context(), slotKey{}, slot))
 	w.Header().Set("X-Request-ID", rand.Text())
 	token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 	if !ok || strings.TrimSpace(token) == "" {
@@ -124,6 +137,11 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// that decides on a subject can be reached with one.
 	if environment, isEnvironment := caller.Environment(); isEnvironment {
 		if id, ok := egressStreamPath(r); ok && h.Egress != nil {
+			// The stream is served before the mux, so it names its own
+			// route: design 017's label is the endpoint and never the path,
+			// which carries the environment's name.
+			slot.route = EgressStreamRoute
+			nameSpan(r.Context(), EgressStreamRoute)
 			if id != environment {
 				respondError(w, &auth.Error{Code: auth.CodeForbidden, Detail: "the key names another environment"})
 				return
@@ -134,6 +152,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		respondError(w, &auth.Error{Code: auth.CodeForbidden, Detail: "environment keys authorize data plane streams only"})
 		return
 	}
+	stampSpan(r.Context(), caller.Subject, w.Header().Get("X-Request-ID"))
 	ctx := context.WithValue(r.Context(), callerKey{}, caller)
 	// The actor rides the context from here: a mutation several calls below
 	// this handler records who asked for it and under which request id, and
@@ -483,6 +502,7 @@ func respond(w http.ResponseWriter, status int, body any) {
 }
 func respondError(w http.ResponseWriter, err error) {
 	status, envelope := errorEnvelope(err, w.Header().Get("X-Request-ID"))
+	noteCode(w, envelope.Code)
 	httpjson.WriteError(w, status, envelope)
 }
 
