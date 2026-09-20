@@ -6,7 +6,7 @@ depends_on: []
 affects: [cmd/cellad/, internal/config/, internal/version/, Makefile, .lateregate.yaml, Dockerfile, .github/workflows/, .githooks/, docs/]
 effort: small
 created: 2026-09-12
-updated: 2026-09-19
+updated: 2026-09-20
 author: changkun
 ---
 
@@ -174,6 +174,8 @@ deployment that sets one before its spec lands is not refused.
 | `CELLA_EGRESS_PROXY_ADDR`, `CELLA_EGRESS_REVERSE_ADDR`, `CELLA_EGRESS_CA_KEY` | 018 | `:3128`, `:8080`, none | the `egress` role's two doors and the certificate authority it terminates TLS with, as one PEM value carrying the certificate and the private key, since a gateway given only a key could not tell a sandbox what to trust; absent, an authority is generated at start and lives for that process, so an environment with several gateways sets one value on each (039) |
 | `CELLA_EGRESS_CA_BUNDLE` | 012 | unset | PEM authorities the gateway trusts beside the system roots when it dials an upstream; unset in production, the tiers set it to the upstream stub's |
 | `CELLA_TEST_URL`, `CELLA_TEST_TOKEN` | 012 | unset | what the conformance and kind tiers read; printed by the kind overlay's `up.sh` |
+| `CELLA_TEST_KIND`, `CELLA_TEST_CLUSTER`, `CELLA_TEST_SINK` | 012 | unset, `cella-tier`, unset | what the kind tier reads when it brings its own cluster up: `1` turns it on, the cluster it creates and deletes, and the stub sink whose records it asserts (049) |
+| `CELLA_RUN_DIR`, `CELLA_RUN_PORT`, `CELLA_KIND_BUILD`, `CELLA_DOCKER` | 012 | `out/run`, `8080`, `1`, `docker` | read by the development stack of `make run` and the kind overlay's `up.sh`: where their state lives, the public port, so two clones run side by side, whether the images are built here rather than pulled, and the container command (049) |
 | `CELLA_TEST_DRIFT_DEFAULT` | 015 | unset | a field whose default resolves one unit off, so a test proves the conformance suite notices; empty in every deployment |
 | `CELLA_EVENTS_EGRESS` | 018 | unset | `1` delivers per-connection egress records to the sink as events; the journal and the metrics carry them regardless |
 | `CELLA_EGRESS_SIDECAR` | 018 | unset | `1` runs the gateway as a per-Pod sidecar on k8s instead of one Deployment |

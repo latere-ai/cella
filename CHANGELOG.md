@@ -6,6 +6,16 @@ refused before it is pushed.
 
 ## Unreleased
 
+- `make run` needs no issuer of your own. It starts `cella-stubs`, a test
+  binary that serves an OpenID Connect issuer, an authorization endpoint, an
+  admission endpoint and an event sink on loopback, then starts `cellad serve`
+  wired to them, and prints the one command that mints a token to call it
+  with. `make test`, `make test-podman` and `make test-kind` are the tiers,
+  and `deploy/examples/kind-stubs` runs the same stubs beside the control
+  plane in a kind cluster, which is what lets
+  [`docs/install.md`](docs/install.md) walk green on every push and on every
+  tag rather than waiting for an issuer somebody has to supply.
+
 - A `v*` tag is a release. It publishes `ghcr.io/<owner>/cellad:<tag>`, a
   multi-architecture image built from the binary the pipeline compiled, signed
   with cosign and carrying an SPDX bill of materials and a build-provenance
