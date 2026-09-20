@@ -211,9 +211,6 @@ func (d *Driver) Update(ctx context.Context, id string, c driver.Change) error {
 		if err != nil {
 			return change{}, err
 		}
-		if len(c.Token) > 0 && pvc.Annotations[annToken] != "true" {
-			return change{set: map[string]string{annToken: "true"}}, nil
-		}
 		if c.Labels != nil {
 			spec.Labels = maps.Clone(*c.Labels)
 		}
@@ -221,12 +218,21 @@ func (d *Driver) Update(ctx context.Context, id string, c driver.Change) error {
 			spec.Env = maps.Clone(*c.Env)
 		}
 		out := change{spec: &spec}
+		// The claim records that a token is projected, so a start renders
+		// the mount the create rendered. A sandbox that carried none takes
+		// the record here with the token.
+		if len(c.Token) > 0 && pvc.Annotations[annToken] != "true" {
+			out.set = map[string]string{annToken: "true"}
+		}
 		if c.Lifecycle != nil {
 			spec.Lifecycle = *c.Lifecycle
 			// The deadline is measured from the sandbox's creation, not from
 			// the update, so extending a ttl twice is not a moving window.
 			created := parseStamp(pvc.Annotations, annCreatedAt)
-			out.set = lifecycleAnnotations(*c.Lifecycle, created)
+			if out.set == nil {
+				out.set = map[string]string{}
+			}
+			maps.Copy(out.set, lifecycleAnnotations(*c.Lifecycle, created))
 			for _, key := range []string{annExpiresAt, annAutoStop, annAutoDelete} {
 				if _, ok := out.set[key]; !ok {
 					out.remove = append(out.remove, key)

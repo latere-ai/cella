@@ -261,3 +261,29 @@ func envOf(pod *corev1.Pod) map[string]string {
 	}
 	return out
 }
+
+// TestUpdateCarriesTheTokenBesideTheOtherFields keeps one call that changes
+// the labels and the identity from dropping either half.
+func TestUpdateCarriesTheTokenBesideTheOtherFields(t *testing.T) {
+	h := newHarness(t)
+	const id = "sbx_both"
+	h.created(t, spec(id))
+	labels := map[string]string{"team": "a"}
+	if err := h.Update(t.Context(), id, driver.Change{Labels: &labels, Token: []byte("first")}); err != nil {
+		t.Fatal(err)
+	}
+	pvc := h.claimOf(t, id)
+	if pvc.Annotations[annToken] != "true" {
+		t.Errorf("the claim does not record the projection: %v", pvc.Annotations)
+	}
+	s, err := specOf(pvc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Labels["team"] != "a" {
+		t.Errorf("the labels the same call carried were dropped: %v", s.Labels)
+	}
+	if got := string(h.secretOf(t, id).Data[tokenKey]); got != "first" {
+		t.Errorf("the secret holds %q, want %q", got, "first")
+	}
+}
