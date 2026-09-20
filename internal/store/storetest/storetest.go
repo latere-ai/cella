@@ -60,6 +60,7 @@ var cases = []struct {
 	{"Journal", journal},
 	{"Delivery", delivery},
 	{"Leases", leases},
+	{"Revocations", revocations},
 	{"Values", values},
 	{"Ready", ready},
 }
@@ -795,6 +796,18 @@ func held(t TB, s store.Store, name, holder string, ttl time.Duration, want bool
 	}
 }
 
+// revoked asks the list about one jti and reports what it answered.
+func revoked(t TB, s store.Store, jti string) bool {
+	t.Helper()
+	var got bool
+	with(t, s, func(tx store.Tx) error {
+		var err error
+		got, err = tx.Revocations().Revoked(context.Background(), jti)
+		return err
+	})
+	return got
+}
+
 // object is one desired sandbox with the fields every case reads.
 func object(id, owner, name string) store.Object {
 	return store.Object{
@@ -849,4 +862,57 @@ func equal(got, want []string) bool {
 		}
 	}
 	return true
+}
+
+// revocations is the list the verifier of design 006 asks before it trusts a
+// token cellad signed: a jti that was revoked is refused from that moment,
+// one that never was is not, and a row whose exp has passed is swept, because
+// a token nobody can still present needs no row.
+func revocations(t TB, open Opener) {
+	s := opened(t, open, Key)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	with(t, s, func(tx store.Tx) error {
+		return tx.Revocations().Revoke(ctx, "01JLIVE", now.Add(time.Hour))
+	})
+	if !revoked(t, s, "01JLIVE") {
+		t.Errorf("a revoked jti reads as live")
+	}
+	if revoked(t, s, "01JOTHER") {
+		t.Errorf("a jti nobody revoked reads as revoked")
+	}
+	// A rotation or a recovery that retried revokes the same jti twice, and
+	// the row keeps the later expiry so it outlives every token that could
+	// present it.
+	with(t, s, func(tx store.Tx) error {
+		return tx.Revocations().Revoke(ctx, "01JLIVE", now.Add(2*time.Hour))
+	})
+	if !revoked(t, s, "01JLIVE") {
+		t.Errorf("a repeated revocation dropped the row")
+	}
+	// A revocation with no jti revokes nothing and says so, rather than
+	// writing a row every token would match on an empty claim.
+	if err := s.Tx(ctx, func(tx store.Tx) error {
+		return tx.Revocations().Revoke(ctx, "", now.Add(time.Hour))
+	}); err == nil {
+		t.Errorf("a revocation with no jti was accepted")
+	}
+	with(t, s, func(tx store.Tx) error {
+		return tx.Revocations().Revoke(ctx, "01JPAST", now.Add(-time.Minute))
+	})
+	var swept int
+	with(t, s, func(tx store.Tx) error {
+		var err error
+		swept, err = tx.Revocations().Forget(ctx, now)
+		return err
+	})
+	if swept != 1 {
+		t.Errorf("the sweep dropped %d rows, want the one whose exp had passed", swept)
+	}
+	if revoked(t, s, "01JPAST") {
+		t.Errorf("the expired revocation is still in the list")
+	}
+	if !revoked(t, s, "01JLIVE") {
+		t.Errorf("the sweep dropped a revocation whose exp has not passed")
+	}
 }
