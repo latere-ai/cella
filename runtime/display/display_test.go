@@ -266,7 +266,7 @@ func TestScripts(t *testing.T) {
 		t.Errorf("a half-size JPEG capture is %q", half)
 	}
 	for fps, want := range map[int]string{1: "1.000", 4: "0.250", 10: "0.100", 100: "0.100", 0: "1.000"} {
-		if stream := display.StreamScript(fps, display.FormatPNG); !strings.Contains(stream, "sleep "+want) {
+		if stream := display.StreamScript(fps, display.FormatPNG, "abc"); !strings.Contains(stream, "sleep "+want) {
 			t.Errorf("a stream at %d frames a second sleeps something other than %s: %s", fps, want, stream)
 		}
 	}
@@ -275,6 +275,19 @@ func TestScripts(t *testing.T) {
 	}
 	if !strings.Contains(display.StopScript(), display.PIDPath) {
 		t.Error("the stop script does not read the pid file")
+	}
+	// A session ends itself when its file goes, and ends anyway after an
+	// hour, because a container engine cannot end an exec session it started.
+	session := display.NewSession()
+	stream := display.StreamScript(10, display.FormatPNG, session)
+	if !strings.Contains(stream, display.SessionPath(session)) || !strings.Contains(stream, "-lt 36000") {
+		t.Errorf("the stream is not bounded by its session: %s", stream)
+	}
+	if !strings.Contains(display.EndStreamScript(session), display.SessionPath(session)) {
+		t.Error("ending a session does not remove its file")
+	}
+	if a, b := display.NewSession(), display.NewSession(); a == b || len(a) != 16 {
+		t.Errorf("two session names are %q and %q", a, b)
 	}
 }
 

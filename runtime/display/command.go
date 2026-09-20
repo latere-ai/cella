@@ -98,6 +98,17 @@ func CaptureScript(req ScreenshotRequest) string {
 		"xwd -root -display " + DisplayValue + " | \"$c\" xwd:- " + resize(req.Scale) + encoder(req.Format) + ":-"
 }
 
+// MaxSessionSeconds bounds one screen session inside the sandbox. A container
+// engine has no way to end an exec session it has started, so a viewer that
+// vanishes would otherwise leave the capture loop running: the loop counts its
+// own frames and ends itself.
+const MaxSessionSeconds = 3600
+
+// SessionPath is the file one screen session runs while it exists. Removing it
+// ends the session's loop within one frame interval, which is how a driver
+// stops a stream it can no longer read.
+func SessionPath(session string) string { return HomeDir + "/session." + session }
+
 // StreamScript is every frame of one screen session on standard output, each
 // behind its length. One command serves the whole stream, because a command
 // per frame would be ten calls a second into the container engine or the
@@ -105,21 +116,41 @@ func CaptureScript(req ScreenshotRequest) string {
 //
 // Each frame is captured to a file first, so the length is the whole frame's
 // and a reader never meets a partial one.
-func StreamScript(fps int, format string) string {
-	frame := HomeDir + "/frame.$$"
+func StreamScript(fps int, format, session string) string {
 	return strings.Join([]string{
 		"set -e",
 		"c=$(command -v magick || command -v convert)",
 		"mkdir -p " + HomeDir,
-		"f=" + frame,
-		"trap 'rm -f \"$f\"' EXIT",
-		"while :",
+		"s=" + SessionPath(session),
+		": > \"$s\"",
+		"f=" + HomeDir + "/frame.$$",
+		"trap 'rm -f \"$f\" \"$s\"' EXIT",
+		"n=0",
+		"while test -e \"$s\" && test \"$n\" -lt " + strconv.Itoa(frameCap(fps)),
 		"do xwd -root -display " + DisplayValue + " | \"$c\" xwd:- " + encoder(format) + ":\"$f\"",
 		"printf %0" + strconv.Itoa(FrameHeaderBytes) + "x $(wc -c < \"$f\")",
 		"cat \"$f\"",
+		"n=$((n+1))",
 		"sleep " + interval(fps),
 		"done",
 	}, "; ")
+}
+
+// EndStreamScript ends one screen session by removing the file its loop runs
+// while it exists.
+func EndStreamScript(session string) string {
+	return "rm -f " + SessionPath(session)
+}
+
+// frameCap is how many frames one session may produce before it ends itself.
+func frameCap(fps int) int {
+	if fps < 1 {
+		fps = 1
+	}
+	if fps > MaxFPS {
+		fps = MaxFPS
+	}
+	return fps * MaxSessionSeconds
 }
 
 // PortsScript is the kernel's own table of TCP sockets. Reading it answers for

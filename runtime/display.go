@@ -5,10 +5,8 @@ package runtime
 
 import (
 	"context"
-	"errors"
 	"io"
 	"net"
-	"strconv"
 
 	"latere.ai/x/cella/runtime/display"
 )
@@ -28,7 +26,7 @@ type (
 // up. It is not a bring-up: the desktop is started by the lifecycle, and a
 // caller that arrives before it is ready is told which condition it is
 // waiting on rather than made to wait.
-var ErrDisplayNotReady = errors.New("the sandbox's desktop is not ready: DisplayReady is false")
+var ErrDisplayNotReady = display.ErrNotReady
 
 // DisplayDriver is implemented by a driver if and only if it declares
 // Capabilities.Display; runtimetest checks both directions.
@@ -63,21 +61,10 @@ type Dialer interface {
 	Dial(ctx context.Context, id string, port int) (net.Conn, error)
 }
 
-// InputFailure is the event a batch stopped at. A driver returns it when part
-// of a batch ran, so the API answers with how much landed and where it
-// stopped rather than with a failure that says nothing about the desktop's
-// state.
-type InputFailure struct {
-	// Index is the event that failed and Executed is how many ran before it.
-	Index    int
-	Executed int
-	Err      error
-}
-
-func (e *InputFailure) Error() string {
-	return "the desktop refused event " + strconv.Itoa(e.Index) + ": " + e.Err.Error()
-}
-func (e *InputFailure) Unwrap() error { return e.Err }
+// InputFailure is the event a batch stopped at, so the API answers with how
+// much of a gesture landed and where it stopped rather than with a failure
+// that says nothing about the desktop's state.
+type InputFailure = display.InputFailure
 
 // The ways a port may be reached from outside the sandbox (spec 023).
 const (
