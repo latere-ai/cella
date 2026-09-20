@@ -137,6 +137,52 @@ func TestRunMirrorsTheReportOntoSubtests(t *testing.T) {
 	}
 }
 
+// TestMinterTakesATokenPerSubject: the function a tier hands the suite as
+// its Token, over an issuer that mints, one that refuses, one that answers
+// something else, and one that is not there.
+func TestMinterTakesATokenPerSubject(t *testing.T) {
+	f := newFake(t)
+	mint := Minter(f.server.URL + "/")
+	token, err := mint(t.Context(), "alice")
+	if err != nil || token != "fake-token-alice" {
+		t.Fatalf("the issuer minted %q, %v", token, err)
+	}
+	for mode, want := range map[string]string{
+		"status": "answered 503",
+		"body":   "no token",
+		"empty":  "minted nothing",
+	} {
+		f.mintFailure = mode
+		if _, err := mint(t.Context(), "alice"); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("an issuer in mode %s answered %v, want an error naming %q", mode, err, want)
+		}
+	}
+	f.server.Close()
+	if _, err := mint(t.Context(), "alice"); err == nil || !strings.Contains(err.Error(), "minting a token") {
+		t.Errorf("an issuer that is not there answered %v", err)
+	}
+}
+
+// TestAServerWithNoSecretKeySkipsTheSecrets: an installation that holds no
+// key to seal a value under says so, and the group skips with the server's
+// own sentence rather than failing.
+func TestAServerWithNoSecretKeySkipsTheSecrets(t *testing.T) {
+	f := newFake(t)
+	f.noSecretKey = true
+	report, err := Execute(t.Context(), f.config())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"case018SecretWriteOnly", "case018SecretRotates", "case018SecretDelete"} {
+		if !slices.Contains(report.Skipped, name) {
+			t.Errorf("%s did not skip against a server that stores no secret value", name)
+		}
+		if reason := report.Reasons[name]; !strings.Contains(reason, "stores no secret value") {
+			t.Errorf("%s skipped with %q", name, reason)
+		}
+	}
+}
+
 // TestTheReportPrintsEveryBucket: the report a person reads names each case
 // with what happened to it, and the counts at the end.
 func TestTheReportPrintsEveryBucket(t *testing.T) {

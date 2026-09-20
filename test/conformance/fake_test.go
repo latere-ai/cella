@@ -47,6 +47,13 @@ type fake struct {
 	// is what proves a case reads the answer and not only its status.
 	wrongMessage bool
 	wrongValues  bool
+	// noSecretKey answers a secret's apply the way an installation that
+	// holds no key to seal a value under answers it.
+	noSecretKey bool
+	// mintFailure is how the issuer route fails: empty mints, "status" for a
+	// refusal, "body" for an answer that is no token, "empty" for a token
+	// that is not there.
+	mintFailure string
 	// breakMode is how this server breaks: empty never, "gone" for a
 	// connection that goes away, "garbage" for an answer that is no answer.
 	// breakAfter is how many calls it answers before it breaks, so a sweep
@@ -91,6 +98,7 @@ func newFake(t *testing.T) *fake {
 	})
 	// The control contract of the suite and the sink's own records.
 	mux.HandleFunc("POST /fail", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
+	mux.HandleFunc("POST /mint", f.mint)
 	mux.HandleFunc("GET /events", f.sinkRecords)
 
 	mux.Handle("POST /v1/sandboxes", f.authenticated(f.create))
@@ -783,6 +791,10 @@ func (f *fake) applySecret(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if f.noSecretKey {
+		f.refuse(w, "capability_unsupported")
+		return
+	}
 	name := r.PathValue("name")
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -942,6 +954,28 @@ func (f *fake) environments(w http.ResponseWriter, _ *http.Request) {
 			"files": true, "attach": true, "display": true, "input": true, "dial": true,
 		}},
 	}}, "next": ""})
+}
+
+// mint is the issuer route a tier takes every subject's token from.
+func (f *fake) mint(w http.ResponseWriter, r *http.Request) {
+	var asked struct {
+		Sub string `json:"sub"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&asked); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	switch f.mintFailure {
+	case "status":
+		w.WriteHeader(http.StatusServiceUnavailable)
+	case "body":
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, "this is no token")
+	case "empty":
+		f.write(w, http.StatusOK, map[string]any{"token": ""})
+	default:
+		f.write(w, http.StatusOK, map[string]any{"token": "fake-token-" + asked.Sub})
+	}
 }
 
 // lookup resolves an id or a name. The caller holds the lock.
