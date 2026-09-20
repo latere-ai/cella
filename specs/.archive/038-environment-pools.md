@@ -1,6 +1,6 @@
 ---
 title: "Environment pools: the prewarmed entry, the match rule, adoption as one exclusive driver act, the refill loop under its lease"
-status: in-progress
+status: complete
 track: core
 depends_on:
   - specs/020-scheduling-and-sets.md
@@ -352,22 +352,98 @@ adoption, which waits on a workspace source the manifest does not have.
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| `Prewarm` makes an entry with no owner, no token and the pool stamp; `Inspect` reports `Pool`; an owner filter does not select it and does after adoption | `PrewarmIsNotOwned` in `runtimetest` | not built |
-| Adoption rewrites owner, name, labels, env, lifecycle, token and the boundary, and moves `createdAt` and `lastActivityAt` to the adoption | `AdoptRewritesTheRecord` in `runtimetest` | not built |
-| Two concurrent adoptions of one entry yield one success and one `ErrNotFound`, and the winner's record is whole | `PrewarmAndAdoptIsExclusive` in `runtimetest` | not built |
-| A differing workspace path is `ErrInvalid` and the entry is untouched; `Adopt` beside another `Change` field is `ErrInvalid`; a driver without `Pool` answers `ErrUnsupported` | `AdoptRefusals` in `runtimetest` | not built |
-| The match rule accepts an equal manifest and refuses each of image, resources, display, command, args, user, workspace source and workspace path | `TestPoolMatch` | not built |
-| A matching create adopts: one `Update{Adopt}`, no `Create`, `Scheduled` is `FromPool`, `createdAt` is the adoption, the boundary and the token are the sandbox's own | `TestPoolAdoption` | not built |
-| An adoption lost to a race falls back to a real create under a new id, with no leaked map, token or desired row | `TestPoolAdoptionFallsBack` | not built |
-| A non-matching create never touches an entry and is `Scheduled: Placed` | `TestPoolMismatchCreatesForReal` | not built |
-| The refill loop reaches `spec.pool.size` and stops, runs only under its lease, holds `min(size, capacity - live)`, prewarms at most the in-flight cap per tick, and acts on no tick whose list failed | `TestPoolRefill`, `TestPoolRefillHoldsTheLease`, `TestPoolRefillBounds` | not built |
-| What the loop prewarms is what the match rule accepts for a manifest that asks for the environment's own shape | `TestPoolPrewarmMatchesItsOwnShape` | not built |
-| A real create that does not fit deletes the oldest entries first, and is `ErrQuota` with none left | `TestPoolYieldsCapacity` | not built |
-| An entry whose shape stamp differs, one that left `Running`, and every entry once the size is zero are deleted, and an entry inside the grace is left alone | `TestPoolDrift`, `TestPoolOrphans`, `TestPoolGrace` | not built |
-| The reaper ends no entry under any rule, with a deadline stamped on one | `TestReaperLeavesPoolEntries` | not built |
-| A node on the native driver with `CELLA_POOL_SIZE=2` holds two entries, adopts a matching create with `FromPool` and a fresh `createdAt`, and creates a non-matching one for real | `TestPoolEndToEnd` in `cmd/cellad` | not built |
-| `CELLA_SCHEDULING_MODE=queued` and a size above zero on a driver without `Pool` are start-up problems | `TestPoolConfig` | not built |
+| `Prewarm` makes an entry with no owner, no token and the pool stamp; `Inspect` reports `Pool`; an owner filter does not select it and does after adoption | `PrewarmIsNotOwned` in `runtimetest` | built |
+| Adoption rewrites owner, name, labels, env, lifecycle, token and the boundary, and moves `createdAt` and `lastActivityAt` to the adoption | `AdoptRewritesTheRecord` in `runtimetest` | built |
+| Two concurrent adoptions of one entry yield one success and one `ErrNotFound`, and the winner's record is whole | `PrewarmAndAdoptIsExclusive` in `runtimetest` | built |
+| A differing workspace path is `ErrInvalid` and the entry is untouched; `Adopt` beside another `Change` field is `ErrInvalid`; a driver without `Pool` answers `ErrUnsupported` | `AdoptRefusals` in `runtimetest` | built |
+| The match rule accepts an equal manifest and refuses each of image, resources, display, command, args, user, workspace source and workspace path | `TestPoolMatch` | built |
+| A matching create adopts: one `Update{Adopt}`, no `Create`, `Scheduled` is `FromPool`, `createdAt` is the adoption, the boundary and the token are the sandbox's own | `TestPoolAdoption` | built |
+| An adoption lost to a race falls back to a real create under a new id, with no leaked map, token or desired row | `TestPoolAdoptionFallsBack` | built |
+| A non-matching create never touches an entry and is `Scheduled: Placed` | `TestPoolMismatchCreatesForReal` | built |
+| The refill loop reaches `spec.pool.size` and stops, runs only under its lease, holds `min(size, capacity - live)`, prewarms at most the in-flight cap per tick, and acts on no tick whose list failed | `TestPoolRefill`, `TestPoolRefillHoldsTheLease`, `TestPoolRefillBounds` | built |
+| What the loop prewarms is what the match rule accepts for a manifest that asks for the environment's own shape | `TestPoolPrewarmMatchesItsOwnShape` | built |
+| A real create that does not fit deletes the oldest entries first, and is `ErrQuota` with none left | `TestPoolYieldsCapacity` | built |
+| An entry whose shape stamp differs, one that left `Running`, and every entry once the size is zero are deleted, and an entry inside the grace is left alone | `TestPoolDrift`, `TestPoolOrphans`, `TestPoolGrace` | built |
+| The reaper ends no entry under any rule, with a deadline stamped on one | `TestReaperLeavesPoolEntries` | built |
+| A node on the native driver with `CELLA_POOL_SIZE=2` holds two entries, adopts a matching create with `FromPool` and a fresh `createdAt`, and creates a non-matching one for real | `TestPoolEndToEnd` in `cmd/cellad` | built |
+| `CELLA_SCHEDULING_MODE=queued` and a size above zero on a driver without `Pool` are start-up problems | `TestPoolConfig` | built |
 
 ## Outcome
 
-Written at completion.
+Built as specified, with the drivers' claims in the shapes the table names.
+
+`runtime` gained `CreateSpec.Prewarm`, `Change.Adopt *Adoption`, `State.Pool`,
+`Filter.Pool`, and the two contract checks every driver runs first:
+`Change.Adoption`, which refuses an adoption beside any other change, and
+`CreateSpec.CheckPrewarm`, which refuses a prewarm carrying an owner, a name, a
+command, an identity, a boundary or an environment. `Filter.Selects` moved the
+narrowing every driver's `List` does into one place, so `Pool` reached all
+three at once.
+
+Each driver claims before it projects, which is what keeps a loser of the race
+from having written its caller's token into a sandbox the winner owns:
+
+- `native` rewrites the record under the lock one process already holds over
+  its root.
+- `podman` writes record generation n+1, and the engine's refusal of a second
+  volume of one name is the compare-and-swap. It holds between two driver
+  instances over one engine, where the in-process lock does not, which
+  `TestAdoptionIsExclusiveAcrossDrivers` drives with two drivers over one fake
+  engine. The owner, the name and the creation instant moved onto the record,
+  because podman fixes a volume's labels at create and all three are rewritten
+  at adoption.
+- `k8s` sends one guarded patch testing the pool label, the resource version
+  and the spec annotation, and removing the label in the same act. A prewarmed
+  Pod is rendered with the token projection already mounted and no Secret
+  behind it: the kubelet cannot add a volume to a running Pod, so an entry
+  without the mount could never be handed the identity an adoption mints.
+
+A projection that fails after a won claim deletes the sandbox on every driver.
+Nothing is ever returned to the pool: an entry carrying half of one caller's
+identity is worth less than the seconds it saves, which is the hosted
+platform's own conclusion.
+
+`controller/pool.go` holds the refill loop, the match rule, the shape stamp,
+the capacity arithmetic and the placement condition. `Create` gained ten lines:
+the entry is matched before the id is minted, the driver call at the end is
+`Update{Adopt}` instead of `Create`, and an adoption the driver refuses with
+`ErrNotFound`, `ErrInvalid` or `ErrUnsupported` withdraws the whole attempt,
+its map and its identity with it, and creates again under a new id. The
+adopted sandbox takes the entry's id, because the id is the object's name on
+both container drivers and neither can be renamed.
+
+Three bounds came from the hosted platform's own regressions rather than from
+the design: the grace, which keeps a tick from deleting an entry that is still
+coming up; the in-flight cap, which keeps a cold start from opening every image
+pull at once; and the rule that a list the driver refused ends the tick, since
+a partial view reads as a pool that is short. `TestPoolPrewarmMatchesItsOwnShape`
+is the one the hosted suite says matters most: what the loop makes must be what
+the match rule accepts, or every create takes the slow path with no test
+failing.
+
+The end-to-end run is `TestPoolEndToEnd` in `cmd/cellad`: a node on the native
+driver with `CELLA_POOL_SIZE=2`, the two entries read back through a second
+driver over the same root, a create that lands on one of them with
+`Scheduled: FromPool` and a `createdAt` after the prewarm, a create with a
+command that lands on neither with `Scheduled: Placed`, and the loop replacing
+what the adoption took. `podman` ran the four conformance cases against a real
+engine; `k8s` ran its own against the client double, and the cluster run
+carries them where a cluster is configured.
+
+Coverage on the packages this slice touched: `controller` 93.8%, `runtime`
+100%, `runtime/native` 90.3%, `runtime/podman` 93.0%, `runtime/k8s` 92.6%,
+`runtime/runtimetest` 98.2%, `manifest/v1` 100%, `internal/config` 94.8%,
+`cmd/cellad` 90.6%. `go test -race` passes and `go tool lateregate` reports
+sixteen gates passed.
+
+Four things left open. The count ceiling is `controller.Options.Capacity` and
+no variable sets it: the environment's capacity is [[021-data-plane-workers]]'s
+`CELLA_CAPACITY`, and reading it here would fix a field that spec owns. The
+resource form of capacity waits on drivers reporting granted resources.
+`spec.pool.display` is carried and hashed into the shape and no driver renders
+it, because a sandbox has no `display` field yet ([[023-computer-use-operations]]).
+And a create whose adoption is lost emits `sandbox.created` and
+`sandbox.deleted` for an id no caller was ever given, which is truthful about
+what the control plane did and noisier than what the caller experienced; the
+alternative is deferring the desired write past the driver call, which
+[[005-lifecycle-controller]]'s create order forbids.
