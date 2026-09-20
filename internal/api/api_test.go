@@ -37,6 +37,8 @@ type fixture struct {
 	issuerURL       string
 	h               http.Handler
 	c               *controller.Controller
+	// header is the last response's, for a route whose answer is in them.
+	header http.Header
 }
 
 func setup(t *testing.T, policy authz.Authorizer) *fixture { return setupDriver(t, policy, nil) }
