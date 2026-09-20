@@ -201,6 +201,20 @@ depcheck:
         go.yaml.in/yaml: the YAML parser the Kubernetes decoders are built on
         gopkg.in/evanphx/json-patch.v4: the JSON patch the k8s driver's compare-and-swap is written as
         gopkg.in/inf.v0: the arbitrary-precision arithmetic behind a Kubernetes quantity
+    latere.ai/x/cella/cmd/cella-stubs:
+      decision: >-
+        the test stubs of spec 012 reach latere.ai/x/pkg and the standard
+        library and nothing of the control plane: no store, no driver, no
+        Kubernetes client and no Podman client. The issuer is
+        latere.ai/x/pkg/authkit/issuertest and the authorizer is
+        latere.ai/x/pkg/authz/stub, both behind a listener of
+        internal/stubs; the admission endpoint of spec 007 and the sink of
+        spec 009 are written there against the spec and not against the
+        client, because a stub built from the code it stands opposite
+        agrees with that code whatever either one does
+      allow:
+        latere.ai/x/pkg: the shared library every Latere service is built on (spec 002)
+        github.com/google/uuid: request ids in latere.ai/x/pkg/httpjson
     latere.ai/x/cella/internal/egressd:
       decision: >-
         the egress role reaches latere.ai/x/pkg/egress, the WebSocket
