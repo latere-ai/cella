@@ -301,6 +301,7 @@ yet. The mesh and spawn objects of [[022-mesh-and-spawn]].
 | `Operations.Claim` redelivers an operation whose claimer's heartbeat lapsed, exactly once to a live worker | `storetest`'s `Operations`, `Redelivery` and `Workers` cases over both adapters | built |
 | `runtime/remote` passes the conformance suite of [[004-runtime-contract]] against an in-process worker running the native driver | `TestWorkerConformance` | built |
 | The stream's framing holds, every driver sentinel crosses the seam, and a caller's cancel reaches the worker | `TestStreamFraming`, `TestControlMessages`, `TestErrorCrossesTheSeam`, `TestCancelCrossesTheSeam`, `TestExecStreamsAcrossTheSeam` | built |
+| An operation that answers and then streams sends its answer first, and a body cut short never says it is whole | `TestReadAnswersBeforeItStreams`, `TestABodyThatFailedLeavesTheFileWhole` | built |
 | A worker that drops its stream registers again and the environment is placeable once more, with nothing having dialed it | `TestWorkerReconnects`, `TestWorkerRetriesARefusedRegistration` | built |
 | `cellad serve` and `cellad worker` in one process over loopback: a key minted through the route, a worker that registers and connects, an environment that reports it, and one that reports none when it stops and one again when it returns | `TestWorkerEndToEnd` | built |
 | Capabilities are the intersection of the live workers' reports | `TestRegistrationMismatch` | built |
@@ -332,7 +333,7 @@ state half of it is not. What landed:
 Coverage on the packages this slice added or extended, on
 `go test -cover`: `manifest` 97.5%, `internal/config` 91.4%,
 `internal/store` 91.6% with memory 93.8% and postgres 90.0%,
-`internal/api` 90.6%, `runtime/remote` 90.8%, `internal/worker` 91.0%,
+`internal/api` 90.6%, `runtime/remote` 90.5%, `internal/worker` 91.0%,
 `cmd/cellad` 90.5%.
 `go test -race` is clean over all of them.
 
@@ -355,5 +356,5 @@ signer.
 | `Controller.driverFor`: the per-environment driver map, the reaper and the pool per environment | 44 call sites of `c.driver` across the reaper, the pool, recovery, egress and display, some under the controller's lock and some not. It is the half of this spec that collides with the controller work of [[022-mesh-and-spawn]], and half-applied it delivers nothing |
 | The phase loop writing `status.phase` and `status.reason` under the environments lease | It writes to the stored object, which is the item above |
 | `environment.registered` and `.offline` emitted from the phase loop | The same. `.keyed` and `.key_revoked` are emitted from the key routes and the vocabulary is declared |
-| The `credit` control message of 021's flow control | The framing reserves it; a sub-stream is bounded by the 1 MiB frame and the write deadline instead, and adding the window is additive |
+| The `credit` control message of 021's flow control | The framing reserves it. Until it lands the only back pressure is the sub-stream's own pipe, which blocks the connection's read pump: an operation that answers and then streams must send its answer first, which `TestReadAnswersBeforeItStreams` holds, and the window is what would make the ordering unnecessary |
 | The `workers` and `operations` rows read back by the hub for redelivery | `Claim`, `Register`, `Heartbeat`, `Forget` and `Workers` are built and proved at the store; the hub writes the row and the answer and keeps the live registrations in memory, which is one replica's view. A fleet reads them from the table |
