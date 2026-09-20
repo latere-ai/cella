@@ -30,6 +30,10 @@ type Sink interface {
 	// that streams for its whole life calls it; one that answers at once
 	// does not, because its answer is its acceptance.
 	Accept(err error) error
+	// Answer sends the operation's result. One operation answers once, so an
+	// operation that must answer before it writes a sub-stream calls it
+	// itself and the caller's later answer is the no-op it should be.
+	Answer(res Response, err error) error
 }
 
 // Execute runs one operation with the worker's own driver and returns its
@@ -293,10 +297,22 @@ func files(ctx context.Context, d runtime.Driver, opType string, req Request, si
 // result rather than a frame of its own, so a caller learns the size and the
 // mode before the first byte and a file that cannot be opened costs no
 // sub-stream at all.
+//
+// The answer is sent here rather than by the caller, and before the copy
+// starts. The far side waits for the result before it reads the bytes, and
+// one connection carries both: a byte frame queued ahead of the result would
+// reach a reader nobody is draining yet and hold the whole connection behind
+// it. Sending the answer first is what keeps that order, and the caller's
+// later answer is the no-op one operation answering once makes it.
 func open(ctx context.Context, store runtime.FileStore, req Request, sink Sink) (Response, error) {
 	reader, info, err := store.Open(ctx, req.ID, req.Path)
 	if err != nil {
 		return Response{}, err
+	}
+	answer := Response{Info: &info}
+	if sendErr := sink.Answer(answer, nil); sendErr != nil {
+		_ = reader.Close()
+		return Response{}, sendErr
 	}
 	out := sink.Writer(StreamBytes)
 	go func() {
@@ -304,6 +320,5 @@ func open(ctx context.Context, store runtime.FileStore, req Request, sink Sink) 
 		_, _ = io.Copy(out, reader)
 		_ = out.Close()
 	}()
-	_ = ctx
-	return Response{Info: &info}, nil
+	return answer, nil
 }

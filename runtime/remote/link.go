@@ -287,10 +287,16 @@ type Channel struct {
 	mu      sync.Mutex
 	readers map[byte]*io.PipeReader
 	writers map[byte]*io.PipeWriter
+	// ended is why the operation stopped, once it has. A sub-stream asked
+	// for after that is handed back already ended: a caller that starts
+	// reading an operation the connection has already lost must read the
+	// reason rather than wait for bytes nobody will send.
+	ended error
 
 	resizes      chan [2]int
 	result       chan Message
 	answered     sync.Once
+	sent         sync.Once
 	started      chan Message
 	acceptedOnce sync.Once
 	cancelled    chan struct{}
@@ -313,13 +319,21 @@ func (c *Channel) pipe(stream byte) *io.PipeReader {
 	}
 	r, w := io.Pipe()
 	c.readers[stream], c.writers[stream] = r, w
+	if c.ended != nil {
+		_ = w.CloseWithError(c.ended)
+	}
 	return r
 }
 
 // write puts one incoming frame into a sub-stream's pipe. A zero-length frame
-// ends it. The write runs on the read pump, so a sub-stream nobody is reading
-// holds the connection, which is the back pressure the protocol has instead
-// of a window.
+// ends it.
+//
+// The write runs on the read pump and an io.Pipe blocks until it is read, so
+// a sub-stream whose reader has stopped holds this connection. That is the
+// only back pressure the protocol has until the credit window of design 021
+// lands, and it is why an operation that answers and then streams sends its
+// answer first: the far side must never be waiting for a result that is
+// queued behind bytes it has not started reading.
 func (c *Channel) write(stream byte, payload []byte) {
 	c.pipe(stream)
 	c.mu.Lock()
@@ -420,15 +434,22 @@ func (c *Channel) Accepted(ctx context.Context) error {
 	}
 }
 
-// Answer sends the operation's result. It is the worker's call.
+// Answer sends the operation's result. It is the worker's call, and one
+// operation answers once: an operation that answered before it wrote its
+// sub-stream has already said what it will say, and a second answer would be
+// a second result for one call.
 func (c *Channel) Answer(res Response, err error) error {
-	m := Message{Type: MessageResult, Operation: c.operation, OK: err == nil}
-	if err != nil {
-		m.Error = EncodeError(err)
-	} else {
-		m.Response = &res
-	}
-	return c.link.Send(c.operation, m)
+	var sendErr error
+	c.sent.Do(func() {
+		m := Message{Type: MessageResult, Operation: c.operation, OK: err == nil}
+		if err != nil {
+			m.Error = EncodeError(err)
+		} else {
+			m.Response = &res
+		}
+		sendErr = c.link.Send(c.operation, m)
+	})
+	return sendErr
 }
 
 func (c *Channel) answer(m Message) {
@@ -456,10 +477,16 @@ func (c *Channel) Close() error {
 }
 
 // end releases every sub-stream with the reason the operation stopped, so a
-// reader blocked on one learns it rather than waiting forever.
+// reader blocked on one learns it rather than waiting forever. The reason is
+// kept, because a caller may ask for a sub-stream after the operation ended
+// and must be handed one that is already over.
 func (c *Channel) end(err error) {
 	c.cancel()
+	if err == nil {
+		err = ErrLinkClosed
+	}
 	c.mu.Lock()
+	c.ended = err
 	writers := make([]*io.PipeWriter, 0, len(c.writers))
 	for _, w := range c.writers {
 		writers = append(writers, w)

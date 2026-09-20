@@ -457,3 +457,115 @@ func TestLogsCrossTheSeam(t *testing.T) {
 	}
 	t.Fatalf("the main process's output never crossed the seam")
 }
+
+// TestReadAnswersBeforeItStreams holds the ordering the protocol needs: the
+// far side waits for a file read's answer before it reads the bytes, and one
+// connection carries both, so an answer queued behind bytes nobody is
+// draining yet would hold the whole stream. This is the shape that hung
+// under load before the answer was sent first.
+func TestReadAnswersBeforeItStreams(t *testing.T) {
+	host, err := native.New(filepath.Join(t.TempDir(), "native"))
+	if err != nil {
+		t.Fatalf("the worker's own driver did not open: %v", err)
+	}
+	t.Cleanup(func() { _ = host.Close() })
+	s := openSeam(t, host)
+	ctx := t.Context()
+
+	ref, err := s.driver.Create(ctx, driver.CreateSpec{
+		ID: "sbx_ordered", Name: "ordered", Owner: "ops", Command: []string{"sleep", "30"},
+	})
+	if err != nil {
+		t.Fatalf("the create failed: %v", err)
+	}
+	t.Cleanup(func() { _ = s.driver.Delete(context.Background(), ref.ID) })
+
+	// A body of many frames: the copy on the worker's side is well ahead of
+	// the reader on this side by the time the answer is asked for.
+	body := strings.Repeat("the bytes that arrive before anybody reads them\n", 4096)
+	if _, err = s.driver.Write(ctx, ref.ID, driver.WriteRequest{
+		Path: "/workspace/ordered.txt", Body: strings.NewReader(body),
+	}); err != nil {
+		t.Fatalf("the write failed: %v", err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		reader, info, openErr := s.driver.Open(ctx, ref.ID, "/workspace/ordered.txt")
+		if openErr != nil {
+			done <- openErr
+			return
+		}
+		defer func() { _ = reader.Close() }()
+		if info.Size != int64(len(body)) {
+			done <- errors.New("the entry reports a size the file does not have")
+			return
+		}
+		got, readErr := io.ReadAll(reader)
+		if readErr != nil {
+			done <- readErr
+			return
+		}
+		if string(got) != body {
+			done <- errors.New("the file read back as something else")
+			return
+		}
+		done <- nil
+	}()
+	select {
+	case err = <-done:
+		if err != nil {
+			t.Fatalf("the read failed: %v", err)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatalf("the read never answered, which is the answer queued behind its own bytes")
+	}
+}
+
+// TestABodyThatFailedLeavesTheFileWhole holds what a cut-short write costs:
+// the sub-stream's zero-length frame is what says a body is whole, so a body
+// that failed never sends one and the worker discards what it had staged.
+func TestABodyThatFailedLeavesTheFileWhole(t *testing.T) {
+	host, err := native.New(filepath.Join(t.TempDir(), "native"))
+	if err != nil {
+		t.Fatalf("the worker's own driver did not open: %v", err)
+	}
+	t.Cleanup(func() { _ = host.Close() })
+	s := openSeam(t, host)
+	ctx := t.Context()
+
+	ref, err := s.driver.Create(ctx, driver.CreateSpec{
+		ID: "sbx_cutshort", Name: "cutshort", Owner: "ops", Command: []string{"sleep", "30"},
+	})
+	if err != nil {
+		t.Fatalf("the create failed: %v", err)
+	}
+	t.Cleanup(func() { _ = s.driver.Delete(context.Background(), ref.ID) })
+
+	const path = "/workspace/cutshort.txt"
+	if _, err = s.driver.Write(ctx, ref.ID, driver.WriteRequest{
+		Path: path, Body: strings.NewReader("what was there before"),
+	}); err != nil {
+		t.Fatalf("the first write failed: %v", err)
+	}
+	cut := io.MultiReader(strings.NewReader("half"), failingReader{})
+	if _, err = s.driver.Write(ctx, ref.ID, driver.WriteRequest{Path: path, Body: cut}); err == nil {
+		t.Errorf("a body that failed part way reported no error")
+	}
+	reader, _, err := s.driver.Open(ctx, ref.ID, path)
+	if err != nil {
+		t.Fatalf("the read failed: %v", err)
+	}
+	defer func() { _ = reader.Close() }()
+	got, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("the file did not read: %v", err)
+	}
+	if string(got) != "what was there before" {
+		t.Errorf("a write whose body failed left %q", got)
+	}
+}
+
+// failingReader is a body cut short: it fails on the first read.
+type failingReader struct{}
+
+func (failingReader) Read([]byte) (int, error) { return 0, errors.New("the body was cut short") }

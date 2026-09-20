@@ -319,7 +319,11 @@ func (d *Driver) ImportTar(ctx context.Context, id, dest string, src io.Reader) 
 	defer func() { _ = stream.Close() }()
 	down := stream.Down(StreamBytes)
 	if _, err = io.Copy(down, src); err != nil {
-		_ = down.Close()
+		// The sub-stream is left unclosed on purpose: its zero-length frame
+		// is what says the archive is whole, and an archive that ended early
+		// is not. The deferred close cancels the operation instead, so the
+		// worker's driver reads a body that failed rather than one that
+		// finished.
 		return err
 	}
 	if err = down.Close(); err != nil {
@@ -395,8 +399,13 @@ func (d *Driver) Write(ctx context.Context, id string, req runtime.WriteRequest)
 		// A body past the bound is the worker's refusal, not this side's:
 		// the copy ends when the worker stops reading, and the result
 		// carries ErrTooLarge with the file left whole.
+		//
+		// A body that failed part way is this side's, and the sub-stream is
+		// left unclosed: its zero-length frame is what says the body is
+		// whole. The deferred close cancels the operation instead, so the
+		// worker's driver discards what it had staged and the file the
+		// write named keeps the content it had.
 		if _, err = io.Copy(down, req.Body); err != nil && !errors.Is(err, io.ErrClosedPipe) {
-			_ = down.Close()
 			return 0, err
 		}
 	}
