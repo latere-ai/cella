@@ -255,6 +255,11 @@ var verbs = []struct{ group, resource, subresource, verb string }{
 	// mesh, made with its first member and removed with its last.
 	{"", "services", "", "create"}, {"", "services", "", "delete"},
 	{networkGroup, "networkpolicies", "", "create"}, {networkGroup, "networkpolicies", "", "delete"},
+	// The workload token of spec 006: one Secret per sandbox, projected on
+	// /run/cella, replaced in place on a rotation and removed with the
+	// sandbox. It holds the identity and never a secret value.
+	{"", "secrets", "", "create"}, {"", "secrets", "", "get"},
+	{"", "secrets", "", "update"}, {"", "secrets", "", "delete"},
 }
 
 // networkGroup is the API group a NetworkPolicy lives in.

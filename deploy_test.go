@@ -239,6 +239,7 @@ var driverVerbs = map[string][]string{
 	// mesh, made with its first member and removed with its last.
 	"services":        {"create", "delete"},
 	"networkpolicies": {"create", "delete"},
+	"secrets":         {"create", "get", "update", "delete"},
 }
 
 // TestRoleMatchesTheDriversVerbs holds the Role to that table exactly, in

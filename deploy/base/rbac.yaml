@@ -1,8 +1,9 @@
 # SPDX-FileCopyrightText: 2026 Latere AI
 # SPDX-License-Identifier: Apache-2.0
 #
-# Exactly the twelve accesses the Kubernetes driver uses, in the one
-# namespace it writes in, and nothing else. The driver proves each one at
+# Exactly the accesses the Kubernetes driver uses, in the one namespace it
+# writes in, and nothing else: the driver's own verbs table is the source
+# and a test holds this file to it. The driver proves each one at
 # start with a SelfSubjectAccessReview, so a rule missing here is named in
 # the start-up log and by `cellad check` rather than found at the first
 # create. SelfSubjectAccessReview itself needs no rule: the cluster's
@@ -11,11 +12,13 @@
 # What is deliberately absent:
 #
 #   watch          the driver lists and gets; it opens no watch
-#   secrets        a secret value is sealed in the store under
-#                  CELLA_SECRET_KEY, and no driver writes one
-#   networkpolicies  the boundary is the egress gateway's (spec 018), not
-#                  a policy object the control plane writes
 #   nodes          nothing schedules by hand
+#
+# Two objects the driver does write, and why: a Secret per sandbox holds
+# the workload token (spec 006) and never a secret value, which stays
+# sealed in the store under CELLA_SECRET_KEY; a NetworkPolicy and a
+# headless Service per mesh (spec 022) admit peers to each other, while
+# the egress boundary stays the gateway's (spec 018).
 #
 # A namespace is not named here. The overlay sets one for every object,
 # and the Deployment reads its own from the downward API, so the driver
@@ -36,6 +39,9 @@ rules:
   - apiGroups: [""]
     resources: ["pods/log"]
     verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create", "get", "update", "delete"]
   - apiGroups: [""]
     resources: ["persistentvolumeclaims"]
     verbs: ["get", "list", "create", "delete", "patch"]
