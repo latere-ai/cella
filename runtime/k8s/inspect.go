@@ -96,17 +96,9 @@ func (d *Driver) List(ctx context.Context, f driver.Filter) ([]driver.State, err
 		if id == "" {
 			continue
 		}
-		s := state(pvc, byID[id])
-		if f.Owner != "" && s.Owner != f.Owner {
-			continue
+		if s := state(pvc, byID[id]); f.Selects(s) {
+			out = append(out, s)
 		}
-		if f.Phase != "" && s.Phase != f.Phase {
-			continue
-		}
-		if len(f.IDs) > 0 && !slices.Contains(f.IDs, s.ID) {
-			continue
-		}
-		out = append(out, s)
 	}
 	return out, nil
 }
@@ -126,6 +118,7 @@ func state(pvc *corev1.PersistentVolumeClaim, pod *corev1.Pod) driver.State {
 		ExpiresAt:      parseStamp(pvc.Annotations, annExpiresAt),
 		AutoStop:       parseDuration(pvc.Annotations, annAutoStop),
 		AutoDelete:     parseDuration(pvc.Annotations, annAutoDelete),
+		Pool:           pvc.Labels[labelPool] == "true",
 	}
 	if spec, err := specOf(pvc); err == nil {
 		s.Name = spec.Name

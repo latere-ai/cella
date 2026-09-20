@@ -35,12 +35,19 @@ func (d *Driver) Create(ctx context.Context, s driver.CreateSpec) (driver.Ref, e
 	if err := d.validate(s); err != nil {
 		return driver.Ref{}, err
 	}
+	if err := s.CheckPrewarm(); err != nil {
+		return driver.Ref{}, err
+	}
 	now := d.opts.Now().UTC()
 	pvc, err := d.claim(s, now)
 	if err != nil {
 		return driver.Ref{}, err
 	}
-	token := len(s.Token) > 0
+	// A prewarmed entry carries the projection with no Secret behind it.
+	// The kubelet cannot add a volume to a running Pod, so an entry that
+	// was rendered without the mount could never be handed the identity an
+	// adoption mints; the source is optional, so the Pod starts either way.
+	token := len(s.Token) > 0 || s.Prewarm
 	pod, err := d.pod(s, now, token)
 	if err != nil {
 		return driver.Ref{}, err
@@ -191,6 +198,13 @@ func (d *Driver) deleteOptions() *metav1.DeleteOptions {
 // Update rewrites the mutable half of the record: the user's labels, the
 // environment the next Exec carries, and the deadlines the reaper reads.
 func (d *Driver) Update(ctx context.Context, id string, c driver.Change) error {
+	adoption, err := c.Adoption()
+	if err != nil {
+		return err
+	}
+	if adoption != nil {
+		return d.adopt(ctx, id, *adoption)
+	}
 	if c.Lifecycle != nil && (c.Lifecycle.TTL < 0 || c.Lifecycle.AutoStop < 0 || c.Lifecycle.AutoDelete < 0) {
 		return fmt.Errorf("%w: a negative lifecycle duration", driver.ErrInvalid)
 	}
@@ -355,11 +369,13 @@ func patchFor(pvc *corev1.PersistentVolumeClaim, c change) ([]byte, error) {
 	return json.Marshal(ops)
 }
 
-// annPath is the JSON pointer of one annotation key, with the pointer's own
-// two escapes applied, so a key holding a slash patches the key it names.
-func annPath(key string) string {
-	escaped := strings.ReplaceAll(strings.ReplaceAll(key, "~", "~0"), "/", "~1")
-	return "/metadata/annotations/" + escaped
+// annPath is the JSON pointer of one annotation key.
+func annPath(key string) string { return "/metadata/annotations/" + jsonPointer(key) }
+
+// jsonPointer escapes one key for a JSON pointer, with the grammar's own two
+// escapes, so a key holding a slash patches the key it names.
+func jsonPointer(key string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(key, "~", "~0"), "/", "~1")
 }
 
 // waitReady waits for the Pod to leave Pending. A Pod that has already run and
