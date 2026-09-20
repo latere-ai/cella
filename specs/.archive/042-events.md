@@ -377,7 +377,7 @@ transaction; `internal/api` emits the three operations; `cellad` wires
 the journal, the emitter and the loop.
 
 Coverage: `internal/events` 96.6%, `internal/store` 90.7%,
-`internal/api` 92.9%, `internal/config` 98.8%, `controller` 96.3%,
+`internal/api` 92.9%, `internal/config` 98.8%, `controller` 96.0%,
 `cmd/cellad` 92.3%. `go test -race` passes over each. Every gate of
 `go tool lateregate` passes, the hermetic and tempdir gates included.
 
