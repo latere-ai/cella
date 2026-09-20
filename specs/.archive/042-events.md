@@ -111,7 +111,7 @@ shape leaves room for the rest of the reference without a wire break.
 | Type | Emitted by | `data` | `reason` |
 |---|---|---|---|
 | `sandbox.created` | `controller.Create`, on the accepted intent | the resolved manifest, `spec.env` reduced to its keys | none |
-| `sandbox.started` | `controller.Act` start | `{phase}` | `Request` |
+| `sandbox.started` | `controller.Act` start, and the first driver read after a create that came up running | `{phase}` | `Request` |
 | `sandbox.stopped` | `controller.Act` stop, `stopLocked` | `{phase}` | `Request`, `AutoStop`, `Expired` |
 | `sandbox.deleted` | `controller.forget` | `{phase}` | `Request`, `AutoDelete`, `Expired`, `Lost` |
 | `sandbox.failed` | `controller.Create` on a driver failure, recovery exhaustion | `{phase}` | `CreateFailed`, `RecoveryExhausted` |
@@ -143,6 +143,16 @@ the driver's word for it.
 
 No `sandbox.logs` type exists. Reading a process's output is a read, and
 [[009-events]] lists no type for it, so `internal/api` emits none.
+
+A create is two records where the driver brings the sandbox up at once:
+`sandbox.created` on the accepted intent, and `sandbox.started` on the
+first driver read that finds it running. The sink's usage fold opens its
+interval on `sandbox.started` and closes it on a terminal transition, so
+a sandbox that ran from creation and never said it started would meter
+as never having run. A driver that comes up asynchronously reports
+`Pending` at that read and writes a status row instead; the record that
+says it started waits on the loop that observes a phase change, which no
+spec of this repository builds yet.
 
 The controller writes journal rows for two acts that are not events:
 `sandbox.deleting`, the intent written before the driver is asked, and
@@ -376,9 +386,9 @@ serve` on the native driver against a stub sink that verifies every
 signature with a second implementation of the formula and refuses an
 unsigned, stale or bearer-carrying delivery. The run creates a sandbox,
 imports an archive, execs, exports, stops and deletes; the sink's first
-two answers are 500, and all six records still arrive once, in sequence
-order, with the labels the sink files them under, the request id, and
-`Request` on the two transitions a person asked for.
+two answers are 500, and all seven records still arrive once, in
+sequence order, with the labels the sink files them under, the request
+id, and `Request` on the three transitions a person asked for.
 `TestNoContentInEvents` drives the same session with a canary command, a
 canary file body and a value shaped like a secret, and holds the bytes
 the sink received: none of the three appears in any record.
@@ -399,3 +409,12 @@ points, and the types of [[018-egress-and-secrets]] through
 no adapter enforces. The metric names of [[017-observability]]: the
 deliverer counts delivered, dropped and deferred on its own type and
 exports none yet.
+
+Two bounds this slice does not close. `Journal.Prune` exists on both
+adapters and nothing calls it: [[010-state]] runs retention on the
+reaper's tick and no tick does, so the journal grows, and the operation
+records this slice adds are the high-volume ones. And a sandbox whose
+main process exits on its own produces no record until some later act
+writes its status, because nothing observes a phase change; `Exited` is
+in the enum and no act writes it. Both are the observation loop's, not
+this slice's, and both shorten the usage fold's intervals until then.

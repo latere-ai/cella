@@ -248,7 +248,7 @@ func TestEventsEndToEnd(t *testing.T) {
 	call("DELETE", path, "", "application/json", 202)
 
 	want := []string{
-		"sandbox.created", "sandbox.files", "sandbox.exec",
+		"sandbox.created", "sandbox.started", "sandbox.files", "sandbox.exec",
 		"sandbox.files", "sandbox.stopped", "sandbox.deleted",
 	}
 	deadline := time.Now().Add(30 * time.Second)
@@ -303,9 +303,11 @@ func TestEventsEndToEnd(t *testing.T) {
 			t.Errorf("%s names a sandbox in context it did not need: %+v", r.Type, r.Sandbox)
 		}
 	}
-	// The two terminal transitions a person asked for carry Request.
+	// The terminal transitions a person asked for carry Request. The sink's
+	// usage fold opens its interval on started and closes it on stopped, so
+	// a sandbox that runs from creation has to say it started.
 	for _, r := range got {
-		if r.Type == "sandbox.stopped" || r.Type == "sandbox.deleted" {
+		if r.Type == "sandbox.started" || r.Type == "sandbox.stopped" || r.Type == "sandbox.deleted" {
 			if r.Reason != "Request" {
 				t.Errorf("%s carries reason %q", r.Type, r.Reason)
 			}
@@ -377,12 +379,12 @@ func TestNoContentInEvents(t *testing.T) {
 	call("DELETE", path, "", "application/json", 202)
 
 	deadline := time.Now().Add(30 * time.Second)
-	for len(sink.records()) < 4 && time.Now().Before(deadline) {
+	for len(sink.records()) < 5 && time.Now().Before(deadline) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	got := sink.records()
-	if len(got) < 4 {
-		t.Fatalf("the sink took %d record(s), want the create, the transfer, the exec and the delete", len(got))
+	if len(got) < 5 {
+		t.Fatalf("the sink took %d record(s), want the create, the start, the transfer, the exec and the delete", len(got))
 	}
 	for _, r := range got {
 		for _, canary := range []string{canaryCommand, canaryFile, canarySecret} {

@@ -102,7 +102,7 @@ and that every emission point a spec names is here.
 |---|---|---|---|
 | `sandbox.created` | `Create` accepted | the resolved manifest with `spec.env` reduced to its keys and `spec.secrets[]` to names | 005 |
 | `sandbox.updated` | an update applied | `{paths: []string}`, the changed paths | 005 |
-| `sandbox.started`, `.stopped`, `.deleted`, `.failed`, `.lost` | the transition completed | `{phase}`; `Reason` set | 005 |
+| `sandbox.started`, `.stopped`, `.deleted`, `.failed`, `.lost` | the transition completed, `started` included where a create's first driver read finds the sandbox running | `{phase}`; `Reason` set | 005 |
 | `sandbox.recovered` | a lost sandbox recreated | `{workspace: "kept" or "recreated", volumes: []string}` | 005 |
 | `sandbox.spawned` | a workload created a child | `{child: sbx_..., budgetLeft}` | 022 |
 | `sandbox.exec` | a command ended | `{exitCode, durationMs}`; never the command, its input or its output | 008 |

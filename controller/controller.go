@@ -272,7 +272,23 @@ func (c *Controller) Create(ctx context.Context, obj v1.Sandbox, owner string, m
 		return obj, errors.Join(err, c.persist(ctx, obj, MutationFailed))
 	}
 	obj, err = c.refresh(ctx, obj)
-	return clone(obj), errors.Join(err, c.persist(ctx, obj, MutationStatus))
+	return clone(obj), errors.Join(err, c.persist(ctx, obj, phaseMutation(obj.Status.Phase)))
+}
+
+// phaseMutation is the act the first driver read after a create observed. A
+// sandbox the driver brought up is Running, and that is the transition
+// design 009 names started; one that came up Failed is that transition; one
+// still coming up is a status write and no event. Without this a sandbox
+// that runs from creation would never say it started, and a meter that opens
+// its interval there would read it as never having run.
+func phaseMutation(phase string) string {
+	switch phase {
+	case driver.Running:
+		return MutationStarted
+	case PhaseFailed:
+		return MutationFailed
+	}
+	return MutationStatus
 }
 
 // specOf derives the driver's create spec from one resolved manifest and the

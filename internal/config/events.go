@@ -17,9 +17,9 @@ import (
 // Events is spec 009's half of the configuration: where records go, what
 // signs them, and how long one is retried.
 type Events struct {
-	// URL is CELLA_EVENTS_URL. Empty turns delivery off; records are still
-	// journaled, so turning it on later delivers what the journal still
-	// holds.
+	// URL is CELLA_EVENTS_URL. Empty turns delivery off: a record is still
+	// journaled, for the per-object history, and stored acknowledged, so it
+	// is never delivered and the retention forgets it on schedule.
 	URL string
 	// Secrets are the one or two halves of CELLA_EVENTS_SECRET, in the
 	// order the variable lists them. Two are sent while a secret is being
