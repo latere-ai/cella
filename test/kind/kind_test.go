@@ -160,7 +160,9 @@ func call(t *testing.T, client *http.Client, method, url, token string, body []b
 	if body != nil {
 		reader = bytes.NewReader(body)
 	}
-	req, err := http.NewRequestWithContext(t.Context(), method, url, reader)
+	// The cleanup's delete runs after the test's context is done, so the
+	// request carries the client's timeout and not the test's cancellation.
+	req, err := http.NewRequestWithContext(context.WithoutCancel(t.Context()), method, url, reader)
 	if err != nil {
 		t.Fatalf("request: %v", err)
 	}
