@@ -366,13 +366,15 @@ What landed, by package:
 | `internal/egressd` | `valueOf` with the scheme encodings, one OAuth resolver per principal and secret held across a re-push, one substitution table per entry, and placement on the reverse door |
 | `internal/api` | `/v1/secrets` under the `secret.*` actions, the per-request secret lookup that folds in `secret.mount`, and the error table's four new rows |
 
-Coverage: `manifest` 97.7%, `manifest/v1` 100%, `egress` 100%, `controller`
-93.2%, `internal/store` 91.3%, `internal/store/memory` 96.7%,
-`internal/store/postgres` 92.0%, `internal/store/storetest` 90.5%,
-`internal/events` 95.0%, `internal/egressd` 91.5%, `internal/api` 90.6%,
-`cmd/cellad` 90.5%; every package clears the gate's 90%. `go test -race
-./...` passes and every gate of `go tool lateregate` is green, the hermetic
-and tempdir gates included.
+Coverage, measured on the tree this slice merged into, which carries
+[[045-workload-tokens]] as well: `manifest` 97.4%, `manifest/v1` 100%,
+`egress` 100%, `controller` 93.0%, `internal/store` 91.6%,
+`internal/store/memory` 95.7%, `internal/store/postgres` 91.6%,
+`internal/store/storetest` 90.9%, `internal/events` 95.1%,
+`internal/egressd` 91.5%, `internal/api` 90.6%, `cmd/cellad` 90.4%; every
+one of the 21 measured packages clears the gate's 90%. `go test -race ./...`
+passes and all 16 gates of `go tool lateregate` are green, the hermetic and
+tempdir gates included.
 
 The end-to-end run is `TestSecretValuesNeverEnterASandbox` in `cmd/cellad`:
 one `cellad serve` with a key against a stub issuer and a stub event sink,
