@@ -6,6 +6,36 @@ refused before it is pushed.
 
 ## Unreleased
 
+- A `v*` tag is a release. It publishes `ghcr.io/<owner>/cellad:<tag>`, a
+  multi-architecture image built from the binary the pipeline compiled, signed
+  with cosign and carrying an SPDX bill of materials and a build-provenance
+  attestation; `cellad_<tag>_<os>_<arch>.tar.gz` for linux and darwin on amd64
+  and arm64, with `checksums.txt` and a signature over it; and
+  `deploy-<tag>.tar.gz`, the kustomize tree with that image pinned by digest.
+  The namespace is the account that pushed the tag, so a fork's tag publishes
+  under the fork. The release page's body is the CHANGELOG section for the
+  tag, and a clean runner verifies every signature, checksum and attestation
+  after it is published.
+
+- `deploy/` is the installation: a base with the control plane's Deployment,
+  its Service, the account and the Role the Kubernetes driver needs and
+  nothing more, a network policy, a disruption budget and a check Job;
+  `deploy/bootstrap` with the namespace and one Secret per dependency; and two
+  overlays, a laptop cluster and a cluster an installation runs on. The base
+  pins no namespace and no image registry. [`docs/install.md`](docs/install.md)
+  walks it from an empty cluster to a running sandbox.
+
+- `cellad check` reads the whole configuration and prints one line per
+  requirement of an installation, exiting 1 on any failure: the configuration
+  loads, every issuer answers and the signing key parses, the authorization
+  endpoint denies the reserved probe, the backend answers with the accesses
+  the driver uses, and the data directory is writable. Each optional
+  dependency is answered for when its variable is set and reported as not
+  configured otherwise. It is the start-up path of `cellad serve` asked one
+  question at a time, so an installation that passes it is one that would have
+  started. `cellad version` prints the same build identity as `cellad
+  -version`, for a Job that is one image and one argument.
+
 - Every sandbox carries an identity of its own. The control plane mints a
   workload token at create, the driver projects it read-only at
   `/run/cella/token` and names the path in `CELLA_TOKEN_FILE`, and a process
@@ -113,9 +143,17 @@ refused before it is pushed.
   coalesced per sandbox so a busy session does not write the substrate per
   request. `CELLA_REAP_INTERVAL` (default `30s`) sets how often the rules run
   and `CELLA_TOUCH_INTERVAL` (default `1m`) how often one sandbox's activity
-  reaches the runtime. No manifest field carries a lifecycle yet, so a sandbox
-  takes the deadline set its environment was opened with, and a sandbox with no
-  deadline is never ended.
+  reaches the runtime. A sandbox with no deadline is never ended.
+
+- A manifest carries the fields that decide what a sandbox gets and how long
+  it lives: `spec.user`, `spec.resources` with `cpu`, `memory` and `disk`,
+  `spec.workspace.path`, and `spec.lifecycle` with `ttl`, `autoStop` and
+  `autoDelete`, each a duration or `never`. A resolved manifest is returned in
+  the caller's own spelling, with `status.expiresAt` and a warning for every
+  field the environment records and does not enforce. The operator's defaults
+  and ceilings apply in one staged resolve, so a manifest above a ceiling is
+  refused with `ceiling_exceeded` and the path that exceeded it, and a field
+  the contract fixes is refused with `immutable_field`.
 
 - `runtime/runtimetest` is the conformance suite a driver passes: `Run` drives
   every `Driver` method, skips an operation the driver does not declare, and
