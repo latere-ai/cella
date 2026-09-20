@@ -55,6 +55,12 @@ func (d *Driver) Create(ctx context.Context, s driver.CreateSpec) (driver.Ref, e
 	if token {
 		pvc.Annotations[annToken] = "true"
 	}
+	// The mesh's policy and Service are in the cluster before the Pod that
+	// belongs to them, so a member is reachable by its peers and by nothing
+	// else from the moment it starts (spec 022).
+	if err := d.joinMesh(ctx, s.Mesh.ID); err != nil {
+		return driver.Ref{}, err
+	}
 	if _, err := d.cs.CoreV1().PersistentVolumeClaims(d.opts.Namespace).Create(ctx, pvc, metav1.CreateOptions{}); err != nil {
 		return driver.Ref{}, mapErr(err, "claim create")
 	}
@@ -156,6 +162,12 @@ func (d *Driver) Delete(ctx context.Context, id string) error {
 // out. The order matters, since a claim in use by a Pod stays terminating
 // until the Pod is gone.
 func (d *Driver) remove(ctx context.Context, id string) error {
+	// The membership is read before the claim that carries it goes, because
+	// the last-member rule counts what the cluster still holds.
+	mesh := ""
+	if state, err := d.Inspect(ctx, id); err == nil {
+		mesh = state.MeshID
+	}
 	if err := d.deletePod(ctx, id); err != nil {
 		return err
 	}
@@ -166,10 +178,13 @@ func (d *Driver) remove(ctx context.Context, id string) error {
 	if err := claims.Delete(ctx, objectName(id), *d.deleteOptions()); err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("claim delete: %w", err)
 	}
-	return d.waitGone(ctx, "claim", func(ctx context.Context) error {
+	if err := d.waitGone(ctx, "claim", func(ctx context.Context) error {
 		_, err := claims.Get(ctx, objectName(id), metav1.GetOptions{})
 		return err
-	})
+	}); err != nil {
+		return err
+	}
+	return d.leaveMesh(ctx, id, mesh)
 }
 
 // deletePod removes the Pod of one sandbox and waits until the cluster has

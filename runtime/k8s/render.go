@@ -231,6 +231,15 @@ func (d *Driver) identity(s driver.CreateSpec, createdAt time.Time) (labels, ann
 	if s.Prewarm {
 		labels[labelPool] = "true"
 	}
+	// The tree position of spec 022 is the label half, because the mesh is
+	// what the policy and the Service select on and the parent is what a
+	// list of one sandbox's children reads.
+	if labelValue.MatchString(s.Mesh.ID) {
+		labels[labelMesh] = s.Mesh.ID
+	}
+	if labelValue.MatchString(s.Parent) {
+		labels[labelParent] = s.Parent
+	}
 	encoded, err := json.Marshal(s)
 	if err != nil {
 		return nil, nil, err
@@ -346,6 +355,11 @@ func (d *Driver) pod(s driver.CreateSpec, now time.Time, token bool) (*corev1.Po
 		Name: name, Namespace: d.opts.Namespace,
 		Labels: labels, Annotations: annotations,
 		Spec: corev1.PodSpec{
+			// A mesh member is addressed at its own name under the mesh's
+			// headless Service, which is the two fields the kubelet writes
+			// into the cluster's DNS (spec 022).
+			Hostname:                      meshHostname(s),
+			Subdomain:                     meshSubdomain(s),
 			RestartPolicy:                 corev1.RestartPolicyNever,
 			AutomountServiceAccountToken:  ptr(false),
 			EnableServiceLinks:            ptr(false),

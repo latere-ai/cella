@@ -234,6 +234,10 @@ var driverVerbs = map[string][]string{
 	"pods/exec":              {"create"},
 	"pods/log":               {"get"},
 	"persistentvolumeclaims": {"get", "list", "create", "delete", "patch"},
+	// The mesh of spec 022: one headless Service and one NetworkPolicy per
+	// mesh, made with its first member and removed with its last.
+	"services":        {"create", "delete"},
+	"networkpolicies": {"create", "delete"},
 }
 
 // TestRoleMatchesTheDriversVerbs holds the Role to that table exactly, in
