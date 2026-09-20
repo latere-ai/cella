@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
 	"sync/atomic"
 
 	"latere.ai/x/cella/runtime"
@@ -61,8 +62,16 @@ type remoteSession struct {
 	closed atomic.Bool
 }
 
-func (s *remoteSession) Read(p []byte) (int, error)  { return s.out.Read(p) }
-func (s *remoteSession) Write(p []byte) (int, error) { return s.in.Write(p) }
+func (s *remoteSession) Read(p []byte) (int, error) { return s.out.Read(p) }
+
+// Write types into the terminal. A session the caller closed refuses, because
+// the terminal is gone and bytes sent into it would be dropped in silence.
+func (s *remoteSession) Write(p []byte) (int, error) {
+	if s.closed.Load() {
+		return 0, net.ErrClosed
+	}
+	return s.in.Write(p)
+}
 
 // Resize sets the window the process inside reads. A resize on a session that
 // has ended is not an error: the terminal is gone and the caller has nothing

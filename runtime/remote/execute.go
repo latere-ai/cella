@@ -25,6 +25,11 @@ type Sink interface {
 	// Resizes carries the windows a control message asked for. It is nil on
 	// an operation that is not an attach.
 	Resizes() <-chan [2]int
+	// Accept says the driver call was created and the sub-streams are live,
+	// or that the driver refused before any of them existed. An operation
+	// that streams for its whole life calls it; one that answers at once
+	// does not, because its answer is its acceptance.
+	Accept(err error) error
 }
 
 // Execute runs one operation with the worker's own driver and returns its
@@ -112,6 +117,9 @@ func execute(ctx context.Context, d runtime.Driver, req Request, sink Sink) (Res
 		call.Stdin = sink.Reader(StreamStdin)
 	}
 	session, err := d.Exec(ctx, req.ID, call)
+	if acceptErr := sink.Accept(err); acceptErr != nil {
+		return Response{}, acceptErr
+	}
 	if err != nil {
 		return Response{}, err
 	}
@@ -139,6 +147,9 @@ func logs(ctx context.Context, d runtime.Driver, req Request, sink Sink) (Respon
 		request = *req.Logs
 	}
 	reader, err := d.Logs(ctx, req.ID, request)
+	if acceptErr := sink.Accept(err); acceptErr != nil {
+		return Response{}, acceptErr
+	}
 	if err != nil {
 		return Response{}, err
 	}
@@ -155,6 +166,9 @@ func logs(ctx context.Context, d runtime.Driver, req Request, sink Sink) (Respon
 }
 
 func exportTar(ctx context.Context, d runtime.Driver, req Request, sink Sink) error {
+	if err := sink.Accept(nil); err != nil {
+		return err
+	}
 	out := sink.Writer(StreamBytes)
 	err := d.ExportTar(ctx, req.ID, req.Paths, out)
 	if closeErr := out.Close(); err == nil {
@@ -168,6 +182,7 @@ func exportTar(ctx context.Context, d runtime.Driver, req Request, sink Sink) er
 func attach(ctx context.Context, d runtime.Driver, req Request, sink Sink) (Response, error) {
 	attacher, ok := d.(runtime.Attacher)
 	if !ok {
+		_ = sink.Accept(runtime.ErrUnsupported)
 		return Response{}, runtime.ErrUnsupported
 	}
 	var request runtime.AttachRequest
@@ -175,6 +190,9 @@ func attach(ctx context.Context, d runtime.Driver, req Request, sink Sink) (Resp
 		request = *req.Attach
 	}
 	session, err := attacher.Attach(ctx, req.ID, request)
+	if acceptErr := sink.Accept(err); acceptErr != nil {
+		return Response{}, acceptErr
+	}
 	if err != nil {
 		return Response{}, err
 	}

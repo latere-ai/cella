@@ -37,11 +37,13 @@ import (
 	"latere.ai/x/cella/internal/store/memory"
 	"latere.ai/x/cella/internal/store/postgres"
 	"latere.ai/x/cella/internal/version"
+	"latere.ai/x/cella/internal/worker"
 	"latere.ai/x/cella/manifest"
 	"latere.ai/x/cella/runtime"
 	"latere.ai/x/cella/runtime/k8s"
 	"latere.ai/x/cella/runtime/native"
 	"latere.ai/x/cella/runtime/podman"
+	"latere.ai/x/cella/runtime/remote"
 )
 
 // Shutdown timing of spec 002: readiness answers 503 at once, the drain
@@ -60,13 +62,14 @@ func main() {
 
 // run dispatches the subcommand and returns the process exit code, so
 // tests drive it without a subprocess: 0 on a clean stop, 1 on a start-up
-// or runtime failure, 2 on a usage error. The worker role of spec 021 is
-// the one row of spec 002's table still unbuilt.
+// or runtime failure, 2 on a usage error.
 func run(ctx context.Context, args []string, getenv config.Getenv, stdout, stderr io.Writer) int {
 	name, rest := subcommand(args)
 	switch name {
 	case "", "serve":
 		return serve(ctx, rest, getenv, stdout, stderr)
+	case "worker":
+		return workerRole(ctx, rest, getenv, stdout, stderr)
 	case "egress":
 		return egressRole(ctx, rest, getenv, stdout, stderr)
 	case "check":
@@ -74,7 +77,7 @@ func run(ctx context.Context, args []string, getenv config.Getenv, stdout, stder
 	case "version":
 		return versionRole(rest, stdout, stderr)
 	default:
-		_, _ = fmt.Fprintf(stderr, "cellad: unknown subcommand %q; serve, egress, check and version are the subcommands\n", name)
+		_, _ = fmt.Fprintf(stderr, "cellad: unknown subcommand %q; serve, worker, egress, check and version are the subcommands\n", name)
 		return 2
 	}
 }
@@ -126,6 +129,76 @@ func egressRole(ctx context.Context, args []string, getenv config.Getenv, stdout
 		return fail(stderr, err)
 	}
 	return 0
+}
+
+// workerRole is the data plane beside the sandboxes: one driver, one
+// outbound stream to the control plane, and the operations it claims on it
+// (spec 021). It reads none of the control plane's variables and holds no
+// store, no issuer and no authorizer.
+func workerRole(ctx context.Context, args []string, getenv config.Getenv, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("cellad worker", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	showVersion := fs.Bool("version", false, "print the build identity and exit")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *showVersion {
+		_, _ = fmt.Fprintln(stdout, version.String())
+		return 0
+	}
+	cfg, err := config.LoadWorker(getenv)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	if err = os.MkdirAll(cfg.DataDir, 0o750); err != nil {
+		return fail(stderr, fmt.Errorf("CELLA_DATA_DIR: %w", err))
+	}
+	runtimeDriver, closeRuntime, err := openWorkerRuntime(cfg)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	defer func() { _ = closeRuntime() }()
+	w, err := worker.New(worker.Options{
+		URL: cfg.URL, Key: cfg.EnvironmentKey, Driver: runtimeDriver,
+		Capacity: remote.Registration{Capacity: cfg.Capacity, Labels: cfg.Labels},
+		Version:  version.Version,
+	})
+	if err != nil {
+		return fail(stderr, err)
+	}
+	_, _ = fmt.Fprintf(stdout, "cellad: %s worker driver=%s isolation=%s control-plane=%s\n",
+		version.Version, runtimeDriver.Name(), runtimeDriver.Isolation(), cfg.URL)
+	if err = w.Run(ctx); err != nil {
+		return fail(stderr, err)
+	}
+	return 0
+}
+
+// openWorkerRuntime opens the driver the worker runs. It is openRuntime over
+// the worker's own configuration, which carries the driver's variables and
+// none of the control plane's.
+func openWorkerRuntime(cfg config.WorkerConfig) (runtime.Driver, func() error, error) {
+	noop := func() error { return nil }
+	switch cfg.Runtime {
+	case config.RuntimeK8s:
+		d, err := k8s.New(cfg.K8s)
+		if err != nil {
+			return nil, noop, fmt.Errorf("runtime: %w", err)
+		}
+		return d, noop, nil
+	case config.RuntimePodman:
+		d, err := podman.New(podman.Options{Socket: cfg.PodmanSocket})
+		if err != nil {
+			return nil, noop, fmt.Errorf("runtime: %w", err)
+		}
+		return d, d.Close, nil
+	default:
+		d, err := native.New(filepath.Join(cfg.DataDir, "native"))
+		if err != nil {
+			return nil, noop, fmt.Errorf("runtime: %w", err)
+		}
+		return d, d.Close, nil
+	}
 }
 
 // serve is the node: the two listeners and the probes of spec 002. The
@@ -208,6 +281,17 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	if err != nil {
 		return fail(stderr, err)
 	}
+	// The credential every data plane role carries: an administrator mints
+	// one per worker and per gateway through the key routes, and revokes it
+	// by the jti the mint returned (spec 021).
+	keys, err := auth.NewEnvironmentKeys(identity.Signer, revocations, cfg.EnvironmentKeyTTL)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	// The workers of every registered environment connect to this hub. It
+	// never dials one: a worker connects outbound and the hub answers on the
+	// stream the worker opened (spec 021).
+	workers := remote.NewHub(remote.HubOptions{Offline: cfg.EnvironmentOffline})
 	// A driver that owns local processes or an engine session is closed at
 	// shutdown; one that drives a cluster owns nothing this process has to
 	// release.
@@ -268,7 +352,7 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	handler, err := api.New(api.Options{
 		Controller: control, Verifier: identity.Verifier, Authorizer: identity.Authorizer,
 		MaxBodyBytes: cfg.MaxBodyBytes, MaxUploadBytes: cfg.MaxUploadBytes,
-		Egress: hub, Events: emitter,
+		Egress: hub, Events: emitter, Keys: keys, Workers: workers,
 		Admit: admit, Defaults: manifest.Defaults{Image: cfg.Admission.DefaultImage},
 	})
 	if err != nil {

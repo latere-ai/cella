@@ -13,10 +13,13 @@
 package remote
 
 import (
+	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
+	"strings"
 	"time"
 
 	v1 "latere.ai/x/cella/manifest/v1"
@@ -44,8 +47,17 @@ const (
 )
 
 // OperationIDLen is the fixed width of the operation id every frame opens
-// with: a ULID in Crockford base32.
-const OperationIDLen = 26
+// with, and OperationIDPrefix the kind prefix the row in the operations table
+// carries. The frame's id is fixed width so a frame is parsed without a
+// length, and the row's is prefixed like every other id of design 001.
+const (
+	OperationIDLen    = 26
+	OperationIDPrefix = "op_"
+)
+
+// NewOperationID mints one operation id: 26 characters of base32, which is
+// the width every frame opens with.
+func NewOperationID() string { return strings.ToLower(rand.Text()) }
 
 // The sub-streams one operation's frames carry. Control is JSON; the rest are
 // bytes, and a zero-length frame closes the sub-stream it names.
@@ -71,6 +83,12 @@ const (
 	MessageHeartbeat = "heartbeat"
 	// MessageOperation is one driver call, down.
 	MessageOperation = "operation"
+	// MessageStarted says the driver call was created and its sub-streams
+	// are live, up. An operation that streams for its whole life answers
+	// long after it began, and a caller of Exec, Attach or Logs must learn
+	// at once that the driver refused rather than at the end of a stream
+	// that will never carry anything.
+	MessageStarted = "started"
 	// MessageResult is that call's answer, up.
 	MessageResult = "result"
 	// MessageCancel says the caller went away, down. The worker cancels the
@@ -197,18 +215,30 @@ const (
 	KindUnsupported   = "unsupported"
 	KindInvalid       = "invalid"
 	KindTooLarge      = "tooLarge"
+	// The two the context carries. A deadline the caller set and a
+	// cancellation it made are the caller's own errors, and they cross the
+	// seam so errors.Is holds on the side that set them.
+	KindDeadlineExceeded = "deadlineExceeded"
+	KindCanceled         = "canceled"
 )
 
-// sentinels maps each kind to the error the contract declares. It is the one
-// table both directions read, so an error that crosses and comes back is the
-// error it started as.
-var sentinels = map[string]error{
-	KindNotFound:      runtime.ErrNotFound,
-	KindAlreadyExists: runtime.ErrAlreadyExists,
-	KindNotRunning:    runtime.ErrNotRunning,
-	KindUnsupported:   runtime.ErrUnsupported,
-	KindInvalid:       runtime.ErrInvalid,
-	KindTooLarge:      runtime.ErrTooLarge,
+// sentinels pairs each kind with the error the contract declares. It is the
+// one table both directions read, so an error that crosses and comes back is
+// the error it started as, and it is a slice rather than a map because the
+// first match decides the kind and that decision must not depend on
+// iteration order.
+var sentinels = []struct {
+	kind string
+	err  error
+}{
+	{KindDeadlineExceeded, context.DeadlineExceeded},
+	{KindCanceled, context.Canceled},
+	{KindNotFound, runtime.ErrNotFound},
+	{KindAlreadyExists, runtime.ErrAlreadyExists},
+	{KindNotRunning, runtime.ErrNotRunning},
+	{KindUnsupported, runtime.ErrUnsupported},
+	{KindTooLarge, runtime.ErrTooLarge},
+	{KindInvalid, runtime.ErrInvalid},
 }
 
 // EncodeError renders one driver error for the wire. A nil error is nil.
@@ -217,9 +247,9 @@ func EncodeError(err error) *Error {
 		return nil
 	}
 	out := &Error{Message: err.Error()}
-	for kind, sentinel := range sentinels {
-		if errors.Is(err, sentinel) {
-			out.Kind = kind
+	for _, s := range sentinels {
+		if errors.Is(err, s.err) {
+			out.Kind = s.kind
 			break
 		}
 	}
@@ -236,13 +266,16 @@ func (e *Error) Err() error {
 	if message == "" {
 		message = "the worker refused the operation"
 	}
-	if sentinel, held := sentinels[e.Kind]; held {
-		// The message already opens with the sentinel's text where the
-		// driver wrapped it; repeating it would read twice.
-		if wrapped := fmt.Errorf("%w", sentinel); wrapped.Error() == message {
-			return sentinel
+	for _, s := range sentinels {
+		if s.kind != e.Kind {
+			continue
 		}
-		return fmt.Errorf("%s (%w)", message, sentinel)
+		// The message is already the sentinel's where the driver did not
+		// wrap it; repeating it would read twice.
+		if message == s.err.Error() {
+			return s.err
+		}
+		return fmt.Errorf("%s (%w)", message, s.err)
 	}
 	return errors.New(message)
 }

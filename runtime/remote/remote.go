@@ -49,6 +49,10 @@ type Stream interface {
 	// Up is the reader of one sub-stream from the worker. It ends with
 	// io.EOF at the sub-stream's zero-length frame.
 	Up(stream byte) io.Reader
+	// Accepted waits for the worker to say the driver call was created. It
+	// is what makes a refusal of Exec, Attach or Logs reach the caller of
+	// that method rather than the caller of Wait.
+	Accepted(ctx context.Context) error
 	// Resize sets an attached terminal's window.
 	Resize(cols, rows int) error
 	// Result waits for the operation's answer.
@@ -249,6 +253,10 @@ func (d *Driver) Exec(ctx context.Context, id string, req runtime.ExecRequest) (
 	if err != nil {
 		return nil, err
 	}
+	if err = stream.Accepted(ctx); err != nil {
+		_ = stream.Close()
+		return nil, err
+	}
 	e := &remoteExec{stream: stream}
 	if req.Stdin != nil {
 		// The copy runs until the caller's reader ends, then closes the
@@ -276,6 +284,10 @@ func (d *Driver) Logs(ctx context.Context, id string, req runtime.LogsRequest) (
 	if err != nil {
 		return nil, err
 	}
+	if err = stream.Accepted(ctx); err != nil {
+		_ = stream.Close()
+		return nil, err
+	}
 	return &streamReader{stream: stream, r: stream.Up(StreamStdout)}, nil
 }
 
@@ -288,6 +300,9 @@ func (d *Driver) ExportTar(ctx context.Context, id string, paths []string, dst i
 		return err
 	}
 	defer func() { _ = stream.Close() }()
+	if err = stream.Accepted(ctx); err != nil {
+		return err
+	}
 	if _, err = io.Copy(dst, stream.Up(StreamBytes)); err != nil {
 		return err
 	}
@@ -320,6 +335,10 @@ func (d *Driver) ImportTar(ctx context.Context, id, dest string, src io.Reader) 
 func (d *Driver) Attach(ctx context.Context, id string, req runtime.AttachRequest) (runtime.Session, error) {
 	stream, err := d.transport.Open(ctx, OpAttach, Request{ID: id, Attach: &req})
 	if err != nil {
+		return nil, err
+	}
+	if err = stream.Accepted(ctx); err != nil {
+		_ = stream.Close()
 		return nil, err
 	}
 	return &remoteSession{stream: stream, in: stream.Down(StreamStdin), out: stream.Up(StreamStdout)}, nil
