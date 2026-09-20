@@ -9,7 +9,7 @@ depends_on:
 affects: [.github/workflows/release.yml, .github/workflows/verify.yml, Dockerfile.ci, deploy/, tools/release/, docs/install.md, docs/upgrades/, cmd/cellad/]
 effort: medium
 created: 2026-09-12
-updated: 2026-09-13
+updated: 2026-09-20
 author: changkun
 ---
 
@@ -87,11 +87,13 @@ test.
 ### Deploy manifests
 
 `deploy/base` pins no namespace, so an overlay sets it: a Deployment, a
-Service, a ServiceAccount with a Role and a RoleBinding limited to
-`create`, `get`, `list`, `watch`, `update`, and `delete` on Pods, PVCs,
-NetworkPolicies, and Secrets in `CELLA_NAMESPACE`
-([[002-repository-scaffold]]), a NetworkPolicy for `cellad` itself, and a
-PodDisruptionBudget. The Deployment runs one replica; a durable store
+Service, a ServiceAccount with a Role and a RoleBinding limited to the
+driver's own verb table, which is `get`, `list`, `create`, `delete` and
+`patch` on Pods and PVCs, `create` on `pods/exec` and `get` on
+`pods/log`, in the namespace the overlay set and the Deployment reads
+from the downward API, a NetworkPolicy for `cellad` itself, and a
+PodDisruptionBudget of `maxUnavailable: 1`, since `minAvailable: 1` over
+one replica refuses every node drain. The Deployment runs one replica; a durable store
 ([[010-state]]) permits more, and when `CELLA_DB_URL` is set the strategy
 is `Recreate` so a rolling update does not double the replica count
 against the connection ceiling `CELLA_DB_MAX_CONNS` shares
@@ -113,11 +115,22 @@ starts from. Every overlay renders in CI.
 
 Reads the whole configuration and prints one line per requirement.
 Mandatory in every configuration: issuer discovery reachable, token key
-parses, the authorizer denies the reserved probe id
-`sbx_00000000000000000000000000` ([[006-identity]]) so an allow fails the
-line as an endpoint that does not read the request, backend reachable
-with the permissions the Role grants (a dry-run create of a Pod, a PVC, a
-NetworkPolicy, and a Secret), and the data directory writable. The
+parses, the authorizer denies the reserved probe id ([[006-identity]]) so
+an allow fails the line as an endpoint that does not read the request,
+backend reachable with the permissions the Role grants, and the data
+directory writable.
+
+Two corrections, made when slice 048 built the command. The probe id is
+the shared contract's `authz.ProbeID` and not the Cella-shaped string
+this spec first named, as [[006-identity]] records. The backend line is
+the driver's own `Preflight` and not a dry run of four creates:
+`Preflight` runs one `SelfSubjectAccessReview` per entry of the driver's
+verb table, which is the list the Role is written from, and it writes
+nothing. The set is smaller than this spec first named, too. The driver
+of [[036-k8s-driver]] writes no NetworkPolicy, because the
+boundary is the gateway's ([[018-egress-and-secrets]]), and no Secret,
+because a secret value is sealed in the store under `CELLA_SECRET_KEY`,
+so granting either would be access nothing uses. The
 authorizer probe holds even under the built-in owner policy, which denies
 the probe too ([[006-identity]]). Each optional dependency is checked
 only when its configuration is set and reported as not configured
@@ -154,16 +167,21 @@ same `schema_migrations` guard that refuses a downgrade
 The tiers themselves ([[012-test-stubs-and-tiers]]); the suite the
 conformance job runs ([[015-conformance-suite]]).
 
+Slice 048 ([[048-release-and-check]]) built this spec against
+the tree of 2026-09-20, and its Outcome records which jobs run for real
+and which wait on [[012-test-stubs-and-tiers]] and
+[[015-conformance-suite]].
+
 ## Acceptance criteria
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| Every artifact in the table is attached to the release of a tag | the `release-verify` job | not built |
-| The workflow and the archive fix no image namespace | `TestReleasePublishesUnderTheOwnersNamespace` | not built |
-| `Dockerfile` and `Dockerfile.ci` share the runtime stage byte for byte | `TestRuntimeStagesMatch` | not built |
-| Every overlay renders and the base carries every Pod security field | `TestOverlaysRender`, `TestBaseIsConfined` | not built |
-| `docs/install.md` walks green against a bare kind cluster on every push | the `install` job | not built |
-| `cellad check` fails on each mandatory requirement removed one at a time and reports each optional dependency as not configured when its variable is unset | `TestCheckNamesEachFailure`, `TestCheckSkipsUnconfigured` | not built |
-| A backup restores into a binary at or above the dumped schema and a lower binary refuses to start | `TestRestoreSchemaGuard` against [[010-state]]'s guard | not built |
-| `docs/upgrades/` rollback steps walk green and a downgrade across a migration is refused | `TestUpgradeDocRollback` | not built |
-| A tag without a CHANGELOG section is refused at pre-push and in the pipeline | the gate's `release` command | passing for the rule; the pipeline not built |
+| Every artifact in the table is attached to the release of a tag | the `release-verify` job | built; proven on the first tag |
+| The workflow and the archive fix no image namespace | `TestReleasePublishesUnderTheOwnersNamespace` | passing |
+| `Dockerfile` and `Dockerfile.ci` share the runtime stage byte for byte | `TestRuntimeStagesMatch` | passing |
+| Every overlay renders and the base carries every Pod security field | `TestOverlaysRender`, `TestBaseIsConfined` | passing |
+| `docs/install.md` walks green against a bare kind cluster on every push | the `install` job | open: the job renders every overlay on every push; the cluster walk waits on the stub issuer of [[012-test-stubs-and-tiers]], since a `cellad` in a CI cluster has no issuer to verify a token against. `install-release` walks the published artifacts and gates the cluster half behind `RELEASE_INSTALL_KIND` |
+| `cellad check` fails on each mandatory requirement removed one at a time and reports each optional dependency as not configured when its variable is unset | `TestCheckNamesEachFailure`, `TestEveryOptionalLineNamesItsVariableWhenUnset` | passing |
+| A backup restores into a binary at or above the dumped schema and a lower binary refuses to start | `TestRestoreSchemaGuard` against [[010-state]]'s guard | open: the guard is built, and `cellad check` reports the schema against the binary's; the restore walk waits on `docs/upgrades/` |
+| `docs/upgrades/` rollback steps walk green and a downgrade across a migration is refused | `TestUpgradeDocRollback` | open: there is one tag to roll back to, so the document is written with the second release |
+| A tag without a CHANGELOG section is refused at pre-push and in the pipeline | the gate's `release` command | passing; `build` reads the section before it compiles and `publish` writes it as the body |

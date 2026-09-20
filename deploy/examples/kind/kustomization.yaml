@@ -1,0 +1,26 @@
+# SPDX-FileCopyrightText: 2026 Latere AI
+# SPDX-License-Identifier: Apache-2.0
+#
+# A laptop cluster: one replica, every state in memory, the public
+# listener on a node port, and no dependency but an OpenID Connect issuer
+# the cluster can reach. It is the right first installation and the wrong
+# second one, because nothing survives a restart of the Pod.
+#
+# The image is the placeholder the base names. Set it to the release you
+# are installing:
+#
+#	kustomize edit set image cellad=ghcr.io/<owner>/cellad:<tag>
+#
+# or pass `--set-string` from your own tooling. The deploy archive of a
+# release carries the base with that reference already pinned by digest.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: cella
+resources:
+  - ../../base
+  - configmap.yaml
+patches:
+  - path: service-nodeport.yaml
+    target:
+      kind: Service
+      name: cellad

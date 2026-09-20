@@ -58,8 +58,8 @@ func main() {
 
 // run dispatches the subcommand and returns the process exit code, so
 // tests drive it without a subprocess: 0 on a clean stop, 1 on a start-up
-// or runtime failure, 2 on a usage error. serve is the only subcommand
-// today; spec 002 keeps the table.
+// or runtime failure, 2 on a usage error. The worker role of spec 021 is
+// the one row of spec 002's table still unbuilt.
 func run(ctx context.Context, args []string, getenv config.Getenv, stdout, stderr io.Writer) int {
 	name, rest := subcommand(args)
 	switch name {
@@ -67,8 +67,12 @@ func run(ctx context.Context, args []string, getenv config.Getenv, stdout, stder
 		return serve(ctx, rest, getenv, stdout, stderr)
 	case "egress":
 		return egressRole(ctx, rest, getenv, stdout, stderr)
+	case "check":
+		return checkRole(ctx, rest, getenv, stdout, stderr)
+	case "version":
+		return versionRole(rest, stdout, stderr)
 	default:
-		_, _ = fmt.Fprintf(stderr, "cellad: unknown subcommand %q; serve and egress are the subcommands\n", name)
+		_, _ = fmt.Fprintf(stderr, "cellad: unknown subcommand %q; serve, egress, check and version are the subcommands\n", name)
 		return 2
 	}
 }
@@ -205,27 +209,9 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	// A driver that owns local processes or an engine session is closed at
 	// shutdown; one that drives a cluster owns nothing this process has to
 	// release.
-	var runtimeDriver runtime.Driver
-	closeRuntime := func() error { return nil }
-	switch cfg.Runtime {
-	case config.RuntimeK8s:
-		driver, err := k8s.New(cfg.K8s)
-		if err != nil {
-			return fail(stderr, fmt.Errorf("runtime: %w", err))
-		}
-		runtimeDriver = driver
-	case config.RuntimePodman:
-		driver, err := podman.New(podman.Options{Socket: cfg.PodmanSocket})
-		if err != nil {
-			return fail(stderr, fmt.Errorf("runtime: %w", err))
-		}
-		runtimeDriver, closeRuntime = driver, driver.Close
-	default:
-		driver, err := native.New(filepath.Join(cfg.DataDir, "native"))
-		if err != nil {
-			return fail(stderr, fmt.Errorf("runtime: %w", err))
-		}
-		runtimeDriver, closeRuntime = driver, driver.Close
+	runtimeDriver, closeRuntime, err := openRuntime(cfg)
+	if err != nil {
+		return fail(stderr, err)
 	}
 	if err := runtimeDriver.Preflight(ctx); err != nil {
 		return fail(stderr, fmt.Errorf("runtime preflight: %w", err))
@@ -368,6 +354,35 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		return fail(stderr, fmt.Errorf("runtime shutdown: %w", err))
 	}
 	return 0
+}
+
+// openRuntime opens the backend CELLA_RUNTIME selects and returns it with
+// the function that releases it: a driver that owns local processes or an
+// engine session is closed at shutdown, and one that drives a cluster owns
+// nothing this process has to release. The serve role and the check role
+// open the same way, so the check drives the driver the node would.
+func openRuntime(cfg config.Config) (runtime.Driver, func() error, error) {
+	noop := func() error { return nil }
+	switch cfg.Runtime {
+	case config.RuntimeK8s:
+		driver, err := k8s.New(cfg.K8s)
+		if err != nil {
+			return nil, noop, fmt.Errorf("runtime: %w", err)
+		}
+		return driver, noop, nil
+	case config.RuntimePodman:
+		driver, err := podman.New(podman.Options{Socket: cfg.PodmanSocket})
+		if err != nil {
+			return nil, noop, fmt.Errorf("runtime: %w", err)
+		}
+		return driver, driver.Close, nil
+	default:
+		driver, err := native.New(filepath.Join(cfg.DataDir, "native"))
+		if err != nil {
+			return nil, noop, fmt.Errorf("runtime: %w", err)
+		}
+		return driver, driver.Close, nil
+	}
 }
 
 // openStore opens desired state: the Postgres of spec 010 where CELLA_DB_URL

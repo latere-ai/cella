@@ -1,0 +1,29 @@
+# SPDX-FileCopyrightText: 2026 Latere AI
+# SPDX-License-Identifier: Apache-2.0
+#
+# Everything this installation chooses. The credentials are not here: they
+# are the Secrets of deploy/bootstrap.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cellad
+data:
+  # The absolute URL callers reach the public listener at. It is the iss of
+  # every token cellad mints and the base of every URL in a response, so it
+  # is the address callers actually use: on a kind cluster whose node port
+  # 30080 is published to the host, that is localhost.
+  CELLA_PUBLIC_URL: "http://localhost:30080"
+  # The issuer whose tokens this installation accepts. There is no
+  # anonymous access and cellad issues no login of its own, so this is
+  # yours: a company login, or a small one you run.
+  CELLA_OIDC_ISSUERS: "https://issuer.example.com"
+  # The subjects the built-in owner policy lets act on every object,
+  # rendered <issuer>|<sub>. Read and unused once an authorizer endpoint is
+  # configured.
+  CELLA_ADMIN_SUBJECTS: "https://issuer.example.com|you"
+  CELLA_DEFAULT_ENVIRONMENT: "default"
+  # A laptop cluster provisions from whatever class it has, so no class is
+  # named: the driver's Preflight checks a class only when one is set.
+  CELLA_K8S_DEFAULT_CPU: "500m"
+  CELLA_K8S_DEFAULT_MEMORY: "512Mi"
+  CELLA_K8S_DEFAULT_DISK: "1Gi"

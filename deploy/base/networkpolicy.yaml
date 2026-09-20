@@ -1,0 +1,60 @@
+# SPDX-FileCopyrightText: 2026 Latere AI
+# SPDX-License-Identifier: Apache-2.0
+#
+# The boundary around cellad itself, which is not the sandbox boundary of
+# spec 018: that one is the egress gateway's and is enforced per sandbox.
+# This policy says who reaches the control plane and what the control
+# plane reaches.
+#
+# Ingress is the public listener alone, from anywhere in the cluster: the
+# ingress controller of an installation runs in a namespace this base
+# cannot name, so an overlay narrows the peer. The internal listener is
+# absent from the rule, which is what keeps /metrics off the routed port;
+# the kubelet's probes are not subject to policy.
+#
+# Egress is written as what the control plane dials: cluster DNS, and the
+# rest of the world on the ports its issuers, its webhooks, its store and
+# its API server answer on. A cluster whose API server is outside the pod
+# network needs that address, which is a CIDR only the operator knows, so
+# the rule admits every destination on those ports rather than pretending
+# to a precision this base does not have.
+#
+# A port here is the destination pod's own, after the Service's address
+# translation, and not the Service's port. An in-cluster webhook served on
+# Service port 443 by a container listening on 8443 is refused by this
+# rule until the operator adds 8443, and the same holds for a Postgres
+# whose pod listens off 5432. An installation that can name its
+# destinations narrows this document and nothing else.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cellad
+  labels:
+    app.kubernetes.io/name: cellad
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: cellad
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - ports:
+        - port: 8080
+          protocol: TCP
+  egress:
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    - ports:
+        - port: 443
+          protocol: TCP
+        - port: 6443
+          protocol: TCP
+        - port: 5432
+          protocol: TCP

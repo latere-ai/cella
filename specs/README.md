@@ -273,3 +273,4 @@ The map, the order, and the rule for a slice are in 031.
 | [036-k8s-driver.md](.archive/036-k8s-driver.md) | complete | Kubernetes driver: a claim and a Pod per sandbox, the baseline, exec, logs, archives, identity on the objects |
 | [045-workload-tokens.md](.archive/045-workload-tokens.md) | complete | The workload token minted at create, projected by every driver, rotated at two thirds of its life, revoked by jti |
 | [046-secret-kind.md](.archive/046-secret-kind.md) | complete | The Secret kind, its stored value, and the substitution that value reaches a sandbox's request by |
+| [048-release-and-check.md](.archive/048-release-and-check.md) | complete | The v* tag pipeline, the deploy tree an operator installs from, the install walk, and `cellad check` |

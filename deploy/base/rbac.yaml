@@ -1,0 +1,55 @@
+# SPDX-FileCopyrightText: 2026 Latere AI
+# SPDX-License-Identifier: Apache-2.0
+#
+# Exactly the twelve accesses the Kubernetes driver uses, in the one
+# namespace it writes in, and nothing else. The driver proves each one at
+# start with a SelfSubjectAccessReview, so a rule missing here is named in
+# the start-up log and by `cellad check` rather than found at the first
+# create. SelfSubjectAccessReview itself needs no rule: the cluster's
+# system:basic-user role grants it to system:authenticated.
+#
+# What is deliberately absent:
+#
+#   watch          the driver lists and gets; it opens no watch
+#   secrets        a secret value is sealed in the store under
+#                  CELLA_SECRET_KEY, and no driver writes one
+#   networkpolicies  the boundary is the egress gateway's (spec 018), not
+#                  a policy object the control plane writes
+#   nodes          nothing schedules by hand
+#
+# A namespace is not named here. The overlay sets one for every object,
+# and the Deployment reads its own from the downward API, so the driver
+# writes where this Role grants and not in the driver's default namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cellad
+  labels:
+    app.kubernetes.io/name: cellad
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "create", "delete", "patch"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list", "create", "delete", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cellad
+  labels:
+    app.kubernetes.io/name: cellad
+subjects:
+  - kind: ServiceAccount
+    name: cellad
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cellad
