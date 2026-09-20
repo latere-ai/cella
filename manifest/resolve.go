@@ -514,7 +514,18 @@ func ResolveNative(ctx context.Context, obj v1.Sandbox, environment string) (v1.
 // the store through the authorizer's decision; a caller with no secrets
 // passes nil and every mount is not_found.
 func NativeOptions(environment string, secrets SecretFunc) Options {
-	return Options{Lookup: WithSecrets(FixedEnvironment(NativeEnvironment(environment)), secrets)}
+	return DriverOptions(environment, v1.Capabilities{}, secrets)
+}
+
+// DriverOptions are NativeOptions with the environment declaring what the
+// driver behind it actually provides. A manifest field that depends on a
+// capability is then refused at resolve, where the refusal names the field,
+// rather than at the driver, where it would name nothing; and a field the
+// driver does provide resolves with no other change.
+func DriverOptions(environment string, capabilities v1.Capabilities, secrets SecretFunc) Options {
+	env := NativeEnvironment(environment)
+	env.Status.Capabilities = capabilities
+	return Options{Lookup: WithSecrets(FixedEnvironment(env), secrets)}
 }
 
 // ResolveNativeWith is ResolveNative over caller-supplied options. It returns

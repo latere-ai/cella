@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"latere.ai/x/pkg/authkit/issuertest"
 
@@ -18,6 +19,7 @@ import (
 	"latere.ai/x/cella/internal/events"
 	"latere.ai/x/cella/internal/store"
 	"latere.ai/x/cella/internal/store/memory"
+	"latere.ai/x/cella/runtime"
 	"latere.ai/x/cella/runtime/native"
 )
 
@@ -31,7 +33,11 @@ type recorded struct {
 // setupRecorded is setup with design 009's emitter wired in. It repeats the
 // fixture rather than changing it, so a test about records is not also a
 // change to every other test's wiring.
-func setupRecorded(t *testing.T) *recorded {
+func setupRecorded(t *testing.T) *recorded { return setupRecordedDriver(t, nil) }
+
+// setupRecordedDriver is setupRecorded over a driver a case wraps, for a route
+// whose records depend on a capability the native driver does not have.
+func setupRecordedDriver(t *testing.T, wrap func(runtime.Driver) runtime.Driver) *recorded {
 	t.Helper()
 	issuer := issuertest.New(t, issuertest.WithDefaultAudience("cella"))
 	verifier, err := auth.NewVerifier(t.Context(), auth.VerifierOptions{
@@ -45,6 +51,10 @@ func setupRecorded(t *testing.T) *recorded {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = d.Close() })
+	var runtimeDriver runtime.Driver = d
+	if wrap != nil {
+		runtimeDriver = wrap(d)
+	}
 	s, err := memory.Open(memory.Options{})
 	if err != nil {
 		t.Fatal(err)
@@ -52,7 +62,8 @@ func setupRecorded(t *testing.T) *recorded {
 	t.Cleanup(func() { _ = s.Close() })
 	emitter := events.NewEmitter(store.EventJournal(s, store.Delivered), slog.New(slog.DiscardHandler))
 	c, err := controller.Open(controller.Options{
-		DataDir: t.TempDir(), Driver: d, Environment: "default", Events: emitter,
+		DataDir: t.TempDir(), Driver: runtimeDriver, Environment: "default", Events: emitter,
+		TouchInterval: time.Millisecond,
 	})
 	if err != nil {
 		t.Fatal(err)

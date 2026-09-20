@@ -84,6 +84,11 @@ func New(o Options) (http.Handler, error) {
 	h.mux.HandleFunc("POST /v1/sandboxes/{id}/{verb}", h.item)
 	h.mux.HandleFunc("GET /v1/sandboxes/{id}/exec", h.execSocket)
 	h.mux.HandleFunc("GET /v1/sandboxes/{id}/attach", h.attachSocket)
+	h.mux.HandleFunc("GET /v1/sandboxes/{id}/display", h.display)
+	h.mux.HandleFunc("GET /v1/sandboxes/{id}/screenshot", h.screenshot)
+	h.mux.HandleFunc("GET /v1/sandboxes/{id}/screen", h.screen)
+	h.mux.HandleFunc("POST /v1/sandboxes/{id}/input", h.input)
+	h.mux.HandleFunc("GET /v1/sandboxes/{id}/ports", h.ports)
 	h.mux.HandleFunc("POST /v1/secrets", h.createSecret)
 	h.mux.HandleFunc("GET /v1/secrets", h.listSecrets)
 	h.mux.HandleFunc("PUT /v1/secrets/{key}", h.applySecret)
@@ -164,7 +169,7 @@ func (h *handler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	obj, _, err = manifest.ResolveNativeWith(r.Context(), obj,
-		manifest.NativeOptions(h.Controller.Environment(), h.secretLookup(r)))
+		manifest.DriverOptions(h.Controller.Environment(), h.Controller.Capabilities(), h.secretLookup(r)))
 	if err != nil {
 		respondError(w, err)
 		return
