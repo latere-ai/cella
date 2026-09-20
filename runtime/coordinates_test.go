@@ -13,8 +13,15 @@ import (
 )
 
 // roots are the trees the check covers, relative to this package's directory.
-// A slice that ports a package into the repository adds its tree here.
+// The walk is recursive, so "." carries every driver package under runtime/
+// and a slice that ports one in adds no root; a slice that adds a sibling
+// tree of runtime/ adds it here.
 var roots = []string{".", "../controller"}
+
+// drivers are the driver packages the walk has to reach. Naming them keeps a
+// later narrowing of the walk from silently dropping a driver's tree, which is
+// where an inherited image or namespace would land.
+var drivers = []string{"native", "k8s"}
 
 // group is the API group the contract stamps on an object. A hostname is a
 // coordinate of one deployment; the group is part of the schema, so the
@@ -40,6 +47,24 @@ func TestNoLatereCoordinates(t *testing.T) {
 			for _, finding := range scan(path, body) {
 				t.Error(finding)
 			}
+		}
+	}
+}
+
+// TestNoLatereCoordinatesCoversEveryDriver pins what the walk reaches: a
+// clean tree passes whether or not the files under it were read.
+func TestNoLatereCoordinatesCoversEveryDriver(t *testing.T) {
+	walked := files(t, ".")
+	for _, pkg := range drivers {
+		found := false
+		for path := range walked {
+			if strings.HasPrefix(path, pkg+"/") && strings.HasSuffix(path, ".go") {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("the walk reaches no file of runtime/%s, so its coordinates are unchecked", pkg)
 		}
 	}
 }

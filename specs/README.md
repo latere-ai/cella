@@ -261,3 +261,4 @@ The map, the order, and the rule for a slice are in 031.
 | [037-lifecycle-enforcement.md](.archive/037-lifecycle-enforcement.md) | complete | Reaper deadline rules, lease and clock seams, activity stamping |
 | [043-postgres-store.md](.archive/043-postgres-store.md) | complete | Store contract of spec 010, memory and Postgres adapters, the lost rule and recovery |
 | [044-manifest-fields.md](.archive/044-manifest-fields.md) | complete | Resource, user, workspace and lifecycle manifest fields with the staged resolver |
+| [036-k8s-driver.md](.archive/036-k8s-driver.md) | complete | Kubernetes driver: a claim and a Pod per sandbox, the baseline, exec, logs, archives, identity on the objects |

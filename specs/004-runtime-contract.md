@@ -30,7 +30,7 @@ the suite.
 
 ## Current state
 
-The initial native implementation is in `runtime/native` ([[025-native-runtime-migration]]). The exported package and capability types follow this design; the other drivers and remaining native capabilities below are not complete.
+The initial native implementation is in `runtime/native` ([[025-native-runtime-migration]]), and the container driver of the server-side default is in `runtime/k8s` ([[036-k8s-driver]]) with the lifecycle, execution, logs, archive transfer and stamped identity of this contract and none of its optional capabilities. The exported package and capability types follow this design; the other drivers and remaining native capabilities below are not complete.
 
 Design provenance: The interface descends from one that three container
 drivers have implemented in the hosted platform; the changes are that
@@ -216,7 +216,7 @@ podman and `local` the file is rewritten.
 
 ### The k8s driver
 
-One namespace (`CELLA_NAMESPACE`), one PVC and one Pod per sandbox, the
+One namespace (`CELLA_K8S_NAMESPACE`), one PVC and one Pod per sandbox, the
 Pod owned by nothing so that a Stop deletes the Pod and keeps the PVC.
 `Exec` and `Attach` go through the SPDY exec subresource; `Dial`
 through port forwarding. The egress rule is a NetworkPolicy selecting
@@ -406,7 +406,7 @@ suite cannot yet check. Each of those cases lands with its interface.
 `CELLA_RUNTIME` picks the in-process driver of the default environment:
 `k8s` (default), `podman`, `native`, `local`, `vm`, or `none` for a
 control plane that serves only workers. A driver's own variables
-(`CELLA_KUBECONFIG`, `CELLA_NAMESPACE`, `CELLA_K8S_RUNTIME_CLASS`,
+(`CELLA_K8S_KUBECONFIG`, `CELLA_K8S_NAMESPACE`, `CELLA_K8S_RUNTIME_CLASS`,
 `CELLA_K8S_RUNTIME_CLASS_ISOLATION`, `CELLA_PODMAN_SOCKET`,
 `CELLA_LOCAL_SRT`) are read only when that driver is selected. Further
 environments are registered objects.
@@ -425,9 +425,9 @@ requests ([[023-computer-use-operations]]); the microVM driver's design
 |---|---|---|
 | `native` passes the whole conformance suite in the unit suite | `TestNativeConformance` | passing for the cases built, [[032-runtime-conformance-suite]] |
 | `local` passes it on a machine with the sandbox runtime installed, with `Attach`, `Dial`, `Mesh`, `Display`, `Input`, `Resize`, `Pool` and the `open` egress case skipped as undeclared, and is skipped whole with the remediation printed where the runtime is absent | `TestLocalConformance` | not built |
-| `podman` passes it in the podman tier; `k8s` against kind; `remote` through a worker running `native` | `TestPodmanConformance`, `TestClusterConformance`, `TestWorkerConformance` | `podman` passing against a real engine, skipped where no socket answers, [[035-podman-driver]]; `k8s` and `remote` not built |
+| `podman` passes it in the podman tier; `k8s` against kind; `remote` through a worker running `native` | `TestPodmanConformance`, `TestClusterConformance`, `TestWorkerConformance` | `podman` passing against a real engine, skipped where no socket answers, [[035-podman-driver]]; `TestClusterConformance` built and skipped where no cluster is configured, [[036-k8s-driver]]; `remote` not built |
 | A driver that declares a capability without its interface, or one the suite finds not to hold, fails | `TestConformanceCatchesAFalseCapability` with three lying wrappers | passing, [[032-runtime-conformance-suite]] |
-| Every stamped label value is a legal Kubernetes label value and every key a legal key, for an owner with `@` and a user label with a `/` | `TestStampedIdentityIsLegal` | not built |
+| Every stamped label value is a legal Kubernetes label value and every key a legal key, for an owner with `@` and a user label with a `/` | `TestStampedIdentityIsLegal` | passing, [[036-k8s-driver]] |
 | A decorator that removes the token mount, sets `privileged`, adds `hostNetwork` or `shareProcessNamespace`, or mounts a service account token is refused with `decorator_violation` naming the field | `TestDecoratorCannotWeakenTheBaseline`, table-driven over the baseline | not built |
 | With `CELLA_K8S_RUNTIME_CLASS_ISOLATION=vm`, `Isolation()` is `vm` and the Pod carries the class; unset, `container` regardless of the class name | `TestK8sIsolationIsDeclared` | not built |
 | `Ingress` is declared only with an `Exposer` installed, and a `public` port then has a URL that answers | `TestIngressNeedsAnExposer`, e2e `IngressURL` | not built |

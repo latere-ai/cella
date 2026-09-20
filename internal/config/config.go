@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"latere.ai/x/cella/internal/store"
+	"latere.ai/x/cella/runtime/k8s"
 )
 
 // Defaults for the optional variables.
@@ -101,6 +102,10 @@ type Config struct {
 	// SecretKey wraps every secret value's data key (specs 010 and 018).
 	// It is read where it is set and required once a Secret exists.
 	SecretKey []byte
+	// K8s configures the Kubernetes driver of spec 004. It is read only
+	// when CELLA_RUNTIME selects that driver, so an installation that runs
+	// another backend carries no opinion about a cluster.
+	K8s k8s.Options
 	// Identity is spec 006's half: the issuers, the audience, the signing
 	// keys, the authorizer, and the owner policy's admins.
 	Identity
@@ -134,6 +139,9 @@ func Load(getenv Getenv) (Config, error) {
 	c.PodmanSocket = strings.TrimSpace(getenv("CELLA_PODMAN_SOCKET"))
 	if c.PodmanSocket != "" && !filepath.IsAbs(c.PodmanSocket) {
 		problems = append(problems, "CELLA_PODMAN_SOCKET must be an absolute path to a unix socket")
+	}
+	if c.Runtime == RuntimeK8s {
+		c.K8s = loadK8s(getenv, &problems)
 	}
 	if c.Runtime == RuntimeNative && !c.AllowUnsafeNative {
 		problems = append(problems, "CELLA_RUNTIME=native requires CELLA_ALLOW_UNSAFE_NATIVE=true; native execution has no isolation")

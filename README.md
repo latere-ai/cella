@@ -209,6 +209,8 @@ whole table, identity and everything else; the
   policy, an admission webhook with built-in defaults and ceilings, and
   a signed event sink.
 - Self-hosted environments through a worker that connects outbound.
+- Runtimes: Kubernetes (`CELLA_RUNTIME=k8s`, a claim and a Pod per sandbox)
+  and a native runtime for trusted local development.
 - Go packages a platform imports: `manifest`, `runtime`, `controller`,
   `egress`.
 - The `cella` command and a skill file that teaches an agent to use it.

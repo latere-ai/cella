@@ -34,16 +34,10 @@ import (
 	"latere.ai/x/cella/internal/store/postgres"
 	"latere.ai/x/cella/internal/version"
 	"latere.ai/x/cella/runtime"
+	"latere.ai/x/cella/runtime/k8s"
 	"latere.ai/x/cella/runtime/native"
 	"latere.ai/x/cella/runtime/podman"
 )
-
-// driverCloser is the in-process driver of the default environment plus the
-// shutdown this process owns, which every backend under runtime/ provides.
-type driverCloser interface {
-	runtime.Driver
-	Close() error
-}
 
 // Shutdown timing of spec 002: readiness answers 503 at once, the drain
 // delay lets a load balancer notice, then the servers close with the
@@ -129,9 +123,6 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		return fail(stderr, err)
 	}
 
-	if cfg.Runtime != config.RuntimeNative && cfg.Runtime != config.RuntimePodman {
-		return fail(stderr, fmt.Errorf("CELLA_RUNTIME=%s is not implemented; native is available for trusted development with CELLA_ALLOW_UNSAFE_NATIVE=true, and podman where CELLA_PODMAN_SOCKET reaches an engine", cfg.Runtime))
-	}
 	// Recovery may change runtime records. Own the state before opening the
 	// driver so a second process cannot mutate live workloads.
 	desired, lease, storeReady, err := openStore(ctx, cfg)
@@ -139,17 +130,31 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		return fail(stderr, err)
 	}
 	defer func() { _ = desired.Close() }()
-	var runtimeDriver driverCloser
+	// A driver that owns local processes or an engine session is closed at
+	// shutdown; one that drives a cluster owns nothing this process has to
+	// release.
+	var runtimeDriver runtime.Driver
+	closeRuntime := func() error { return nil }
 	switch cfg.Runtime {
+	case config.RuntimeK8s:
+		driver, err := k8s.New(cfg.K8s)
+		if err != nil {
+			return fail(stderr, fmt.Errorf("runtime: %w", err))
+		}
+		runtimeDriver = driver
 	case config.RuntimePodman:
-		runtimeDriver, err = podman.New(podman.Options{Socket: cfg.PodmanSocket})
+		driver, err := podman.New(podman.Options{Socket: cfg.PodmanSocket})
+		if err != nil {
+			return fail(stderr, fmt.Errorf("runtime: %w", err))
+		}
+		runtimeDriver, closeRuntime = driver, driver.Close
 	default:
-		runtimeDriver, err = native.New(filepath.Join(cfg.DataDir, "native"))
+		driver, err := native.New(filepath.Join(cfg.DataDir, "native"))
+		if err != nil {
+			return fail(stderr, fmt.Errorf("runtime: %w", err))
+		}
+		runtimeDriver, closeRuntime = driver, driver.Close
 	}
-	if err != nil {
-		return fail(stderr, fmt.Errorf("runtime: %w", err))
-	}
-	defer func() { _ = runtimeDriver.Close() }()
 	if err := runtimeDriver.Preflight(ctx); err != nil {
 		return fail(stderr, fmt.Errorf("runtime preflight: %w", err))
 	}
@@ -251,7 +256,7 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	}
 	// The reaper drives the runtime, so it ends before the runtime does.
 	stopReaper()
-	if err := runtimeDriver.Close(); err != nil {
+	if err := closeRuntime(); err != nil {
 		return fail(stderr, fmt.Errorf("runtime shutdown: %w", err))
 	}
 	return 0
