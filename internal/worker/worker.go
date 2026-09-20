@@ -123,7 +123,9 @@ func (w *Worker) Run(ctx context.Context) error {
 	for {
 		err := w.connect(ctx)
 		if ctx.Err() != nil {
-			return nil
+			// The worker was asked to stop. Whatever ended the connection is
+			// that request, not a failure of the worker's own act.
+			return nil //nolint:nilerr // the context ending is the caller stopping the role
 		}
 		if err != nil {
 			w.log.WarnContext(ctx, "the worker's stream to the control plane ended", "err", err, "retryIn", backoff)
@@ -218,6 +220,11 @@ func (w *Worker) dial(ctx context.Context) (remote.FrameConn, error) {
 	conn, res, err := dialer.DialContext(ctx, endpoint, http.Header{
 		"Authorization": []string{"Bearer " + w.options.Key},
 	})
+	if res != nil {
+		// A refused upgrade carries a body the caller owns; a successful one
+		// carries an empty body, and both are closed here.
+		defer func() { _ = res.Body.Close() }()
+	}
 	if err != nil {
 		if res != nil {
 			return nil, fmt.Errorf("worker: opening the stream: %w (%s)", err, res.Status)

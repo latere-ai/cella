@@ -219,6 +219,10 @@ func TestTheEgressSubcommandConnects(t *testing.T) {
 	proxyAddr, reverseAddr := freePort(t), freePort(t)
 	plane := startPlane(t, proxyAddr, reverseAddr)
 
+	// The key is minted before the role starts, through the route an
+	// operator uses, so what the gateway carries is what a deployment holds.
+	key := plane.environmentKey(t)
+
 	var out syncBuffer
 	var errOut bytes.Buffer
 	ctx, cancel := context.WithCancel(t.Context())
@@ -226,7 +230,7 @@ func TestTheEgressSubcommandConnects(t *testing.T) {
 	go func() {
 		codec <- run(ctx, []string{"egress"}, env(map[string]string{
 			"CELLA_URL":                 plane.url,
-			"CELLA_ENVIRONMENT_KEY":     plane.environmentKey(t),
+			"CELLA_ENVIRONMENT_KEY":     key,
 			"CELLA_EGRESS_PROXY_ADDR":   proxyAddr,
 			"CELLA_EGRESS_REVERSE_ADDR": reverseAddr,
 		}), &out, &errOut)

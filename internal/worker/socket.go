@@ -42,19 +42,17 @@ func NewSocket(conn *websocket.Conn) *Socket {
 // ReadFrame takes the next binary message. A text message is a peer speaking
 // another protocol, which ends the connection rather than being skipped.
 func (s *Socket) ReadFrame() ([]byte, error) {
-	for {
-		if err := s.conn.SetReadDeadline(time.Now().Add(remote.HeartbeatTimeout)); err != nil {
-			return nil, err
-		}
-		kind, raw, err := s.conn.ReadMessage()
-		if err != nil {
-			return nil, err
-		}
-		if kind != websocket.BinaryMessage {
-			return nil, errors.New("worker: every frame of this protocol is binary")
-		}
-		return raw, nil
+	if err := s.conn.SetReadDeadline(time.Now().Add(remote.HeartbeatTimeout)); err != nil {
+		return nil, err
 	}
+	kind, raw, err := s.conn.ReadMessage()
+	if err != nil {
+		return nil, err
+	}
+	if kind != websocket.BinaryMessage {
+		return nil, errors.New("worker: every frame of this protocol is binary")
+	}
+	return raw, nil
 }
 
 func (s *Socket) WriteFrame(raw []byte) error {

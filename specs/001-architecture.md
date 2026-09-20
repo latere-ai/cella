@@ -6,7 +6,7 @@ depends_on: []
 affects: [manifest/, runtime/, controller/, egress/, internal/, cmd/cellad/, cmd/cella/, docs/]
 effort: medium
 created: 2026-09-12
-updated: 2026-09-12
+updated: 2026-09-20
 author: changkun
 ---
 
@@ -370,7 +370,7 @@ the packages ([[016-building-a-plane]]).
 | Each role package's and each binary's build list matches its `depcheck` allow list | the `depcheck` gate | passing for the scaffold's list |
 | No released artifact, deploy manifest, inherited default, or documentation page names a Latere hostname or namespace outside an example or the API group | `TestNoLatereCoordinatesInReleasedArtifacts` over `deploy/`, `docs/`, the workflows' image references, and every default in `internal/config`; [[014-release-and-installation]]'s `TestReleasePublishesUnderTheOwnersNamespace` | not built |
 | A manifest applied through the API and one handed to `manifest.Resolve` by an importer with the same options produce byte-identical resolved manifests | `TestAPIAndImporterResolveAgree`, comparing the `PUT` response body with `Resolve`'s output | not built |
-| A sandbox created on a directly driven environment and one on a worker's environment are indistinguishable through the API except by `status.environment`, `status.driver`, and `status.isolation` | conformance case `case001Indistinguishable` | not built, [[021-data-plane-workers]] |
+| A sandbox created on a directly driven environment and one on a worker's environment are indistinguishable through the API except by `status.environment`, `status.driver`, and `status.isolation` | conformance case `case001Indistinguishable` | not built: [[051-environments-and-workers]] builds the worker and the remote driver, and the sandbox routing that lets one be created on a worker's environment is its open item |
 | The control plane opens no connection toward a worker's host during the whole e2e tier | [[021-data-plane-workers]]'s `TestNoInboundToTheDataPlane` | not built |
 | `cellad` refuses to start with no issuer configured | `TestServeRefusesToStartWithoutAnIssuer` | not built, [[006-identity]] |
 | With the authorizer URL set and the endpoint down, every request is refused with `authorizer_unavailable` | conformance case `case006AuthorizerUnavailable` | not built, [[006-identity]] |
