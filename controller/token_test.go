@@ -291,9 +291,12 @@ func TestTokenRuleRunsUnderTheReaperLoop(t *testing.T) {
 	clock.Advance(2 * time.Hour)
 	clock.ticks <- clock.Now()
 	waitFor(t, "the identity to be re-minted", func() bool { return d.tokenOf(obj.Status.ID) == "token-jti-2" })
-	if _, revoked, _ := tokens.read(); !slices.Equal(revoked, []string{"jti-1"}) {
-		t.Fatalf("the loop revoked %v, want the token it replaced", revoked)
-	}
+	// The revocation is the step after the projection, so the new token is
+	// visible in the driver an instant before the old one is on the list.
+	waitFor(t, "the replaced token to be revoked", func() bool {
+		_, revoked, _ := tokens.read()
+		return slices.Equal(revoked, []string{"jti-1"})
+	})
 }
 
 // TestCappedTokenIsNotRotated: a token that already ends when its sandbox
