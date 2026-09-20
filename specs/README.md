@@ -279,4 +279,5 @@ The map, the order, and the rule for a slice are in 031.
 | [038-environment-pools.md](.archive/038-environment-pools.md) | complete | The environment's prewarmed pool, the match rule, adoption as one exclusive driver act, the refill loop |
 | [049-stubs-and-tiers.md](.archive/049-stubs-and-tiers.md) | complete | `cella-stubs`, `make run` with no issuer of your own, the unit, podman and kind tiers, the kind overlay, and the install walk on every push and every tag |
 | [041-display-and-input.md](.archive/041-display-and-input.md) | complete | The virtual desktop, the screenshot, the screen stream, the input batch, the port probe |
+| [053-observability.md](.archive/053-observability.md) | complete | The metric registry of 017 and the scrape surface, the server span per request, the redacting log handler on both paths of the tee, and the alert rules over what is emitted |
 | [050-cella-command.md](.archive/050-cella-command.md) | complete | The `cella` command, the typed client and its own WebSocket, the exit scheme, the columns and `--json`, the skill, and the client's four release archives |

@@ -1,6 +1,6 @@
 ---
 title: "Observability: the metric registry of 017, the spans across the seam, the redacting log handler, and the alert rules over what is emitted"
-status: in-progress
+status: complete
 track: core
 depends_on:
   - specs/017-observability.md
@@ -223,6 +223,14 @@ credential or a token as an attribute at all. This handler is the second
 line, and a canary written through every log path this slice touches
 proves it holds on both paths of the tee.
 
+The volume is one line per request, written where the count is written:
+the deferred observation the API handler already makes, at `INFO`, with
+the route, the status class, the code, the duration, the subject, the
+sandbox the route names and the request id. It is emitted under the
+request's own context, so the trace id and the span id reach both paths
+and a line read out of the container's output joins its trace. A stream
+is one request and so one line; nothing is written per frame.
+
 ### Alerts
 
 `deploy/base/prometheusrule.yaml` keeps 048's shape and its alert names
@@ -275,12 +283,59 @@ loops.
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| The registered metrics match 017's table row for row in name, type, labels and buckets, and the unregistered rows are exactly the declared awaiting set | `TestMetricsTable`, reading `017-observability.md` through `runtime.Caller` | not built |
-| Every labelled histogram has a series before its first observation, and no label value is a sandbox id, a subject, a name or a path | `TestSeriesExistAtStart`, `TestLabelsAreBounded` | not built |
-| Each counter and histogram is moved by the code path that owns it | one test per owner package against a fake recorder, and `TestRegistryRecords` over the registry | not built |
-| `/metrics` on the internal listener serves the exposition and the public listener does not | `TestScrapeSurface`, `TestMetricsIsInternalOnly` | not built |
-| The egress role opens no listener beyond its doors | `TestEgressRoleOpensNoScrapeSurface` | not built |
-| A request draws one server span named by the route with the request id and trace id, and the authorizer and admission calls are child spans | `TestRequestSpans` over an in-memory span exporter | not built |
-| One canary per kind (env value, secret value, placeholder, credential, token, `Authorization`, `Proxy-Authorization`, `Cella-Egress-Credential`) appears on neither path of the tee | `TestLogsRedact`, `TestRedactionReachesTheBridge` against an OTLP collector | not built |
-| Every `cella_` metric and label the rules file names is in the declared table, and the document parses | `TestAlertsNameKnownMetrics` | not built |
-| A serve, create, exec, stop and delete moves the counters an operator reads, with export on | `TestObservabilityEndToEnd` in `cmd/cellad` | not built |
+| The registered metrics match 017's table row for row in name, type, labels and buckets, and the unregistered rows are exactly the declared awaiting set | `TestMetricsTable` reading `017-observability.md` through `runtime.Caller`, `TestAwaitingRowsAreRegisteredByNobody` | built |
+| Every labelled histogram has a series before its first observation, and no label value is a sandbox id, a subject, a name or a path | `TestSeriesExistAtStart`, `TestLabelValuesAreBounded`, and the scrape the end-to-end run reads | built |
+| Each counter and histogram is moved by the code path that owns it | one test per owner package against a fake recorder, and `TestCountersRecordWhatTheyOwn` over the registry | built |
+| `/metrics` on the internal listener serves the exposition and the public listener does not | `TestScrapeSurfaceIsTheInternalListener` | built |
+| The egress role opens no listener beyond its doors | `TestEgressRoleServesNoScrapeSurface` | built |
+| A request draws one server span named by the route with the subject, the request id and the sandbox, and the probes draw none | `TestRequestSpans` over an in-memory exporter, `TestTheAPIDrawsAServerSpan` against a collector | built |
+| One canary per kind (env value, secret value, placeholder, credential, token, `Authorization`, `Proxy-Authorization`, `Cella-Egress-Credential`) appears on neither path of the tee | `TestLogsRedact`, `TestCanaryNeverReachesALogLine`, `TestTelemetryExportsOverOTLP` | built |
+| One line per request and per stream, none per frame, carrying the route, the code, the subject, the sandbox and the request id | `TestOneLogLinePerRequest`, `TestOneLogLinePerStreamAndNonePerFrame` | built |
+| Every `cella_` metric and label the rules file names is in the declared table, and the document parses | `TestAlertsNameKnownMetrics`, `TestAlertsAggregateOnLabelsThatExist`, `TestEveryAlertCarriesItsRunbookSentence` | built |
+| A serve, create, exec, stop and delete moves the counters an operator reads | `TestObservabilityEndToEnd` in `cmd/cellad` | built |
+
+## Outcome
+
+Built on 2026-09-20. `internal/metrics` is the one registry, at 100%
+statement coverage, and every package the gate measures clears 90%: the
+packages this slice touched read `cmd/cellad` 90.7%, `internal/api`
+91.4%, `controller` 94.1%, `internal/auth` 95.3%, `internal/events`
+95.3%, `internal/store` 92.0%.
+
+`go tool lateregate` passes: fmt-check, modernize, cgo-free, otel-client,
+license, spec-lint, depcheck, identity, postgres, lint, vuln, test, race,
+hermetic, tempdir and cover. No new module joined a build list, so
+`depcheck` gained no row: the OpenTelemetry SDK was already admitted
+through the outbound clients of [[006-identity]], and `pkg/metrics` is
+part of `latere.ai/x/pkg`.
+
+The end-to-end run is `TestObservabilityEndToEnd` in `cmd/cellad`: the
+serve role on the native driver, a create, a read, two exec sessions, a
+stop, a delete and a read that is refused, then a scrape of the internal
+listener that reads each counter the run owns, the route label holding
+the mux pattern and never a sandbox id, and the hijacked streams counted
+without being timed. `TestTheAPIDrawsAServerSpan` runs the same role
+against an in-process collector and reads back the span named by the
+route, and `TestTelemetryExportsOverOTLP` reads a canary back off the
+bridge to prove the redaction is on both paths and not one.
+
+What the slice built beyond the table, because the numbers could not be
+right without it: the journal gained `Undelivered`, a count of the
+records the sink has not taken. `Pending` answers what one pass may take
+now, which loses every record inside a backoff window, so a gauge built
+on it would read zero on a queue that is not empty. Both store adapters
+implement it and the store contract suite holds them to it.
+
+Twenty-one of 017's twenty-nine rows are emitted. Eight wait on the
+limiter of [[008-api]], the scheduler and sets of
+[[020-scheduling-and-sets]] and the workers of
+[[021-data-plane-workers]]; each is declared in the table in code, named
+by `TestMetricsTable`, and registered by nothing. Two alert rules read
+the last of those and ship quiet.
+
+Two things 017 names are not built and are named in Not in this spec:
+`tools/rules` with the `promtool check rules` job, which is a workflow
+change, and the trace continuation across the worker seam, which has no
+seam to cross until [[021-data-plane-workers]] lands. The `cached`
+outcome of `cella_decisions_total` is never emitted: the cache lives
+inside `pkg/authz`'s client and the decision seam cannot see a hit.
