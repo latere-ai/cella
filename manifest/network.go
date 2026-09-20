@@ -167,10 +167,13 @@ func narrowing(existing, obj *v1.Sandbox) error {
 	if narrowingSecrets(existing, obj) {
 		paths = append(paths, pathSecrets)
 	}
+	// The spawn budget is reach of another kind: a sandbox that raised its
+	// own would create more children than its owner granted it.
+	paths = append(paths, meshNarrowing(existing, obj)...)
 	if len(paths) == 0 {
 		return nil
 	}
-	return failPaths("boundary_widened", "A sandbox cannot widen its own network boundary: "+strings.Join(paths, ", ")+".", paths)
+	return failPaths("boundary_widened", "A sandbox cannot widen its own boundary: "+strings.Join(paths, ", ")+".", paths)
 }
 
 // egressCapability is the boundary's row of stage 7. An environment declares
@@ -238,12 +241,20 @@ func validatePorts(ports []v1.Port) error {
 // only a driver that declares Mesh can make, and public is an endpoint only an
 // installed exposer can give. An environment without the capability refuses
 // the field rather than recording a reach the sandbox will not have.
-func portCapability(obj *v1.Sandbox, env *v1.Environment) error {
+//
+// A mesh port also needs a mesh to be reached on, which is the sandbox's own
+// membership. The environment's capability and the sandbox's membership are
+// two different refusals by spec 003: an environment that connects no peers
+// is capability_unsupported, and a sandbox outside every mesh asking for a
+// reach inside one is invalid_field.
+func portCapability(obj *v1.Sandbox, env *v1.Environment, member bool) error {
 	caps := env.Status.Capabilities
 	for i, p := range obj.Spec.Network.Ports {
 		switch {
 		case p.Expose == v1.ExposeMesh && !caps.Mesh:
 			return failAt("capability_unsupported", portPath(i, "expose"), "This environment has no mesh for a port to be reached on.")
+		case p.Expose == v1.ExposeMesh && !member:
+			return failAt("invalid_field", portPath(i, "expose"), "Only a sandbox in a mesh reaches a port on one.")
 		case p.Expose == v1.ExposePublic && !caps.Ingress:
 			return failAt("capability_unsupported", portPath(i, "expose"), "This environment gives a port no public endpoint.")
 		}

@@ -104,6 +104,9 @@ type data struct {
 	// revoked is the jti of every token revoked before it expired, against
 	// the instant after which the row is no longer worth keeping.
 	revoked map[string]time.Time
+	// used is the spawn ledger of design 022: how many children each sandbox
+	// has created in total.
+	used map[string]int
 }
 
 type observedRow struct {
@@ -131,6 +134,7 @@ func newData() *data {
 		values:   map[string]valueRow{},
 		leases:   map[string]leaseRow{},
 		revoked:  map[string]time.Time{},
+		used:     map[string]int{},
 	}
 }
 
@@ -159,6 +163,7 @@ func (d *data) clone() *data {
 	}
 	maps.Copy(n.leases, d.leases)
 	maps.Copy(n.revoked, d.revoked)
+	maps.Copy(n.used, d.used)
 	return n
 }
 
@@ -194,6 +199,7 @@ func (t *txn) Values() store.Values     { return values{t.d, t.env} }
 func (t *txn) Leases() store.Leases     { return leases{t.d} }
 
 func (t *txn) Revocations() store.Revocations { return revocations{t.d} }
+func (t *txn) Ledger() store.Ledger           { return ledger{t.d} }
 
 type desired struct{ d *data }
 
@@ -696,4 +702,48 @@ func (x revocations) Forget(ctx context.Context, before time.Time) (int, error) 
 		}
 	}
 	return n, nil
+}
+
+// ledger is the spawn budget of design 022. The count is the whole row: the
+// budget it is judged against travels with the debit, because the manifest
+// already holds it and one number has one source of truth.
+type ledger struct{ d *data }
+
+func (x ledger) Debit(ctx context.Context, parentID string, budget int) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if parentID == "" {
+		return errors.New("store: a debit names a sandbox")
+	}
+	if x.d.used[parentID] >= budget {
+		return store.ErrBudgetExhausted
+	}
+	x.d.used[parentID]++
+	return nil
+}
+
+func (x ledger) Credit(ctx context.Context, parentID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if n := x.d.used[parentID]; n > 0 {
+		x.d.used[parentID] = n - 1
+	}
+	return nil
+}
+
+func (x ledger) Used(ctx context.Context, parentID string) (int, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	return x.d.used[parentID], nil
+}
+
+func (x ledger) Forget(ctx context.Context, parentID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	delete(x.d.used, parentID)
+	return nil
 }

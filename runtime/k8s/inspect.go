@@ -128,6 +128,8 @@ func state(pvc *corev1.PersistentVolumeClaim, pod *corev1.Pod) driver.State {
 		AutoStop:       parseDuration(pvc.Annotations, annAutoStop),
 		AutoDelete:     parseDuration(pvc.Annotations, annAutoDelete),
 		Pool:           pvc.Labels[labelPool] == "true",
+		MeshID:         pvc.Labels[labelMesh],
+		Parent:         pvc.Labels[labelParent],
 	}
 	if spec, err := specOf(pvc); err == nil {
 		s.Name = spec.Name

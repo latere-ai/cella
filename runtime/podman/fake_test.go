@@ -38,6 +38,10 @@ type fake struct {
 	images     map[string]string
 	execs      map[string]*fakeExec
 	pulls      int
+	// networks maps one network's name onto the aliases each attached
+	// container answers to inside it, which is what the mesh of spec 022
+	// asks the engine for.
+	networks map[string]map[string][]string
 
 	// faults maps "METHOD /path-prefix" onto the refusal a matching request
 	// gets, so an error branch is reached on purpose.
@@ -118,6 +122,7 @@ func newFake(t *testing.T) *fake {
 		containers: map[string]*fakeContainer{},
 		images:     map[string]string{"img": "sha256:d1", "docker.io/library/alpine:latest": "sha256:a1"},
 		execs:      map[string]*fakeExec{},
+		networks:   map[string]map[string][]string{},
 		faults:     map[string]*arranged{},
 	}
 	ln, err := net.Listen("unix", f.socket)
@@ -238,6 +243,10 @@ func (f *fake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.image(w, r, strings.TrimPrefix(p, libpod+"/images/"))
 	case strings.HasPrefix(p, libpod+"/exec/"):
 		f.exec(w, r, strings.TrimPrefix(p, libpod+"/exec/"))
+	case p == libpod+"/networks/create":
+		f.createNetwork(w, r)
+	case strings.HasPrefix(p, libpod+"/networks/"):
+		f.oneNetwork(w, r, strings.TrimPrefix(p, libpod+"/networks/"))
 	case strings.HasPrefix(p, compat+"/containers/") && strings.HasSuffix(p, "/archive"):
 		f.archive(w, r, strings.TrimSuffix(strings.TrimPrefix(p, compat+"/containers/"), "/archive"))
 	default:
@@ -805,4 +814,69 @@ func rootOf(c *fakeContainer) string {
 // line records one log entry the container wrote.
 func line(at time.Time, stream byte, text string) fakeLine {
 	return fakeLine{at: at, stream: stream, data: text}
+}
+
+// createNetwork makes one network. A name the engine already holds is 409,
+// which is what a second member of one mesh meets.
+func (f *fake) createNetwork(w http.ResponseWriter, r *http.Request) {
+	var body networkCreate
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		refuse(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, held := f.networks[body.Name]; held {
+		refuse(w, http.StatusConflict, "network already exists")
+		return
+	}
+	f.networks[body.Name] = map[string][]string{}
+	writeJSON(w, map[string]string{"name": body.Name})
+}
+
+// oneNetwork serves the connect and the removal of one network.
+func (f *fake) oneNetwork(w http.ResponseWriter, r *http.Request, rest string) {
+	name, action, _ := strings.Cut(rest, "/")
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	members, held := f.networks[name]
+	if !held {
+		refuse(w, http.StatusNotFound, "no such network "+name)
+		return
+	}
+	switch {
+	case action == "connect" && r.Method == http.MethodPost:
+		var body networkConnect
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			refuse(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		var aliases []string
+		if body.EndpointConfig != nil {
+			aliases = body.EndpointConfig.Aliases
+		}
+		members[body.Container] = aliases
+		w.WriteHeader(http.StatusNoContent)
+	case action == "" && r.Method == http.MethodDelete:
+		delete(f.networks, name)
+		w.WriteHeader(http.StatusNoContent)
+	default:
+		refuse(w, http.StatusNotFound, "no route for the network "+name)
+	}
+}
+
+// network reports one network's members and their aliases, or false where the
+// engine holds no such network.
+func (f *fake) network(name string) (map[string][]string, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	members, held := f.networks[name]
+	if !held {
+		return nil, false
+	}
+	out := map[string][]string{}
+	for container, aliases := range members {
+		out[container] = slices.Clone(aliases)
+	}
+	return out, true
 }

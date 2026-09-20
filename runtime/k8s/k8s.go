@@ -229,26 +229,36 @@ func (d *Driver) Isolation() string { return "container" }
 // Capabilities declares only what this driver enforces today. Pool, because
 // the claim's label is the cluster's own mutex: the guarded patch of an
 // adoption tests it, so of two adopters one writes and the other is told the
-// entry is gone. Display and Input follow the display image: with none
-// configured there is no desktop to give, and declaring one would push the
-// refusal from resolve, where it names the field, to create, where it names
-// nothing. Egress, mesh, attach, dial, resize, volumes and snapshots each land
-// with the slice that builds them.
+// entry is gone. Mesh, because a mesh is a NetworkPolicy and a headless
+// Service the driver writes per mesh. Display and Input follow the display
+// image: with none configured there is no desktop to give, and declaring one
+// would push the refusal from resolve, where it names the field, to create,
+// where it names nothing. Egress, attach, dial, resize, volumes and snapshots
+// each land with the slice that builds them.
 func (d *Driver) Capabilities() driver.Capabilities {
 	desktop := d.opts.DisplayImage != ""
-	return driver.Capabilities{Files: true, Pool: true, Display: desktop, Input: desktop}
+	return driver.Capabilities{Files: true, Pool: true, Mesh: true, Display: desktop, Input: desktop}
 }
 
 // verbs are the accesses the driver uses, checked one review each so a missing
 // rule is named before the first sandbox rather than at the first create.
-var verbs = []struct{ resource, subresource, verb string }{
-	{"pods", "", "get"}, {"pods", "", "list"}, {"pods", "", "create"},
-	{"pods", "", "delete"}, {"pods", "", "patch"},
-	{"pods", "exec", "create"}, {"pods", "log", "get"},
-	{"persistentvolumeclaims", "", "get"}, {"persistentvolumeclaims", "", "list"},
-	{"persistentvolumeclaims", "", "create"}, {"persistentvolumeclaims", "", "delete"},
-	{"persistentvolumeclaims", "", "patch"},
+// group is the API group the resource belongs to, empty for the core one, so
+// a review asks about the object the driver actually writes.
+var verbs = []struct{ group, resource, subresource, verb string }{
+	{"", "pods", "", "get"}, {"", "pods", "", "list"}, {"", "pods", "", "create"},
+	{"", "pods", "", "delete"}, {"", "pods", "", "patch"},
+	{"", "pods", "exec", "create"}, {"", "pods", "log", "get"},
+	{"", "persistentvolumeclaims", "", "get"}, {"", "persistentvolumeclaims", "", "list"},
+	{"", "persistentvolumeclaims", "", "create"}, {"", "persistentvolumeclaims", "", "delete"},
+	{"", "persistentvolumeclaims", "", "patch"},
+	// The mesh of spec 022: one headless Service and one NetworkPolicy per
+	// mesh, made with its first member and removed with its last.
+	{"", "services", "", "create"}, {"", "services", "", "delete"},
+	{networkGroup, "networkpolicies", "", "create"}, {networkGroup, "networkpolicies", "", "delete"},
 }
+
+// networkGroup is the API group a NetworkPolicy lives in.
+const networkGroup = "networking.k8s.io"
 
 // Preflight proves the cluster answers, the namespace holds the objects, the
 // service account may act on them, and the storage class exists.
@@ -260,7 +270,8 @@ func (d *Driver) Preflight(ctx context.Context) error {
 	for _, v := range verbs {
 		review, err := d.cs.AuthorizationV1().SelfSubjectAccessReviews().Create(ctx, &authv1.SelfSubjectAccessReview{
 			Spec: authv1.SelfSubjectAccessReviewSpec{ResourceAttributes: &authv1.ResourceAttributes{
-				Namespace: d.opts.Namespace, Resource: v.resource, Subresource: v.subresource, Verb: v.verb,
+				Namespace: d.opts.Namespace, Group: v.group, Resource: v.resource,
+				Subresource: v.subresource, Verb: v.verb,
 			}},
 		}, metav1.CreateOptions{})
 		if err != nil {

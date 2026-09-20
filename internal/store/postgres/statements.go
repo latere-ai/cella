@@ -41,6 +41,7 @@ func (t *txn) Values() store.Values     { return values{t.q, t.env} }
 func (t *txn) Leases() store.Leases     { return leases{t.q, t.store} }
 
 func (t *txn) Revocations() store.Revocations { return revocations{t.q} }
+func (t *txn) Ledger() store.Ledger           { return ledger{t.q} }
 
 // The constraints a write can violate, and what each one means to a caller.
 const (
@@ -638,4 +639,57 @@ func (x revocations) Forget(ctx context.Context, before time.Time) (int, error) 
 		return 0, fmt.Errorf("store: forgetting expired revocations: %w", err)
 	}
 	return int(tag.RowsAffected()), nil
+}
+
+// ledger is the spawn budget of design 022: one row per sandbox holding how
+// many children it has created in total. The budget is not a column, so the
+// debit carries the number it is conditional on.
+type ledger struct{ q querier }
+
+// Debit inserts the first child's row and raises every later one, both under
+// the same condition, so two concurrent debits at one remaining unit yield
+// one success. The insert conflicts on the primary key and the update's where
+// clause decides; a statement that changed no row found the budget spent.
+func (x ledger) Debit(ctx context.Context, parentID string, budget int) error {
+	if parentID == "" {
+		return errors.New("store: a debit names a sandbox")
+	}
+	if budget <= 0 {
+		return store.ErrBudgetExhausted
+	}
+	tag, err := x.q.Exec(ctx, `insert into ledger (sandbox_id, used) values ($1, 1)
+		on conflict (sandbox_id) do update set used = ledger.used + 1, updated_at = now()
+		where ledger.used < $2`, parentID, budget)
+	if err != nil {
+		return fmt.Errorf("store: debiting the spawn budget of %s: %w", parentID, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return store.ErrBudgetExhausted
+	}
+	return nil
+}
+
+func (x ledger) Credit(ctx context.Context, parentID string) error {
+	_, err := x.q.Exec(ctx, `update ledger set used = used - 1, updated_at = now()
+		where sandbox_id = $1 and used > 0`, parentID)
+	if err != nil {
+		return fmt.Errorf("store: crediting the spawn budget of %s: %w", parentID, err)
+	}
+	return nil
+}
+
+func (x ledger) Used(ctx context.Context, parentID string) (int, error) {
+	var used int
+	err := x.q.QueryRow(ctx, `select coalesce(max(used), 0) from ledger where sandbox_id = $1`, parentID).Scan(&used)
+	if err != nil {
+		return 0, fmt.Errorf("store: reading the spawn budget of %s: %w", parentID, err)
+	}
+	return used, nil
+}
+
+func (x ledger) Forget(ctx context.Context, parentID string) error {
+	if _, err := x.q.Exec(ctx, `delete from ledger where sandbox_id = $1`, parentID); err != nil {
+		return fmt.Errorf("store: forgetting the spawn ledger of %s: %w", parentID, err)
+	}
+	return nil
 }

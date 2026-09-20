@@ -86,6 +86,7 @@ const (
 	TypeLost       Type = "sandbox.lost"
 	TypeRecovering Type = "sandbox.recovering"
 	TypeRecovered  Type = "sandbox.recovered"
+	TypeSpawned    Type = "sandbox.spawned"
 	TypeExec       Type = "sandbox.exec"
 	TypeFiles      Type = "sandbox.files"
 	TypeScreenshot Type = "sandbox.screenshot"
@@ -97,8 +98,8 @@ const (
 // lists them. A test walks it.
 var Types = []Type{
 	TypeCreated, TypeUpdated, TypeStarted, TypeStopped, TypeDeleted,
-	TypeFailed, TypeLost, TypeRecovering, TypeRecovered, TypeExec, TypeFiles,
-	TypeScreenshot, TypeInput, TypeScreen,
+	TypeFailed, TypeLost, TypeRecovering, TypeRecovered, TypeSpawned,
+	TypeExec, TypeFiles, TypeScreenshot, TypeInput, TypeScreen,
 	TypeSecretCreated, TypeSecretUpdated, TypeSecretDeleted,
 }
 
@@ -126,10 +127,13 @@ type Reason string
 // The reasons this slice writes. The rest of design 009's enum belongs to
 // the slices that end a sandbox for those causes.
 const (
-	ReasonRequest           Reason = "Request"
-	ReasonAutoStop          Reason = "AutoStop"
-	ReasonAutoDelete        Reason = "AutoDelete"
-	ReasonExpired           Reason = "Expired"
+	ReasonRequest    Reason = "Request"
+	ReasonAutoStop   Reason = "AutoStop"
+	ReasonAutoDelete Reason = "AutoDelete"
+	ReasonExpired    Reason = "Expired"
+	// ReasonParent is a sandbox ended by the delete of an ancestor, which
+	// is the cascade of design 022.
+	ReasonParent            Reason = "Parent"
 	ReasonExited            Reason = "Exited"
 	ReasonLost              Reason = "Lost"
 	ReasonCreateFailed      Reason = "CreateFailed"
@@ -141,8 +145,8 @@ const (
 // reason to it.
 var Reasons = []Reason{
 	ReasonRequest, ReasonAutoStop, ReasonAutoDelete, ReasonExpired,
-	ReasonExited, ReasonLost, ReasonCreateFailed, ReasonDriverFailed,
-	ReasonRecoveryExhausted,
+	ReasonParent, ReasonExited, ReasonLost, ReasonCreateFailed,
+	ReasonDriverFailed, ReasonRecoveryExhausted,
 }
 
 // ReasonOf maps a status reason to the closed enum. A driver names failures

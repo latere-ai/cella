@@ -4,6 +4,7 @@
 package store_test
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"testing"
@@ -323,5 +324,97 @@ func TestBridgeReportsAStoreFailure(t *testing.T) {
 	}
 	if _, err := c.Acquire(t.Context(), controller.ReaperLease, controller.LeaseTTL); err == nil {
 		t.Error("a lease on a closed store was reported as taken")
+	}
+}
+
+// TestBridgeSpawnDebitsWithTheChild: the child's row, its journal record and
+// the parent's decrement are one transaction, and exhaustion writes none of
+// the three.
+func TestBridgeSpawnDebitsWithTheChild(t *testing.T) {
+	c, _ := bound(t)
+	ctx := t.Context()
+	const parent = "sbx_parent"
+
+	first := sandbox("sbx_one", "one", driver.Running)
+	if err := c.WriteSpawn(ctx, first, controller.MutationCreated, parent, 1); err != nil {
+		t.Fatalf("the first spawn: %v", err)
+	}
+	if used, err := c.SpawnsUsed(ctx, parent); err != nil || used != 1 {
+		t.Fatalf("used = %d (%v), want 1", used, err)
+	}
+	events, err := c.Events(ctx, "sbx_one", 10)
+	if err != nil || len(events) != 1 {
+		t.Fatalf("the spawn journaled %d records (%v), want one", len(events), err)
+	}
+
+	second := sandbox("sbx_two", "two", driver.Running)
+	err = c.WriteSpawn(ctx, second, controller.MutationCreated, parent, 1)
+	if !errors.Is(err, controller.ErrBudgetExhausted) {
+		t.Fatalf("the second spawn answered %v, want the controller's sentinel", err)
+	}
+	objects, err := c.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, held := objects["sbx_two"]; held {
+		t.Fatal("the refused spawn wrote the child's row")
+	}
+	if events, err = c.Events(ctx, "sbx_two", 10); err != nil || len(events) != 0 {
+		t.Fatalf("the refused spawn journaled %d records (%v)", len(events), err)
+	}
+
+	// The credit returns the unit and the next spawn takes it.
+	if err = c.CreditSpawn(ctx, parent); err != nil {
+		t.Fatal(err)
+	}
+	if err = c.WriteSpawn(ctx, second, controller.MutationCreated, parent, 1); err != nil {
+		t.Fatalf("the spawn after the credit: %v", err)
+	}
+	if err = c.ForgetSpawns(ctx, parent); err != nil {
+		t.Fatal(err)
+	}
+	if used, err := c.SpawnsUsed(ctx, parent); err != nil || used != 0 {
+		t.Fatalf("used = %d (%v) after the row was forgotten", used, err)
+	}
+}
+
+// TestBridgeWritesARecordWithItsOwnData: the spawn record is about the parent
+// and names the child, which no field of the parent carries, so it is
+// journaled without a desired write.
+func TestBridgeWritesARecordWithItsOwnData(t *testing.T) {
+	c, _ := bound(t)
+	ctx := t.Context()
+	parent := sandbox("sbx_parent", "planner", driver.Running)
+	if err := c.Write(ctx, parent, controller.MutationCreated); err != nil {
+		t.Fatal(err)
+	}
+	data := controller.SpawnedData{Child: "sbx_one", Root: "sbx_parent", BudgetLeft: 3}
+	if err := c.WriteRecord(ctx, parent, controller.MutationSpawned, data); err != nil {
+		t.Fatalf("journaling the spawn: %v", err)
+	}
+	events, err := c.Events(ctx, "sbx_parent", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("the parent has %d records, want the create and the spawn", len(events))
+	}
+	var found bool
+	for _, e := range events {
+		if e.Type != controller.MutationSpawned {
+			continue
+		}
+		found = true
+		if !bytes.Contains(e.Payload, []byte("sbx_one")) || !bytes.Contains(e.Payload, []byte("budgetLeft")) {
+			t.Fatalf("the spawn record carries %s", e.Payload)
+		}
+	}
+	if !found {
+		t.Fatal("the journal holds no spawn record")
+	}
+	// A record whose type the vocabulary does not know is refused rather
+	// than journaled under a type no sink reads.
+	if err = c.WriteRecord(ctx, v1.Sandbox{}, controller.MutationSpawned, data); err == nil {
+		t.Fatal("a record about no object was journaled")
 	}
 }

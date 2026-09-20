@@ -1,6 +1,6 @@
 ---
 title: "Mesh and spawn: peers that reach each other, sandboxes that create sandboxes, a boundary that never moves"
-status: validated
+status: in-progress
 track: core
 depends_on:
   - specs/003-manifest-contract.md
@@ -11,7 +11,7 @@ depends_on:
 affects: [manifest/, controller/, internal/auth/, internal/api/, internal/store/, runtime/]
 effort: medium
 created: 2026-09-12
-updated: 2026-09-13
+updated: 2026-09-20
 author: changkun
 ---
 
@@ -33,10 +33,15 @@ and no workload widens it by what it does.
 
 ## Current state
 
-Not built. The hosted platform carries a mesh with a spawn budget in
-the workload token and a ledger; this spec restates that design
-against the manifest contract and adds the subset check that the
-manifest now makes possible.
+Built by [[040-mesh-and-spawn]]: the spawn tree and its status fields,
+the boundary check of stage 6 over every rule with a field, the ledger
+and its debit inside the child's own write, the mesh minted at a root's
+create and inherited down the tree, the cascade, the `sandbox.spawned`
+record, the `?root=` selector, and the mesh's own objects on podman and
+on k8s. What waits: rule 4 on [[019-volumes]], a set's template as a
+parent on [[020-scheduling-and-sets]], a workload's `PUT` on the route
+[[008-api]] has yet to serve, and the peer-reachability case on the
+conformance tier of [[012-test-stubs-and-tiers]].
 
 ## Design
 
@@ -172,16 +177,16 @@ nine rules' text ([[003-manifest-contract]]).
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| Two members of one mesh reach each other's `mesh` ports at `<name>.mesh`; a non-member cannot; a `none`-exposed port is reachable by neither; a `Stopped` member's name resolves to no address | e2e `TestMeshReachability` on k8s and podman | not built |
-| The mesh id is minted at the root's create and at a set's apply, inherited by children and replicas, and the driver's per-mesh object is gone after the last member's delete | `TestMeshLifetime` | not built |
-| A child spawned within the parent's boundary is created with `parent`, `root`, the inherited mesh, and the root's owner; a grandchild's `Parent` is its immediate parent | `TestSpawnInheritance` | not built |
-| Each of the nine rules, violated one at a time through the spawn path, is `boundary_exceeded` naming the path | `TestSpawnBoundary`, table-driven | not built |
-| A child that omits `spawn` gets zero; one asking one more than the remainder is refused; a spawn from a parent at `depth: 0` is `boundary_exceeded` at `spec.mesh.spawn.depth` | `TestSpawnFieldsAndDepth` | not built |
-| A workload's `PUT` of its own name is an update with no boundary check | `TestWorkloadSelfUpdateIsNotASpawn` | not built |
-| A non-workload actor cannot create a sandbox with a parent | `TestOnlyWorkloadsSpawn` | not built |
-| The debit is in the desired-write transaction; two concurrent spawns against one remaining unit yield one child and one `spawn_budget_exhausted`; a failed create credits back; a deleted child does not; `status.spawn.used` tracks the ledger | [[005-lifecycle-controller]]'s `TestSpawnDebitIsAtomic`, `TestSpawnUsedTracksTheLedger` | not built |
-| Narrowing a root below a live descendant is `boundary_exceeded` naming the descendant | `TestParentCannotBeNarrowedBelowAChild` | not built |
-| Deleting the root deletes every descendant deepest first with `Parent`, and the root with the request's reason | [[005-lifecycle-controller]]'s `TestCascade` | not built |
-| `GET /v1/sandboxes?root=` returns the tree | `TestRootQuery` | not built |
-| The workload token's `spawn` claims equal the grant at mint and are not trusted over the ledger | `TestClaimsAreTheGrant` | not built |
-| Admission sees `Parent` on a spawn | [[007-admission]]'s `TestAdmissionRequestShape` | not built |
+| Two members of one mesh reach each other's `mesh` ports at `<name>.mesh`; a non-member cannot; a `none`-exposed port is reachable by neither; a `Stopped` member's name resolves to no address | e2e `TestMeshReachability` on k8s and podman | built in part by [[040-mesh-and-spawn]]: each driver's own objects are proven, and the reachability case waits on the conformance tier of [[012-test-stubs-and-tiers]] |
+| The mesh id is minted at the root's create and at a set's apply, inherited by children and replicas, and the driver's per-mesh object is gone after the last member's delete | `TestMeshLifetime` | built by [[040-mesh-and-spawn]] for a root's create; a set's apply waits on [[020-scheduling-and-sets]] |
+| A child spawned within the parent's boundary is created with `parent`, `root`, the inherited mesh, and the root's owner; a grandchild's `Parent` is its immediate parent | `TestSpawnInheritance` | built by [[040-mesh-and-spawn]] |
+| Each of the nine rules, violated one at a time through the spawn path, is `boundary_exceeded` naming the path | `TestSpawnBoundary`, table-driven | built by [[040-mesh-and-spawn]] for the eight rules with a field; rule 4 waits on [[019-volumes]] |
+| A child that omits `spawn` gets zero; one asking one more than the remainder is refused; a spawn from a parent at `depth: 0` is `boundary_exceeded` at `spec.mesh.spawn.depth` | `TestSpawnFieldsAndDepth` | built by [[040-mesh-and-spawn]] |
+| A workload's `PUT` of its own name is an update with no boundary check | `TestWorkloadSelfUpdateIsNotASpawn` | not built: this API serves no `PUT` of a sandbox, so a workload's apply of an existing name has no route yet |
+| A non-workload actor cannot create a sandbox with a parent | `TestOnlyWorkloadsSpawn` | built by [[040-mesh-and-spawn]] |
+| The debit is in the desired-write transaction; two concurrent spawns against one remaining unit yield one child and one `spawn_budget_exhausted`; a failed create credits back; a deleted child does not; `status.spawn.used` tracks the ledger | [[005-lifecycle-controller]]'s `TestSpawnDebitIsAtomic`, `TestSpawnUsedTracksTheLedger` | built by [[040-mesh-and-spawn]] |
+| Narrowing a root below a live descendant is `boundary_exceeded` naming the descendant | `TestParentCannotBeNarrowedBelowAChild` | built by [[040-mesh-and-spawn]] |
+| Deleting the root deletes every descendant deepest first with `Parent`, and the root with the request's reason | [[005-lifecycle-controller]]'s `TestCascade` | built by [[040-mesh-and-spawn]] |
+| `GET /v1/sandboxes?root=` returns the tree | `TestRootQuery` | built by [[040-mesh-and-spawn]] |
+| The workload token's `spawn` claims equal the grant at mint and are not trusted over the ledger | `TestClaimsAreTheGrant` | built by [[040-mesh-and-spawn]] |
+| Admission sees `Parent` on a spawn | [[007-admission]]'s `TestAdmissionRequestShape` | built by [[040-mesh-and-spawn]]: a workload's apply resolves with `Options.Parent` and the step is handed it |

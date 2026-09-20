@@ -138,6 +138,7 @@ func (stubTx) Values() store.Values     { return stubValues{} }
 func (stubTx) Leases() store.Leases     { return stubLeases{} }
 
 func (stubTx) Revocations() store.Revocations { return stubRevocations{} }
+func (stubTx) Ledger() store.Ledger           { return stubLedger{} }
 
 type stubDesired struct{}
 
@@ -205,3 +206,12 @@ type stubRevocations struct{}
 func (stubRevocations) Revoke(context.Context, string, time.Time) error { return nil }
 func (stubRevocations) Revoked(context.Context, string) (bool, error)   { return false, nil }
 func (stubRevocations) Forget(context.Context, time.Time) (int, error)  { return 0, nil }
+
+type stubLedger struct{}
+
+func (stubLedger) Debit(context.Context, string, int) error { return nil }
+func (stubLedger) Credit(context.Context, string) error     { return nil }
+func (stubLedger) Used(context.Context, string) (int, error) {
+	return 0, nil
+}
+func (stubLedger) Forget(context.Context, string) error { return nil }

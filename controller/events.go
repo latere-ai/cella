@@ -35,6 +35,11 @@ type Events interface {
 type Act struct {
 	Type   string
 	Object v1.Sandbox
+	// Data is the record's own payload, for an act that carries one no
+	// field of the object holds. Nil takes the per-type data of design
+	// 009's table. The spawn of design 022 is its one setter: the record is
+	// about the parent and names the child.
+	Data any
 }
 
 // SecretAct is one thing the controller did to one Secret. The object as it
@@ -51,6 +56,14 @@ func (c *Controller) emit(ctx context.Context, mutation string, obj v1.Sandbox) 
 		return
 	}
 	c.events.Emit(ctx, Act{Type: mutation, Object: obj})
+}
+
+// emitData is emit for an act whose record carries a payload of its own.
+func (c *Controller) emitData(ctx context.Context, mutation string, obj v1.Sandbox, data any) {
+	if c.events == nil {
+		return
+	}
+	c.events.Emit(ctx, Act{Type: mutation, Object: obj, Data: data})
 }
 
 // emitSecret is emit for the Secret kind.

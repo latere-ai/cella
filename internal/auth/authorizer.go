@@ -92,7 +92,15 @@ func workloadOf(c Caller) map[string]any {
 	if !ok {
 		return nil
 	}
-	return map[string]any{"id": id}
+	out := map[string]any{"id": id}
+	if c.sandbox == nil {
+		return out
+	}
+	s := c.sandbox
+	out["parent"], out["root"] = s.Parent, s.Root
+	out["environment"], out["mesh"] = s.Environment, s.Mesh
+	out["spawn"] = map[string]any{"budget": s.Spawn.Budget, "used": s.Spawn.Used, "depth": s.Spawn.Depth}
+	return out
 }
 
 // Decide asks one question and returns the answer for an allow. A deny

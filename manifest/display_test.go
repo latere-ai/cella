@@ -147,22 +147,25 @@ func TestPortFields(t *testing.T) {
 }
 
 // TestPortCapability is the stage-7 row for a reach beyond the control plane's
-// own routes. No driver of this repository declares either capability today,
-// so both reaches are refused; an environment that declares one accepts it
-// with no other change.
+// own routes, with the membership rule that sits beside it. The environment's
+// capability and the sandbox's own mesh are two separate refusals: an
+// environment that connects no peers has no mesh for any port to be reached
+// on, and a sandbox outside every mesh asks for a reach inside one.
 func TestPortCapability(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		expose v1.Expose
 		mesh   bool
 		in     bool
+		member bool
 		want   string
 	}{
-		{"meshWithoutAMesh", v1.ExposeMesh, false, false, "capability_unsupported"},
-		{"meshWithOne", v1.ExposeMesh, true, false, ""},
-		{"publicWithoutAnExposer", v1.ExposePublic, false, false, "capability_unsupported"},
-		{"publicWithOne", v1.ExposePublic, false, true, ""},
-		{"noneNeedsNothing", v1.ExposeNone, false, false, ""},
+		{"meshWithoutAMesh", v1.ExposeMesh, false, false, false, "capability_unsupported"},
+		{"meshOutsideOne", v1.ExposeMesh, true, false, false, "invalid_field"},
+		{"meshOnAMember", v1.ExposeMesh, true, false, true, ""},
+		{"publicWithoutAnExposer", v1.ExposePublic, false, false, false, "capability_unsupported"},
+		{"publicWithOne", v1.ExposePublic, false, true, false, ""},
+		{"noneNeedsNothing", v1.ExposeNone, false, false, false, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			env := container("default")
@@ -170,6 +173,7 @@ func TestPortCapability(t *testing.T) {
 			env.Status.Capabilities.Ingress = tc.in
 			o := environmentOptions(env)
 			obj := withPorts(v1.Port{Name: "web", Port: 8080, Expose: tc.expose})
+			obj.Spec.Mesh.Enabled = tc.member
 			if tc.want == "" {
 				resolve(t, obj, o)
 				return
@@ -179,6 +183,24 @@ func TestPortCapability(t *testing.T) {
 				t.Fatalf("error = %+v, want %s at the expose field", err, tc.want)
 			}
 		})
+	}
+}
+
+// TestAMeshPortOnAChildReadsTheParentsMesh: a spawned child never declares
+// mesh.enabled and its status is the server's, zeroed at the top of Resolve,
+// so the membership an expose: mesh port stands on is the parent's. A child of
+// a root outside every mesh is refused at the field.
+func TestAMeshPortOnAChildReadsTheParentsMesh(t *testing.T) {
+	child := childSandbox()
+	child.Spec.Network.Ports = []v1.Port{{Name: "web", Port: 8080, Expose: v1.ExposeMesh}}
+	resolve(t, child, spawnOptions(parentSandbox()))
+
+	outside := parentSandbox()
+	outside.Spec.Mesh.Enabled = false
+	outside.Status.Mesh = ""
+	err := refusal(t, child, spawnOptions(outside))
+	if err.Code != "invalid_field" || err.Path != pathPorts+"[0].expose" {
+		t.Fatalf("error = %+v, want invalid_field at the expose field", err)
 	}
 }
 

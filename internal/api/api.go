@@ -153,10 +153,19 @@ func requestInfo(r *http.Request) authz.Caller {
 	return authz.Caller{IP: ip, UserAgent: r.UserAgent()}
 }
 func resource(obj v1.Sandbox) authz.Resource {
-	return (auth.Sandbox{ID: obj.Status.ID, Name: obj.Metadata.Name, Owner: obj.Status.Owner, Environment: obj.Spec.Environment, Labels: obj.Metadata.Labels}).Resource()
+	return (auth.Sandbox{ID: obj.Status.ID, Name: obj.Metadata.Name, Owner: obj.Status.Owner,
+		Environment: obj.Spec.Environment, Parent: obj.Status.Parent, Root: obj.Status.Root,
+		Labels: obj.Metadata.Labels}).Resource()
 }
 func (h *handler) decide(r *http.Request, action string, res authz.Resource) (auth.Decision, error) {
-	d, err := h.Authorizer.Decide(r.Context(), caller(r), requestInfo(r), action, res)
+	return h.decideAs(r, caller(r), action, res)
+}
+
+// decideAs is decide for a caller the endpoint enriched: a workload create
+// carries the calling sandbox's status, so the envelope's workload member is
+// the store's record of the tree rather than the token's claim.
+func (h *handler) decideAs(r *http.Request, c auth.Caller, action string, res authz.Resource) (auth.Decision, error) {
+	d, err := h.Authorizer.Decide(r.Context(), c, requestInfo(r), action, res)
 	if err == nil && d.Limits.RequestsPerMinute > 0 {
 		err = &manifest.Error{Code: "capability_unsupported", Detail: "requests_per_minute limit is not implemented"}
 	}
@@ -185,10 +194,11 @@ func (h *handler) resolveOptions(w http.ResponseWriter, r *http.Request) (manife
 	o.Admit = h.Admit
 	o.RequestID = w.Header().Get("X-Request-ID")
 	id, workload := c.Sandbox()
-	if h.Admit == nil || !workload {
+	if !workload {
 		return o, nil
 	}
-	// A sandbox applying through its own token is named as one. An
+	// A sandbox applying through its own token is named as one, and its own
+	// sandbox is the parent every boundary rule is read against. An
 	// admission step that will not grant a workload the authority of its
 	// owner cannot see the difference from the subject alone, so a calling
 	// sandbox this node cannot read is a refusal and not an apply the
@@ -199,6 +209,7 @@ func (h *handler) resolveOptions(w http.ResponseWriter, r *http.Request) (manife
 	}
 	status := calling.Status
 	o.Workload = &status
+	o.Parent = &calling
 	return o, nil
 }
 
@@ -223,22 +234,42 @@ func (h *handler) create(w http.ResponseWriter, r *http.Request) {
 		respondError(w, err)
 		return
 	}
+	parent := options.Parent
+	c := caller(r)
 	// Ownership is established before authorizing; client status has already gone.
-	obj.Status.Owner = caller(r).Subject
-	d, err := h.decide(r, authorizer.ActionSandboxCreate, resource(obj))
+	// A spawned child takes the root's owner, so one tree has one owner and
+	// one namespace of names (spec 022).
+	obj.Status.Owner = c.Subject
+	if parent != nil {
+		obj.Status.Owner = parent.Status.Owner
+		obj.Status.Parent = parent.Status.ID
+		obj.Status.Root = parent.Status.Root
+		c = c.WithSandbox(parent.Status)
+	}
+	d, err := h.decideAs(r, c, authorizer.ActionSandboxCreate, resource(obj))
 	if err != nil {
 		respondError(w, err)
 		return
 	}
-	envDecision, err := h.Authorizer.Lookup(r.Context(), caller(r), requestInfo(r), authorizer.ActionEnvironmentUse, (auth.Environment{ID: obj.Spec.Environment, Name: obj.Spec.Environment, Isolation: h.Controller.Isolation()}).Resource())
-	if err == nil && envDecision.Limits.RequestsPerMinute > 0 {
-		err = &manifest.Error{Code: "capability_unsupported", Detail: "requests_per_minute limit is not implemented"}
+	// The environment of a spawn is its parent's by boundary rule 8, and
+	// that environment's use was decided when the root was created. Asking
+	// again would ask a sandbox whether it may use an environment, which is
+	// a question about a person.
+	if parent == nil {
+		envDecision, err := h.Authorizer.Lookup(r.Context(), c, requestInfo(r), authorizer.ActionEnvironmentUse, (auth.Environment{ID: obj.Spec.Environment, Name: obj.Spec.Environment, Isolation: h.Controller.Isolation()}).Resource())
+		if err == nil && envDecision.Limits.RequestsPerMinute > 0 {
+			err = &manifest.Error{Code: "capability_unsupported", Detail: "requests_per_minute limit is not implemented"}
+		}
+		if err != nil {
+			respondError(w, err)
+			return
+		}
 	}
-	if err != nil {
-		respondError(w, err)
-		return
+	if parent != nil {
+		obj, err = h.Controller.Spawn(r.Context(), obj, *parent, d.Limits.MaxSandboxes)
+	} else {
+		obj, err = h.Controller.Create(r.Context(), obj, obj.Status.Owner, d.Limits.MaxSandboxes)
 	}
-	obj, err = h.Controller.Create(r.Context(), obj, caller(r).Subject, d.Limits.MaxSandboxes)
 	if err != nil {
 		respondError(w, err)
 		return
@@ -302,10 +333,6 @@ func (h *handler) list(w http.ResponseWriter, r *http.Request) {
 		respondError(w, err)
 		return
 	}
-	if r.URL.Query().Get("root") != "" {
-		respondError(w, &manifest.Error{Code: "capability_unsupported", Detail: "spawn tree selectors are not implemented"})
-		return
-	}
 	limit := 50
 	if q := r.URL.Query().Get("limit"); q != "" {
 		limit, err = strconv.Atoi(q)
@@ -330,7 +357,14 @@ func (h *handler) list(w http.ResponseWriter, r *http.Request) {
 	items := []v1.Sandbox{}
 	next := ""
 	q := r.URL.Query()
-	for _, obj := range h.Controller.List() {
+	// The tree selector of design 008 narrows the page to one root's
+	// sandboxes, the root included; every other selector still applies, and
+	// each row is still read one authorizer decision at a time.
+	objects := h.Controller.List()
+	if root := q.Get("root"); root != "" {
+		objects = h.Controller.Tree(root)
+	}
+	for _, obj := range objects {
 		if obj.Status.ID <= q.Get("cursor") || (q.Get("owner") != "" && q.Get("owner") != obj.Status.Owner) || (q.Get("environment") != "" && q.Get("environment") != obj.Spec.Environment) || !matches(obj, labels) {
 			continue
 		}
@@ -513,6 +547,8 @@ func errorEnvelope(err error, requestID string) (int, httpjson.Error) {
 		code = "capability_unsupported"
 	case errors.Is(err, controller.ErrQuota):
 		code = "quota_exceeded"
+	case errors.Is(err, controller.ErrBudgetExhausted):
+		code = "spawn_budget_exhausted"
 	case errors.Is(err, controller.ErrPhase), errors.Is(err, driver.ErrNotRunning):
 		code = "phase_conflict"
 	case errors.Is(err, driver.ErrUnsupported):
@@ -601,6 +637,12 @@ func errorEnvelope(err error, requestID string) (int, httpjson.Error) {
 	case "boundary_widened":
 		status = 409
 		message = "A sandbox cannot widen its own boundary."
+	case "boundary_exceeded":
+		status = 422
+		message = "A child sandbox cannot exceed its parent's boundary."
+	case "spawn_budget_exhausted":
+		status = 422
+		message = "The sandbox has no spawn budget left."
 	}
 	details := map[string]any{"request_id": requestID, "detail": fmt.Sprint(err)}
 	if me != nil && len(me.Paths) > 0 {

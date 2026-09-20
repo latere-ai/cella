@@ -43,6 +43,10 @@ var (
 	// ErrNoSecretKey is a secret value written to a store opened without the
 	// key that wraps every data key.
 	ErrNoSecretKey = errors.New("store: no secret key, so a secret value cannot be sealed")
+	// ErrBudgetExhausted is a debit against a sandbox that has already
+	// created every child its budget allows. Design 008 answers it with 422
+	// spawn_budget_exhausted.
+	ErrBudgetExhausted = errors.New("store: the sandbox has no spawn budget left")
 )
 
 // Store is the state of one control plane.
@@ -63,10 +67,9 @@ type Store interface {
 
 // Tx is every method set of the store, inside one transaction.
 //
-// Design 010 names four more: Queue (slice 038), Operations (design 021),
-// Ledger (design 022) and Records (design 018). The first two are declared
-// below with their tables in the schema and have no accessor here until a
-// caller exists.
+// Design 010 names three more: Queue (slice 038), Operations (design 021) and
+// Records (design 018). Each is declared below with its table in the schema
+// and has no accessor here until a caller exists.
 type Tx interface {
 	Desired() Desired
 	Observed() Observed
@@ -74,6 +77,31 @@ type Tx interface {
 	Values() Values
 	Leases() Leases
 	Revocations() Revocations
+	Ledger() Ledger
+}
+
+// Ledger is the spawn budget of design 022: one row per sandbox holding how
+// many children it has created in total. The budget itself stays in desired
+// state and travels as an argument, so a root narrowed after its children
+// exist takes effect at the next debit with no second write, and one number
+// has one source of truth.
+//
+// A debit runs inside the transaction that writes the child, which is what
+// makes two concurrent spawns against one remaining unit yield one child.
+type Ledger interface {
+	// Debit records one child against the parent and refuses at the budget
+	// with ErrBudgetExhausted. It is atomic: the count is read and written
+	// in one statement.
+	Debit(ctx context.Context, parentID string, budget int) error
+	// Credit is the undo of a create that did not complete. It never takes
+	// the count below zero.
+	Credit(ctx context.Context, parentID string) error
+	// Used is how many children the parent has created in total, which is
+	// what status.spawn.used is projected from. A sandbox with no row has
+	// created none.
+	Used(ctx context.Context, parentID string) (int, error)
+	// Forget drops one sandbox's row, at the delete that ends it.
+	Forget(ctx context.Context, parentID string) error
 }
 
 // Object is one desired-state row: the identity every kind is indexed by, the

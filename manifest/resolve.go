@@ -120,6 +120,11 @@ type Options struct {
 	Workload  *v1.SandboxStatus
 	RequestID string
 	Existing  *v1.Sandbox // the current object on update; nil on create
+	// Parent is the spawning sandbox, its desired spec and its current
+	// status, and is nil unless this apply is a spawn. It turns on stage 6,
+	// the boundary check of spec 022: a child's resolved manifest is a
+	// subset of its parent's on every boundary field.
+	Parent *v1.Sandbox
 	// Now is the clock a stage that computes a deadline reads. The spawn
 	// boundary check is its first reader.
 	Now     func() time.Time
@@ -178,6 +183,9 @@ func Resolve(ctx context.Context, in *v1.Sandbox, o Options) (*Resolved, error) 
 	if err = semantic(&obj, o); err != nil {
 		return nil, err
 	}
+	if err = boundary(&obj, o.Parent, resolveNow(o)); err != nil {
+		return nil, err
+	}
 	admitted, err := capabilities(&obj, env, o)
 	if err != nil {
 		return nil, err
@@ -206,10 +214,14 @@ func defaulting(ctx context.Context, obj *v1.Sandbox, o Options) (*v1.Environmen
 			*field.value = defaultQuantity(field.path, o.Defaults)
 		}
 	}
+	namedTTL, namedStop := obj.Spec.Lifecycle.TTL != "", obj.Spec.Lifecycle.AutoStop != ""
 	for _, field := range lifecycleFields(&obj.Spec.Lifecycle) {
 		if *field.value == "" {
 			*field.value = defaultDuration(field.path, o.Defaults)
 		}
+	}
+	if !namedTTL {
+		defaultChildTTL(obj, o.Parent, resolveNow(o), namedStop)
 	}
 	// The image default is the operator's fallback for an installation with
 	// no admission step, and it is read only where the environment runs an
@@ -227,6 +239,7 @@ func defaulting(ctx context.Context, obj *v1.Sandbox, o Options) (*v1.Environmen
 	if obj.Spec.Workdir == "" {
 		obj.Spec.Workdir = obj.Spec.Workspace.Path
 	}
+	inheritEgress(obj, o.Parent)
 	inferEgressMode(&obj.Spec.Network, len(obj.Spec.Secrets) > 0)
 	if err = validateSpec(obj.Spec); err != nil {
 		return nil, errors.New("manifest: this server's defaults are invalid: " + err.Error())
@@ -434,6 +447,7 @@ func immutable(existing, obj *v1.Sandbox) error {
 		{"spec.env", !maps.Equal(existing.Spec.Env, obj.Spec.Env)},
 		{"spec.display", !displayEqual(existing.Spec.Display, obj.Spec.Display)},
 		{"spec.network.ports", !slices.Equal(existing.Spec.Network.Ports, obj.Spec.Network.Ports)},
+		{pathMeshEnabled, existing.Spec.Mesh.Enabled != obj.Spec.Mesh.Enabled},
 	} {
 		if f.changed {
 			paths = append(paths, f.path)
@@ -483,7 +497,10 @@ func capabilities(obj *v1.Sandbox, env *v1.Environment, o Options) ([]string, er
 	if obj.Spec.Display != nil && (!env.Status.Capabilities.Display || !env.Status.Capabilities.Input) {
 		return nil, failAt("capability_unsupported", "spec.display", "This environment has no desktop to give a sandbox.")
 	}
-	if err := portCapability(obj, env); err != nil {
+	if err := meshCapability(obj, env); err != nil {
+		return nil, err
+	}
+	if err := portCapability(obj, env, meshMembershipAt(obj, o)); err != nil {
 		return nil, err
 	}
 	warnings, err := egressCapability(obj, env)
@@ -622,6 +639,16 @@ func ResolveNativeWith(ctx context.Context, obj v1.Sandbox, o Options) (v1.Sandb
 		return obj, nil, failAt("capability_unsupported", "spec.workspace.path", "Native environments keep the workspace at "+DefaultWorkspacePath+" and start there.")
 	}
 	return out, resolved.Secrets, nil
+}
+
+// resolveNow is the clock the stages that compute a deadline read. A caller
+// that named none reads the wall clock, so a boundary rule is never skipped
+// for want of an option.
+func resolveNow(o Options) time.Time {
+	if o.Now == nil {
+		return time.Now().UTC()
+	}
+	return o.Now().UTC()
 }
 
 func clone(obj *v1.Sandbox) v1.Sandbox {

@@ -62,6 +62,15 @@ func (d *Driver) Create(ctx context.Context, s driver.CreateSpec) (driver.Ref, e
 	// the caller hung up, so it drops the cancellation it inherited: a
 	// cancelled context makes each cleanup a no-op and leaks both objects.
 	rollback := func() { _ = d.remove(context.WithoutCancel(ctx), s.ID) }
+	// The mesh's policy and Service are in the cluster before the Pod that
+	// belongs to them, so a member is reachable by its peers and by nothing
+	// else from the moment it starts (spec 022). They are made after the
+	// claim, which carries the membership, so the rollback above reaches
+	// them: a mesh whose only member never started leaves no objects.
+	if err := d.joinMesh(ctx, s.Mesh.ID); err != nil {
+		rollback()
+		return driver.Ref{}, err
+	}
 	// The identity is in the cluster before the Pod that mounts it, so the
 	// workload's first read finds the token rather than an empty directory
 	// the kubelet fills a moment later (spec 006).
@@ -156,6 +165,12 @@ func (d *Driver) Delete(ctx context.Context, id string) error {
 // out. The order matters, since a claim in use by a Pod stays terminating
 // until the Pod is gone.
 func (d *Driver) remove(ctx context.Context, id string) error {
+	// The membership is read before the claim that carries it goes, because
+	// the last-member rule counts what the cluster still holds.
+	mesh := ""
+	if state, err := d.Inspect(ctx, id); err == nil {
+		mesh = state.MeshID
+	}
 	if err := d.deletePod(ctx, id); err != nil {
 		return err
 	}
@@ -166,10 +181,13 @@ func (d *Driver) remove(ctx context.Context, id string) error {
 	if err := claims.Delete(ctx, objectName(id), *d.deleteOptions()); err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("claim delete: %w", err)
 	}
-	return d.waitGone(ctx, "claim", func(ctx context.Context) error {
+	if err := d.waitGone(ctx, "claim", func(ctx context.Context) error {
 		_, err := claims.Get(ctx, objectName(id), metav1.GetOptions{})
 		return err
-	})
+	}); err != nil {
+		return err
+	}
+	return d.leaveMesh(ctx, id, mesh)
 }
 
 // deletePod removes the Pod of one sandbox and waits until the cluster has

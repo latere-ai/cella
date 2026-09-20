@@ -4,7 +4,9 @@
 package podman
 
 import (
+	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"testing"
 
@@ -49,4 +51,61 @@ func TestPodmanConformance(t *testing.T) {
 			return []string{"sh", "-c", fmt.Sprintf("nc -l -p %d || sleep 600", port)}
 		},
 	})
+}
+
+// TestPodmanMeshOnARealEngine holds the mesh of spec 022 to the engine rather
+// than to the fake: the network exists with the name the contract derives, a
+// member answers to its own name and to that name in the mesh zone, and the
+// network is gone once the last member is deleted. It skips where no engine
+// answers, as the conformance suite above does.
+func TestPodmanMeshOnARealEngine(t *testing.T) {
+	d, err := New(Options{Socket: os.Getenv("CELLA_PODMAN_SOCKET")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = d.Preflight(t.Context()); err != nil {
+		t.Skipf("no podman engine for the mesh case: %v", err)
+	}
+	t.Cleanup(func() { _ = d.Close() })
+
+	const mesh = "msh_01j9zk2p7q8r9s0t1u2v3w4x5z"
+	network := driver.MeshObjectName(mesh)
+	ids := []string{"sbx_meshone", "sbx_meshtwo"}
+	names := []string{"peer-one", "peer-two"}
+	t.Cleanup(func() {
+		clean := context.WithoutCancel(t.Context())
+		for _, id := range ids {
+			_ = d.Delete(clean, id)
+		}
+	})
+	for i, id := range ids {
+		spec := driver.CreateSpec{ID: id, Name: names[i], Owner: "alice", Image: conformanceImage,
+			Mesh: driver.Mesh{ID: mesh}}
+		if _, err = d.Create(t.Context(), spec); err != nil {
+			t.Fatalf("Create %s: %v", id, err)
+		}
+	}
+	var inspected map[string]any
+	if err = d.client().json(t.Context(), http.MethodGet, "/networks/"+network+"/json", nil, &inspected); err != nil {
+		t.Fatalf("the engine holds no network %s: %v", network, err)
+	}
+	members, err := d.List(t.Context(), driver.Filter{MeshID: mesh})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(members) != 2 {
+		t.Fatalf("the mesh holds %d members, want 2", len(members))
+	}
+	if err = d.Delete(t.Context(), ids[0]); err != nil {
+		t.Fatal(err)
+	}
+	if err = d.client().json(t.Context(), http.MethodGet, "/networks/"+network+"/json", nil, &inspected); err != nil {
+		t.Fatalf("the network went while a member was still on it: %v", err)
+	}
+	if err = d.Delete(t.Context(), ids[1]); err != nil {
+		t.Fatal(err)
+	}
+	if err = d.client().json(t.Context(), http.MethodGet, "/networks/"+network+"/json", nil, &inspected); err == nil {
+		t.Fatalf("the network %s outlived its last member", network)
+	}
 }

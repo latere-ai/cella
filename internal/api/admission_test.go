@@ -147,7 +147,9 @@ func TestAdmissionSeesAWorkload(t *testing.T) {
 	f := setup(t, allowAll{})
 	signer := signing(t, f, rows{})
 	var mine v1.Sandbox
-	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes", f.alice, createBody, 201), &mine); err != nil {
+	// The parent declares a budget, because an apply by a workload is a
+	// spawn and a sandbox with no budget creates nothing (design 022).
+	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes", f.alice, spawningBody, 201), &mine); err != nil {
 		t.Fatal(err)
 	}
 	token, err := signer.MintWorkload(auth.Workload{Sandbox: mine.Status.ID, Environment: "default"})

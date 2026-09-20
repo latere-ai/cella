@@ -46,13 +46,13 @@ func TestDeclarations(t *testing.T) {
 	if d.Name() != "podman" || d.Isolation() != v1.IsolationContainer {
 		t.Fatalf("declarations: %q %q", d.Name(), d.Isolation())
 	}
-	want := driver.Capabilities{Files: true, Detach: true, Attach: true, Pool: true, Display: true, Input: true}
+	want := driver.Capabilities{Files: true, Detach: true, Attach: true, Pool: true, Mesh: true, Display: true, Input: true}
 	if got := d.Capabilities(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("Capabilities = %+v, want %+v", got, want)
 	}
 	// The forbidden half of the table: this driver advertises none of it.
 	c := d.Capabilities()
-	if c.Mesh || c.Dial || c.Volumes || c.Snapshots || c.Ingress || c.Resize || len(c.Egress) > 0 {
+	if c.Dial || c.Volumes || c.Snapshots || c.Ingress || c.Resize || len(c.Egress) > 0 {
 		t.Fatalf("a capability this driver does not implement is declared: %+v", c)
 	}
 }

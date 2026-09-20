@@ -45,14 +45,24 @@ func (w *WorkloadTokens) Mint(_ context.Context, obj v1.Sandbox) (token, jti str
 		Sandbox:     obj.Status.ID,
 		Environment: obj.Status.Environment,
 		ExpiresAt:   obj.Status.ExpiresAt,
-		// The spawn budget rides on the claim from desired state, which
-		// spec 022 fills; until it does, a workload token carries no
-		// budget rather than a budget of zero.
+		Spawn:       grantOf(obj),
 	})
 	if err != nil {
 		return "", "", time.Time{}, err
 	}
 	return minted.Value, minted.JTI, minted.ExpiresAt, nil
+}
+
+// grantOf is the spawn claim of spec 006: the budget from desired state at
+// mint and the mesh the sandbox belongs to. It is a copy the control plane
+// never trusts over the store, so a sandbox that may create nothing and be in
+// no mesh carries no claim at all rather than a claim of zero.
+func grantOf(obj v1.Sandbox) *Spawn {
+	spawn := obj.Status.Spawn
+	if spawn.Budget == 0 && spawn.Depth == 0 && obj.Status.Mesh == "" {
+		return nil
+	}
+	return &Spawn{Budget: spawn.Budget, Depth: spawn.Depth, Mesh: obj.Status.Mesh}
 }
 
 // Revoke ends one token before its exp. Without a list there is nothing to
