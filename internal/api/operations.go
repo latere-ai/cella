@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"latere.ai/x/cella/authorizer"
+	"latere.ai/x/cella/internal/events"
 	"latere.ai/x/cella/manifest"
 	v1 "latere.ai/x/cella/manifest/v1"
 	"latere.ai/x/cella/runtime"
@@ -74,7 +75,7 @@ func (h *handler) files(w http.ResponseWriter, r *http.Request) {
 		}
 		defer func() { _ = os.Remove(spool.Name()) }()
 		defer func() { _ = spool.Close() }()
-		_, err = io.Copy(spool, http.MaxBytesReader(w, r.Body, h.MaxUploadBytes))
+		size, err := io.Copy(spool, http.MaxBytesReader(w, r.Body, h.MaxUploadBytes))
 		if err != nil {
 			respondError(w, err)
 			return
@@ -87,6 +88,9 @@ func (h *handler) files(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
+		h.emit(r, obj, events.TypeFiles, events.Files{
+			Direction: events.DirectionImport, Paths: []string{dest}, Bytes: size,
+		})
 		return
 	}
 	paths := r.URL.Query()["path"]
@@ -100,6 +104,11 @@ func (h *handler) files(w http.ResponseWriter, r *http.Request) {
 	if err = h.Controller.ExportTar(r.Context(), obj.Status.ID, paths, stream); err != nil {
 		stream.fail(err)
 	}
+	// The record is written whether the transfer finished or failed part
+	// way: the bytes that left are the fact the feed reports.
+	h.emit(r, obj, events.TypeFiles, events.Files{
+		Direction: events.DirectionExport, Paths: paths, Bytes: stream.bytes,
+	})
 }
 func (h *handler) logs(w http.ResponseWriter, r *http.Request) {
 	obj, err := h.authorizedObject(r, authorizer.ActionSandboxRead)
@@ -149,6 +158,9 @@ type responseStream struct {
 	w       http.ResponseWriter
 	written bool
 	flush   bool
+	// bytes is what reached the caller, which design 009's transfer record
+	// carries in place of anything that was in them.
+	bytes int64
 }
 
 func newStream(w http.ResponseWriter, contentType string) *responseStream {
@@ -161,6 +173,7 @@ func (s *responseStream) Write(p []byte) (int, error) {
 		s.written = true
 	}
 	n, err := s.w.Write(p)
+	s.bytes += int64(n)
 	if s.flush {
 		if flusher, ok := s.w.(http.Flusher); ok {
 			flusher.Flush()

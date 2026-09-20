@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -57,6 +58,7 @@ var cases = []struct {
 	{"Transactions", transactions},
 	{"Observed", observed},
 	{"Journal", journal},
+	{"Delivery", delivery},
 	{"Leases", leases},
 	{"Values", values},
 	{"Ready", ready},
@@ -459,9 +461,17 @@ func journal(t TB, open Opener) {
 	if len(seen) != 3 || seen[0] != 3 || seen[2] != 1 {
 		t.Errorf("the pages read %v, want 3, 2, 1", seen)
 	}
+	// Retention forgets a finished row and keeps one the sink has not taken:
+	// an event older than the window is not an event that may be lost, and
+	// design 009 decides when one is given up.
 	old := time.Now().UTC().Add(-48 * time.Hour)
 	with(t, s, func(tx store.Tx) error {
-		_, err := tx.Journal().Append(ctx, store.Event{ObjectID: "sbx_old", Type: "sandbox.created", At: old})
+		if _, err := tx.Journal().Append(ctx, store.Event{
+			ObjectID: "sbx_old", Type: "sandbox.created", At: old, AckedAt: old,
+		}); err != nil {
+			return err
+		}
+		_, err := tx.Journal().Append(ctx, store.Event{ObjectID: "sbx_waiting", Type: "sandbox.created", At: old})
 		return err
 	})
 	with(t, s, func(tx store.Tx) error {
@@ -470,7 +480,14 @@ func journal(t TB, open Opener) {
 			return err
 		}
 		if n != 1 {
-			t.Errorf("pruning dropped %d event(s), want the one older than the window", n)
+			t.Errorf("pruning dropped %d event(s), want the one finished row older than the window", n)
+		}
+		waiting, _, err := tx.Journal().ByObject(ctx, "sbx_waiting", store.Page{})
+		if err != nil {
+			return err
+		}
+		if len(waiting) != 1 {
+			t.Errorf("pruning by age took an event the sink had not taken")
 		}
 		events, _, err := tx.Journal().ByObject(ctx, "sbx_a", store.Page{})
 		if err != nil {
@@ -478,6 +495,109 @@ func journal(t TB, open Opener) {
 		}
 		if len(events) != 3 {
 			t.Errorf("pruning by age dropped %d of the three recent events", 3-len(events))
+		}
+		return nil
+	})
+}
+
+// delivery: design 009's half of the journal. One event per object, the
+// lowest unfinished sequence, and a deferred head holding its own object's
+// successors and no other object's.
+func delivery(t TB, open Opener) {
+	s := opened(t, open, Key)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	ids := map[string]string{}
+	for _, tc := range []struct{ object, event string }{
+		{"sbx_a", "sandbox.created"},
+		{"sbx_a", "sandbox.started"},
+		{"sbx_b", "sandbox.created"},
+	} {
+		id := store.EventID()
+		ids[tc.object+"/"+tc.event] = id
+		with(t, s, func(tx store.Tx) error {
+			_, err := tx.Journal().Append(ctx, store.Event{
+				ID: id, ObjectID: tc.object, Type: tc.event, At: now, Payload: []byte(`{}`),
+			})
+			return err
+		})
+	}
+	// A mutation design 009 names no type for is stored finished and is
+	// never pending.
+	with(t, s, func(tx store.Tx) error {
+		_, err := tx.Journal().Append(ctx, store.Event{
+			ObjectID: "sbx_c", Type: "sandbox.deleting", At: now, AckedAt: now,
+		})
+		return err
+	})
+	pending(t, s, now, []string{ids["sbx_a/sandbox.created"], ids["sbx_b/sandbox.created"]},
+		"the first pass reads each object's head")
+
+	// The head of sbx_a is deferred: its successor waits and sbx_b does not.
+	next := now.Add(time.Minute)
+	with(t, s, func(tx store.Tx) error {
+		return tx.Journal().Defer(ctx, ids["sbx_a/sandbox.created"], next)
+	})
+	pending(t, s, now, []string{ids["sbx_b/sandbox.created"]}, "a deferred head holds its own object")
+	pending(t, s, next, []string{ids["sbx_a/sandbox.created"], ids["sbx_b/sandbox.created"]},
+		"the deferred head is due again")
+
+	// Acknowledged, the successor becomes the head.
+	with(t, s, func(tx store.Tx) error {
+		return tx.Journal().Acknowledge(ctx, ids["sbx_a/sandbox.created"], now)
+	})
+	pending(t, s, now, []string{ids["sbx_a/sandbox.started"], ids["sbx_b/sandbox.created"]},
+		"the acknowledged head hands over")
+
+	// Dropped, an event leaves the queue the same way.
+	with(t, s, func(tx store.Tx) error {
+		return tx.Journal().Drop(ctx, ids["sbx_b/sandbox.created"], now)
+	})
+	pending(t, s, now, []string{ids["sbx_a/sandbox.started"]}, "a dropped head leaves the queue")
+
+	// The attempt count is what the backoff reads, so it is on the row.
+	with(t, s, func(tx store.Tx) error {
+		return tx.Journal().Defer(ctx, ids["sbx_a/sandbox.started"], now)
+	})
+	with(t, s, func(tx store.Tx) error {
+		rows, err := tx.Journal().Pending(ctx, 10, now)
+		if err != nil {
+			return err
+		}
+		if len(rows) != 1 || rows[0].Attempts != 1 {
+			t.Errorf("the deferred event reads back %+v, want one failed attempt", rows)
+		}
+		return nil
+	})
+	for _, id := range []string{"evt_nothing"} {
+		fails(t, s, store.ErrNotFound, "acknowledging an event no row holds", func(tx store.Tx) error {
+			return tx.Journal().Acknowledge(ctx, id, now)
+		})
+		fails(t, s, store.ErrNotFound, "deferring an event no row holds", func(tx store.Tx) error {
+			return tx.Journal().Defer(ctx, id, now)
+		})
+		fails(t, s, store.ErrNotFound, "dropping an event no row holds", func(tx store.Tx) error {
+			return tx.Journal().Drop(ctx, id, now)
+		})
+	}
+}
+
+// pending reads what is due at now and holds it to the ids expected.
+func pending(t TB, s store.Store, now time.Time, want []string, what string) {
+	t.Helper()
+	with(t, s, func(tx store.Tx) error {
+		rows, err := tx.Journal().Pending(context.Background(), 10, now)
+		if err != nil {
+			return err
+		}
+		got := make([]string, 0, len(rows))
+		for _, r := range rows {
+			got = append(got, r.ID)
+		}
+		slices.Sort(got)
+		sorted := slices.Sorted(slices.Values(want))
+		if !equal(got, sorted) {
+			t.Errorf("%s: pending reads %v, want %v", what, got, sorted)
 		}
 		return nil
 	})

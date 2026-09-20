@@ -31,7 +31,9 @@ import (
 	"latere.ai/x/cella/internal/auth"
 	"latere.ai/x/cella/internal/config"
 	"latere.ai/x/cella/internal/egressd"
+	"latere.ai/x/cella/internal/events"
 	"latere.ai/x/cella/internal/store"
+	"latere.ai/x/cella/internal/store/memory"
 	"latere.ai/x/cella/internal/store/postgres"
 	"latere.ai/x/cella/internal/version"
 	"latere.ai/x/cella/runtime"
@@ -163,11 +165,29 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 
 	// Recovery may change runtime records. Own the state before opening the
 	// driver so a second process cannot mutate live workloads.
-	desired, lease, storeReady, err := openStore(ctx, cfg)
+	desired, lease, storeReady, journal, err := openStore(ctx, cfg)
 	if err != nil {
 		return fail(stderr, err)
 	}
 	defer func() { _ = desired.Close() }()
+	// Design 009's journal. Where desired state is design 010's store, the
+	// record of a mutation commits inside that mutation's own transaction
+	// and this is the same store read back. Where it is the local snapshot,
+	// which keeps no journal, records live in one opened for them alone and
+	// the controller hands each act to the emitter instead.
+	var controllerEvents controller.Events
+	if journal == nil {
+		journal, err = memory.Open(memory.Options{})
+		if err != nil {
+			return fail(stderr, fmt.Errorf("event journal: %w", err))
+		}
+		defer func() { _ = journal.Close() }()
+	}
+	delivery := store.Journaled
+	if cfg.Events.Enabled() {
+		delivery = store.Delivered
+	}
+	emitter := events.NewEmitter(store.EventJournal(journal, delivery), nil)
 	// A driver that owns local processes or an engine session is closed at
 	// shutdown; one that drives a cluster owns nothing this process has to
 	// release.
@@ -204,11 +224,14 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		AckTimeout:  cfg.Gateway.AckTimeout,
 		RecordsCap:  cfg.Gateway.RecordsCap,
 	})
+	if _, transactional := desired.(*store.Controlled); !transactional {
+		controllerEvents = emitter
+	}
 	control, err := controller.Open(controller.Options{
 		Store: desired, Driver: runtimeDriver, Environment: cfg.DefaultEnvironment,
 		Lease: lease, ReapInterval: cfg.ReapInterval, TouchInterval: cfg.TouchInterval,
-		LostGrace: cfg.LostGrace,
-		Egress:    hub, Gateway: controller.GatewayAddresses{Proxy: cfg.Gateway.ProxyAddr, Reverse: cfg.Gateway.ReverseAddr},
+		LostGrace: cfg.LostGrace, Events: controllerEvents,
+		Egress: hub, Gateway: controller.GatewayAddresses{Proxy: cfg.Gateway.ProxyAddr, Reverse: cfg.Gateway.ReverseAddr},
 	})
 	if err != nil {
 		return fail(stderr, fmt.Errorf("controller: %w", err))
@@ -225,9 +248,27 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	go func() { defer close(reaperDone); control.RunReaper(reaperCtx) }()
 	stopReaper := sync.OnceFunc(func() { cancelReaper(); <-reaperDone })
 	defer stopReaper()
-	handler, err := api.New(api.Options{Controller: control, Verifier: identity.Verifier, Authorizer: identity.Authorizer, MaxBodyBytes: cfg.MaxBodyBytes, MaxUploadBytes: cfg.MaxUploadBytes, Egress: hub})
+	handler, err := api.New(api.Options{Controller: control, Verifier: identity.Verifier, Authorizer: identity.Authorizer, MaxBodyBytes: cfg.MaxBodyBytes, MaxUploadBytes: cfg.MaxUploadBytes, Egress: hub, Events: emitter})
 	if err != nil {
 		return fail(stderr, fmt.Errorf("API: %w", err))
+	}
+	// Delivery runs on the replica holding the journal lease, so a replica
+	// set posts each record once (spec 009).
+	stopDelivery := func() {}
+	if cfg.Events.Enabled() {
+		deliverer, err := events.NewDeliverer(events.DelivererOptions{
+			Journal: store.EventJournal(journal, store.Delivered), Lease: lease,
+			URL: cfg.Events.URL, Secrets: cfg.Events.Secrets,
+			Timeout: cfg.Events.Timeout, RetryWindow: cfg.Events.RetryWindow,
+		})
+		if err != nil {
+			return fail(stderr, err)
+		}
+		deliveryCtx, cancelDelivery := context.WithCancel(ctx)
+		deliveryDone := make(chan struct{})
+		go func() { defer close(deliveryDone); deliverer.Run(deliveryCtx) }()
+		stopDelivery = sync.OnceFunc(func() { cancelDelivery(); <-deliveryDone })
+		defer stopDelivery()
 	}
 
 	draining := make(chan struct{})
@@ -305,8 +346,10 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	for _, s := range servers {
 		_ = s.Shutdown(shutdownCtx)
 	}
-	// The reaper drives the runtime, so it ends before the runtime does.
+	// The reaper drives the runtime, so it ends before the runtime does, and
+	// delivery ends with it: what it had not posted stays on the journal.
 	stopReaper()
+	stopDelivery()
 	if err := closeRuntime(); err != nil {
 		return fail(stderr, fmt.Errorf("runtime shutdown: %w", err))
 	}
@@ -317,20 +360,24 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 // names one, and the single-process snapshot under CELLA_DATA_DIR otherwise.
 // It returns the store, the lease the reaper runs under, and the readiness
 // check to mount, which is nil where the store is local.
-func openStore(ctx context.Context, cfg config.Config) (controller.Store, controller.Lease, func(context.Context) error, error) {
+func openStore(ctx context.Context, cfg config.Config) (controller.Store, controller.Lease, func(context.Context) error, store.Store, error) {
+	delivery := store.Journaled
+	if cfg.Events.Enabled() {
+		delivery = store.Delivered
+	}
 	if cfg.DBURL == "" {
 		local, err := controller.OpenFileStore(filepath.Join(cfg.DataDir, "controller"))
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("controller store: %w", err)
+			return nil, nil, nil, nil, fmt.Errorf("controller store: %w", err)
 		}
-		return local, controller.LocalLease{}, nil, nil
+		return local, controller.LocalLease{}, nil, nil, nil
 	}
 	durable, err := postgres.Open(ctx, postgres.Options{URL: cfg.DBURL, MaxConns: cfg.DBMaxConns, Key: cfg.SecretKey})
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
-	bound := store.ForController(durable, cfg.DefaultEnvironment)
-	return bound, bound, bound.Ready, nil
+	bound := store.ForController(durable, cfg.DefaultEnvironment, delivery)
+	return bound, bound, bound.Ready, durable, nil
 }
 
 // recovery is what the start-up line says about state: which store is in use,

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"latere.ai/x/cella/controller"
+	"latere.ai/x/cella/internal/events"
 	v1 "latere.ai/x/cella/manifest/v1"
 	driver "latere.ai/x/cella/runtime"
 )
@@ -33,11 +34,19 @@ type Controlled struct {
 	// overwrite.
 	mu       sync.Mutex
 	versions map[string]int64
+
+	// delivery says whether a record this bridge journals is waiting for a
+	// sink; see Delivery.
+	delivery Delivery
 }
 
-// ForController wraps a store for one environment's controller.
-func ForController(s Store, environment string) *Controlled {
-	return &Controlled{store: s, environment: environment, holder: Holder(), versions: map[string]int64{}}
+// ForController wraps a store for one environment's controller. d says
+// whether the records it journals are waiting for a sink.
+func ForController(s Store, environment string, d Delivery) *Controlled {
+	return &Controlled{
+		store: s, environment: environment, holder: Holder(),
+		versions: map[string]int64{}, delivery: d,
+	}
 }
 
 // Store reports the store underneath, for a caller that needs the contract
@@ -138,13 +147,17 @@ func (c *Controlled) Write(ctx context.Context, obj v1.Sandbox, mutation string)
 	c.mu.Lock()
 	version := c.versions[row.ID]
 	c.mu.Unlock()
+	event, err := c.record(ctx, mutation, obj)
+	if err != nil {
+		return err
+	}
 	var written int64
 	err = c.store.Tx(ctx, func(tx Tx) error {
 		next, err := tx.Desired().Put(ctx, row, version)
 		if err != nil {
 			return err
 		}
-		if _, err := tx.Journal().Append(ctx, Event{ObjectID: row.ID, Type: mutation, Payload: row.Status}); err != nil {
+		if _, err := tx.Journal().Append(ctx, event); err != nil {
 			return err
 		}
 		written = next
@@ -164,10 +177,27 @@ func (c *Controlled) Write(ctx context.Context, obj v1.Sandbox, mutation string)
 // either way, and the journal still records that this replica ended it.
 func (c *Controlled) Remove(ctx context.Context, id, mutation string) error {
 	err := c.store.Tx(ctx, func(tx Tx) error {
+		// The row is read before it goes, so the record carries the labels,
+		// name, owner and reason of an object that no longer exists once the
+		// transaction ends. A row another replica already removed leaves the
+		// record with the id alone, which is still a true statement that
+		// this replica ended the object.
+		obj := v1.Sandbox{Status: v1.SandboxStatus{ID: id}}
+		if row, err := tx.Desired().Get(ctx, KindSandbox, id); err == nil {
+			if decoded, err := decode(row); err == nil {
+				obj = decoded
+			}
+		} else if !errors.Is(err, ErrNotFound) {
+			return err
+		}
+		event, err := c.record(ctx, mutation, obj)
+		if err != nil {
+			return err
+		}
 		if err := tx.Desired().Delete(ctx, KindSandbox, id); err != nil && !errors.Is(err, ErrNotFound) {
 			return err
 		}
-		_, err := tx.Journal().Append(ctx, Event{ObjectID: id, Type: mutation})
+		_, err = tx.Journal().Append(ctx, event)
 		return err
 	})
 	if err != nil {
@@ -177,6 +207,20 @@ func (c *Controlled) Remove(ctx context.Context, id, mutation string) error {
 	delete(c.versions, id)
 	c.mu.Unlock()
 	return nil
+}
+
+// record is the journal row for one mutation: design 009's record, built from
+// the object being written, the act's name, and the actor the context
+// carries. It is built here rather than in the controller so the row and the
+// state it explains commit in one transaction.
+func (c *Controlled) record(ctx context.Context, mutation string, obj v1.Sandbox) (Event, error) {
+	kind := events.Type(mutation)
+	rec, err := events.Mutation(kind, events.ReasonOf(obj.Status.Reason, kind),
+		events.OfSandbox(obj), events.MutationData(kind, obj), events.ActorFrom(ctx), time.Now().UTC())
+	if err != nil {
+		return Event{}, err
+	}
+	return journalRow(rec, c.delivery)
 }
 
 // Rebuild replaces the observed rows of one environment with what its driver

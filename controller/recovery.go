@@ -158,7 +158,7 @@ func (c *Controller) recoverLocked(ctx context.Context, obj v1.Sandbox, now time
 		delete(c.retry, id)
 		delete(c.attempts, id)
 		delete(c.lost, id)
-		return true, c.persist(ctx, obj, MutationUpdated)
+		return true, c.persist(ctx, obj, MutationFailed)
 	}
 	obj.Status.Phase = PhaseRecovering
 	obj.Status.Reason = ReasonLost

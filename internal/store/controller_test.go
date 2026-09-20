@@ -28,7 +28,7 @@ func bound(t *testing.T) (*store.Controlled, store.Store) {
 			t.Errorf("closing the store: %v", err)
 		}
 	})
-	return store.ForController(s, "default"), s
+	return store.ForController(s, "default", store.Delivered), s
 }
 
 // sandbox is one desired sandbox as the controller holds it.
@@ -82,7 +82,7 @@ func TestBridgeRoundTrip(t *testing.T) {
 // work through the seam the controller sees.
 func TestBridgeWritesAreConditional(t *testing.T) {
 	first, s := bound(t)
-	second := store.ForController(s, "default")
+	second := store.ForController(s, "default", store.Delivered)
 	obj := sandbox("sbx_a", "work", driver.Pending)
 	if err := first.Write(t.Context(), obj, controller.MutationCreated); err != nil {
 		t.Fatalf("the first write: %v", err)
@@ -160,7 +160,7 @@ func TestBridgeLoadsOnlyItsEnvironment(t *testing.T) {
 	if err := c.Write(t.Context(), sandbox("sbx_a", "work", driver.Running), controller.MutationCreated); err != nil {
 		t.Fatal(err)
 	}
-	elsewhere := store.ForController(s, "other")
+	elsewhere := store.ForController(s, "other", store.Delivered)
 	// A name is unique per owner and kind across every environment, which is
 	// design 010's index and not a per environment one.
 	obj := sandbox("sbx_b", "work-elsewhere", driver.Running)
@@ -228,7 +228,7 @@ func TestBridgeRebuilds(t *testing.T) {
 // identity per process.
 func TestBridgeIsTheLeaseSeam(t *testing.T) {
 	c, s := bound(t)
-	other := store.ForController(s, "default")
+	other := store.ForController(s, "default", store.Delivered)
 	if c.Holder() == "" || c.Holder() == other.Holder() {
 		t.Fatalf("two processes share the holder %q", c.Holder())
 	}

@@ -258,7 +258,7 @@ func TestLostGraceReaps(t *testing.T) {
 	if _, err := c.Get(t.Context(), id, "alice"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("the lost record outlived its grace: %v", err)
 	}
-	want := []string{MutationCreated, MutationUpdated, MutationLost, MutationDeleting, MutationDeleted}
+	want := []string{MutationCreated, MutationStarted, MutationLost, MutationDeleting, MutationDeleted}
 	if got := st.mutations(id); !slices.Equal(got, want) {
 		t.Fatalf("the journal reads %v, want %v", got, want)
 	}

@@ -87,7 +87,7 @@ func TestTheStartUpLineReportsRecovery(t *testing.T) {
 // listeners, so a database that does not answer is a start-up failure.
 func TestOpenStoreReportsADatabaseItCannotReach(t *testing.T) {
 	cfg := config.Config{DBURL: "postgres://cella:cella@127.0.0.1:1/cella?sslmode=disable&connect_timeout=1"}
-	if _, _, _, err := openStore(t.Context(), cfg); err == nil {
+	if _, _, _, _, err := openStore(t.Context(), cfg); err == nil {
 		t.Fatal("a database that does not answer was opened")
 	}
 }

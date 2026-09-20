@@ -173,6 +173,12 @@ func (stubJournal) ByObject(context.Context, string, store.Page) ([]store.Event,
 	return nil, "", nil
 }
 func (stubJournal) Prune(context.Context, time.Time) (int, error) { return 0, nil }
+func (stubJournal) Pending(context.Context, int, time.Time) ([]store.Event, error) {
+	return nil, nil
+}
+func (stubJournal) Acknowledge(context.Context, string, time.Time) error { return nil }
+func (stubJournal) Defer(context.Context, string, time.Time) error       { return nil }
+func (stubJournal) Drop(context.Context, string, time.Time) error        { return nil }
 
 type stubValues struct{}
 

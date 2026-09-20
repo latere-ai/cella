@@ -410,6 +410,75 @@ func (x journal) Append(ctx context.Context, e store.Event) (int64, error) {
 	return e.Seq, nil
 }
 
+// Pending reads each object's lowest unfinished sequence first and holds it
+// to the due time after, so a deferred event blocks its own object's later
+// events and no other object's.
+func (x journal) Pending(ctx context.Context, limit int, now time.Time) ([]store.Event, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if limit <= 0 {
+		limit = store.DefaultPageLimit
+	}
+	var heads []store.Event
+	for _, events := range x.d.events {
+		head, found := store.Event{}, false
+		for _, e := range events {
+			if !e.AckedAt.IsZero() || !e.DroppedAt.IsZero() {
+				continue
+			}
+			if !found || e.Seq < head.Seq {
+				head, found = e, true
+			}
+		}
+		if !found || head.NextAttemptAt.After(now) {
+			continue
+		}
+		head.Payload = slices.Clone(head.Payload)
+		heads = append(heads, head)
+	}
+	sort.Slice(heads, func(i, j int) bool { return heads[i].ID < heads[j].ID })
+	if len(heads) > limit {
+		heads = heads[:limit]
+	}
+	return heads, nil
+}
+
+func (x journal) Acknowledge(ctx context.Context, id string, at time.Time) error {
+	return x.finish(ctx, id, func(e *store.Event) { e.AckedAt = at.UTC() })
+}
+
+func (x journal) Drop(ctx context.Context, id string, at time.Time) error {
+	return x.finish(ctx, id, func(e *store.Event) { e.DroppedAt = at.UTC() })
+}
+
+func (x journal) Defer(ctx context.Context, id string, next time.Time) error {
+	return x.finish(ctx, id, func(e *store.Event) {
+		e.Attempts++
+		e.NextAttemptAt = next.UTC()
+	})
+}
+
+// finish applies one delivery outcome to one row. An id no row holds is
+// ErrNotFound: the caller read it from Pending, so its absence is a fact
+// worth reporting rather than a write that quietly did nothing.
+func (x journal) finish(ctx context.Context, id string, apply func(*store.Event)) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	for object, events := range x.d.events {
+		for i := range events {
+			if events[i].ID != id {
+				continue
+			}
+			apply(&events[i])
+			x.d.events[object] = events
+			return nil
+		}
+	}
+	return store.ErrNotFound
+}
+
 func (x journal) ByObject(ctx context.Context, objectID string, p store.Page) ([]store.Event, string, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, "", err
@@ -435,6 +504,9 @@ func (x journal) ByObject(ctx context.Context, objectID string, p store.Page) ([
 	return rows, next, nil
 }
 
+// Prune forgets finished rows only. An event still waiting for the sink is
+// older than the retention long before it is undeliverable, and design 009
+// decides when it is given up, not the retention.
 func (x journal) Prune(ctx context.Context, before time.Time) (int, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err
@@ -443,7 +515,8 @@ func (x journal) Prune(ctx context.Context, before time.Time) (int, error) {
 	for id, events := range x.d.events {
 		kept := events[:0]
 		for _, e := range events {
-			if e.At.Before(before) {
+			finished := !e.AckedAt.IsZero() || !e.DroppedAt.IsZero()
+			if e.At.Before(before) && finished {
 				n++
 				continue
 			}

@@ -193,7 +193,7 @@ type Observed interface {
 }
 
 // Event is one journal row: what happened to one object, in the order it
-// happened to that object.
+// happened to that object, and how far its delivery has got.
 type Event struct {
 	// ID is the event's own id (evt_). Append assigns one when it is empty.
 	ID string
@@ -203,19 +203,42 @@ type Event struct {
 	Type     string
 	At       time.Time
 	Payload  []byte
+	// Attempts is how many deliveries have failed and NextAttemptAt when the
+	// next one is due. Both are zero on a row nobody has tried.
+	Attempts      int
+	NextAttemptAt time.Time
+	// AckedAt is when the sink took the event and DroppedAt when delivery
+	// gave it up. A row with either set is finished and never pending
+	// again; the two are apart because design 010's retention forgets both
+	// and a reader must not read one as the other.
+	AckedAt   time.Time
+	DroppedAt time.Time
 }
 
-// Journal is the append-only record of every mutation, ordered per object.
-// Delivery, which is design 009's Pending, Acknowledge, Defer and Drop, is
-// not in this slice.
+// Journal is the append-only record of every mutation, ordered per object,
+// and the delivery of design 009 over it.
 type Journal interface {
 	// Append writes one event and returns the sequence it took, which is one
-	// more than the object's last.
+	// more than the object's last. An event whose AckedAt is set is stored
+	// finished, which is how a mutation that design 009 names no type for is
+	// recorded without ever being delivered.
 	Append(ctx context.Context, e Event) (int64, error)
 	// ByObject reads one object's events, newest first, one page at a time.
 	ByObject(ctx context.Context, objectID string, p Page) ([]Event, string, error)
 	// Prune drops events older than before and reports how many went.
 	Prune(ctx context.Context, before time.Time) (int, error)
+	// Pending returns at most limit unfinished events, at most one per
+	// object: each object's lowest sequence, and only where its next attempt
+	// is due. The lowest sequence is chosen before the due filter, so a
+	// deferred event holds the events behind it for that object and lets no
+	// other object's wait.
+	Pending(ctx context.Context, limit int, now time.Time) ([]Event, error)
+	// Acknowledge marks one event delivered.
+	Acknowledge(ctx context.Context, id string, at time.Time) error
+	// Defer records one failed attempt and when the next is due.
+	Defer(ctx context.Context, id string, next time.Time) error
+	// Drop ends one event undelivered.
+	Drop(ctx context.Context, id string, at time.Time) error
 }
 
 // Values holds secret values under the envelope of design 018: a data key

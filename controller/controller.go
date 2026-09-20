@@ -73,6 +73,9 @@ type Options struct {
 	// Gateway is where sandboxes of this environment reach the gateway's
 	// two doors, from CELLA_GATEWAY and CELLA_GATEWAY_REVERSE.
 	Gateway GatewayAddresses
+	// Events is design 009's emission seam, set only where the store keeps
+	// no journal of its own. See the Events interface.
+	Events Events
 }
 type Controller struct {
 	mu            sync.Mutex
@@ -101,6 +104,7 @@ type Controller struct {
 	retry            map[string]time.Time
 	egress           Egress
 	gateway          GatewayAddresses
+	events           Events
 }
 
 // Open restores desired state from an operator-supplied store, or the provisional
@@ -142,6 +146,7 @@ func Open(o Options) (*Controller, error) {
 		lostGrace: o.LostGrace, recoveryAttempts: o.RecoveryAttempts,
 		lost: map[string]time.Time{}, attempts: map[string]int{}, retry: map[string]time.Time{},
 		egress: o.Egress, gateway: o.Gateway,
+		events: o.Events,
 	}
 	// A store of design 010 takes one conditional write per object and
 	// carries the journal; one that is also durable is what lets the lost
@@ -200,8 +205,14 @@ func (c *Controller) persist(ctx context.Context, obj v1.Sandbox, mutation strin
 		} else {
 			delete(c.objects, id)
 		}
+		return err
 	}
-	return err
+	// A durable store journaled the record inside the write above. A
+	// snapshot store has no journal, so the emitter takes the act here.
+	if c.durable == nil {
+		c.emit(ctx, mutation, clone(obj))
+	}
+	return nil
 }
 
 // forget drops one object and records the mutation that ended it.
@@ -214,10 +225,16 @@ func (c *Controller) forget(ctx context.Context, id, mutation string) error {
 	} else {
 		err = c.store.Save(c.objects)
 	}
-	if err != nil && held {
-		c.objects[id] = previous
+	if err != nil {
+		if held {
+			c.objects[id] = previous
+		}
+		return err
 	}
-	return err
+	if c.durable == nil {
+		c.emit(ctx, mutation, previous)
+	}
+	return nil
 }
 
 // Create atomically reserves the owner's name and quota before calling runtime.
@@ -275,12 +292,28 @@ func (c *Controller) Create(ctx context.Context, obj v1.Sandbox, owner string, m
 	_, err = c.driver.Create(ctx, specOf(obj, lifecycle, c.egressSpec(m)))
 	if err != nil {
 		obj.Status.Phase = PhaseFailed
-		obj.Status.Reason = "RuntimeCreateFailed"
+		obj.Status.Reason = ReasonCreateFailed
 		c.purgeEgress(ctx, id)
-		return export(obj), errors.Join(err, c.persist(ctx, obj, MutationUpdated))
+		return export(obj), errors.Join(err, c.persist(ctx, obj, MutationFailed))
 	}
 	obj, err = c.refresh(ctx, obj)
-	return export(obj), errors.Join(err, c.persist(ctx, obj, MutationUpdated))
+	return export(obj), errors.Join(err, c.persist(ctx, obj, phaseMutation(obj.Status.Phase)))
+}
+
+// phaseMutation is the act the first driver read after a create observed. A
+// sandbox the driver brought up is Running, and that is the transition
+// design 009 names started; one that came up Failed is that transition; one
+// still coming up is a status write and no event. Without this a sandbox
+// that runs from creation would never say it started, and a meter that opens
+// its interval there would read it as never having run.
+func phaseMutation(phase string) string {
+	switch phase {
+	case driver.Running:
+		return MutationStarted
+	case PhaseFailed:
+		return MutationFailed
+	}
+	return MutationStatus
 }
 
 // specOf derives the driver's create spec from one resolved manifest, the
@@ -461,7 +494,16 @@ func (c *Controller) Act(ctx context.Context, id, verb string) (v1.Sandbox, erro
 	if err != nil {
 		return obj, err
 	}
-	return export(obj), c.persist(ctx, obj, MutationUpdated)
+	return export(obj), c.persist(ctx, obj, verbMutation(verb))
+}
+
+// verbMutation is the act one API verb performed, which is the type of the
+// record it produces.
+func verbMutation(verb string) string {
+	if verb == "start" {
+		return MutationStarted
+	}
+	return MutationStopped
 }
 func (c *Controller) Exec(ctx context.Context, id string, req driver.ExecRequest) (driver.Exec, error) {
 	return c.driver.Exec(ctx, id, req)

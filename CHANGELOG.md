@@ -6,6 +6,20 @@ refused before it is pushed.
 
 ## Unreleased
 
+- Every change to a sandbox and every operation on one produces a signed
+  record, delivered to the endpoint `CELLA_EVENTS_URL` names. A record says
+  who did what to which object, when, and why, with the object's labels and a
+  sequence per object; it never carries a command line, a file's content, an
+  environment or secret value, or a token. `CELLA_EVENTS_SECRET` holds one
+  secret or two separated by a comma, and each signs the delivery, so a secret
+  is rotated without losing a record. Delivery is at least once and in order
+  per object: a sink that fails is retried with a growing wait for
+  `CELLA_EVENTS_RETRY_WINDOW` (default `24h`), a sink that refuses a record
+  ends it, and a sink that rejects the signature holds it until the two ends
+  agree again. A record commits with the change it describes, so a sandbox
+  that started has a record that says so. With the URL unset nothing is
+  delivered and the journal still holds the history.
+
 - A manifest declares the network boundary its sandbox lives inside, and
   `cellad egress` enforces it. `spec.network.egress` takes a `mode` of `none`,
   `allowlist` or `open`, with `allowedHosts` for the first and `deniedHosts`
