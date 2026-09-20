@@ -72,6 +72,24 @@ func (r *apiRecorder) counts() []request {
 	return slices.Clone(r.requests)
 }
 
+// awaitCount returns the count of one route once the handler has taken it.
+// A stream's count lands after the handler returns, which is after the
+// client read the last frame, so a reader that has seen the frame waits.
+func (r *apiRecorder) awaitCount(t *testing.T, route string) request {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		counts := r.counts()
+		if i := slices.IndexFunc(counts, func(c request) bool { return c.route == route }); i >= 0 {
+			return counts[i]
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the route %s was not counted: %v", route, counts)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 // timed reports the routes that were observed into the latency histogram.
 func (r *apiRecorder) timed() []string {
 	r.mu.Lock()
@@ -121,13 +139,11 @@ func TestStreamsAreCountedAndNotTimed(t *testing.T) {
 		t.Fatalf("the session ended %q", last)
 	}
 
-	counts := f.metrics.counts()
-	stream := slices.IndexFunc(counts, func(c request) bool { return c.route == "GET /v1/sandboxes/{id}/exec" })
-	if stream < 0 {
-		t.Fatalf("the exec stream was not counted: %v", counts)
-	}
-	if counts[stream].status != "1xx" {
-		t.Errorf("the upgraded stream counted as %s, want the switching-protocols class", counts[stream].status)
+	// The count is taken when the handler returns, which is after the last
+	// frame reached the client, so the count is awaited rather than read.
+	stream := f.metrics.awaitCount(t, "GET /v1/sandboxes/{id}/exec")
+	if stream.status != "1xx" {
+		t.Errorf("the upgraded stream counted as %s, want the switching-protocols class", stream.status)
 	}
 	if slices.Contains(f.metrics.timed(), "GET /v1/sandboxes/{id}/exec") {
 		t.Error("a hijacked stream was observed into the latency histogram")
