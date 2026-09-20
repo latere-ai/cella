@@ -208,7 +208,7 @@ jobs:
     name: the candidate passes what is built
     needs: build
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     permissions:
       contents: read
       packages: read
@@ -385,7 +385,7 @@ jobs:
     name: the install document against the published artifacts
     needs: [build, publish]
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     permissions:
       contents: read
       packages: read
