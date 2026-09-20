@@ -26,12 +26,13 @@ func tokenPath(dir string) string { return filepath.Join(dir, tokenDir, tokenFil
 
 // projectToken writes the workload token beside the sandbox and returns the
 // environment the projection adds to the workload's own. A create that
-// carries no token writes nothing and adds nothing.
-func projectToken(dir string, s driver.CreateSpec, env map[string]string) (map[string]string, error) {
-	if len(s.Token) == 0 {
+// carries no token writes nothing and adds nothing. It takes the token rather
+// than the create spec, so an adoption projects through the same path.
+func projectToken(dir string, token []byte, env map[string]string) (map[string]string, error) {
+	if len(token) == 0 {
 		return env, nil
 	}
-	if err := writeToken(dir, s.Token); err != nil {
+	if err := writeToken(dir, token); err != nil {
 		return nil, err
 	}
 	out := maps.Clone(env)

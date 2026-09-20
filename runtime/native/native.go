@@ -78,8 +78,12 @@ func New(root string) (*Driver, error) {
 }
 func (d *Driver) Name() string      { return "native" }
 func (d *Driver) Isolation() string { return driver.IsolationNone }
+
+// Capabilities declares what this driver provides. Pool, because a prewarmed
+// entry here is a directory and a record, and adoption is one rewrite of that
+// record under the lock one process already holds over the root.
 func (d *Driver) Capabilities() driver.Capabilities {
-	return driver.Capabilities{Files: true, Attach: ptySupported}
+	return driver.Capabilities{Files: true, Attach: ptySupported, Pool: true}
 }
 func (d *Driver) Preflight(ctx context.Context) error { return d.Ready(ctx) }
 func (d *Driver) Ready(ctx context.Context) error {
@@ -130,6 +134,9 @@ func (d *Driver) Create(ctx context.Context, s driver.CreateSpec) (driver.Ref, e
 	if !validID.MatchString(s.ID) || s.Lifecycle.TTL < 0 || s.Lifecycle.AutoStop < 0 || s.Lifecycle.AutoDelete < 0 {
 		return driver.Ref{}, driver.ErrInvalid
 	}
+	if err := s.CheckPrewarm(); err != nil {
+		return driver.Ref{}, err
+	}
 	if s.Image != "" {
 		return driver.Ref{}, driver.ErrUnsupported
 	}
@@ -159,16 +166,16 @@ func (d *Driver) Create(ctx context.Context, s driver.CreateSpec) (driver.Ref, e
 	if err := os.Mkdir(filepath.Join(d.dir(s.ID), "workspace"), 0700); err != nil {
 		return driver.Ref{}, err
 	}
-	env, err := projectEgress(d.dir(s.ID), s)
+	env, err := projectEgress(d.dir(s.ID), s.Env, s.Egress)
 	if err != nil {
 		return driver.Ref{}, err
 	}
-	env, err = projectToken(d.dir(s.ID), s, env)
+	env, err = projectToken(d.dir(s.ID), s.Token, env)
 	if err != nil {
 		return driver.Ref{}, err
 	}
 	now := time.Now().UTC()
-	r := record{State: driver.State{ID: s.ID, Name: s.Name, Owner: s.Owner, Phase: driver.Running, Isolation: driver.IsolationNone, Labels: maps.Clone(s.Labels), CreatedAt: now, StartedAt: now, LastActivityAt: now, AutoStop: s.Lifecycle.AutoStop, AutoDelete: s.Lifecycle.AutoDelete}, Env: env, Workdir: s.Workdir, Command: slices.Clone(s.Command), Args: slices.Clone(s.Args)}
+	r := record{State: driver.State{ID: s.ID, Name: s.Name, Owner: s.Owner, Phase: driver.Running, Isolation: driver.IsolationNone, Labels: maps.Clone(s.Labels), CreatedAt: now, StartedAt: now, LastActivityAt: now, AutoStop: s.Lifecycle.AutoStop, AutoDelete: s.Lifecycle.AutoDelete, Pool: s.Prewarm}, Env: env, Workdir: s.Workdir, Command: slices.Clone(s.Command), Args: slices.Clone(s.Args)}
 	if s.Lifecycle.TTL > 0 {
 		r.State.ExpiresAt = now.Add(s.Lifecycle.TTL)
 	}
@@ -217,11 +224,9 @@ func (d *Driver) List(ctx context.Context, f driver.Filter) ([]driver.State, err
 		if err := d.mainError(e.Name()); err != nil {
 			return nil, err
 		}
-		s := r.State
-		if f.Owner != "" && s.Owner != f.Owner || f.Phase != "" && s.Phase != f.Phase || len(f.IDs) > 0 && !slices.Contains(f.IDs, s.ID) {
-			continue
+		if s := r.State; f.Selects(s) {
+			out = append(out, s)
 		}
-		out = append(out, s)
 	}
 	return out, nil
 }
@@ -316,6 +321,13 @@ func (d *Driver) Delete(ctx context.Context, id string) error {
 	if _, err := d.load(id); err != nil {
 		return err
 	}
+	return d.deleteLocked(id)
+}
+
+// deleteLocked removes one sandbox's directory and every execution in it. It
+// is called with the driver's lock held, by Delete and by the adoption that
+// discards an entry it could not finish projecting into.
+func (d *Driver) deleteLocked(id string) error {
 	d.cancel(id)
 	if err := os.RemoveAll(d.dir(id)); err != nil {
 		return err
@@ -330,6 +342,13 @@ func (d *Driver) Touch(ctx context.Context, id string) error {
 	})
 }
 func (d *Driver) Update(ctx context.Context, id string, c driver.Change) error {
+	adoption, err := c.Adoption()
+	if err != nil {
+		return err
+	}
+	if adoption != nil {
+		return d.adopt(ctx, id, *adoption)
+	}
 	if c.Lifecycle != nil && (c.Lifecycle.TTL < 0 || c.Lifecycle.AutoStop < 0 || c.Lifecycle.AutoDelete < 0) {
 		return driver.ErrInvalid
 	}
