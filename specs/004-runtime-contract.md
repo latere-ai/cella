@@ -8,7 +8,7 @@ depends_on:
 affects: [runtime/, runtime/k8s/, runtime/podman/, runtime/native/, runtime/local/, runtime/vm/, runtime/remote/, runtime/runtimetest/, internal/config/]
 effort: large
 created: 2026-09-12
-updated: 2026-09-19
+updated: 2026-09-20
 author: changkun
 ---
 
@@ -439,6 +439,7 @@ requests ([[023-computer-use-operations]]); the microVM driver's design
 | `podman` passes it in the podman tier; `k8s` against kind; `remote` through a worker running `native` | `TestPodmanConformance`, `TestClusterConformance`, `TestWorkerConformance` | `podman` passing against a real engine, the `Attacher` cases included, skipped where no socket answers, [[035-podman-driver]], [[034-terminal-attach]]; `TestClusterConformance` built and skipped where no cluster is configured, [[036-k8s-driver]]; `remote` not built |
 | A driver that declares a capability without its interface, implements one it does not declare, or declares one the suite finds not to hold, fails | `TestConformanceCatchesAFalseCapability` with five lying wrappers | passing, [[032-runtime-conformance-suite]], [[034-terminal-attach]] |
 | Every stamped label value is a legal Kubernetes label value and every key a legal key, for an owner with `@` and a user label with a `/` | `TestStampedIdentityIsLegal` | passing, [[036-k8s-driver]] |
+| The workload token a create carries is a file inside the sandbox its owner alone reads, at `/run/cella/token` or at the path `CELLA_TOKEN_FILE` names where the driver has no mount namespace of its own, and `Change.Token` is what the next read returns | the `TokenProjection` case of the conformance suite | passing on `native` and on `podman` against a real engine; on `k8s` over the client double, and in the cluster run where one is configured ([[045-workload-tokens]]) |
 | A decorator that removes the token mount, sets `privileged`, adds `hostNetwork` or `shareProcessNamespace`, or mounts a service account token is refused with `decorator_violation` naming the field | `TestDecoratorCannotWeakenTheBaseline`, table-driven over the baseline | not built |
 | With `CELLA_K8S_RUNTIME_CLASS_ISOLATION=vm`, `Isolation()` is `vm` and the Pod carries the class; unset, `container` regardless of the class name | `TestK8sIsolationIsDeclared` | not built |
 | `Ingress` is declared only with an `Exposer` installed, and a `public` port then has a URL that answers | `TestIngressNeedsAnExposer`, e2e `IngressURL` | not built |

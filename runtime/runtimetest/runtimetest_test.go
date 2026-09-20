@@ -186,6 +186,16 @@ func (d filesLiar) isStopped(ctx context.Context, id string) bool {
 	return err == nil && s.Phase == runtime.Stopped
 }
 
+// staleTokenLiar projects the token a create carried and drops every
+// re-projection, which is the shape of a driver that leaves a workload
+// holding an expired identity.
+type staleTokenLiar struct{ *native.Driver }
+
+func (d staleTokenLiar) Update(ctx context.Context, id string, c runtime.Change) error {
+	c.Token = nil
+	return d.Driver.Update(ctx, id, c)
+}
+
 // isolationLiar reports a class outside the four the contract defines.
 type isolationLiar struct{ *native.Driver }
 
@@ -241,6 +251,12 @@ func TestConformanceCatchesAFalseCapability(t *testing.T) {
 			kase:  "NameIsolationCapabilities",
 			wrap:  func(d *native.Driver) runtime.Driver { return isolationLiar{d} },
 			wants: "is not one of",
+		},
+		{
+			name:  "TokenProjectedOnceAndNeverAgain",
+			kase:  "TokenProjection",
+			wrap:  func(d *native.Driver) runtime.Driver { return staleTokenLiar{d} },
+			wants: "the re-projected token reads",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

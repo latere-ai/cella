@@ -542,6 +542,10 @@ func clone(obj *v1.Sandbox) v1.Sandbox {
 		state.Secrets = slices.Clone(obj.Status.EgressState.Secrets)
 		out.Status.EgressState = &state
 	}
+	if obj.Status.TokenState != nil {
+		state := *obj.Status.TokenState
+		out.Status.TokenState = &state
+	}
 	if obj.Status.ExitCode != nil {
 		code := *obj.Status.ExitCode
 		out.Status.ExitCode = &code

@@ -144,25 +144,6 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		return fail(stderr, fmt.Errorf("CELLA_DATA_DIR: %w", err))
 	}
 
-	// Identity comes up before the listeners, so a deployment whose
-	// issuer or signing key is wrong fails to start rather than binding
-	// a port and refusing every request (spec 006).
-	identity, err := auth.Start(ctx, auth.Options{
-		Issuers:            cfg.OIDCIssuers,
-		Audience:           cfg.OIDCAudience,
-		Audiences:          cfg.OIDCAudiences,
-		PublicURL:          cfg.PublicURL,
-		TokenKeys:          cfg.TokenKeys,
-		AuthorizerURL:      cfg.AuthorizerURL,
-		AuthorizerToken:    cfg.AuthorizerToken,
-		AuthorizerTimeout:  cfg.AuthorizerTimeout,
-		AdminSubjects:      cfg.AdminSubjects,
-		DefaultEnvironment: cfg.DefaultEnvironment,
-	})
-	if err != nil {
-		return fail(stderr, err)
-	}
-
 	// Recovery may change runtime records. Own the state before opening the
 	// driver so a second process cannot mutate live workloads.
 	desired, lease, storeReady, journal, err := openStore(ctx, cfg)
@@ -188,6 +169,39 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		delivery = store.Delivered
 	}
 	emitter := events.NewEmitter(store.EventJournal(journal, delivery), nil)
+	// The revocation list of spec 010: what the verifier asks about a token
+	// cellad minted, and what the controller writes when it replaces or ends
+	// one. It is the same store the journal is in, so a deployment with a
+	// database keeps its revocations across a restart and one without keeps
+	// them as long as the tokens it minted live, which is the process.
+	revocations := store.NewRevocations(journal)
+
+	// Identity comes up before the listeners, so a deployment whose
+	// issuer or signing key is wrong fails to start rather than binding
+	// a port and refusing every request (spec 006).
+	identity, err := auth.Start(ctx, auth.Options{
+		Issuers:            cfg.OIDCIssuers,
+		Audience:           cfg.OIDCAudience,
+		Audiences:          cfg.OIDCAudiences,
+		PublicURL:          cfg.PublicURL,
+		TokenKeys:          cfg.TokenKeys,
+		AuthorizerURL:      cfg.AuthorizerURL,
+		AuthorizerToken:    cfg.AuthorizerToken,
+		AuthorizerTimeout:  cfg.AuthorizerTimeout,
+		AdminSubjects:      cfg.AdminSubjects,
+		DefaultEnvironment: cfg.DefaultEnvironment,
+		Revocations:        revocations,
+	})
+	if err != nil {
+		return fail(stderr, err)
+	}
+	// Every sandbox carries the identity spec 006 gives it: minted here at
+	// create, projected by the driver, re-minted before it expires and
+	// revoked with the sandbox.
+	tokens, err := auth.NewWorkloadTokens(identity.Signer, revocations)
+	if err != nil {
+		return fail(stderr, err)
+	}
 	// A driver that owns local processes or an engine session is closed at
 	// shutdown; one that drives a cluster owns nothing this process has to
 	// release.
@@ -230,7 +244,7 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	control, err := controller.Open(controller.Options{
 		Store: desired, Driver: runtimeDriver, Environment: cfg.DefaultEnvironment,
 		Lease: lease, ReapInterval: cfg.ReapInterval, TouchInterval: cfg.TouchInterval,
-		LostGrace: cfg.LostGrace, Events: controllerEvents,
+		LostGrace: cfg.LostGrace, Events: controllerEvents, Tokens: tokens,
 		Egress: hub, Gateway: controller.GatewayAddresses{Proxy: cfg.Gateway.ProxyAddr, Reverse: cfg.Gateway.ReverseAddr},
 	})
 	if err != nil {

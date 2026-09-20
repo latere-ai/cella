@@ -163,6 +163,10 @@ func (d *Driver) Create(ctx context.Context, s driver.CreateSpec) (driver.Ref, e
 	if err != nil {
 		return driver.Ref{}, err
 	}
+	env, err = projectToken(d.dir(s.ID), s, env)
+	if err != nil {
+		return driver.Ref{}, err
+	}
 	now := time.Now().UTC()
 	r := record{State: driver.State{ID: s.ID, Name: s.Name, Owner: s.Owner, Phase: driver.Running, Isolation: driver.IsolationNone, Labels: maps.Clone(s.Labels), CreatedAt: now, StartedAt: now, LastActivityAt: now, AutoStop: s.Lifecycle.AutoStop, AutoDelete: s.Lifecycle.AutoDelete}, Env: env, Workdir: s.Workdir, Command: slices.Clone(s.Command), Args: slices.Clone(s.Args)}
 	if s.Lifecycle.TTL > 0 {
@@ -221,7 +225,7 @@ func (d *Driver) List(ctx context.Context, f driver.Filter) ([]driver.State, err
 	}
 	return out, nil
 }
-func (d *Driver) edit(ctx context.Context, id string, fn func(*record)) error {
+func (d *Driver) edit(ctx context.Context, id string, fn func(*record) error) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -231,7 +235,9 @@ func (d *Driver) edit(ctx context.Context, id string, fn func(*record)) error {
 	if err != nil {
 		return err
 	}
-	fn(&r)
+	if err := fn(&r); err != nil {
+		return err
+	}
 	return d.save(id, r)
 }
 func (d *Driver) Start(ctx context.Context, id string) error {
@@ -318,18 +324,33 @@ func (d *Driver) Delete(ctx context.Context, id string) error {
 	return nil
 }
 func (d *Driver) Touch(ctx context.Context, id string) error {
-	return d.edit(ctx, id, func(r *record) { r.State.LastActivityAt = time.Now().UTC() })
+	return d.edit(ctx, id, func(r *record) error {
+		r.State.LastActivityAt = time.Now().UTC()
+		return nil
+	})
 }
 func (d *Driver) Update(ctx context.Context, id string, c driver.Change) error {
 	if c.Lifecycle != nil && (c.Lifecycle.TTL < 0 || c.Lifecycle.AutoStop < 0 || c.Lifecycle.AutoDelete < 0) {
 		return driver.ErrInvalid
 	}
-	return d.edit(ctx, id, func(r *record) {
+	return d.edit(ctx, id, func(r *record) error {
 		if c.Labels != nil {
 			r.State.Labels = maps.Clone(*c.Labels)
 		}
 		if c.Env != nil {
 			r.Env = maps.Clone(*c.Env)
+		}
+		// The re-projection is the same write the create made, so a
+		// sandbox that carried no token takes one here and its
+		// environment names the path from this point on.
+		if len(c.Token) > 0 {
+			if err := writeToken(d.dir(id), c.Token); err != nil {
+				return err
+			}
+			if r.Env == nil {
+				r.Env = map[string]string{}
+			}
+			r.Env[driver.TokenFileEnv] = tokenPath(d.dir(id))
 		}
 		if c.Lifecycle != nil {
 			r.State.AutoStop = c.Lifecycle.AutoStop
@@ -339,6 +360,7 @@ func (d *Driver) Update(ctx context.Context, id string, c driver.Change) error {
 				r.State.ExpiresAt = r.State.CreatedAt.Add(c.Lifecycle.TTL)
 			}
 		}
+		return nil
 	})
 }
 

@@ -101,6 +101,9 @@ type data struct {
 	seq      map[string]int64
 	values   map[string]valueRow
 	leases   map[string]leaseRow
+	// revoked is the jti of every token revoked before it expired, against
+	// the instant after which the row is no longer worth keeping.
+	revoked map[string]time.Time
 }
 
 type observedRow struct {
@@ -127,6 +130,7 @@ func newData() *data {
 		seq:      map[string]int64{},
 		values:   map[string]valueRow{},
 		leases:   map[string]leaseRow{},
+		revoked:  map[string]time.Time{},
 	}
 }
 
@@ -154,6 +158,7 @@ func (d *data) clone() *data {
 		n.values[k] = v
 	}
 	maps.Copy(n.leases, d.leases)
+	maps.Copy(n.revoked, d.revoked)
 	return n
 }
 
@@ -187,6 +192,8 @@ func (t *txn) Observed() store.Observed { return observed{t.d} }
 func (t *txn) Journal() store.Journal   { return journal{t.d} }
 func (t *txn) Values() store.Values     { return values{t.d, t.env} }
 func (t *txn) Leases() store.Leases     { return leases{t.d} }
+
+func (t *txn) Revocations() store.Revocations { return revocations{t.d} }
 
 type desired struct{ d *data }
 
@@ -645,4 +652,48 @@ func matches(f store.Filter, owner, phase, environment, id string, labels map[st
 		}
 	}
 	return true
+}
+
+// revocations is the list a verifier asks before it trusts a token cellad
+// minted. It holds one instant per jti, the exp the token carried, so the
+// sweep drops a row once no token could still present it.
+type revocations struct{ d *data }
+
+func (x revocations) Revoke(ctx context.Context, jti string, exp time.Time) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if jti == "" {
+		return errors.New("store: a revocation names a jti")
+	}
+	// A revocation is idempotent: a rotation or a recovery that retried
+	// revokes a jti it already revoked, and the later exp is the one that
+	// keeps the row alive long enough.
+	if current, held := x.d.revoked[jti]; held && current.After(exp) {
+		return nil
+	}
+	x.d.revoked[jti] = exp.UTC()
+	return nil
+}
+
+func (x revocations) Revoked(ctx context.Context, jti string) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	_, held := x.d.revoked[jti]
+	return held, nil
+}
+
+func (x revocations) Forget(ctx context.Context, before time.Time) (int, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	n := 0
+	for jti, exp := range x.d.revoked {
+		if exp.Before(before) {
+			delete(x.d.revoked, jti)
+			n++
+		}
+	}
+	return n, nil
 }

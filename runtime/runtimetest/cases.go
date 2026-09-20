@@ -404,6 +404,34 @@ func touchStampsActivity(t tb, open func() runtime.Driver, opts Options) {
 	}
 }
 
+// tokenProjection is spec 006's identity as spec 004 projects it: the token
+// the create carried is a file inside the sandbox, and an Update with a new
+// one is what the next read returns, with no restart between them.
+//
+// The path is read from TokenFileEnv rather than written literally, because a
+// driver with no mount namespace of its own projects the file where it can
+// and names that path in the variable. That is what makes this case one case
+// for every driver.
+func tokenProjection(t tb, open func() runtime.Driver, opts Options) {
+	d := open()
+	ctx := context.Background()
+	const id = "sbx_cnf_token"
+	const first, second = "first.workload.token", "second.workload.token"
+	create(t, d, opts, runtime.CreateSpec{ID: id, Name: "token", Owner: "alice", Token: []byte(first)})
+	path := script(t, d, opts, id, `printf '%s' "$`+runtime.TokenFileEnv+`"`)
+	need(t, path != "", "%s is unset inside a sandbox created with a token", runtime.TokenFileEnv)
+	got := script(t, d, opts, id, `cat "$`+runtime.TokenFileEnv+`"`)
+	expect(t, got == first, "the projected token reads %q, want %q", got, first)
+	mode := strings.TrimSpace(script(t, d, opts, id, `ls -l "$`+runtime.TokenFileEnv+`" | cut -c1-10`))
+	need(t, len(mode) == 10, "the mode of the projected token reads %q", mode)
+	expect(t, mode[0] == '-' && mode[1] == 'r' && mode[2] == '-' && mode[3] == '-',
+		"the projected token is %q, want a file its owner only reads", mode)
+	expect(t, !strings.Contains(mode[7:], "r"), "the projected token is %q, want no world read", mode)
+	must(t, d.Update(ctx, id, runtime.Change{Token: []byte(second)}), "Update token")
+	got = script(t, d, opts, id, `cat "$`+runtime.TokenFileEnv+`"`)
+	expect(t, got == second, "the re-projected token reads %q, want %q", got, second)
+}
+
 func detachRecovers(t tb, open func() runtime.Driver, opts Options) {
 	d := open()
 	if !d.Capabilities().Detach {

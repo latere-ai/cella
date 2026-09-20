@@ -27,6 +27,17 @@ refused before it is pushed.
   request leaves unauthenticated. `status.secrets` says which placeholders are
   mounted and which of them the gateway will not substitute.
 
+- Every sandbox carries an identity of its own. The control plane mints a
+  workload token at create, the driver projects it read-only at
+  `/run/cella/token` and names the path in `CELLA_TOKEN_FILE`, and a process
+  inside the sandbox calls `/v1` back with it: it reads and execs the sandbox
+  it belongs to and reaches nothing else. The token expires with its sandbox
+  or a day after it was minted, whichever is sooner, and the control plane
+  re-mints and re-projects it once two thirds of that has passed, without
+  restarting the workload. A token that is replaced, and one whose sandbox is
+  deleted, is refused from that moment rather than when it expires. Any
+  service can verify one offline against `/.well-known/jwks.json`.
+
 - Every change to a sandbox and every operation on one produces a signed
   record, delivered to the endpoint `CELLA_EVENTS_URL` names. A record says
   who did what to which object, when, and why, with the object's labels and a

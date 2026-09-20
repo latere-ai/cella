@@ -68,6 +68,7 @@ var cases = []caseDef{
 	{"LogsFollow", logsFollow},
 	{"TarOutAndIn", tarOutAndIn},
 	{"TouchStampsActivity", touchStampsActivity},
+	{"TokenProjection", tokenProjection},
 	{"DetachRecovers", detachRecovers},
 }
 

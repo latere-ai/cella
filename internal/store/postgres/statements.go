@@ -40,6 +40,8 @@ func (t *txn) Journal() store.Journal   { return journal{t.q} }
 func (t *txn) Values() store.Values     { return values{t.q, t.env} }
 func (t *txn) Leases() store.Leases     { return leases{t.q, t.store} }
 
+func (t *txn) Revocations() store.Revocations { return revocations{t.q} }
+
 // The constraints a write can violate, and what each one means to a caller.
 const (
 	uniqueViolation  = "23505"
@@ -600,4 +602,40 @@ func writeError(err error, what string) error {
 		}
 	}
 	return fmt.Errorf("store: %s: %w", what, err)
+}
+
+// revocations is the list a verifier asks before it trusts a token cellad
+// minted: one row per jti, against the exp the token carried.
+type revocations struct{ q querier }
+
+func (x revocations) Revoke(ctx context.Context, jti string, exp time.Time) error {
+	if jti == "" {
+		return errors.New("store: a revocation names a jti")
+	}
+	// A revocation is idempotent, because a rotation or a recovery that
+	// retried revokes a jti it already revoked. The later exp wins, so the
+	// row outlives every token that could present it.
+	_, err := x.q.Exec(ctx, `insert into revocations (jti, exp) values ($1, $2)
+		on conflict (jti) do update set exp = greatest(revocations.exp, excluded.exp)`, jti, exp.UTC())
+	if err != nil {
+		return fmt.Errorf("store: revoking %s: %w", jti, err)
+	}
+	return nil
+}
+
+func (x revocations) Revoked(ctx context.Context, jti string) (bool, error) {
+	var found bool
+	err := x.q.QueryRow(ctx, `select exists (select 1 from revocations where jti = $1)`, jti).Scan(&found)
+	if err != nil {
+		return false, fmt.Errorf("store: reading the revocation of %s: %w", jti, err)
+	}
+	return found, nil
+}
+
+func (x revocations) Forget(ctx context.Context, before time.Time) (int, error) {
+	tag, err := x.q.Exec(ctx, `delete from revocations where exp < $1`, before)
+	if err != nil {
+		return 0, fmt.Errorf("store: forgetting expired revocations: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
 }

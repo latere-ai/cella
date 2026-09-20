@@ -69,9 +69,10 @@ type fakeContainer struct {
 }
 
 type fakeFile struct {
-	mode int64
-	body []byte
-	dir  bool
+	mode     int64
+	uid, gid int
+	body     []byte
+	dir      bool
 }
 
 type fakeLine struct {
@@ -402,6 +403,7 @@ func (f *fake) oneContainer(w http.ResponseWriter, r *http.Request, rest string)
 		var ci containerInspect
 		ci.State.Status, ci.State.ExitCode = c.state, c.exitCode
 		ci.State.StartedAt, ci.State.FinishedAt = c.startedAt, c.finishedAt
+		ci.Config.User = c.user
 		f.mu.Unlock()
 		writeJSON(w, ci)
 	case verb == "start":
@@ -737,7 +739,7 @@ func (f *fake) archive(w http.ResponseWriter, r *http.Request, name string) {
 				refuse(w, http.StatusBadRequest, err.Error())
 				return
 			}
-			c.files[full] = fakeFile{mode: h.Mode, body: body}
+			c.files[full] = fakeFile{mode: h.Mode, uid: h.Uid, gid: h.Gid, body: body}
 		}
 	case http.MethodGet:
 		f.mu.Lock()

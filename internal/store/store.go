@@ -63,16 +63,17 @@ type Store interface {
 
 // Tx is every method set of the store, inside one transaction.
 //
-// Design 010 names five more: Revocations (slice 045), Queue (slice 038),
-// Operations (design 021), Ledger (design 022) and Records (design 018).
-// The first three are declared below with their tables in the schema and
-// have no accessor here until a caller exists.
+// Design 010 names four more: Queue (slice 038), Operations (design 021),
+// Ledger (design 022) and Records (design 018). The first two are declared
+// below with their tables in the schema and have no accessor here until a
+// caller exists.
 type Tx interface {
 	Desired() Desired
 	Observed() Observed
 	Journal() Journal
 	Values() Values
 	Leases() Leases
+	Revocations() Revocations
 }
 
 // Object is one desired-state row: the identity every kind is indexed by, the
@@ -272,12 +273,17 @@ type Leases interface {
 	Release(ctx context.Context, name, holder string) error
 }
 
-// Revocations is the seam slice 045 fills: the jti of every token revoked
-// before it expired, and the sweep that forgets a row whose exp passed. The
-// revocations table is in the schema; no accessor reaches it yet.
+// Revocations is the jti of every token cellad minted and then replaced or
+// ended before it expired. The verifier asks it about every token it signed
+// itself (design 006), and the reaper's tick sweeps the rows no live token
+// could present any more.
 type Revocations interface {
+	// Revoke refuses the jti until exp passes. It is idempotent: a rotation
+	// or a recovery that retried revokes a jti it already revoked.
 	Revoke(ctx context.Context, jti string, exp time.Time) error
+	// Revoked reports whether this jti was revoked.
 	Revoked(ctx context.Context, jti string) (bool, error)
+	// Forget drops the rows whose exp has passed and reports how many went.
 	Forget(ctx context.Context, before time.Time) (int, error)
 }
 

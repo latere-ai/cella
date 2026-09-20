@@ -34,7 +34,9 @@ import (
 
 // Verifier verifies a bearer without interpreting hosted identity claims.
 type Verifier interface {
-	Verify(string) (auth.Caller, error)
+	// VerifyContext verifies one bearer under the request's own context,
+	// which bounds the revocation read a token cellad minted costs.
+	VerifyContext(context.Context, string) (auth.Caller, error)
 }
 type Options struct {
 	Controller     *controller.Controller
@@ -93,7 +95,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		respondError(w, &auth.Error{Code: auth.CodeUnauthenticated, Detail: "missing bearer"})
 		return
 	}
-	caller, err := h.Verifier.Verify(token)
+	caller, err := h.Verifier.VerifyContext(r.Context(), token)
 	if err != nil {
 		respondError(w, err)
 		return
