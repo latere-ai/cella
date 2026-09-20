@@ -66,12 +66,14 @@ func TestClusterLifecycle(t *testing.T) {
 	var phase string
 	for time.Now().Before(deadline) {
 		_, body = call(t, client, http.MethodGet, url+"/v1/sandboxes/"+name, token, nil)
-		if phase = statusField(t, body, "phase"); phase == "Ready" || phase == "Failed" {
+		// Running is the phase of spec 005; Ready is a condition, not a
+		// phase, and a sandbox never reaches a phase by that name.
+		if phase = statusField(t, body, "phase"); phase == "Running" || phase == "Failed" {
 			break
 		}
 		time.Sleep(2 * time.Second)
 	}
-	if phase != "Ready" {
+	if phase != "Running" {
 		t.Fatalf("the sandbox is %q after %s: %s", phase, ready, body)
 	}
 
