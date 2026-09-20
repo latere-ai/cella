@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"maps"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -213,5 +214,37 @@ func TestUnknownSubcommand(t *testing.T) {
 	}
 	if !strings.Contains(errOut.String(), "worker") {
 		t.Errorf("the usage error does not name the worker role: %q", errOut.String())
+	}
+}
+
+// TestWorkerRoleRefusesADataDirItCannotMake holds that the role fails at
+// start rather than running with nowhere to keep what its driver needs.
+func TestWorkerRoleRefusesADataDirItCannotMake(t *testing.T) {
+	// A file where the directory should be: the role cannot make one there.
+	blocked := filepath.Join(t.TempDir(), "occupied")
+	if err := os.WriteFile(blocked, []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut syncBuffer
+	code := run(t.Context(), []string{"worker"}, env(map[string]string{
+		"CELLA_URL":             "http://127.0.0.1:1",
+		"CELLA_ENVIRONMENT_KEY": "a-key",
+		"CELLA_RUNTIME":         "podman",
+		"CELLA_DATA_DIR":        filepath.Join(blocked, "under"),
+	}), &out, &errOut)
+	if code != 1 {
+		t.Errorf("a worker with no data directory exited %d, want 1", code)
+	}
+	if !strings.Contains(errOut.String(), "CELLA_DATA_DIR") {
+		t.Errorf("the refusal does not name the directory: %q", errOut.String())
+	}
+}
+
+// TestWorkerRoleRefusesAFlagItDoesNotHave holds spec 002's usage rule for the
+// role's own flags: a flag outside its set is a usage error, not a start.
+func TestWorkerRoleRefusesAFlagItDoesNotHave(t *testing.T) {
+	var out, errOut syncBuffer
+	if code := run(t.Context(), []string{"worker", "-teleport"}, env(nil), &out, &errOut); code != 2 {
+		t.Errorf("a flag the role does not have exited %d, want 2", code)
 	}
 }
