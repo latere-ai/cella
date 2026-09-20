@@ -336,6 +336,16 @@ func (x journal) Pending(ctx context.Context, limit int, now time.Time) ([]store
 	return out, nil
 }
 
+func (x journal) Undelivered(ctx context.Context) (int, error) {
+	var n int
+	err := x.q.QueryRow(ctx,
+		`select count(*) from events where acked_at is null and dropped_at is null`).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("store: counting what the journal has undelivered: %w", err)
+	}
+	return n, nil
+}
+
 func (x journal) Acknowledge(ctx context.Context, id string, at time.Time) error {
 	return x.finish(ctx, `update events set acked_at = $2 where id = $1`, id, at)
 }

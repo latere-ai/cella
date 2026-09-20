@@ -72,6 +72,16 @@ func (j eventJournal) Pending(ctx context.Context, limit int, now time.Time) ([]
 	return out, err
 }
 
+func (j eventJournal) Undelivered(ctx context.Context) (int, error) {
+	var n int
+	err := j.store.Tx(ctx, func(tx Tx) error {
+		var err error
+		n, err = tx.Journal().Undelivered(ctx)
+		return err
+	})
+	return n, err
+}
+
 func (j eventJournal) Acknowledge(ctx context.Context, id string, at time.Time) error {
 	return j.store.Tx(ctx, func(tx Tx) error { return tx.Journal().Acknowledge(ctx, id, at) })
 }

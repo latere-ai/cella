@@ -242,6 +242,7 @@ type refusing struct {
 }
 
 func (r *refusing) Append(context.Context, events.Record) error { return r.err }
+func (r *refusing) Undelivered(context.Context) (int, error)    { return len(r.rows), nil }
 func (r *refusing) Pending(context.Context, int, time.Time) ([]events.Pending, error) {
 	return r.rows, r.err
 }
@@ -337,6 +338,7 @@ func TestOutcomesThatCannotBeRecordedAreNotCounted(t *testing.T) {
 type halfRefusing struct{ rows []events.Pending }
 
 func (h *halfRefusing) Append(context.Context, events.Record) error { return nil }
+func (h *halfRefusing) Undelivered(context.Context) (int, error)    { return len(h.rows), nil }
 func (h *halfRefusing) Pending(context.Context, int, time.Time) ([]events.Pending, error) {
 	return h.rows, nil
 }

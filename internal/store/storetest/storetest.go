@@ -557,10 +557,17 @@ func delivery(t TB, open Opener) {
 	})
 	pending(t, s, now, []string{ids["sbx_a/sandbox.started"]}, "a dropped head leaves the queue")
 
+	// The backlog is every unfinished row and not the heads one pass may
+	// take: a deferred row is still owed to the sink, and a gauge that lost
+	// it during a backoff would read zero on a queue that is not empty
+	// ([[017-observability]]).
+	undelivered(t, s, 1, "an acknowledged and a dropped row leave the backlog")
+
 	// The attempt count is what the backoff reads, so it is on the row.
 	with(t, s, func(tx store.Tx) error {
 		return tx.Journal().Defer(ctx, ids["sbx_a/sandbox.started"], now)
 	})
+
 	with(t, s, func(tx store.Tx) error {
 		rows, err := tx.Journal().Pending(ctx, 10, now)
 		if err != nil {
@@ -571,6 +578,15 @@ func delivery(t TB, open Opener) {
 		}
 		return nil
 	})
+
+	// A row whose next attempt is in the future is out of the queue and
+	// still owed to the sink. That difference is why the gauge of
+	// [[017-observability]] reads the backlog and never what is due.
+	with(t, s, func(tx store.Tx) error {
+		return tx.Journal().Defer(ctx, ids["sbx_a/sandbox.started"], now.Add(time.Hour))
+	})
+	pending(t, s, now, nil, "a row deferred into the future is not due")
+	undelivered(t, s, 1, "a row deferred into the future is still owed to the sink")
 	for _, id := range []string{"evt_nothing"} {
 		fails(t, s, store.ErrNotFound, "acknowledging an event no row holds", func(tx store.Tx) error {
 			return tx.Journal().Acknowledge(ctx, id, now)
@@ -582,6 +598,21 @@ func delivery(t TB, open Opener) {
 			return tx.Journal().Drop(ctx, id, now)
 		})
 	}
+}
+
+// undelivered reads the backlog and holds it to the count expected.
+func undelivered(t TB, s store.Store, want int, what string) {
+	t.Helper()
+	with(t, s, func(tx store.Tx) error {
+		got, err := tx.Journal().Undelivered(context.Background())
+		if err != nil {
+			return err
+		}
+		if got != want {
+			t.Errorf("%s: the journal holds %d undelivered, want %d", what, got, want)
+		}
+		return nil
+	})
 }
 
 // pending reads what is due at now and holds it to the ids expected.

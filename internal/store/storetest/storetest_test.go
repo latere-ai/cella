@@ -175,6 +175,7 @@ func (stubJournal) ByObject(context.Context, string, store.Page) ([]store.Event,
 	return nil, "", nil
 }
 func (stubJournal) Prune(context.Context, time.Time) (int, error) { return 0, nil }
+func (stubJournal) Undelivered(context.Context) (int, error)      { return 0, nil }
 func (stubJournal) Pending(context.Context, int, time.Time) ([]store.Event, error) {
 	return nil, nil
 }
