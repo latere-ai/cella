@@ -55,12 +55,6 @@ func (d *Driver) Create(ctx context.Context, s driver.CreateSpec) (driver.Ref, e
 	if token {
 		pvc.Annotations[annToken] = "true"
 	}
-	// The mesh's policy and Service are in the cluster before the Pod that
-	// belongs to them, so a member is reachable by its peers and by nothing
-	// else from the moment it starts (spec 022).
-	if err := d.joinMesh(ctx, s.Mesh.ID); err != nil {
-		return driver.Ref{}, err
-	}
 	if _, err := d.cs.CoreV1().PersistentVolumeClaims(d.opts.Namespace).Create(ctx, pvc, metav1.CreateOptions{}); err != nil {
 		return driver.Ref{}, mapErr(err, "claim create")
 	}
@@ -68,6 +62,15 @@ func (d *Driver) Create(ctx context.Context, s driver.CreateSpec) (driver.Ref, e
 	// the caller hung up, so it drops the cancellation it inherited: a
 	// cancelled context makes each cleanup a no-op and leaks both objects.
 	rollback := func() { _ = d.remove(context.WithoutCancel(ctx), s.ID) }
+	// The mesh's policy and Service are in the cluster before the Pod that
+	// belongs to them, so a member is reachable by its peers and by nothing
+	// else from the moment it starts (spec 022). They are made after the
+	// claim, which carries the membership, so the rollback above reaches
+	// them: a mesh whose only member never started leaves no objects.
+	if err := d.joinMesh(ctx, s.Mesh.ID); err != nil {
+		rollback()
+		return driver.Ref{}, err
+	}
 	// The identity is in the cluster before the Pod that mounts it, so the
 	// workload's first read finds the token rather than an empty directory
 	// the kubelet fills a moment later (spec 006).

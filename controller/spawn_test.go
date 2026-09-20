@@ -453,3 +453,72 @@ func (d *refusingCreate) Create(ctx context.Context, s driver.CreateSpec) (drive
 	}
 	return d.Driver.Create(ctx, s)
 }
+
+// TestATreeNeverAdoptsAnEntry: a sandbox's place in its tree is create-time
+// identity the driver stamps on objects it cannot rewrite, and an adoption
+// writes only the half a mutation may reach. A spawn and a mesh root
+// therefore take the slow path, so no member of a mesh is a member the
+// substrate does not know about.
+func TestATreeNeverAdoptsAnEntry(t *testing.T) {
+	c, d, _ := newPool(t, poolOptions(2))
+	ctx := t.Context()
+	if _, err := c.Refill(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// A root that joins a mesh is created outright, with the entries left
+	// where they are.
+	meshRoot := root("planner", 2, 1)
+	meshRoot.Spec.Mesh.Enabled = true
+	parent, err := c.Create(ctx, meshRoot, "alice", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.adopted() != 0 {
+		t.Fatalf("a mesh root adopted %d entries, want none", d.adopted())
+	}
+	if _, err = c.Spawn(ctx, child("worker", 0, 0), parent, 0); err != nil {
+		t.Fatal(err)
+	}
+	if d.adopted() != 0 {
+		t.Fatalf("a spawn adopted %d entries, want none", d.adopted())
+	}
+	// A sandbox that is neither still takes one, so the rule narrows the
+	// acceleration and does not end it.
+	if _, err = c.Create(ctx, workspace(), "alice", 0); err != nil {
+		t.Fatal(err)
+	}
+	if d.adopted() != 1 {
+		t.Fatalf("an ordinary create adopted %d entries, want one", d.adopted())
+	}
+}
+
+// TestADeadlineEndsTheTree: the reaper's delete cascades the way a request's
+// does, so a parent that expired or was auto-deleted leaves no descendant
+// behind.
+func TestADeadlineEndsTheTree(t *testing.T) {
+	c, _ := spawning(t)
+	ctx := t.Context()
+	parent, err := c.Create(ctx, root("planner", 2, 1), "alice", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := c.Spawn(ctx, child("worker", 1, 1), parent, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	grandchild, err := c.Spawn(ctx, child("helper", 0, 0), first, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.mu.Lock()
+	err = c.deleteLocked(ctx, parent.Status.ID, ReasonExpired)
+	c.mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{parent.Status.ID, first.Status.ID, grandchild.Status.ID} {
+		if _, err = c.Get(ctx, id, "alice"); !errors.Is(err, ErrNotFound) {
+			t.Errorf("%s outlived the deadline that ended its ancestor: %v", id, err)
+		}
+	}
+}

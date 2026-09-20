@@ -304,27 +304,31 @@ func (c *Controller) stopLocked(ctx context.Context, id, reason string) error {
 // deleteLocked writes the Deleting intent with its reason before it calls the
 // driver, so a crash between the two leaves a record that names why, and
 // removes the record once the object is gone.
+//
+// A deadline ends a tree the way a request does: the descendants go first,
+// deepest generation before the one above it, each with reason Parent, so a
+// sandbox never outlives the ancestor whose boundary it ran inside (spec 022).
 func (c *Controller) deleteLocked(ctx context.Context, id, reason string) error {
 	obj, tracked := c.objects[id]
 	if tracked {
+		if err := c.cascade(ctx, id); err != nil {
+			return err
+		}
 		intent := clone(obj)
 		intent.Status.Phase = PhaseDeleting
 		intent.Status.Reason = reason
 		if err := c.persist(ctx, intent, MutationDeleting); err != nil {
 			return err
 		}
+		obj = intent
+		return c.deleteOne(ctx, &obj)
 	}
 	if err := c.driver.Delete(ctx, id); err != nil && !errors.Is(err, driver.ErrNotFound) {
 		return err
 	}
 	c.forgetTouch(id)
 	c.forgetLost(id)
-	if !tracked {
-		return nil
-	}
-	// The identity ends with the sandbox rather than with its own exp, so a
-	// token the workload still holds is refused from this moment (spec 006).
-	return errors.Join(c.revokeToken(ctx, obj.Status.TokenState), c.forget(ctx, id, MutationDeleted))
+	return nil
 }
 
 // Touch stamps activity on a sandbox, coalesced per sandbox: the first call

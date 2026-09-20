@@ -339,6 +339,14 @@ func (c *Controller) create(ctx context.Context, obj v1.Sandbox, owner string, m
 	}
 	entries := c.poolEntries(ctx)
 	entry := c.matchEntry(entries, obj)
+	// A sandbox's place in its tree is create-time identity: the driver
+	// stamps the mesh and the parent on objects it cannot rewrite, and an
+	// adoption writes only the half of a sandbox a mutation may reach. A
+	// spawn and a mesh root therefore take the slow path, so an adopted
+	// member is never a member the substrate does not know about.
+	if parent != nil || obj.Spec.Mesh.Enabled {
+		entry = nil
+	}
 	out, err := c.createLocked(ctx, obj, owner, max, warnings, lifecycle, entries, entry, parent)
 	if entry != nil && err != nil && adoptionLost(err) {
 		c.log.InfoContext(ctx, "the pool entry could not be adopted; this create takes the slow path",

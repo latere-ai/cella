@@ -4,6 +4,7 @@
 package k8s
 
 import (
+	"errors"
 	"reflect"
 	"slices"
 	"testing"
@@ -11,6 +12,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kruntime "k8s.io/apimachinery/pkg/runtime"
+	k8stesting "k8s.io/client-go/testing"
 
 	driver "latere.ai/x/cella/runtime"
 )
@@ -181,5 +184,29 @@ func (h *harness) meshHeld(t *testing.T, name string, want bool) {
 		if held != want {
 			t.Fatalf("the mesh %s %s is held: %v, want %v", c.what, name, held, want)
 		}
+	}
+}
+
+// TestMeshJoinFailureLeavesNoObjects: a first member whose mesh could not be
+// made leaves neither the sandbox nor a policy nobody selects, because the
+// objects are made inside the create's own rollback.
+func TestMeshJoinFailureLeavesNoObjects(t *testing.T) {
+	h := newHarness(t)
+	ctx := t.Context()
+	h.cs.PrependReactor("create", "networkpolicies", func(k8stesting.Action) (bool, kruntime.Object, error) {
+		return true, nil, errors.New("the cluster refused the policy")
+	})
+	if _, err := h.Create(ctx, meshSpec("sbx_one", "planner")); err == nil {
+		t.Fatal("a create whose mesh could not be made was accepted")
+	}
+	if _, err := h.Inspect(ctx, "sbx_one"); err == nil {
+		t.Fatal("the refused create left a sandbox behind")
+	}
+	services, err := h.cs.CoreV1().Services(namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(services.Items) != 0 {
+		t.Fatalf("the refused create left %d services behind", len(services.Items))
 	}
 }
