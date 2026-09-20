@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"net"
 	"net/http"
 	"slices"
@@ -62,11 +63,16 @@ type Options struct {
 	// Metrics is design 017's recorder. It is optional: with none the API
 	// counts nothing and answers the same.
 	Metrics Metrics
+	// Log takes the one line per request of design 017. Nil is the default
+	// logger, which is the redacting one cellad installs before it builds
+	// anything.
+	Log *slog.Logger
 }
 type handler struct {
 	Options
 	mux     *http.ServeMux
 	metrics Metrics
+	log     *slog.Logger
 }
 
 func New(o Options) (http.Handler, error) {
@@ -79,7 +85,11 @@ func New(o Options) (http.Handler, error) {
 	if o.MaxUploadBytes <= 0 {
 		o.MaxUploadBytes = 1 << 30
 	}
-	h := &handler{Options: o, mux: http.NewServeMux(), metrics: cmp.Or(o.Metrics, Metrics(nopMetrics{}))}
+	h := &handler{
+		Options: o, mux: http.NewServeMux(),
+		metrics: cmp.Or(o.Metrics, Metrics(nopMetrics{})),
+		log:     cmp.Or(o.Log, slog.Default()),
+	}
 	h.handle("GET /v1/sandboxes/{id}/files", h.files)
 	h.handle("PUT /v1/sandboxes/{id}/files", h.filesPut)
 	h.handle("DELETE /v1/sandboxes/{id}/files", h.fileRemove)
@@ -118,7 +128,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// wrapper behind the mux can tell this one which route it reached.
 	slot := &routeSlot{}
 	rw := &observed{ResponseWriter: w}
-	defer h.observe(slot, rw, time.Now())
+	defer h.observe(r.Context(), slot, rw, time.Now())
 	w = rw
 	w.Header().Set("X-Request-ID", rand.Text())
 	token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
@@ -151,7 +161,8 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		respondError(w, &auth.Error{Code: auth.CodeForbidden, Detail: "environment keys authorize data plane streams only"})
 		return
 	}
-	stampSpan(r.Context(), caller.Subject, w.Header().Get("X-Request-ID"))
+	slot.subject, slot.requestID = caller.Subject, w.Header().Get("X-Request-ID")
+	stampSpan(r.Context(), caller.Subject, slot.requestID)
 	ctx := context.WithValue(r.Context(), callerKey{}, caller)
 	// The slot rides the context from here, so the wrapper behind the mux
 	// can tell this handler which route the request reached. A request

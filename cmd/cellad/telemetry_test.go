@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -239,6 +240,90 @@ func TestObservabilityEndToEnd(t *testing.T) {
 	}
 }
 
+// TestTheAPIDrawsAServerSpan is design 017's trace seam: /v1/ is wrapped and
+// the probes are not, so a request carries the trace header back and a probe
+// does not. The span's name is the route, which the wrapper behind the mux
+// sets once the pattern is known.
+func TestTheAPIDrawsAServerSpan(t *testing.T) {
+	// A span exists only where a provider does, and a provider exists only
+	// where the deployment set an endpoint. The collector takes what is
+	// exported; the sampler takes every root span so one request is enough.
+	var collected safeBuffer
+	collector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		collected.Write(body)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer collector.Close()
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", collector.URL)
+	t.Setenv("OTEL_TRACES_SAMPLER_ARG", "1.0")
+
+	issuer := issuertest.New(t, issuertest.WithDefaultAudience("cella"))
+	base, internalURL, _, stop := startServeWithLog(t, map[string]string{"CELLA_OIDC_ISSUERS": issuer.URL()})
+	alice := issuer.Mint(issuertest.Claims{Sub: "alice"})
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, base+"/v1/sandboxes", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+alice)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.Header.Get("X-Trace-Id") == "" {
+		t.Errorf("a /v1/ request drew no server span: the answer carries no trace header")
+	}
+	for _, url := range []string{base + "/livez", internalURL + "/readyz", internalURL + "/metrics"} {
+		probe, err := http.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		answer, err := http.DefaultClient.Do(probe)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = answer.Body.Close()
+		if answer.Header.Get("X-Trace-Id") != "" {
+			t.Errorf("%s drew a span; the probes and the scrape surface are not instrumented", url)
+		}
+	}
+	// Stopping flushes the batch, so the collector holds the span this
+	// request drew, named by the route the mux matched.
+	if code := stop(); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	if !strings.Contains(collected.String(), "GET /v1/sandboxes") {
+		t.Errorf("the collector received no span named by the route: %d bytes", collected.Len())
+	}
+}
+
+// safeBuffer is a bytes.Buffer a collector's handler writes to while the
+// test reads it.
+type safeBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (s *safeBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *safeBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
+}
+
+func (s *safeBuffer) Len() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Len()
+}
+
 // TestCanaryNeverReachesALogLine is design 017's redaction, driven through
 // the wiring cellad installs rather than the handler alone: every canary is
 // written through the default logger and none of them appears on stderr.
@@ -284,7 +369,7 @@ func TestCanaryNeverReachesALogLine(t *testing.T) {
 // scrape surface still reports: with the endpoint set, the spans and the log
 // records reach the collector, and the canary is redacted on that path too.
 func TestTelemetryExportsOverOTLP(t *testing.T) {
-	var collected bytes.Buffer
+	var collected safeBuffer
 	collector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		collected.Write(body)
@@ -304,10 +389,10 @@ func TestTelemetryExportsOverOTLP(t *testing.T) {
 	if collected.Len() == 0 {
 		t.Fatal("the collector received nothing")
 	}
-	if bytes.Contains(collected.Bytes(), []byte("canary-on-the-bridge")) {
+	if strings.Contains(collected.String(), "canary-on-the-bridge") {
 		t.Error("the canary reached the OTLP bridge: redaction is on one path only")
 	}
-	if !bytes.Contains(collected.Bytes(), []byte(metrics.Redacted)) {
+	if !strings.Contains(collected.String(), metrics.Redacted) {
 		t.Error("the bridge carried no redacted value; the check would pass vacuously")
 	}
 }

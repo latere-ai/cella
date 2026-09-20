@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"latere.ai/x/pkg/health"
+	"latere.ai/x/pkg/otel"
 
 	"latere.ai/x/cella/controller"
 	"latere.ai/x/cella/internal/admission"
@@ -365,7 +366,11 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	})
 
 	public := http.NewServeMux()
-	public.Handle("/v1/", handler)
+	// The server span of design 017 starts here and nowhere else: the
+	// probes, the key set and the version line draw none, and an inbound
+	// traceparent joins the caller's trace at this one seam. The route
+	// wrapper behind the mux renames the span once the pattern is known.
+	public.Handle("/v1/", otel.Handler(handler, "cellad"))
 	for _, p := range []string{"/livez", "/readyz", "/version"} {
 		public.Handle("GET "+p, probes)
 	}

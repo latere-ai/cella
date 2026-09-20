@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"log/slog"
 	"net"
 	"net/http"
 	"time"
@@ -55,6 +56,12 @@ func (nopMetrics) GatewaySnapshot()                              {}
 type routeSlot struct {
 	route string
 	code  string
+	// subject, sandbox and requestID are what the one log line per request
+	// carries beside the route: who asked, which sandbox where the route
+	// names one, and the id the answer's own header holds.
+	subject   string
+	sandbox   string
+	requestID string
 }
 
 type slotKey struct{}
@@ -141,14 +148,29 @@ func (o *observed) class() string {
 	return metrics.StatusClass(o.status)
 }
 
-// observe is the one count per request, deferred by ServeHTTP. A request that
-// never reached the mux carries no route, which is the count of a bearer that
-// was refused before any endpoint was chosen.
-func (h *handler) observe(slot *routeSlot, o *observed, started time.Time) {
-	h.metrics.Request(slot.route, o.class(), envelopeCode(slot, o))
+// observe is the one count and the one log line per request, deferred by
+// ServeHTTP. A request that never reached the mux carries no route, which is
+// the count of a bearer that was refused before any endpoint was chosen.
+//
+// The line is emitted under the request's own context, so the trace id and
+// the span id reach both paths of the log tee and a line read out of the
+// container's output joins the trace it belongs to.
+func (h *handler) observe(ctx context.Context, slot *routeSlot, o *observed, started time.Time) {
+	elapsed := time.Since(started)
+	code := envelopeCode(slot, o)
+	h.metrics.Request(slot.route, o.class(), code)
 	if !o.hijacked {
-		h.metrics.RequestDuration(slot.route, time.Since(started))
+		h.metrics.RequestDuration(slot.route, elapsed)
 	}
+	h.log.LogAttrs(ctx, slog.LevelInfo, "request",
+		slog.String("route", slot.route),
+		slog.String("status", o.class()),
+		slog.String("code", code),
+		slog.Duration("duration", elapsed),
+		slog.String("subject", slot.subject),
+		slog.String("sandbox", slot.sandbox),
+		slog.String("request_id", slot.requestID),
+	)
 }
 
 // envelopeCode prefers the code the handler recorded on the writer and falls
@@ -167,7 +189,7 @@ func envelopeCode(slot *routeSlot, o *observed) string {
 func (h *handler) handle(pattern string, fn http.HandlerFunc) {
 	h.mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
 		if slot := slotOf(r.Context()); slot != nil {
-			slot.route = r.Pattern
+			slot.route, slot.sandbox = r.Pattern, r.PathValue("id")
 		}
 		nameSpan(r.Context(), r.Pattern)
 		stampSandbox(r.Context(), r.PathValue("id"))

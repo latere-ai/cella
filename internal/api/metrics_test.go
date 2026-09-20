@@ -4,6 +4,9 @@
 package api
 
 import (
+	"bytes"
+	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -255,4 +258,89 @@ func TestRequestSpans(t *testing.T) {
 	if attrs["cella.sandbox_id"] != obj.Status.ID {
 		t.Errorf("the span names the sandbox %q, want %q", attrs["cella.sandbox_id"], obj.Status.ID)
 	}
+}
+
+// TestOneLogLinePerRequest is design 017's log volume: one line at INFO per
+// request, carrying the route, the status, the code, the duration, the
+// subject, the sandbox the route names and the request id, and none per
+// frame of a stream.
+func TestOneLogLinePerRequest(t *testing.T) {
+	var buf bytes.Buffer
+	f := setupLogging(t, &buf)
+	obj := f.sandbox("logged")
+	buf.Reset()
+	f.request(http.MethodGet, "/v1/sandboxes/"+obj.Status.ID, f.alice, "", http.StatusOK)
+
+	lines := logLines(t, &buf)
+	if len(lines) != 1 {
+		t.Fatalf("one request wrote %d lines: %s", len(lines), buf.String())
+	}
+	line := lines[0]
+	for key, want := range map[string]any{
+		"msg":     "request",
+		"level":   "INFO",
+		"route":   "GET /v1/sandboxes/{id}",
+		"status":  "2xx",
+		"code":    "",
+		"sandbox": obj.Status.ID,
+	} {
+		if got := line[key]; got != want {
+			t.Errorf("the line's %s is %v, want %v", key, got, want)
+		}
+	}
+	if s, _ := line["subject"].(string); !strings.HasSuffix(s, "|alice") {
+		t.Errorf("the line names the subject %q", s)
+	}
+	if id, _ := line["request_id"].(string); id == "" {
+		t.Errorf("the line carries no request id: %v", line)
+	}
+	if _, ok := line["duration"]; !ok {
+		t.Errorf("the line carries no duration: %v", line)
+	}
+}
+
+// TestOneLogLinePerStreamAndNonePerFrame is the other half of the volume
+// rule: a stream that carried many frames is still one line.
+func TestOneLogLinePerStreamAndNonePerFrame(t *testing.T) {
+	var buf bytes.Buffer
+	f := setupLogging(t, &buf)
+	obj := f.sandbox("streamed")
+	buf.Reset()
+	_, r := f.attachTo("/v1/sandboxes/"+obj.Status.ID+"/exec", f.alice,
+		`{"command":["sh","-c","for i in 1 2 3 4 5; do printf 'line%s\n' $i; done; exit 0"]}`)
+	if last, _ := r.ended(t); last != `{"exit":0}` {
+		t.Fatalf("the session ended %q", last)
+	}
+	lines := logLines(t, &buf)
+	if len(lines) != 1 {
+		t.Fatalf("one stream wrote %d lines: %s", len(lines), buf.String())
+	}
+	if got := lines[0]["route"]; got != "GET /v1/sandboxes/{id}/exec" {
+		t.Errorf("the line's route is %v", got)
+	}
+}
+
+// setupLogging is the fixture with its log line written to buf.
+func setupLogging(t *testing.T, buf *bytes.Buffer) *fixture {
+	t.Helper()
+	f := setup(t, nil)
+	f.h.(*handler).log = slog.New(slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	return f
+}
+
+// logLines reads the JSON lines a request wrote.
+func logLines(t *testing.T, buf *bytes.Buffer) []map[string]any {
+	t.Helper()
+	var out []map[string]any
+	for l := range strings.SplitSeq(strings.TrimSpace(buf.String()), "\n") {
+		if strings.TrimSpace(l) == "" {
+			continue
+		}
+		var line map[string]any
+		if err := json.Unmarshal([]byte(l), &line); err != nil {
+			t.Fatalf("a log line does not parse: %v: %s", err, l)
+		}
+		out = append(out, line)
+	}
+	return out
 }

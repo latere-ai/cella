@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -86,7 +87,10 @@ func setupDriver(t *testing.T, policy authz.Authorizer, wrap func(runtime.Driver
 		policy = &auth.OwnerPolicy{DefaultEnvironment: "default"}
 	}
 	rec := &apiRecorder{}
-	h, err := New(Options{Controller: c, Verifier: verifier, Authorizer: auth.NewAuthorizer(policy), Metrics: rec})
+	h, err := New(Options{
+		Controller: c, Verifier: verifier, Authorizer: auth.NewAuthorizer(policy),
+		Metrics: rec, Log: slog.New(slog.DiscardHandler),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
