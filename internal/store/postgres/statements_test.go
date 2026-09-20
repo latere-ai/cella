@@ -61,6 +61,26 @@ func TestStatementsReportFailures(t *testing.T) {
 			{"a value delete", func() error { return tx.Values().Delete(gone, "sec_a") }},
 			{"a lease", func() error { _, err := tx.Leases().Acquire(gone, "reaper", "replica-one", time.Second); return err }},
 			{"a lease release", func() error { return tx.Leases().Release(gone, "reaper", "replica-one") }},
+			{"a ledger debit", func() error { return tx.Ledger().Debit(gone, "sbx_a", 1) }},
+			{"a ledger credit", func() error { return tx.Ledger().Credit(gone, "sbx_a") }},
+			{"a ledger read", func() error { _, err := tx.Ledger().Used(gone, "sbx_a"); return err }},
+			{"a ledger forget", func() error { return tx.Ledger().Forget(gone, "sbx_a") }},
+			{"an enqueue", func() error {
+				return tx.Operations().Enqueue(gone, store.Operation{ID: "op_a", Environment: "env_one", Type: "exec"})
+			}},
+			{"a claim", func() error {
+				_, err := tx.Operations().Claim(gone, "env_one", "worker-one", 1, time.Now())
+				return err
+			}},
+			{"an acknowledge", func() error { return tx.Operations().Acknowledge(gone, "op_a", nil) }},
+			{"an operation read", func() error { _, err := tx.Operations().Get(gone, "op_a"); return err }},
+			{"a registration", func() error {
+				return tx.Operations().Register(gone, store.Worker{Environment: "env_one", Worker: "worker-one"})
+			}},
+			{"a heartbeat", func() error { return tx.Operations().Heartbeat(gone, "env_one", "worker-one", time.Now()) }},
+			{"a worker list", func() error { _, err := tx.Operations().Workers(gone, "env_one"); return err }},
+			{"a worker forget", func() error { return tx.Operations().Forget(gone, "env_one", "worker-one") }},
+			{"an operation prune", func() error { _, err := tx.Operations().Prune(gone, time.Now()); return err }},
 		} {
 			if err := tc.call(); err == nil {
 				t.Errorf("%s on a caller that gave up was reported as done", tc.name)
