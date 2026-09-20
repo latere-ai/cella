@@ -114,7 +114,18 @@ func New(ctx context.Context, o Options) (*Gateway, error) {
 		var dialer net.Dialer
 		dial = dialer.DialContext
 	}
-	s := newStore()
+	// One transport reaches every upstream, the token endpoint of an oauth
+	// secret included, so the dial seam and the operator's own authority
+	// hold whichever path a request took to get here.
+	upstream := &http.Transport{
+		DialContext:         dial,
+		TLSClientConfig:     upstreamTLSConfig,
+		ForceAttemptHTTP2:   true,
+		MaxIdleConns:        100,
+		IdleConnTimeout:     90 * time.Second,
+		TLSHandshakeTimeout: 10 * time.Second,
+	}
+	s := newStore(&http.Client{Transport: upstream, Timeout: tokenTimeout})
 	client := &syncClient{
 		url: stream, key: o.Key, gatewayID: gatewayID(), store: s, caPEM: caPEM,
 		records: make(chan egress.Record, recordBuffer), log: o.Log,
@@ -132,15 +143,8 @@ func New(ctx context.Context, o Options) (*Gateway, error) {
 			Realm:                Realm,
 			Log:                  o.Log,
 		},
-		upstream: &http.Transport{
-			DialContext:         dial,
-			TLSClientConfig:     upstreamTLSConfig,
-			ForceAttemptHTTP2:   true,
-			MaxIdleConns:        100,
-			IdleConnTimeout:     90 * time.Second,
-			TLSHandshakeTimeout: 10 * time.Second,
-		},
-		records: client.Record, log: o.Log, now: o.Now,
+		upstream: upstream,
+		records:  client.Record, log: o.Log, now: o.Now,
 	}
 	gw := &Gateway{opts: o, log: o.Log, store: s, gate: g, client: client, caPEM: caPEM, environment: environment}
 	gw.proxy = &http.Server{Handler: http.HandlerFunc(g.ServeProxy), ReadHeaderTimeout: 30 * time.Second}
@@ -212,8 +216,12 @@ func (g *Gateway) Close(ctx context.Context) {
 }
 
 // drainTimeout is how long an in-flight connection has when the gateway is
-// asked to stop.
-const drainTimeout = 5 * time.Second
+// asked to stop, and tokenTimeout how long one mint at an oauth secret's
+// endpoint has.
+const (
+	drainTimeout = 5 * time.Second
+	tokenTimeout = 30 * time.Second
+)
 
 // credentialAuth is what the substitution engine's own proxy authenticates
 // with: the same per-sandbox credential the gate read, looked up in the same

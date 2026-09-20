@@ -5,6 +5,7 @@ package egressd
 
 import (
 	"maps"
+	"net/http"
 	"slices"
 	"sync"
 
@@ -27,13 +28,30 @@ type store struct {
 	maps         map[string]egress.Map // principal to its boundary
 	byCredential map[string]string     // credential to principal
 	registry     *pkgegress.Registry
+	// entries is one table per entry, keyed by principal and placeholder.
+	// The registry answers "what may be substituted toward this host"; these
+	// answer "what may be substituted in this one place", which is what makes
+	// an entry's injection placement a rule on the door this role builds the
+	// request on.
+	entries map[string]map[string]*pkgegress.Map
+	// resolvers are the token sources of the oauth entries, kept across a
+	// map at a higher version so a re-push does not throw away a token that
+	// is still good.
+	resolvers map[string]map[string]*resolver
+	// tokenClient is what a resolver mints with: the gateway's own upstream
+	// path, so the operator's authority and the dial seam reach the token
+	// endpoint too.
+	tokenClient *http.Client
 }
 
-func newStore() *store {
+func newStore(tokenClient *http.Client) *store {
 	return &store{
 		maps:         map[string]egress.Map{},
 		byCredential: map[string]string{},
 		registry:     pkgegress.NewRegistry(),
+		entries:      map[string]map[string]*pkgegress.Map{},
+		resolvers:    map[string]map[string]*resolver{},
+		tokenClient:  tokenClient,
 	}
 }
 
@@ -60,6 +78,8 @@ func (s *store) Replace(maps []egress.Map) {
 	}
 	s.maps = make(map[string]egress.Map, len(maps))
 	s.byCredential = make(map[string]string, len(maps))
+	s.entries = make(map[string]map[string]*pkgegress.Map, len(maps))
+	s.resolvers = make(map[string]map[string]*resolver, len(maps))
 	for _, m := range maps {
 		s.setLocked(m)
 	}
@@ -73,6 +93,8 @@ func (s *store) Remove(principal string) {
 		delete(s.byCredential, held.Credential)
 	}
 	delete(s.maps, principal)
+	delete(s.entries, principal)
+	delete(s.resolvers, principal)
 	s.registry.Delete(principal)
 }
 
@@ -84,7 +106,19 @@ func (s *store) setLocked(m egress.Map) {
 	if m.Credential != "" {
 		s.byCredential[m.Credential] = m.Principal
 	}
-	s.registry.Set(m.Principal, substitutions(m))
+	compiled := s.substitutions(m)
+	s.registry.Set(m.Principal, compiled)
+	byEntry := make(map[string]*pkgegress.Map, len(compiled))
+	for _, entry := range compiled {
+		byEntry[string(entry.Placeholder)] = pkgegress.NewMap([]pkgegress.Entry{entry})
+	}
+	s.entries[m.Principal] = byEntry
+	// A secret the map no longer carries takes its token source with it.
+	for name := range s.resolvers[m.Principal] {
+		if !slices.ContainsFunc(m.Entries, func(e egress.Entry) bool { return e.Secret == name }) {
+			delete(s.resolvers[m.Principal], name)
+		}
+	}
 }
 
 // Principal answers which sandbox a credential belongs to. It is the whole of
@@ -145,33 +179,3 @@ func (s *store) Registry() *pkgegress.Registry {
 	defer s.mu.RUnlock()
 	return s.registry
 }
-
-// substitutions turns a map's entries into the substitution engine's, and
-// takes only the entries that carry a value: an entry with none would replace
-// a placeholder with nothing, which is worse than leaving the placeholder in
-// place, where it is an inert string the upstream refuses.
-//
-// No entry carries a value yet. The Secret kind and its store are the slice
-// after this one, and this function is where their values join the boundary
-// the control plane already compiled.
-func substitutions(m egress.Map) []pkgegress.Entry {
-	var out []pkgegress.Entry
-	for _, e := range m.Entries {
-		value := valueOf(e)
-		if len(value) == 0 {
-			continue
-		}
-		out = append(out, pkgegress.Entry{
-			Placeholder:    []byte(e.Placeholder),
-			Secret:         value,
-			AllowedHosts:   slices.Clone(e.Hosts),
-			SubstituteBody: e.Body,
-		})
-	}
-	return out
-}
-
-// valueOf is the seam the Secret kind fills: the value the control plane sent
-// with the entry. Until it does, every entry compiles to no substitution and
-// every placeholder leaves the sandbox as the opaque token it is.
-func valueOf(egress.Entry) []byte { return nil }

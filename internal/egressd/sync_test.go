@@ -133,7 +133,7 @@ func runClient(t *testing.T, p *stubPlane, s *store, caPEM string) *syncClient {
 // connected, what it holds, and the authority the control plane projects.
 func TestTheGatewayOpensWithAHello(t *testing.T) {
 	p := newStubPlane(t)
-	s := newStore()
+	s := newStore(nil)
 	s.Apply(boundary("sbx_held", 4, v1.EgressOpen))
 	runClient(t, p, s, "-----BEGIN CERTIFICATE-----\nauthority\n-----END CERTIFICATE-----\n")
 	hello := waitForHello(t, p, 1)[0]
@@ -165,7 +165,7 @@ func TestTheSnapshotReplacesTheWholeWorld(t *testing.T) {
 			boundary("sbx_a", 2, v1.EgressAllowlist, "api.example.com"),
 		}}})
 	}
-	s := newStore()
+	s := newStore(nil)
 	s.Apply(boundary("sbx_stale", 1, v1.EgressOpen))
 	runClient(t, p, s, "")
 	waitFor(t, func() bool {
@@ -192,7 +192,7 @@ func TestAPutAppliesAndIsAcknowledged(t *testing.T) {
 		send(conn, egress.Frame{Type: egress.FramePut, Put: mapPtr(boundary("sbx_a", 1, v1.EgressAllowlist, "widened.example.com"))})
 		send(conn, egress.Frame{Type: egress.FrameHeartbeat})
 	}
-	s := newStore()
+	s := newStore(nil)
 	runClient(t, p, s, "")
 	waitFor(t, func() bool {
 		_, acks, _ := p.taken()
@@ -216,7 +216,7 @@ func TestAPurgeDropsThePrincipal(t *testing.T) {
 		send(conn, egress.Frame{Type: egress.FrameSnapshot, Snapshot: &egress.Snapshot{Maps: []egress.Map{boundary("sbx_a", 1, v1.EgressOpen)}}})
 		send(conn, egress.Frame{Type: egress.FramePurge, Purge: &egress.Purge{Principal: egress.Principal("sbx_a")}})
 	}
-	s := newStore()
+	s := newStore(nil)
 	runClient(t, p, s, "")
 	waitFor(t, func() bool {
 		_, held := s.Map(egress.Principal("sbx_a"))
@@ -233,7 +233,7 @@ func TestTheGatewayReconnects(t *testing.T) {
 	p.down = func(conn *websocket.Conn) {
 		send(conn, egress.Frame{Type: egress.FrameSnapshot, Snapshot: &egress.Snapshot{Maps: []egress.Map{boundary("sbx_a", 3, v1.EgressOpen)}}})
 	}
-	s := newStore()
+	s := newStore(nil)
 	runClient(t, p, s, "")
 	waitFor(t, func() bool { return len(waitNothing(p)) >= 2 }, "the gateway to reconnect")
 	waitFor(t, func() bool {
@@ -250,7 +250,7 @@ func TestRecordsGoUpTheSameStream(t *testing.T) {
 	p.down = func(conn *websocket.Conn) {
 		send(conn, egress.Frame{Type: egress.FrameSnapshot, Snapshot: &egress.Snapshot{}})
 	}
-	c := runClient(t, p, newStore(), "")
+	c := runClient(t, p, newStore(nil), "")
 	c.Record(egress.Record{Principal: egress.Principal("sbx_a"), Host: "api.example.com", Decision: egress.DecisionAllowed})
 	waitFor(t, func() bool {
 		_, _, records := p.taken()

@@ -32,7 +32,7 @@ func boundary(id string, version int64, mode v1.EgressMode, hosts ...string) egr
 // is acknowledged and changes nothing, and an older map never overwrites a
 // newer one after a reconnect crossed with a push.
 func TestApplyTakesOnlyAHigherVersion(t *testing.T) {
-	s := newStore()
+	s := newStore(nil)
 	if !s.Apply(boundary("sbx_a", 2, v1.EgressAllowlist, "api.example.com")) {
 		t.Fatal("the first map was not applied")
 	}
@@ -57,7 +57,7 @@ func TestApplyTakesOnlyAHigherVersion(t *testing.T) {
 // the gateway held, after a snapshot it holds exactly the snapshot, so a
 // purge that arrived while the stream was down still lands.
 func TestSnapshotIsAuthoritative(t *testing.T) {
-	s := newStore()
+	s := newStore(nil)
 	s.Apply(boundary("sbx_a", 1, v1.EgressAllowlist, "a.example.com"))
 	s.Apply(boundary("sbx_gone", 1, v1.EgressAllowlist, "b.example.com"))
 	s.Replace([]egress.Map{boundary("sbx_a", 2, v1.EgressAllowlist, "a.example.com"), boundary("sbx_new", 1, v1.EgressOpen)})
@@ -73,7 +73,7 @@ func TestSnapshotIsAuthoritative(t *testing.T) {
 }
 
 func TestRemoveDropsThePrincipalAndItsCredential(t *testing.T) {
-	s := newStore()
+	s := newStore(nil)
 	s.Apply(boundary("sbx_a", 1, v1.EgressAllowlist, "a.example.com"))
 	s.Remove(egress.Principal("sbx_a"))
 	if _, ok := s.Map(egress.Principal("sbx_a")); ok {
@@ -91,7 +91,7 @@ func TestRemoveDropsThePrincipalAndItsCredential(t *testing.T) {
 // sandbox whose map arrives with another credential is reachable by the new
 // one and by nothing else.
 func TestACredentialThatChangedStopsAdmitting(t *testing.T) {
-	s := newStore()
+	s := newStore(nil)
 	s.Apply(boundary("sbx_a", 1, v1.EgressAllowlist, "a.example.com"))
 	next := boundary("sbx_a", 2, v1.EgressAllowlist, "a.example.com")
 	next.Credential = "rotated"
@@ -113,7 +113,7 @@ func TestACredentialThatChangedStopsAdmitting(t *testing.T) {
 // than being replaced with nothing, which would break the request in a way
 // the caller could not read.
 func TestNoEntryCarriesAValueYet(t *testing.T) {
-	s := newStore()
+	s := newStore(nil)
 	m := boundary("sbx_a", 1, v1.EgressAllowlist, "api.example.com")
 	m.Entries = []egress.Entry{{
 		Secret: "token", Placeholder: egress.MintPlaceholder(),
