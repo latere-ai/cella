@@ -8,6 +8,7 @@ packages.
 | Page | |
 |---|---|
 | [Native quickstart](native.md) | Create and execute trusted local workspaces with the implemented API |
+| [The cella command](cli.md) | The client: reaching a plane, the commands, the exit codes, and what a refusal tells you |
 | [Install](install.md) | A cluster, the manifests from the release's `deploy-<tag>.tar.gz`, the first sandbox, and `cellad check` |
 | Configuration | the table in the [repository scaffold spec](../specs/.archive/002-repository-scaffold.md) until `docs/configuration.md` is generated from the code |
 | [Deploy reference](../deploy/README.md) | What each manifest and each Secret of `deploy/` is, and why the Role grants what it does |

@@ -193,7 +193,7 @@ var coordinates = []struct{ needle, what string }{
 // released are the trees a release hands an operator, plus the workflows
 // that build it and the defaults the binary ships with. Spec 001's rule is
 // that none of them names a coordinate of one installation.
-var released = []string{"deploy", "docs", ".github", "internal/config", "tools"}
+var released = []string{"deploy", "docs", ".github", "internal/config", "tools", "skills"}
 
 // TestNoLatereCoordinatesInReleasedArtifacts is that rule as a test. The
 // API group `cella.latere.ai/` is the one legal occurrence of the name: it

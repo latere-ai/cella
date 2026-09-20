@@ -6,6 +6,21 @@ refused before it is pushed.
 
 ## Unreleased
 
+- A second binary, `cella`, speaks the API from a shell and from inside a
+  sandbox: apply a Sandbox or a Secret, list and read objects, exec with or
+  without a terminal, attach, follow logs, move files whole or one at a
+  time, read the gateway's records, start, stop and delete. It reads
+  `CELLA_URL` and `CELLA_TOKEN`, and inside a sandbox it needs neither: the
+  address is injected and the token is read from `/run/cella/token` per
+  request, so no flag and no login are involved. Every command answers
+  columns or `--json`, a refusal is one sentence with the code behind `-v`,
+  and the exit code says what happened without reading it: 2 a bad call, 3
+  refused, 4 not found, 5 the wrong state, 7 unreachable, and under `exec`
+  the code of the command that ran inside. It never retries. The release
+  carries it as `cella_<tag>_<os>_<arch>.tar.gz` for the same four
+  platforms as the server, `docs/cli.md` is the page for a person and
+  `skills/cella/SKILL.md` the one an agent reads.
+
 - An environment can keep sandboxes ready, so a create that matches one
   starts in milliseconds instead of waiting for an image pull and a container
   start. `CELLA_POOL_SIZE` with `CELLA_POOL_IMAGE`, `CELLA_POOL_CPU`,
