@@ -54,7 +54,7 @@ func (h *harness) taken() []egress.Record {
 // host the gate refuses as a destination.
 func newHarness(t *testing.T, upstream, controlPlane string, trust *x509.CertPool) *harness {
 	t.Helper()
-	h := &harness{store: newStore(), upstream: upstream}
+	h := &harness{store: newStore(nil), upstream: upstream}
 	tlsConfig := &tls.Config{RootCAs: trust, MinVersion: tls.VersionTLS12}
 	ca, _, _, err := pkgegress.GenerateCA(CACommonName)
 	if err != nil {

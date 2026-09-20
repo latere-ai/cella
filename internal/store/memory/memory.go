@@ -584,6 +584,31 @@ func (x values) Delete(ctx context.Context, secretID string) error {
 	return nil
 }
 
+func (x values) Rewrap(ctx context.Context, oldKEK, newKEK []byte) (int, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	old, next, err := store.RewrapKeys(oldKEK, newKEK)
+	if err != nil {
+		return 0, err
+	}
+	rewrapped := make(map[string][]byte, len(x.d.values))
+	for id, row := range x.d.values {
+		wrapped, err := store.RewrapKey(old, next, row.wrapped)
+		if err != nil {
+			return 0, err
+		}
+		rewrapped[id] = wrapped
+	}
+	for id, wrapped := range rewrapped {
+		row := x.d.values[id]
+		row.wrapped = wrapped
+		x.d.values[id] = row
+	}
+	x.env.Adopt(next)
+	return len(rewrapped), nil
+}
+
 type leases struct{ d *data }
 
 func (x leases) Acquire(ctx context.Context, name, holder string, ttl time.Duration) (bool, error) {

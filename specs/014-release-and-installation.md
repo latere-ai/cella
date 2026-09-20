@@ -142,7 +142,7 @@ install has nothing to back up and `docs/upgrades/` says so. When it is
 set, a backup is a `pg_dump` of the tables [[010-state]] owns
 (`objects`, `observed`, `secret_values`, `revocations`, `ledger`,
 `events`, `egress_records`, `queue`, `operations`, `workers`, `leases`);
-`secret_values` is ciphertext under `CELLA_SECRETS_KEK`
+`secret_values` is ciphertext under `CELLA_SECRET_KEY`
 ([[018-egress-and-secrets]]), so a dump is safe only while that key is
 held apart. A restore runs against a binary at or above the dumped
 schema: a binary below it refuses to start, naming both versions, by the

@@ -110,6 +110,11 @@ type Controller struct {
 	gateway          GatewayAddresses
 	events           Events
 	tokens           Tokens
+	// secrets is the Secret kind's store, and secretObjects this process's
+	// copy of the collection. Neither holds a value: what is here is what a
+	// read returns, and a plaintext is read per compile through the seam.
+	secrets       Secrets
+	secretObjects map[string]v1.Secret
 }
 
 // Open restores desired state from an operator-supplied store, or the provisional
@@ -152,6 +157,7 @@ func Open(o Options) (*Controller, error) {
 		lost: map[string]time.Time{}, attempts: map[string]int{}, retry: map[string]time.Time{},
 		egress: o.Egress, gateway: o.Gateway,
 		events: o.Events, tokens: o.Tokens,
+		secretObjects: map[string]v1.Secret{},
 	}
 	// A store of design 010 takes one conditional write per object and
 	// carries the journal; one that is also durable is what lets the lost
@@ -159,6 +165,18 @@ func Open(o Options) (*Controller, error) {
 	if d, ok := store.(Durable); ok {
 		c.durable = d
 		c.recovers = d.Durable()
+	}
+	// A store that holds the Secret kind is what makes /v1/secrets and
+	// substitution possible; one that does not serves everything else.
+	if s, ok := store.(Secrets); ok {
+		c.secrets = s
+		if c.secretObjects, err = s.LoadSecrets(); err != nil {
+			_ = store.Close()
+			return nil, err
+		}
+		if c.secretObjects == nil {
+			c.secretObjects = map[string]v1.Secret{}
+		}
 	}
 	if c.clock == nil {
 		c.clock = wallClock{}
@@ -285,7 +303,7 @@ func (c *Controller) Create(ctx context.Context, obj v1.Sandbox, owner string, m
 	// The boundary is put in a gateway before the driver is called, so a
 	// sandbox never starts before a gateway knows it (spec 018). A boundary
 	// that no gateway will hold is a refusal here, with nothing created.
-	m, held, err := c.pushEgress(ctx, &obj)
+	boundary, err := c.pushEgress(ctx, &obj)
 	if err != nil {
 		// The map may already sit in a gateway that took the put and never
 		// answered, so the principal is purged with the object: every map a
@@ -293,7 +311,8 @@ func (c *Controller) Create(ctx context.Context, obj v1.Sandbox, owner string, m
 		c.purgeEgress(ctx, id)
 		return obj, errors.Join(err, c.forget(ctx, id, MutationDeleted))
 	}
-	obj.Status.Conditions = setCondition(obj.Status.Conditions, c.egressCondition(m, held, now))
+	obj.Status.Secrets = boundary.Secrets
+	obj.Status.Conditions = setCondition(obj.Status.Conditions, c.egressCondition(boundary.Map, boundary.Held, now))
 	// The identity is minted after the boundary and before the driver, which
 	// is step 5 of design 005's create order: a sandbox that never starts
 	// leaves a token nobody holds, and the undo below ends it.
@@ -305,7 +324,7 @@ func (c *Controller) Create(ctx context.Context, obj v1.Sandbox, owner string, m
 		return export(obj), errors.Join(err, c.persist(ctx, obj, MutationFailed))
 	}
 	obj.Status.TokenState = tokenState
-	_, err = c.driver.Create(ctx, specOf(obj, lifecycle, c.egressSpec(m), token))
+	_, err = c.driver.Create(ctx, specOf(obj, lifecycle, c.egressSpec(boundary.Map), boundary.Env, token))
 	if err != nil {
 		obj.Status.Phase = PhaseFailed
 		obj.Status.Reason = ReasonCreateFailed
@@ -337,10 +356,10 @@ func phaseMutation(phase string) string {
 // deadline set it runs under, and the boundary its gateway holds. It is the
 // one place the manifest's vocabulary meets the driver's, so a create and a
 // recovery of the same sandbox ask for the same object.
-func specOf(obj v1.Sandbox, lifecycle driver.Lifecycle, boundary driver.Egress, token string) driver.CreateSpec {
+func specOf(obj v1.Sandbox, lifecycle driver.Lifecycle, boundary driver.Egress, secrets map[string]string, token string) driver.CreateSpec {
 	return driver.CreateSpec{
 		ID: obj.Status.ID, Name: obj.Metadata.Name, Owner: obj.Status.Owner, Image: obj.Spec.Image,
-		Command: obj.Spec.Command, Args: obj.Spec.Args, Env: obj.Spec.Env,
+		Command: obj.Spec.Command, Args: obj.Spec.Args, Env: withSecretEnv(obj.Spec.Env, secrets),
 		Workdir: obj.Spec.Workdir, Labels: obj.Metadata.Labels, User: obj.Spec.User,
 		Resources: driver.Resources{CPU: string(obj.Spec.Resources.CPU), Memory: string(obj.Spec.Resources.Memory), Disk: string(obj.Spec.Resources.Disk)},
 		Workspace: driver.Workspace{Path: obj.Spec.Workspace.Path},
@@ -348,6 +367,21 @@ func specOf(obj v1.Sandbox, lifecycle driver.Lifecycle, boundary driver.Egress, 
 		Egress:    boundary,
 		Token:     []byte(token),
 	}
+}
+
+// withSecretEnv is the manifest's own environment with each mounted secret's
+// placeholder beside it, and the companion key that says where to put it.
+// The placeholder is a projection and never a field of the manifest, so what
+// a caller reads back is what it wrote and what the workload holds is what
+// the boundary minted.
+func withSecretEnv(env, secrets map[string]string) map[string]string {
+	if len(secrets) == 0 {
+		return env
+	}
+	out := make(map[string]string, len(env)+len(secrets))
+	maps.Copy(out, env)
+	maps.Copy(out, secrets)
+	return out
 }
 
 // purgeEgress drops a principal from every gateway of the environment. It
@@ -552,11 +586,14 @@ func clone(obj v1.Sandbox) v1.Sandbox {
 	obj.Spec.Env = maps.Clone(obj.Spec.Env)
 	obj.Spec.Network.Egress.AllowedHosts = slices.Clone(obj.Spec.Network.Egress.AllowedHosts)
 	obj.Spec.Network.Egress.DeniedHosts = slices.Clone(obj.Spec.Network.Egress.DeniedHosts)
+	obj.Spec.Secrets = slices.Clone(obj.Spec.Secrets)
 	obj.Status.Conditions = slices.Clone(obj.Status.Conditions)
+	obj.Status.Secrets.Mounted = slices.Clone(obj.Status.Secrets.Mounted)
+	obj.Status.Secrets.NotInjectable = slices.Clone(obj.Status.Secrets.NotInjectable)
 	obj.Status.Warnings = slices.Clone(obj.Status.Warnings)
 	if obj.Status.EgressState != nil {
 		state := *obj.Status.EgressState
-		state.Placeholders = maps.Clone(obj.Status.EgressState.Placeholders)
+		state.Secrets = slices.Clone(obj.Status.EgressState.Secrets)
 		obj.Status.EgressState = &state
 	}
 	if obj.Status.TokenState != nil {

@@ -428,6 +428,10 @@ func (f lookupFunc) Environment(ctx context.Context, name string) (*v1.Environme
 	return f(ctx, name)
 }
 
+// Secret answers nothing: this fake exists to drive the environment lookup's
+// failure branches and no manifest it resolves mounts a secret.
+func (f lookupFunc) Secret(context.Context, string) (*v1.Secret, error) { return nil, ErrNotFound }
+
 func TestLookupErrors(t *testing.T) {
 	obj := sandbox()
 	obj.Spec.Environment = "eu-gpu"

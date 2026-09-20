@@ -9,7 +9,7 @@ depends_on:
 affects: [internal/store/, internal/config/, migrations/]
 effort: large
 created: 2026-09-12
-updated: 2026-09-19
+updated: 2026-09-20
 author: changkun
 ---
 
@@ -308,13 +308,13 @@ table ([[021-data-plane-workers]]); the `v1.Object` interface
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| Both stores pass one suite over every method of every interface; the memory store is exempt only from durability across a restart and the schema check | `TestStoreSuite` over memory and Postgres in a test container | built for `Desired`, `Observed`, `Journal`, `Values` and `Leases` ([[043-postgres-store]]); the seams have no accessor yet |
+| Both stores pass one suite over every method of every interface; the memory store is exempt only from durability across a restart and the schema check | `TestStoreSuite` over memory and Postgres in a test container | built for `Desired`, `Observed`, `Journal`, `Values` and `Leases` ([[043-postgres-store]], [[046-secret-kind]]); the seams have no accessor yet |
 | Writes inside `Tx` commit together or not at all: a desired put plus a debit, and a desired put plus a count check, under a failure injected between them | `TestTxIsAtomic` | built without the ledger half ([[043-postgres-store]]) |
 | `Put` with a stale version is `ErrVersionConflict`; with the current version it advances it | `TestOptimisticConcurrency` | built ([[043-postgres-store]]) |
 | `(kind, owner, name)` is unique among live rows and reusable after delete | `TestNamesAreUniqueAmongLiveRows` | built ([[043-postgres-store]]) |
 | `Rebuild` for one environment replaces only that environment's observed rows and touches no `objects` row; a desired sandbox with no observed counterpart is reported `Lost` and keeps its `Queued` or `Recovering` status | `TestRebuildIsScopedAndKeepsStatus` | built ([[043-postgres-store]]) |
 | `Count` excludes `Deleting` and deleted rows | `TestCountExcludesDeleting` | built ([[043-postgres-store]]) |
-| A plaintext value is returned by `Open` alone; its only caller in the tree is `egress.Compile`; both stores hold ciphertext; `Rewrap` under a new KEK leaves every ciphertext byte unchanged and `Open` still works | `TestValuesAreConfined`, `TestRewrap` | the envelope, `Put`, `Open` and `Delete` built ([[043-postgres-store]]); the confinement test and `Rewrap` wait for the `Secret` kind |
+| A plaintext value is returned by `Open` alone; its only caller in the tree is the control plane's compile path; both stores hold ciphertext; `Rewrap` under a new key leaves every ciphertext byte unchanged and `Open` still works | `TestValuesAreConfined`, `TestRewrapRotatesTheKey` | built ([[043-postgres-store]], [[046-secret-kind]]); the confinement test parses every non-test file and holds `Values.Open` and `Controlled.OpenValue` to one caller each |
 | `Debit` at one remaining unit under contention yields one success; `Credit` restores it | `TestLedgerIsAtomic` | not built |
 | `Pending` returns one event per object, oldest first, and holds later events behind a deferred one; `Drop` after the retry window; `ByObject` pages newest first; `Prune` respects retention | `TestJournal` | `Append`, `ByObject` and `Prune` built ([[043-postgres-store]]); delivery waits for [[009-events]] |
 | `Dequeue` orders by priority, fair share, arrival; capacity in use equals the sum over the named phases after a restart | `TestQueueOrder`, `TestCapacityIsDerived` | not built |

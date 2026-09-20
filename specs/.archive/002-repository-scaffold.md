@@ -165,7 +165,7 @@ deployment that sets one before its spec lands is not refused.
 | `CELLA_REAP_INTERVAL`, `CELLA_TOUCH_INTERVAL`, `CELLA_LOST_GRACE`, `CELLA_RECOVERY_ATTEMPTS` | 005 | `30s`, `1m`, `10m`, `5` | the reaper's tick, each bounded to between `1s` and `1h`; how often one sandbox's activity reaches the driver; how long a sandbox is `Lost` without a durable store before it is reaped; how many recreations a durable one gets before `Failed` |
 | `CELLA_POOL_SIZE`, `CELLA_POOL_IMAGE`, `CELLA_SCHEDULING_MODE` | 020, 021 | `0`, unset, `direct` | the default environment's `spec.pool.size`, `spec.pool.image`, and `spec.scheduling.mode`; every other environment declares its own |
 | `CELLA_SCHEDULE_INTERVAL`, `CELLA_CAPACITY_HEADROOM`, `CELLA_MAX_PREEMPTIONS`, `CELLA_MAX_SET_REPLICAS` | 020 | `5s`, `0.1`, `3`, `4096` | the scheduler loop's tick; the fraction an `auto` capacity keeps free; how often one sandbox may be preempted; the largest set |
-| `CELLA_SECRETS_KEK` | yes when any Secret exists, from 018 | none | 32 bytes, base64, wrapping every secret's data key |
+| `CELLA_SECRET_KEY` | yes when any Secret exists, from 018 | none | 32 bytes, base64, wrapping every secret's data key |
 | `CELLA_EGRESS_ACK_TIMEOUT` | 018 | `5s` | how long a create waits for one gateway of the environment to acknowledge the sandbox's map |
 | `CELLA_EGRESS_RECORDS_RETENTION`, `CELLA_EGRESS_RECORDS_CAP` | 018 | `168h`, `1000` | how long egress records stay in Postgres; how many the memory store keeps per sandbox |
 | `CELLA_URL`, `CELLA_ENVIRONMENT_KEY` | 018, 021 | none | read by the `worker` and `egress` roles: the control plane's public URL and the environment key that authenticates the role's one outbound stream; `CELLA_URL` is also what `cella` reads and what every sandbox is given (004, 011) |
@@ -197,7 +197,7 @@ deployment that sets one before its spec lands is not refused.
 | `CELLA_EVENTS_URL`, `CELLA_EVENTS_SECRET` | 009 | unset | the event sink and one or two comma-separated HMAC secrets; events are off when the URL is unset and the journal still holds them; the URL without a secret, a secret without the URL, or a non-loopback `http://` URL without `CELLA_EVENTS_INSECURE_SINK=1`, is a start-up failure |
 | `CELLA_EVENTS_TIMEOUT`, `CELLA_EVENTS_PORTS`, `CELLA_EVENTS_INSECURE_SINK` | 009 | `10s`, unset, unset | one delivery's deadline; `1` emits a `sandbox.port` event per proxied request; `1` admits an `http://` sink, set by the stubs only |
 | `CELLA_EVENTS_RETRY_WINDOW` | 009 | `24h` | how long a record the sink has not taken is retried before it is dropped and counted; at least `1m` |
-| `CELLA_DB_URL`, `CELLA_DB_MAX_CONNS` | 010 | unset, `8` | a Postgres URL and the pool size; the URL unset keeps every state in memory and turns recovery off |
+| `CELLA_DB_URL`, `CELLA_DB_MAX_CONNS` | 010 | unset, `4` | a Postgres URL and the pool size; the URL unset keeps desired state in the single-process snapshot of 026 and turns recovery off |
 | `CELLA_JOURNAL_CAP` | 010 | `1000` | events kept per object in the in-memory journal |
 | `CELLA_JOURNAL_RETENTION` | 010 | `720h` | how long acknowledged or dropped events stay in the Postgres journal |
 | `CELLA_REQUESTS_PER_MINUTE` | 008 | `600` | requests one subject may send in a minute; `0` turns the limit off |

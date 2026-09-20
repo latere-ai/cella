@@ -324,8 +324,10 @@ func (g *gate) upstreamRequest(r *http.Request, host, path, principal string) (*
 		}
 	}
 	out.ContentLength = r.ContentLength
-	m, _ := g.store.Registry().Get(principal)
-	if _, err = pkgegress.SubstituteHTTPRequestContext(r.Context(), host, out, m); err != nil {
+	// Each entry is applied to the one place its owner named, which is the
+	// placement rule of spec 018: a placeholder anywhere else in the request
+	// leaves as the opaque token it is.
+	if err = g.substitutePlaced(r.Context(), principal, host, 443, out); err != nil {
 		return nil, err
 	}
 	return out, nil

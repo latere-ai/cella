@@ -74,18 +74,51 @@ const (
 	MutationStatus     = "sandbox.status"
 )
 
-type fileStore struct {
-	dir  string
-	lock *os.File
+// Sealer is the envelope of design 010 as the snapshot store needs it: one
+// data key per value, sealed under the operator's own key. The store of
+// design 010 implements it, so the crypto has one implementation whichever
+// store a deployment runs on.
+type Sealer interface {
+	// Seal returns the wrapped data key and the sealed value.
+	Seal(plaintext []byte) (wrapped, sealed []byte, err error)
+	// Open reverses Seal.
+	Open(wrapped, sealed []byte) ([]byte, error)
 }
+
+type fileStore struct {
+	dir     string
+	lock    *os.File
+	sealer  Sealer
+	objects map[string]v1.Sandbox
+	secrets map[string]secretRow
+}
+
+// secretRow is one Secret in the snapshot: the object a read returns and the
+// two ciphertexts of its value, which is the same shape the table of design
+// 010 holds.
+type secretRow struct {
+	Object  v1.Secret `json:"object"`
+	Version int       `json:"version"`
+	Wrapped []byte    `json:"wrapped,omitempty"`
+	Sealed  []byte    `json:"sealed,omitempty"`
+}
+
 type snapshot struct {
 	Version int                   `json:"version"`
 	Objects map[string]v1.Sandbox `json:"objects"`
+	Secrets map[string]secretRow  `json:"secrets,omitempty"`
 }
 
 // OpenFileStore opens a provisional local desired-state snapshot, taking an
-// exclusive process lock. It is not a distributed database or operation journal.
-func OpenFileStore(dir string) (Store, error) {
+// exclusive process lock. It is not a distributed database or operation
+// journal. It holds no secret value, because it was given no key to seal one
+// with; OpenSealedFileStore is the same store with one.
+func OpenFileStore(dir string) (Store, error) { return OpenSealedFileStore(dir, nil) }
+
+// OpenSealedFileStore is OpenFileStore for a deployment that stores secret
+// values: the sealer is the operator's key, and without one every write of a
+// value is ErrNoSecretKey and the rest of the store serves as before.
+func OpenSealedFileStore(dir string, sealer Sealer) (Store, error) {
 	if dir == "" {
 		return nil, errors.New("store directory is required")
 	}
@@ -100,7 +133,8 @@ func OpenFileStore(dir string) (Store, error) {
 		_ = lock.Close()
 		return nil, fmt.Errorf("controller directory is already in use: %w", err)
 	}
-	return &fileStore{dir: dir, lock: lock}, nil
+	return &fileStore{dir: dir, lock: lock, sealer: sealer,
+		objects: map[string]v1.Sandbox{}, secrets: map[string]secretRow{}}, nil
 }
 func (s *fileStore) Load() (map[string]v1.Sandbox, error) {
 	b, err := os.ReadFile(filepath.Join(s.dir, "objects.json"))
@@ -117,10 +151,99 @@ func (s *fileStore) Load() (map[string]v1.Sandbox, error) {
 	if data.Version != 1 || data.Objects == nil {
 		return nil, errors.New("unsupported or invalid controller snapshot")
 	}
+	s.objects = data.Objects
+	s.secrets = data.Secrets
+	if s.secrets == nil {
+		s.secrets = map[string]secretRow{}
+	}
 	return data.Objects, nil
 }
+
+// LoadSecrets is the Secret half of Load. The snapshot was read by Load,
+// which the controller calls first.
+func (s *fileStore) LoadSecrets() (map[string]v1.Secret, error) {
+	out := make(map[string]v1.Secret, len(s.secrets))
+	for id, row := range s.secrets {
+		obj := row.Object
+		obj.Status.Version = row.Version
+		out[id] = obj
+	}
+	return out, nil
+}
+
+// WriteSecret seals the plaintext where one is given and rewrites the
+// snapshot. The journal is not this store's: it keeps desired state and
+// nothing else, and the controller's emitter takes the record.
+func (s *fileStore) WriteSecret(_ context.Context, obj v1.Secret, plaintext []byte, _ string) (int, error) {
+	row := s.secrets[obj.Status.ID]
+	row.Object = obj
+	row.Object.Spec.Value = ""
+	if len(plaintext) > 0 {
+		if s.sealer == nil {
+			return 0, ErrNoSecretKey
+		}
+		wrapped, sealed, err := s.sealer.Seal(plaintext)
+		if err != nil {
+			return 0, err
+		}
+		row.Wrapped, row.Sealed = wrapped, sealed
+		row.Version++
+	}
+	row.Object.Status.Version = row.Version
+	previous, held := s.secrets[obj.Status.ID]
+	s.secrets[obj.Status.ID] = row
+	if err := s.write(); err != nil {
+		s.restoreSecret(obj.Status.ID, previous, held)
+		return 0, err
+	}
+	return row.Version, nil
+}
+
+// RemoveSecret drops one Secret and its ciphertext from the snapshot.
+func (s *fileStore) RemoveSecret(_ context.Context, id, _ string) error {
+	previous, held := s.secrets[id]
+	delete(s.secrets, id)
+	if err := s.write(); err != nil {
+		s.restoreSecret(id, previous, held)
+		return err
+	}
+	return nil
+}
+
+// OpenValue unseals one value. It is the snapshot store's half of the one
+// decrypting call, and it has the same single caller the durable store's has.
+func (s *fileStore) OpenValue(_ context.Context, secretID string) ([]byte, int, error) {
+	row, held := s.secrets[secretID]
+	if !held || len(row.Sealed) == 0 {
+		return nil, 0, ErrNotFound
+	}
+	if s.sealer == nil {
+		return nil, 0, ErrNoSecretKey
+	}
+	plaintext, err := s.sealer.Open(row.Wrapped, row.Sealed)
+	if err != nil {
+		return nil, 0, err
+	}
+	return plaintext, row.Version, nil
+}
+
+func (s *fileStore) restoreSecret(id string, previous secretRow, held bool) {
+	if held {
+		s.secrets[id] = previous
+		return
+	}
+	delete(s.secrets, id)
+}
+
 func (s *fileStore) Save(objects map[string]v1.Sandbox) error {
-	b, err := json.Marshal(snapshot{1, objects})
+	s.objects = objects
+	return s.write()
+}
+
+// write replaces the snapshot atomically: both collections, every time,
+// because the file is one document and a half-written one is no state at all.
+func (s *fileStore) write() error {
+	b, err := json.Marshal(snapshot{Version: 1, Objects: s.objects, Secrets: s.secrets})
 	if err != nil {
 		return err
 	}
@@ -158,3 +281,10 @@ func (s *fileStore) Close() error {
 	s.lock = nil
 	return err
 }
+
+// The seams the snapshot store satisfies. A change to either side that breaks
+// the other is a build failure here rather than a nil store at start-up.
+var (
+	_ Store   = (*fileStore)(nil)
+	_ Secrets = (*fileStore)(nil)
+)

@@ -413,3 +413,46 @@ func TestProjectionEnv(t *testing.T) {
 		}
 	})
 }
+
+// TestCompileCarriesTheValueAndTheKind is the half slice 046 added: the
+// control plane decrypts a value at compile and the entry the gateway holds
+// carries it, with the oauth endpoint beside it where the kind has one.
+func TestCompileCarriesTheValueAndTheKind(t *testing.T) {
+	sb := sandbox(v1.Egress{Mode: v1.EgressAllowlist})
+	grant := &OAuth{TokenURL: "https://login.example.com/token", Scope: "read"}
+	github := view("github", "api.github.com")
+	github.Kind = "static"
+	github.Value = "ghp_value"
+	github.Inject = Inject{Header: "Authorization", Scheme: SchemeBearer}
+	vendor := view("vendor", "api.vendor.example")
+	vendor.Kind = "oauth_client_credentials"
+	vendor.Value = "id:secret"
+	vendor.OAuth = grant
+
+	m := compile(t, sb, github, vendor)
+	if len(m.Entries) != 2 {
+		t.Fatalf("entries = %d, want 2", len(m.Entries))
+	}
+	if m.Entries[0].Value != "ghp_value" || m.Entries[0].Kind != "static" {
+		t.Fatalf("entry = %+v", m.Entries[0])
+	}
+	if m.Entries[1].OAuth == nil || m.Entries[1].OAuth.TokenURL != grant.TokenURL {
+		t.Fatalf("oauth = %+v", m.Entries[1].OAuth)
+	}
+	// The entry holds a copy: the view's own grant is not aliased into the
+	// map a gateway keeps for the life of the sandbox.
+	grant.TokenURL = "https://elsewhere.example/token"
+	if m.Entries[1].OAuth.TokenURL == grant.TokenURL {
+		t.Fatal("Compile aliased the view's oauth section")
+	}
+	// The value is on the wire, because the gateway is where it is used, and
+	// notInjectable is not, because only the control plane reads it.
+	m.NotInjectable = []string{"gone"}
+	encoded, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), "ghp_value") || strings.Contains(string(encoded), "gone") {
+		t.Fatalf("the encoded map is %s", encoded)
+	}
+}

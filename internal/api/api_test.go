@@ -37,6 +37,13 @@ type fixture struct {
 	issuerURL       string
 	h               http.Handler
 	c               *controller.Controller
+	// gateway is the environment's own, where the fixture runs one; a
+	// sandbox that mounts a secret does not exist until one acknowledges
+	// its map.
+	gateway *acceptingGateway
+	// failing arms a policy that answers one action with an error, for a
+	// route that must first have an object to read.
+	failing *atomic.Bool
 }
 
 func setup(t *testing.T, policy authz.Authorizer) *fixture { return setupDriver(t, policy, nil) }

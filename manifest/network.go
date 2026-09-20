@@ -111,18 +111,23 @@ func isLocalName(name string) bool {
 }
 
 // inferEgressMode is stage 2 for the boundary: a manifest that named no mode
-// takes the one its host list asks for. Allowed hosts ask for allowlist,
-// denied hosts and an empty manifest alike ask for open. Stage 1 has already
-// refused the one combination no single mode serves.
-func inferEgressMode(n *v1.Network) {
-	if n.Egress.Mode != "" {
-		return
-	}
-	if len(n.Egress.AllowedHosts) > 0 {
+// takes the one its own fields ask for. Allowed hosts ask for allowlist;
+// denied hosts ask for open; a mounted secret with no host list asks for
+// allowlist, because a sandbox that reaches everything has no boundary for
+// the secret's scope to sit inside. An empty manifest asks for open. Stage 1
+// has already refused the one combination no single mode serves.
+func inferEgressMode(n *v1.Network, mountsASecret bool) {
+	switch {
+	case n.Egress.Mode != "":
+	case len(n.Egress.AllowedHosts) > 0:
 		n.Egress.Mode = v1.EgressAllowlist
-		return
+	case len(n.Egress.DeniedHosts) > 0:
+		n.Egress.Mode = v1.EgressOpen
+	case mountsASecret:
+		n.Egress.Mode = v1.EgressAllowlist
+	default:
+		n.Egress.Mode = v1.EgressOpen
 	}
-	n.Egress.Mode = v1.EgressOpen
 }
 
 // narrowing holds a workload actor to the boundary its sandbox was created
@@ -156,6 +161,11 @@ func narrowing(existing, obj *v1.Sandbox) error {
 				break
 			}
 		}
+	}
+	// A secret is reach as much as a host is: mounting one the sandbox did
+	// not have puts a value in its hands that its owner did not give it.
+	if narrowingSecrets(existing, obj) {
+		paths = append(paths, pathSecrets)
 	}
 	if len(paths) == 0 {
 		return nil

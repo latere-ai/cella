@@ -166,7 +166,7 @@ func TestRunServesBothDoorsUntilTheContextEnds(t *testing.T) {
 }
 
 func TestCredentialAuthenticate(t *testing.T) {
-	s := newStore()
+	s := newStore(nil)
 	s.Apply(boundary("sbx_a", 1, v1.EgressOpen))
 	a := credentialAuth{store: s}
 	principal, ok := a.Authenticate("Basic " + basic(egress.ProxyUser, "credential-sbx_a"))

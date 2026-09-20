@@ -59,10 +59,13 @@ memory/Postgres store contract or replicated recovery of spec 010.
 Only JSON `Sandbox` objects are currently implemented. `metadata` accepts
 `name`, `labels`, and `annotations`; `spec` accepts the configured
 `environment`, `env`, `command`, `args`, and `/workspace` as `workdir`.
-A command starts as the main process; start reruns it after stop. Image
-execution, volumes, secrets, networking, resource limits, scheduling fields,
-and lifecycle timers are not yet available and are refused. Status belongs
-to the server. There is no apply/update route yet.
+A command starts as the main process; start reruns it after stop. `spec`
+also accepts `secrets`, one `{name, env}` per mounted `Secret`: the
+environment carries a placeholder and the gateway substitutes the value,
+which needs `CELLA_SECRET_KEY` to be set. Image execution, volumes,
+networking, resource limits, scheduling fields, and lifecycle timers are not
+yet available and are refused. Status belongs to the server. There is no
+apply/update route yet.
 
 ## Files and logs
 

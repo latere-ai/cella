@@ -174,12 +174,13 @@ func (c *Controller) recoverLocked(ctx context.Context, obj v1.Sandbox, now time
 	// create order against a crash between the driver call and the write.
 	// The boundary is put back in a gateway before the driver is asked, as
 	// on create (spec 018): a recovered sandbox runs inside the same map.
-	m, held, err := c.pushEgress(ctx, &obj)
+	boundary, err := c.pushEgress(ctx, &obj)
 	if err != nil {
 		c.retry[id] = now.Add(recoveryBackoff(attempt))
 		return false, fmt.Errorf("pushing the boundary: %w", err)
 	}
-	obj.Status.Conditions = setCondition(obj.Status.Conditions, c.egressCondition(m, held, now))
+	obj.Status.Secrets = boundary.Secrets
+	obj.Status.Conditions = setCondition(obj.Status.Conditions, c.egressCondition(boundary.Map, boundary.Held, now))
 	// The recreated sandbox carries a newly minted identity and the one it
 	// held is revoked, so a copy of the lost sandbox that is still running
 	// somewhere speaks for nobody (spec 006).
@@ -189,7 +190,7 @@ func (c *Controller) recoverLocked(ctx context.Context, obj v1.Sandbox, now time
 		c.retry[id] = now.Add(recoveryBackoff(attempt))
 		return false, err
 	}
-	_, err = c.driver.Create(ctx, specOf(obj, lifecycle, c.egressSpec(m), token))
+	_, err = c.driver.Create(ctx, specOf(obj, lifecycle, c.egressSpec(boundary.Map), boundary.Env, token))
 	switch {
 	case errors.Is(err, driver.ErrAlreadyExists):
 		// The driver had the sandbox after all and adopted it, which means

@@ -78,6 +78,11 @@ func New(o Options) (http.Handler, error) {
 	h.mux.HandleFunc("POST /v1/sandboxes/{id}/{verb}", h.item)
 	h.mux.HandleFunc("GET /v1/sandboxes/{id}/exec", h.execSocket)
 	h.mux.HandleFunc("GET /v1/sandboxes/{id}/attach", h.attachSocket)
+	h.mux.HandleFunc("POST /v1/secrets", h.createSecret)
+	h.mux.HandleFunc("GET /v1/secrets", h.listSecrets)
+	h.mux.HandleFunc("PUT /v1/secrets/{key}", h.applySecret)
+	h.mux.HandleFunc("GET /v1/secrets/{key}", h.secretItem)
+	h.mux.HandleFunc("DELETE /v1/secrets/{key}", h.secretItem)
 	return h, nil
 }
 
@@ -152,7 +157,8 @@ func (h *handler) create(w http.ResponseWriter, r *http.Request) {
 		respondError(w, err)
 		return
 	}
-	obj, err = manifest.ResolveNative(r.Context(), obj, h.Controller.Environment())
+	obj, _, err = manifest.ResolveNativeWith(r.Context(), obj,
+		manifest.NativeOptions(h.Controller.Environment(), h.secretLookup(r)))
 	if err != nil {
 		respondError(w, err)
 		return
@@ -443,6 +449,8 @@ func errorEnvelope(err error, requestID string) (int, httpjson.Error) {
 		code = "not_found"
 	case errors.Is(err, controller.ErrNameTaken), errors.Is(err, driver.ErrAlreadyExists):
 		code = "name_taken"
+	case errors.Is(err, controller.ErrNoSecretKey):
+		code = "capability_unsupported"
 	case errors.Is(err, controller.ErrQuota):
 		code = "quota_exceeded"
 	case errors.Is(err, controller.ErrPhase), errors.Is(err, driver.ErrNotRunning):
@@ -513,6 +521,21 @@ func errorEnvelope(err error, requestID string) (int, httpjson.Error) {
 	case "admission_refused":
 		status = 422
 		message = "The request was refused by this server's policy."
+	case "exclusive_fields":
+		status = 400
+		message = "Two fields that cannot be set together are set."
+	case "missing_field":
+		status = 400
+		message = "A required field is missing."
+	case "secret_host_conflict":
+		status = 409
+		message = "Two mounted secrets apply to the same host."
+	case "secret_out_of_scope":
+		status = 422
+		message = "The secret does not cover the host it is used for."
+	case "boundary_widened":
+		status = 409
+		message = "A sandbox cannot widen its own boundary."
 	}
 	details := map[string]any{"request_id": requestID, "detail": fmt.Sprint(err)}
 	if me != nil && len(me.Paths) > 0 {

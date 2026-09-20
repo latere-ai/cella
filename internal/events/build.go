@@ -143,20 +143,25 @@ const (
 )
 
 // Created is the data of sandbox.created: the manifest as the resolver left
-// it, with every environment value dropped to its key. A value belongs to
-// the sandbox and never to a record.
+// it, with every environment value dropped to its key and every mounted
+// secret dropped to its name. A value belongs to the sandbox and never to a
+// record, and neither does the placeholder that stands in for one.
 type Created struct {
-	Environment string            `json:"environment,omitempty"`
-	Image       string            `json:"image,omitempty"`
-	Command     []string          `json:"command,omitempty"`
-	Args        []string          `json:"args,omitempty"`
-	Workdir     string            `json:"workdir,omitempty"`
-	User        string            `json:"user,omitempty"`
-	Resources   v1.Resources      `json:"resources,omitzero"`
-	Workspace   v1.Workspace      `json:"workspace,omitzero"`
-	Lifecycle   v1.Lifecycle      `json:"lifecycle,omitzero"`
-	Env         []string          `json:"env,omitempty"`
-	Labels      map[string]string `json:"labels,omitempty"`
+	Environment string       `json:"environment,omitempty"`
+	Image       string       `json:"image,omitempty"`
+	Command     []string     `json:"command,omitempty"`
+	Args        []string     `json:"args,omitempty"`
+	Workdir     string       `json:"workdir,omitempty"`
+	User        string       `json:"user,omitempty"`
+	Resources   v1.Resources `json:"resources,omitzero"`
+	Workspace   v1.Workspace `json:"workspace,omitzero"`
+	Lifecycle   v1.Lifecycle `json:"lifecycle,omitzero"`
+	Env         []string     `json:"env,omitempty"`
+	// Mounts are the secrets the manifest mounts, by name. The key is not
+	// "secrets" because audit.RedactJSON blanks every field whose key ends
+	// in secret or secrets, and a name is not a credential.
+	Mounts []string          `json:"mounts,omitempty"`
+	Labels map[string]string `json:"labels,omitempty"`
 }
 
 // CreatedOf reduces one resolved manifest to the created record's data.
@@ -172,6 +177,22 @@ func CreatedOf(obj v1.Sandbox) Created {
 		Workspace:   obj.Spec.Workspace,
 		Lifecycle:   obj.Spec.Lifecycle,
 		Env:         slices.Sorted(maps.Keys(obj.Spec.Env)),
+		Mounts:      mountedNames(obj),
 		Labels:      maps.Clone(obj.Metadata.Labels),
 	}
+}
+
+// mountedNames is the secrets a manifest mounts, by name. The environment key
+// each arrives under is the sandbox's own business and the placeholder is the
+// gateway's, so neither is here.
+func mountedNames(obj v1.Sandbox) []string {
+	if len(obj.Spec.Secrets) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(obj.Spec.Secrets))
+	for _, mount := range obj.Spec.Secrets {
+		out = append(out, mount.Name)
+	}
+	slices.Sort(out)
+	return out
 }

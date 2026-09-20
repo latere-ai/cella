@@ -253,7 +253,7 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	// A gateway that connects to a control plane that has just restarted
 	// receives every live sandbox's map, with the credential that sandbox
 	// already holds, rather than an empty world.
-	hub.Seed(control.EgressMaps())
+	hub.Seed(control.EgressMaps(ctx))
 	// The reaper is this process's clock: one tick applies the lifecycle
 	// rules to the environment cellad drives (spec 005). One cellad is the
 	// only writer of its environment, so it holds its own lease.
@@ -380,7 +380,18 @@ func openStore(ctx context.Context, cfg config.Config) (controller.Store, contro
 		delivery = store.Delivered
 	}
 	if cfg.DBURL == "" {
-		local, err := controller.OpenFileStore(filepath.Join(cfg.DataDir, "controller"))
+		// The snapshot store seals a secret value under the same envelope
+		// the durable store uses, and holds none where the operator set no
+		// key (spec 010).
+		var sealer controller.Sealer
+		if len(cfg.SecretKey) > 0 {
+			envelope, err := store.NewEnvelope(cfg.SecretKey)
+			if err != nil {
+				return nil, nil, nil, nil, fmt.Errorf("controller store: %w", err)
+			}
+			sealer = envelope
+		}
+		local, err := controller.OpenSealedFileStore(filepath.Join(cfg.DataDir, "controller"), sealer)
 		if err != nil {
 			return nil, nil, nil, nil, fmt.Errorf("controller store: %w", err)
 		}

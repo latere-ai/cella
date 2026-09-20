@@ -10,11 +10,13 @@
 // The package computes and nothing else. It reaches manifest/v1, the
 // placeholder primitives of latere.ai/x/pkg/egress/placeholder, and the
 // standard library, so importing it opens no connection and reads no
-// configuration, which is invariant 6 of the architecture. A secret's value
-// never passes through here: Compile takes a view of a Secret that carries
-// its placeholder and its scope, the gateway joins the value to the entry
-// from the control plane's own store, and no type in this package has a
-// field for one.
+// configuration, which is invariant 6 of the architecture.
+//
+// A value passes through: Compile is where the control plane decrypts one,
+// and the map carries it to the gateway that substitutes it. Every type here
+// that holds a value says so, and the rule around them is that a Map and an
+// Entry travel the sync stream and reach nothing else. No response, record,
+// event or log line is ever built from one.
 package egress
 
 import (
@@ -80,14 +82,30 @@ const (
 
 // SecretView is what the control plane knows of one mounted Secret when it
 // compiles a map: which secret it is, the opaque token the sandbox holds in
-// place of its value, and the scope the secret's own owner set. The value is
-// not here and never will be; the gateway joins it per entry from the store.
+// place of its value, the scope the secret's own owner set, and the value
+// itself, read from the store for this compile and for nothing else.
+//
+// For the oauth_client_credentials kind the value is the client id and
+// secret, split on the first colon by the gateway, and OAuth names the
+// endpoint a token is minted at.
 type SecretView struct {
 	Name        string
+	Kind        string
 	Placeholder string
 	Hosts       []string
 	Ports       []int
 	Inject      Inject
+	Value       string
+	OAuth       *OAuth
+}
+
+// OAuth is the client_credentials grant an oauth entry mints from, as the
+// gateway needs it. The client id and secret are the entry's value, not
+// fields here, so one field holds everything a read must never return.
+type OAuth struct {
+	TokenURL string `json:"tokenUrl"`
+	Scope    string `json:"scope,omitempty"`
+	Audience string `json:"audience,omitempty"`
 }
 
 // Inject is where in a request a secret's value replaces its placeholder:
@@ -121,9 +139,12 @@ type Map struct {
 
 // Entry is one injectable secret's rule: replace this placeholder with that
 // secret's value, in this place, toward these hosts and ports and nowhere
-// else.
+// else. Value is the one field of this package that is a credential, and it
+// travels only on the sync stream, inside a map, toward a gateway that
+// authenticated with the environment's own key.
 type Entry struct {
 	Secret      string   `json:"secret"`
+	Kind        string   `json:"kind,omitempty"`
 	Placeholder string   `json:"placeholder"`
 	Hosts       []string `json:"hosts"`
 	Ports       []int    `json:"ports,omitempty"`
@@ -131,6 +152,8 @@ type Entry struct {
 	Query       string   `json:"query,omitempty"`
 	Scheme      string   `json:"scheme,omitempty"`
 	Body        bool     `json:"body,omitempty"`
+	Value       string   `json:"value,omitempty"`
+	OAuth       *OAuth   `json:"oauth,omitempty"`
 }
 
 // DefaultPort is the port a secret's scope covers when it names none, and the
@@ -236,8 +259,9 @@ func compileEntry(mode v1.EgressMode, deny []string, view SecretView) (Entry, bo
 		ports = []int{DefaultPort}
 	}
 	slices.Sort(ports)
-	return Entry{
+	entry := Entry{
 		Secret:      view.Name,
+		Kind:        view.Kind,
 		Placeholder: view.Placeholder,
 		Hosts:       hosts,
 		Ports:       slices.Compact(ports),
@@ -245,7 +269,13 @@ func compileEntry(mode v1.EgressMode, deny []string, view SecretView) (Entry, bo
 		Query:       view.Inject.Query,
 		Scheme:      view.Inject.Scheme,
 		Body:        view.Inject.Body,
-	}, true, nil
+		Value:       view.Value,
+	}
+	if view.OAuth != nil {
+		oauth := *view.OAuth
+		entry.OAuth = &oauth
+	}
+	return entry, true, nil
 }
 
 // refuseSharedHosts is the first of the two defects the reference designs

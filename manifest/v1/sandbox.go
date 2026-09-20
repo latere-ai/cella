@@ -47,6 +47,7 @@ type SandboxSpec struct {
 	Resources   Resources         `json:"resources,omitzero"`
 	Workspace   Workspace         `json:"workspace,omitzero"`
 	Env         map[string]string `json:"env,omitempty"`
+	Secrets     []SecretMount     `json:"secrets,omitempty"`
 	Network     Network           `json:"network,omitzero"`
 	Lifecycle   Lifecycle         `json:"lifecycle,omitzero"`
 }
@@ -75,21 +76,24 @@ type Lifecycle struct {
 	AutoDelete Duration `json:"autoDelete,omitempty"`
 }
 type SandboxStatus struct {
-	ID             string      `json:"id"`
-	Owner          string      `json:"owner"`
-	Environment    string      `json:"environment"`
-	Driver         string      `json:"driver"`
-	Isolation      string      `json:"isolation"`
-	Phase          string      `json:"phase"`
-	Conditions     []Condition `json:"conditions,omitempty"`
-	CreatedAt      time.Time   `json:"createdAt"`
-	StartedAt      time.Time   `json:"startedAt,omitzero"`
-	StoppedAt      time.Time   `json:"stoppedAt,omitzero"`
-	LastActivityAt time.Time   `json:"lastActivityAt,omitzero"`
-	ExpiresAt      time.Time   `json:"expiresAt,omitzero"`
-	ExitCode       *int        `json:"exitCode,omitempty"`
-	Reason         string      `json:"reason,omitempty"`
-	Warnings       []string    `json:"warnings,omitempty"`
+	ID          string      `json:"id"`
+	Owner       string      `json:"owner"`
+	Environment string      `json:"environment"`
+	Driver      string      `json:"driver"`
+	Isolation   string      `json:"isolation"`
+	Phase       string      `json:"phase"`
+	Conditions  []Condition `json:"conditions,omitempty"`
+	// Secrets is which placeholders are in the sandbox's environment and
+	// which of them the gateway will not substitute.
+	Secrets        SecretsStatus `json:"secrets,omitzero"`
+	CreatedAt      time.Time     `json:"createdAt"`
+	StartedAt      time.Time     `json:"startedAt,omitzero"`
+	StoppedAt      time.Time     `json:"stoppedAt,omitzero"`
+	LastActivityAt time.Time     `json:"lastActivityAt,omitzero"`
+	ExpiresAt      time.Time     `json:"expiresAt,omitzero"`
+	ExitCode       *int          `json:"exitCode,omitempty"`
+	Reason         string        `json:"reason,omitempty"`
+	Warnings       []string      `json:"warnings,omitempty"`
 	// EgressState is the control plane's own record of the sandbox's
 	// boundary: the credential both gateway doors authenticate and the
 	// generation of the map that carries it. It is desired state, not
@@ -127,9 +131,13 @@ type TokenState struct {
 type EgressState struct {
 	Credential string `json:"credential,omitempty"`
 	Version    int64  `json:"version,omitempty"`
-	// Placeholders maps a mounted secret's name to the opaque token this
-	// sandbox holds in its place. It is empty until the Secret kind lands.
-	Placeholders map[string]string `json:"placeholders,omitempty"`
+	// Secrets is one record per mounted secret: which Secret this sandbox
+	// was bound to, under which environment key, and the placeholder minted
+	// for it. It lives here because a placeholder the workload already holds
+	// must not change under it, and because binding by id is what keeps a
+	// recreated secret of the same name from taking a running sandbox's
+	// place.
+	Secrets []MountedSecret `json:"secrets,omitempty"`
 }
 
 // Condition is one statement about the environment, written by the server:
