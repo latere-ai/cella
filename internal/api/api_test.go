@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -46,6 +47,10 @@ type fixture struct {
 	failing *atomic.Bool
 	// header is the last response's, for a route whose answer is in them.
 	header http.Header
+	// metrics is what this fixture's handler recorded, for the cases of
+	// design 017. Every fixture carries one, so a route's count is
+	// assertable wherever the route is exercised.
+	metrics *apiRecorder
 }
 
 func setup(t *testing.T, policy authz.Authorizer) *fixture { return setupDriver(t, policy, nil) }
@@ -81,13 +86,17 @@ func setupDriver(t *testing.T, policy authz.Authorizer, wrap func(runtime.Driver
 	if policy == nil {
 		policy = &auth.OwnerPolicy{DefaultEnvironment: "default"}
 	}
-	h, err := New(Options{Controller: c, Verifier: verifier, Authorizer: auth.NewAuthorizer(policy)})
+	rec := &apiRecorder{}
+	h, err := New(Options{
+		Controller: c, Verifier: verifier, Authorizer: auth.NewAuthorizer(policy),
+		Metrics: rec, Log: slog.New(slog.DiscardHandler),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	server := httptest.NewServer(h)
 	t.Cleanup(server.Close)
-	return &fixture{t: t, url: server.URL, issuerURL: issuer.URL(), alice: issuer.Mint(issuertest.Claims{Sub: "alice"}), bob: issuer.Mint(issuertest.Claims{Sub: "bob"}), h: h, c: c}
+	return &fixture{t: t, url: server.URL, issuerURL: issuer.URL(), alice: issuer.Mint(issuertest.Claims{Sub: "alice"}), bob: issuer.Mint(issuertest.Claims{Sub: "bob"}), h: h, c: c, metrics: rec}
 }
 func (f *fixture) request(method, path, token, body string, status int) []byte {
 	f.t.Helper()

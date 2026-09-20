@@ -457,6 +457,21 @@ func (x journal) Pending(ctx context.Context, limit int, now time.Time) ([]store
 	return heads, nil
 }
 
+func (x journal) Undelivered(ctx context.Context) (int, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, events := range x.d.events {
+		for _, e := range events {
+			if e.AckedAt.IsZero() && e.DroppedAt.IsZero() {
+				n++
+			}
+		}
+	}
+	return n, nil
+}
+
 func (x journal) Acknowledge(ctx context.Context, id string, at time.Time) error {
 	return x.finish(ctx, id, func(e *store.Event) { e.AckedAt = at.UTC() })
 }

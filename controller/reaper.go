@@ -134,6 +134,7 @@ func (c *Controller) RunReaper(ctx context.Context) {
 // tick runs one pass while this replica holds the reaper lease.
 func (c *Controller) tick(ctx context.Context) {
 	held, err := c.lease.Acquire(ctx, ReaperLease, LeaseTTL)
+	c.metrics.LeaseHeld(MetricLeaseReaper, err == nil && held)
 	if err != nil {
 		c.log.WarnContext(ctx, "reaper lease unavailable", "lease", ReaperLease, "err", err)
 		return
@@ -277,8 +278,10 @@ func (c *Controller) enforce(ctx context.Context, id, rule string, now time.Time
 		return false, nil
 	}
 	if rule == ReasonAutoStop {
+		c.metrics.ReaperAction(rule, ActionStopped)
 		return true, c.stopLocked(ctx, id, rule)
 	}
+	c.metrics.ReaperAction(rule, ActionDeleted)
 	return true, c.deleteLocked(ctx, id, rule)
 }
 

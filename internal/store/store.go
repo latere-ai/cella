@@ -263,6 +263,11 @@ type Journal interface {
 	// deferred event holds the events behind it for that object and lets no
 	// other object's wait.
 	Pending(ctx context.Context, limit int, now time.Time) ([]Event, error)
+	// Undelivered counts the events the sink has not taken and that were
+	// not dropped, whatever their next attempt is due. It is the depth
+	// design 017's cella_events_pending gauge reads: Pending answers what
+	// one pass may take now, which is neither the backlog nor a bound on it.
+	Undelivered(ctx context.Context) (int, error)
 	// Acknowledge marks one event delivered.
 	Acknowledge(ctx context.Context, id string, at time.Time) error
 	// Defer records one failed attempt and when the next is due.

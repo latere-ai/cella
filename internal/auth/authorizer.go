@@ -61,12 +61,22 @@ type Decision struct {
 // endpoint behind the shared client, or the owner policy, and the rest of
 // cellad cannot tell which.
 type Authorizer struct {
-	inner authz.Authorizer
+	inner   authz.Authorizer
+	metrics Metrics
 }
 
 // NewAuthorizer wraps whichever authorizer this deployment runs.
 func NewAuthorizer(inner authz.Authorizer) *Authorizer {
-	return &Authorizer{inner: inner}
+	return &Authorizer{inner: inner, metrics: nopMetrics{}}
+}
+
+// Measure attaches design 017's recorder and returns the authorizer, so the
+// wiring reads as one expression. One built without it counts nothing.
+func (a *Authorizer) Measure(m Metrics) *Authorizer {
+	if m != nil {
+		a.metrics = m
+	}
+	return a
 }
 
 // Envelope is what one call carries: the caller's subject and its claims
@@ -119,7 +129,11 @@ func (a *Authorizer) Lookup(ctx context.Context, c Caller, info authz.Caller, ac
 	return a.decide(ctx, c, info, action, res, CodeNotFound)
 }
 
-func (a *Authorizer) decide(ctx context.Context, c Caller, info authz.Caller, action string, res authz.Resource, deny Code) (Decision, error) {
+func (a *Authorizer) decide(ctx context.Context, c Caller, info authz.Caller, action string, res authz.Resource, deny Code) (_ Decision, outcome error) {
+	started := time.Now()
+	defer func() {
+		a.metrics.Decision(MetricEndpointAuthorizer, outcomeOf(outcome), time.Since(started))
+	}()
 	d, err := a.inner.Authorize(ctx, Envelope(c, info, action, res))
 	if err != nil {
 		var unknown *authz.UnknownAction

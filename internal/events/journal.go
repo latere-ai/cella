@@ -25,6 +25,10 @@ type Journal interface {
 	// other. The instant is the deliverer's, not the store's, so one clock
 	// decides the backoff and the due time.
 	Pending(ctx context.Context, limit int, now time.Time) ([]Pending, error)
+	// Undelivered counts the records the sink has not taken and that were
+	// not dropped, whatever their next attempt is due. It is the backlog
+	// design 017's cella_events_pending gauge reads.
+	Undelivered(ctx context.Context) (int, error)
 	// Acknowledge marks a record the sink took.
 	Acknowledge(ctx context.Context, id string, at time.Time) error
 	// Defer records one failed attempt and when the next one is due.

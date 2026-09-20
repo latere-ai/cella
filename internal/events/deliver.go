@@ -77,6 +77,9 @@ type DelivererOptions struct {
 	Client      *http.Client
 	Clock       Clock
 	Log         *slog.Logger
+	// Metrics is design 017's recorder. It is optional: with none delivery
+	// keeps only the counts Stats reports.
+	Metrics Metrics
 }
 
 // Deliverer takes records off the journal and posts them to the sink, in
@@ -119,6 +122,9 @@ func NewDeliverer(o DelivererOptions) (*Deliverer, error) {
 	if o.Log == nil {
 		o.Log = slog.Default()
 	}
+	if o.Metrics == nil {
+		o.Metrics = nopMetrics{}
+	}
 	return &Deliverer{o: o}, nil
 }
 
@@ -160,6 +166,7 @@ func (d *Deliverer) Run(ctx context.Context) {
 // reports how many records it attempted, which is what Run paces on.
 func (d *Deliverer) Pass(ctx context.Context) (int, error) {
 	held, err := d.o.Lease.Acquire(ctx, LeaseName, LeaseTTL)
+	d.o.Metrics.LeaseHeld(MetricLeaseJournal, err == nil && held)
 	if err != nil {
 		return 0, fmt.Errorf("events: taking the %s lease: %w", LeaseName, err)
 	}
@@ -210,7 +217,9 @@ func (d *Deliverer) deliver(ctx context.Context, p Pending, now time.Time) {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set(SignatureHeader, Header(now, body, d.o.Secrets...))
+	attempted := time.Now()
 	resp, err := d.o.Client.Do(req)
+	d.o.Metrics.EventDeliveryDuration(time.Since(attempted))
 	if err != nil {
 		d.retry(ctx, p, now, "the sink did not answer: "+err.Error(), false)
 		return
@@ -227,6 +236,7 @@ func (d *Deliverer) deliver(ctx context.Context, p Pending, now time.Time) {
 			return
 		}
 		d.delivered.Add(1)
+		d.o.Metrics.EventDelivered(MetricAcknowledged)
 	case resp.StatusCode == http.StatusUnauthorized:
 		// A 401 is the one 4xx that says nothing about these bytes: the two
 		// ends hold different secrets. Retrying the same body cannot help
@@ -262,6 +272,7 @@ func (d *Deliverer) retry(ctx context.Context, p Pending, now time.Time, why str
 		return
 	}
 	d.deferred.Add(1)
+	d.o.Metrics.EventDelivered(MetricDeferred)
 }
 
 // drop ends a record and says so, because a dropped record is the one
@@ -275,6 +286,7 @@ func (d *Deliverer) drop(ctx context.Context, p Pending, at time.Time, why strin
 		return
 	}
 	d.dropped.Add(1)
+	d.o.Metrics.EventDelivered(MetricDropped)
 }
 
 // backoff is the wait before attempt n+1, doubling from MinBackoff and held

@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -103,7 +104,7 @@ func setupWithStore(t *testing.T, policy authz.Authorizer, open func(string) (co
 	if policy == nil {
 		policy = &auth.OwnerPolicy{DefaultEnvironment: "default"}
 	}
-	h, err := New(Options{Controller: c, Verifier: verifier, Authorizer: auth.NewAuthorizer(policy)})
+	h, err := New(Options{Controller: c, Verifier: verifier, Authorizer: auth.NewAuthorizer(policy), Log: slog.New(slog.DiscardHandler)})
 	if err != nil {
 		t.Fatal(err)
 	}

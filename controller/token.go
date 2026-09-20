@@ -124,6 +124,7 @@ func (c *Controller) rotateLocked(ctx context.Context, obj v1.Sandbox) error {
 	}
 	c.log.InfoContext(ctx, "the sandbox's identity was re-minted", "sandbox", id,
 		"jti", state.JTI, "expires", state.ExpiresAt)
+	c.metrics.TokenReminted()
 	return c.revokeToken(ctx, previous)
 }
 

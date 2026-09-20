@@ -5,6 +5,7 @@
 package controller
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"errors"
@@ -81,6 +82,9 @@ type Options struct {
 	// 006). It is optional: with none, no sandbox is given a token and no
 	// driver projects one.
 	Tokens Tokens
+	// Metrics is design 017's recorder. It is optional: with none the
+	// controller counts nothing and behaves the same.
+	Metrics Metrics
 	// Pool is the environment's prewarmed set: how many entries to keep and
 	// what shape they are (spec 020). Size zero runs no pool, which is
 	// every environment until an operator asks for one. A size above zero
@@ -124,6 +128,7 @@ type Controller struct {
 	gateway          GatewayAddresses
 	events           Events
 	tokens           Tokens
+	metrics          Metrics
 	// secrets is the Secret kind's store, and secretObjects this process's
 	// copy of the collection. Neither holds a value: what is here is what a
 	// read returns, and a plaintext is read per compile through the seam.
@@ -182,7 +187,7 @@ func Open(o Options) (*Controller, error) {
 		lostGrace: o.LostGrace, recoveryAttempts: o.RecoveryAttempts,
 		lost: map[string]time.Time{}, attempts: map[string]int{}, retry: map[string]time.Time{},
 		egress: o.Egress, gateway: o.Gateway,
-		events: o.Events, tokens: o.Tokens,
+		events: o.Events, tokens: o.Tokens, metrics: cmp.Or(o.Metrics, Metrics(nopMetrics{})),
 		secretObjects: map[string]v1.Secret{},
 		pool:          o.Pool, capacity: o.Capacity,
 		poolInFlight: o.PoolInFlight, poolGrace: o.PoolGrace,
@@ -338,6 +343,7 @@ func (c *Controller) create(ctx context.Context, obj v1.Sandbox, owner string, m
 	if err != nil {
 		return obj, err
 	}
+	started := c.clock.Now()
 	entries := c.poolEntries(ctx)
 	entry := c.matchEntry(entries, obj)
 	// A sandbox's place in its tree is create-time identity: the driver
@@ -348,13 +354,36 @@ func (c *Controller) create(ctx context.Context, obj v1.Sandbox, owner string, m
 	if parent != nil || obj.Spec.Mesh.Enabled {
 		entry = nil
 	}
+	c.countAdoption(entry)
 	out, err := c.createLocked(ctx, obj, owner, max, warnings, lifecycle, entries, entry, parent)
 	if entry != nil && err != nil && adoptionLost(err) {
 		c.log.InfoContext(ctx, "the pool entry could not be adopted; this create takes the slow path",
 			"entry", entry.ID, "err", err)
-		return c.createLocked(ctx, obj, owner, max, warnings, lifecycle, without(entries, entry.ID), nil, parent)
+		out, err = c.createLocked(ctx, obj, owner, max, warnings, lifecycle, without(entries, entry.ID), nil, parent)
+		c.metrics.SandboxCreated(PoolMiss, c.clock.Now().Sub(started))
+		return out, err
 	}
+	c.metrics.SandboxCreated(poolResult(entry), c.clock.Now().Sub(started))
 	return out, err
+}
+
+// countAdoption records what the pool did for this create. An environment
+// that keeps no pool is not a miss: there was nothing to hit.
+func (c *Controller) countAdoption(entry *driver.State) {
+	switch {
+	case entry != nil:
+		c.metrics.PoolAdoption(MetricAdopted)
+	case c.pool.Size > 0:
+		c.metrics.PoolAdoption(MetricMiss)
+	}
+}
+
+// poolResult is the create's own label: what the driver was asked for.
+func poolResult(entry *driver.State) string {
+	if entry != nil {
+		return PoolHit
+	}
+	return PoolMiss
 }
 
 // createLocked is design 005's create order over one placement: an entry to

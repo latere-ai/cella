@@ -72,7 +72,7 @@ func setupRecordedDriver(t *testing.T, wrap func(runtime.Driver) runtime.Driver)
 	h, err := New(Options{
 		Controller: c, Verifier: verifier,
 		Authorizer: auth.NewAuthorizer(&auth.OwnerPolicy{DefaultEnvironment: "default"}),
-		Events:     emitter,
+		Events:     emitter, Log: slog.New(slog.DiscardHandler),
 	})
 	if err != nil {
 		t.Fatal(err)

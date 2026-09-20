@@ -6,6 +6,25 @@ refused before it is pushed.
 
 ## Unreleased
 
+- `cellad` reports what it is doing. `GET /metrics` on the internal listener
+  serves the Prometheus exposition: requests and their latency by route,
+  sandboxes by phase, create time by driver and whether a prewarmed entry was
+  adopted, reaper actions, recovery attempts, token re-mints, authorization
+  and admission decisions with their latency, the event backlog and what
+  delivery did with each record, store operation latency, which loop holds
+  which lease, exec sessions by exit, and the boundary's connections, bytes
+  and connected gateways. Labels are bounded: no series carries a sandbox id,
+  a subject, a name or a path. Setting `OTEL_EXPORTER_OTLP_ENDPOINT` also
+  exports traces and logs, one span per request named after its route with
+  the authorizer and admission calls as children on the same trace.
+  Every log line passes one redacting handler on both destinations, so a
+  secret value, a token, a credential or an egress placeholder cannot reach
+  a log. The start-up line says `telemetry=otlp` or `telemetry=off`, the
+  `egress` role serves no scrape surface of its own, and
+  `deploy/base/prometheusrule.yaml` now carries alert rules over the metrics
+  that are emitted rather than placeholders. `docs/observability.md` is the
+  page.
+
 ## v0.2.0 - 2026-09-20
 
 - A sandbox can create sandboxes. Give one spawn rights with

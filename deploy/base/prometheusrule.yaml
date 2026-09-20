@@ -9,13 +9,14 @@
 #
 #	kubectl -n <namespace> apply -f prometheusrule.yaml
 #
-# These are templates and not a rule set that fires today. The metric names
-# are the ones spec 017 fixes, and spec 017 is not built: nothing in this
-# tree exports them yet, so every expression below evaluates over an empty
-# series and no alert can raise. The file exists so an installation has the
-# shape to edit and so the names are decided in one place; the slice that
-# builds the registry of spec 017 replaces the thresholds with figures its
-# own dashboards justify.
+# Every expression reads a metric spec 017 fixes and cellad emits on
+# /metrics, on the internal listener. The job label is the one your
+# ServiceMonitor gives the cellad Service; the thresholds are starting
+# points an installation moves against its own figures.
+#
+# Two rules read metrics the worker and environment loops emit. They
+# evaluate over an empty series until those loops land, which raises
+# nothing and is what the rest of this file is checked against.
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -36,43 +37,107 @@ spec:
           annotations:
             summary: "cellad is not answering its metrics endpoint"
             description: "No sandbox can be created, read or stopped while this holds."
+        # Readiness is the cluster's view, from kube-state-metrics: no
+        # metric cellad exports can report that cellad is unready.
         - alert: CelladNotReady
-          expr: cella_ready == 0
-          for: 10m
+          expr: |
+            kube_pod_status_ready{condition="true", pod=~"cellad-.*"} == 0
+          for: 5m
           labels:
             severity: critical
           annotations:
-            summary: "cellad is up and not ready"
+            summary: "a cellad Pod is up and not ready"
             description: "One readiness check is failing; /readyz on the internal listener names which."
     - name: cellad.dependencies
       rules:
-        # An authorizer that does not answer refuses every request, which
-        # is the design and is still an outage of the installation.
-        - alert: CelladAuthorizerUnavailable
-          expr: rate(cella_authorizer_calls_total{result="unavailable"}[5m]) > 0
-          for: 10m
+        # An authorizer or an admission endpoint that gives no decision
+        # refuses every request that needs one, which is the design and is
+        # still an outage of the installation.
+        - alert: CelladDecisionEndpointUnavailable
+          expr: |
+            sum by (endpoint) (rate(cella_decisions_total{outcome="unavailable"}[5m])) > 0
+          for: 5m
           labels:
             severity: critical
           annotations:
-            summary: "the authorization endpoint is not answering"
-            description: "Every request is refused while this holds. cellad check names the endpoint."
+            summary: "a decision endpoint is not answering"
+            description: "Every request needing that endpoint is refused while this holds. cellad check names the endpoint."
         # A record the sink has not taken is retried for
         # CELLA_EVENTS_RETRY_WINDOW and then dropped and counted.
         - alert: CelladEventsUndelivered
-          expr: cella_events_pending > 0
-          for: 30m
+          expr: cella_events_pending > 1000
+          for: 10m
           labels:
             severity: warning
           annotations:
             summary: "records are queued for the event sink"
-            description: "The journal holds them; they are dropped when the retry window passes."
+            description: "The journal holds them; they are dropped when the retry window passes. Check the sink and CELLA_EVENTS_URL."
+        # A dropped record is the one failure this pipeline cannot make
+        # good later, so it is an alert on its own and not a threshold.
+        - alert: CelladEventsDropped
+          expr: rate(cella_events_delivered_total{outcome="dropped"}[10m]) > 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "records are being dropped undelivered"
+            description: "The sink refused them, or the retry window closed. The dropped record is gone; the object's own status is not."
+        # A lease nobody holds is a loop that is not running: no reaper
+        # means no deadline is enforced, and no journal lease means no
+        # record is delivered.
+        - alert: CelladLeaseNotHeld
+          expr: cella_lease_held == 0
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: "a control-plane lease is held by nobody"
+            description: "The loop under that lease is not running on any replica. The lease name is on the series."
     - name: cellad.workloads
       rules:
-        - alert: CelladSandboxesFailing
-          expr: rate(cella_sandbox_phase_total{phase="Failed"}[15m]) > 0
+        # A create that takes half a minute at the ninety-fifth percentile
+        # is an environment that is out of capacity, pulling every image
+        # cold, or waiting on a backend that is degraded.
+        - alert: CelladSlowCreates
+          expr: |
+            histogram_quantile(0.95,
+              sum by (le, driver) (rate(cella_sandbox_create_duration_seconds_bucket[10m]))) > 30
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "sandbox creates are slow"
+            description: "The ninety-fifth percentile create is above thirty seconds. Check the backend's capacity and the image pulls."
+        # A sandbox the data plane lost is recovered where the store is
+        # durable and reaped where it is not. One that stays Lost is
+        # neither, which is a control plane that cannot reach its backend.
+        - alert: CelladSandboxesLost
+          expr: sum(cella_sandboxes{phase="Lost"}) > 0
           for: 15m
           labels:
             severity: warning
           annotations:
-            summary: "sandboxes are reaching the Failed phase"
-            description: "status.reason on each sandbox says why; the backend may be out of capacity."
+            summary: "sandboxes are Lost and not recovering"
+            description: "The driver no longer has them. cella_recovery_attempts_total says whether recovery is running out of attempts."
+    - name: cellad.environments
+      rules:
+        # An environment with no worker is an environment nothing can be
+        # placed in. It reads zero until the worker role lands.
+        - alert: CelladEnvironmentOffline
+          expr: sum(cella_environments{phase="Offline"}) > 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "an environment is Offline"
+            description: "No worker has reported for it inside CELLA_ENVIRONMENT_OFFLINE. Nothing can be placed there."
+        # An operation redelivered is a worker that took it and did not
+        # acknowledge it, so the same act is being run twice.
+        - alert: CelladOperationsRedelivered
+          expr: rate(cella_operations_redelivered_total[10m]) > 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "operations are being redelivered to workers"
+            description: "A worker took an operation and did not acknowledge it. Check the worker's stream and its own logs."

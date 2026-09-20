@@ -203,7 +203,7 @@ func TestServeAnswersTheProbesOnBothListenersAndStopsCleanly(t *testing.T) {
 		t.Errorf("GET / = %d %q", code, body)
 	}
 	if code, _ := get(t, publicURL+"/metrics"); code != 404 {
-		t.Errorf("GET /metrics on the public listener = %d, want 404 until a later spec mounts it", code)
+		t.Errorf("GET /metrics on the public listener = %d, want 404: the scrape surface of design 017 is the internal listener's alone", code)
 	}
 
 	if code := stop(); code != 0 {

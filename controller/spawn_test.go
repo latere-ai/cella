@@ -15,23 +15,23 @@ import (
 	"latere.ai/x/cella/runtime/native"
 )
 
-// recorder collects the acts the controller emitted, which is the seam a
+// actRecorder collects the acts the controller emitted, which is the seam a
 // store with no journal of its own is read through.
-type recorder struct {
+type actRecorder struct {
 	mu   sync.Mutex
 	acts []Act
 }
 
-func (r *recorder) Emit(_ context.Context, a Act) {
+func (r *actRecorder) Emit(_ context.Context, a Act) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.acts = append(r.acts, a)
 }
 
-func (r *recorder) EmitSecret(context.Context, SecretAct) {}
+func (r *actRecorder) EmitSecret(context.Context, SecretAct) {}
 
 // of returns every act of one type, in the order they were emitted.
-func (r *recorder) of(kind string) []Act {
+func (r *actRecorder) of(kind string) []Act {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	var out []Act
@@ -45,14 +45,14 @@ func (r *recorder) of(kind string) []Act {
 
 // spawning is a controller over the snapshot store with an emitter attached,
 // which is the shape a node with no database runs in.
-func spawning(t *testing.T) (*Controller, *recorder) {
+func spawning(t *testing.T) (*Controller, *actRecorder) {
 	t.Helper()
 	d, err := native.New(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = d.Close() })
-	events := &recorder{}
+	events := &actRecorder{}
 	c, err := Open(Options{DataDir: t.TempDir(), Driver: d, Environment: "default", Events: events})
 	if err != nil {
 		t.Fatal(err)
