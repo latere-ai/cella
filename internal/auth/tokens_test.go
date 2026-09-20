@@ -262,3 +262,48 @@ func signedLocally(t *testing.T, k *rsa.PrivateKey, claims map[string]any) strin
 	}
 	return signing + "." + base64.RawURLEncoding.EncodeToString(sig)
 }
+
+// TestTheMintCarriesTheGrantFromDesiredState: the spawn claim is the budget
+// and the mesh the store holds at the moment of the mint, and a sandbox that
+// may create nothing and is in no mesh carries no claim at all.
+func TestTheMintCarriesTheGrantFromDesiredState(t *testing.T) {
+	signer := newSigner(t, key(t, 1))
+	tokens, err := auth.NewWorkloadTokens(signer, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	obj := v1.Sandbox{Status: v1.SandboxStatus{
+		ID: "sbx_01J9", Environment: "env_01J9", Mesh: "msh_01J9",
+		Spawn: v1.SpawnStatus{Budget: 4, Used: 3, Depth: 2},
+	}}
+	value, _, _, err := tokens.Mint(t.Context(), obj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, claims := verify(t, value, servedKeys(t, signer))
+	spawn, ok := claims["spawn"].(map[string]any)
+	if !ok {
+		t.Fatalf("the token carries spawn %v", claims["spawn"])
+	}
+	// The grant, not the balance: the claim carries no used count, because
+	// a copy of a moving number would be wrong the instant after it was
+	// signed and the ledger is the enforcement.
+	if _, held := spawn["used"]; held {
+		t.Errorf("the claim carries a used count: %v", spawn)
+	}
+	for name, want := range map[string]any{"budget": float64(4), "depth": float64(2), "mesh": "msh_01J9"} {
+		if got := spawn[name]; got != want {
+			t.Errorf("spawn.%s = %v, want %v", name, got, want)
+		}
+	}
+
+	bare := v1.Sandbox{Status: v1.SandboxStatus{ID: "sbx_01J9", Environment: "env_01J9"}}
+	value, _, _, err = tokens.Mint(t.Context(), bare)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, claims = verify(t, value, servedKeys(t, signer))
+	if got, held := claims["spawn"]; held {
+		t.Errorf("a sandbox granted nothing carries spawn %v", got)
+	}
+}

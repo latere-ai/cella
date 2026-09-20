@@ -17,6 +17,7 @@ import (
 
 	"latere.ai/x/cella/authorizer"
 	"latere.ai/x/cella/internal/auth"
+	v1 "latere.ai/x/cella/manifest/v1"
 )
 
 const (
@@ -631,5 +632,59 @@ func TestAGrantThatCoversNothingRefusesTheCaller(t *testing.T) {
 				t.Errorf("the refusal reads %q; a developer reads %q and knows the key was narrowed", err, authz.ReasonGrant)
 			}
 		})
+	}
+}
+
+// TestTheWorkloadMemberIsTheStores: the tree position and the budget in the
+// envelope come from the sandbox the control plane read, never from the
+// claim the token was minted with, so an authorizer decides on what is and
+// not on what a token says.
+func TestTheWorkloadMemberIsTheStores(t *testing.T) {
+	s := stub.New(t, stub.WithVocabulary(authorizer.Vocabulary()))
+	a := asking(t, s.URL(), s.Token(), nil)
+	// The claim says one thing and the store says another. The envelope
+	// carries the store's.
+	sandbox := auth.Caller{
+		Subject: "sandbox:sbx_CHILD", Issuer: publicURL, Sub: "sandbox:sbx_CHILD", Minted: true,
+		Claims: map[string]any{"spawn": map[string]any{"budget": float64(99), "depth": float64(9)}},
+	}
+	sandbox = sandbox.WithSandbox(v1.SandboxStatus{
+		ID: "sbx_CHILD", Parent: "sbx_ROOT", Root: "sbx_ROOT", Environment: "env_01J9",
+		Mesh:  "msh_01J9",
+		Spawn: v1.SpawnStatus{Budget: 2, Used: 1, Depth: 1},
+	})
+	if _, err := a.Decide(t.Context(), sandbox, info, authorizer.ActionSandboxCreate,
+		auth.Sandbox{Name: "grandchild", Parent: "sbx_CHILD", Root: "sbx_ROOT"}.Resource()); err != nil {
+		t.Fatal(err)
+	}
+	req := s.Requests()[0]
+	for name, want := range map[string]any{
+		"id": "sbx_CHILD", "parent": "sbx_ROOT", "root": "sbx_ROOT",
+		"environment": "env_01J9", "mesh": "msh_01J9",
+	} {
+		if got := req.Workload[name]; got != want {
+			t.Errorf("workload.%s = %v, want %v", name, got, want)
+		}
+	}
+	spawn, ok := req.Workload["spawn"].(map[string]any)
+	if !ok {
+		t.Fatalf("workload.spawn = %v", req.Workload["spawn"])
+	}
+	for name, want := range map[string]float64{"budget": 2, "used": 1, "depth": 1} {
+		if got, _ := spawn[name].(float64); got != want {
+			t.Errorf("workload.spawn.%s = %v, want %v; the ledger is the budget, not the claim", name, spawn[name], want)
+		}
+	}
+	// A caller the control plane read nothing for carries the id alone,
+	// which is what tells an authorizer "no parent" from "a parent this
+	// version does not send".
+	s.ClearRequests()
+	bare := auth.Caller{Subject: "sandbox:sbx_CHILD", Issuer: publicURL, Sub: "sandbox:sbx_CHILD", Minted: true}
+	if _, err := a.Decide(t.Context(), bare, info, authorizer.ActionSandboxExec,
+		auth.Sandbox{ID: "sbx_CHILD", Owner: alice}.Resource()); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Requests()[0].Workload; len(got) != 1 || got["id"] != "sbx_CHILD" {
+		t.Fatalf("workload = %v, want the id alone", got)
 	}
 }

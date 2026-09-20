@@ -507,3 +507,44 @@ func TestAnIssuerThatGoesAwayBeforeTheWarmRefusesTheStart(t *testing.T) {
 		t.Errorf("the refusal reads %q; every start-up refusal names the variable to fix", err)
 	}
 }
+
+// TestCallerSpawnIsTheGrantAtMint: the claim a caller reads is what it was
+// granted, and a token that is not cellad's carries none, so nothing here can
+// be raised by a bearer that wrote its own claims.
+func TestCallerSpawnIsTheGrantAtMint(t *testing.T) {
+	granted := auth.Caller{
+		Sub: auth.SandboxPrefix + "sbx_01J9", Minted: true,
+		Claims: map[string]any{"spawn": map[string]any{
+			"budget": float64(4), "depth": float64(2), "mesh": "msh_01J9",
+		}},
+	}
+	got, held := granted.Spawn()
+	if !held || got != (auth.Spawn{Budget: 4, Depth: 2, Mesh: "msh_01J9"}) {
+		t.Fatalf("Spawn = %+v (%v), want the grant at mint", got, held)
+	}
+	// A minted token with no grant carries no claim rather than a claim of
+	// zero, so "granted nothing" and "this version mints no claim" are
+	// apart.
+	none := auth.Caller{Sub: auth.SandboxPrefix + "sbx_01J9", Minted: true}
+	if _, held = none.Spawn(); held {
+		t.Error("a token with no spawn claim reported a grant")
+	}
+	// A claim of another shape is no grant, not a parse error: the control
+	// plane never decides on this.
+	wrong := auth.Caller{
+		Sub: auth.SandboxPrefix + "sbx_01J9", Minted: true,
+		Claims: map[string]any{"spawn": map[string]any{"budget": "many", "depth": nil, "mesh": 7}},
+	}
+	if got, held = wrong.Spawn(); !held || got != (auth.Spawn{}) {
+		t.Errorf("Spawn = %+v (%v), want an empty grant", got, held)
+	}
+	// A listed issuer's token is not cellad's and confers no grant, however
+	// it is written.
+	forged := auth.Caller{
+		Subject: "https://login.example.com|alice", Sub: "alice",
+		Claims: map[string]any{"spawn": map[string]any{"budget": float64(99)}},
+	}
+	if _, held = forged.Spawn(); held {
+		t.Error("a token cellad did not mint carried a spawn grant")
+	}
+}
