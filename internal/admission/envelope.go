@@ -106,16 +106,31 @@ func envelopeOf(in *v1.Sandbox, req manifest.AdmitRequest) ([]byte, error) {
 		return nil, err
 	}
 	if req.Workload != nil {
-		if body.Workload, err = json.Marshal(req.Workload); err != nil {
+		if body.Workload, err = json.Marshal(exported(*req.Workload)); err != nil {
 			return nil, err
 		}
 	}
 	if req.Existing != nil {
-		if body.Existing, err = json.Marshal(req.Existing); err != nil {
+		existing := *req.Existing
+		existing.Status = exported(existing.Status)
+		if body.Existing, err = json.Marshal(existing); err != nil {
 			return nil, err
 		}
 	}
 	return json.Marshal(body)
+}
+
+// exported drops the members of a status that are the control plane's own:
+// the boundary's credential with the placeholders bound to it, and the
+// record a workload token is revoked by. They are desired state rather
+// than something a caller reads, and this body leaves the process for an
+// endpoint the operator wrote. The API strips them from every response for
+// the same reason; stripping them here as well is what keeps a later
+// caller of this package from having to remember.
+func exported(status v1.SandboxStatus) v1.SandboxStatus {
+	status.EgressState = nil
+	status.TokenState = nil
+	return status
 }
 
 // summaryOf reduces an Environment to the four members the envelope

@@ -165,6 +165,13 @@ func TestAdmissionSeesAWorkload(t *testing.T) {
 	if !seen.Actor.Workload || seen.Workload == nil || seen.Workload.ID != mine.Status.ID {
 		t.Fatalf("request = %+v, workload = %+v", seen.Actor, seen.Workload)
 	}
+	// The status handed to an admission step is the exported one. The
+	// boundary's credential and the record the workload token is revoked by
+	// are the control plane's own and reach no caller, an endpoint the
+	// operator wrote included.
+	if seen.Workload.EgressState != nil || seen.Workload.TokenState != nil {
+		t.Fatalf("the admission step was handed the control plane's own state: %+v", seen.Workload)
+	}
 	// A workload whose own sandbox this node cannot read is refused rather
 	// than decided on as if a person had applied.
 	gone, err := signer.MintWorkload(auth.Workload{Sandbox: "sb_missing", Environment: "default"})

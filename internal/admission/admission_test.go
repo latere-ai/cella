@@ -517,7 +517,12 @@ func TestAdmitCarriesTheWorkloadAndTheExisting(t *testing.T) {
 	req := admitRequest()
 	req.Action = "update"
 	req.Existing = sandbox()
-	req.Workload = &v1.SandboxStatus{ID: "sb_1", Phase: "Running"}
+	req.Workload = &v1.SandboxStatus{
+		ID: "sb_1", Phase: "Running",
+		EgressState: &v1.EgressState{Credential: "never-on-the-wire"},
+		TokenState:  &v1.TokenState{JTI: "never-on-the-wire"},
+	}
+	req.Existing.Status = *req.Workload
 	if _, _, err := client(t, e, Options{}).Admit(t.Context(), sandbox(), req); err != nil {
 		t.Fatal(err)
 	}
@@ -530,6 +535,16 @@ func TestAdmitCarriesTheWorkloadAndTheExisting(t *testing.T) {
 	}
 	if string(body["existing"]) == "null" {
 		t.Fatal("an update sent no existing object")
+	}
+	// The boundary's credential and the record a workload token is revoked
+	// by are the control plane's own and never leave the process, on either
+	// member that carries a status.
+	for _, member := range []string{"workload", "existing"} {
+		if strings.Contains(string(body[member]), "never-on-the-wire") ||
+			strings.Contains(string(body[member]), "egressState") ||
+			strings.Contains(string(body[member]), "tokenState") {
+			t.Fatalf("%s carries the control plane's own state: %s", member, body[member])
+		}
 	}
 	var action string
 	if err := json.Unmarshal(body["action"], &action); err != nil || action != "update" {
