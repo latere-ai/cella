@@ -16,7 +16,7 @@ refused before it is pushed.
   and connected gateways. Labels are bounded: no series carries a sandbox id,
   a subject, a name or a path. Setting `OTEL_EXPORTER_OTLP_ENDPOINT` also
   exports traces and logs, one span per request named after its route with
-  the authorizer, admission and sink calls as children on the same trace.
+  the authorizer and admission calls as children on the same trace.
   Every log line passes one redacting handler on both destinations, so a
   secret value, a token, a credential or an egress placeholder cannot reach
   a log. The start-up line says `telemetry=otlp` or `telemetry=off`, the

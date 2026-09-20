@@ -190,9 +190,13 @@ The server span is named by the route once the mux has matched, which is
 also when `route` is known: the wrapper behind the mux reads
 `http.Request.Pattern`, writes it into the slot the outer handler put in
 the context, and renames the span. Attributes are the subject, the
-sandbox id, the request id and the trace id. The authorizer call and the
-admission call are child spans around the same calls the counters wrap,
-so a decision's latency has one span and one histogram from one place.
+sandbox the route names, the request id and the trace id. The authorizer call and the
+admission call are child spans on the request's own path, drawn by the
+instrumented transports the two clients already dial with, so a
+decision's latency has one span and one histogram from one place.
+Delivery to the sink runs on a loop of its own and draws its own trace:
+it is on no request's path. The driver call and the store call of 017
+draw no child span in this slice.
 The gateway's sync stream is one span per accepted stream and not per
 frame; a `record` frame carries no trace and correlates by principal.
 
@@ -288,7 +292,7 @@ loops.
 | Each counter and histogram is moved by the code path that owns it | one test per owner package against a fake recorder, and `TestCountersRecordWhatTheyOwn` over the registry | built |
 | `/metrics` on the internal listener serves the exposition and the public listener does not | `TestScrapeSurfaceIsTheInternalListener` | built |
 | The egress role opens no listener beyond its doors | `TestEgressRoleServesNoScrapeSurface` | built |
-| A request draws one server span named by the route with the subject, the request id and the sandbox, and the probes draw none | `TestRequestSpans` over an in-memory exporter, `TestTheAPIDrawsAServerSpan` against a collector | built |
+| A request draws one server span named by the route with the subject, the request id and the sandbox, and the probes draw none | `TestRequestSpans` over an in-memory exporter, `TestTheAPIDrawsAServerSpan` against a collector with a stub authorizer | built; the parent link between the server span and the authorizer's client span is in the span context and is not decoded |
 | One canary per kind (env value, secret value, placeholder, credential, token, `Authorization`, `Proxy-Authorization`, `Cella-Egress-Credential`) appears on neither path of the tee | `TestLogsRedact`, `TestCanaryNeverReachesALogLine`, `TestTelemetryExportsOverOTLP` | built |
 | One line per request and per stream, none per frame, carrying the route, the code, the subject, the sandbox and the request id | `TestOneLogLinePerRequest`, `TestOneLogLinePerStreamAndNonePerFrame` | built |
 | Every `cella_` metric and label the rules file names is in the declared table, and the document parses | `TestAlertsNameKnownMetrics`, `TestAlertsAggregateOnLabelsThatExist`, `TestEveryAlertCarriesItsRunbookSentence` | built |

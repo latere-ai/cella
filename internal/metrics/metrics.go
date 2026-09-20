@@ -42,8 +42,10 @@ type Options struct {
 	Sandboxes func() map[string]int
 	// Gateways is how many gateways of the environment hold a sync stream.
 	Gateways func() int
-	// Pending is how many records the journal has not delivered.
-	Pending func() int
+	// Pending is how many records the journal has not delivered, and false
+	// where the store could not answer. A scrape publishes no series rather
+	// than a zero, because a zero is what an alert reads as an empty queue.
+	Pending func() (int, bool)
 }
 
 // Registry is design 017's table, instantiated.
@@ -161,7 +163,11 @@ func (r *Registry) gauges(o Options) {
 	}
 	if o.Pending != nil {
 		r.reg.Gauge("cella_events_pending", help["cella_events_pending"], func() []pkgmetrics.LabeledValue {
-			return []pkgmetrics.LabeledValue{{Value: float64(o.Pending())}}
+			n, ok := o.Pending()
+			if !ok {
+				return nil
+			}
+			return []pkgmetrics.LabeledValue{{Value: float64(n)}}
 		})
 	}
 	r.reg.Gauge("cella_lease_held", help["cella_lease_held"], func() []pkgmetrics.LabeledValue {

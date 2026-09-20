@@ -20,6 +20,12 @@ import (
 // answering must not hold the process open past its grace period.
 const telemetryTimeout = 5 * time.Second
 
+// scrapeTimeout bounds what a gauge asks the store at scrape time. It is the
+// probe budget of design 002: a store that has stopped answering fails the
+// scrape's own deadline first, and a scrape that hangs takes the surface
+// down with it.
+const scrapeTimeout = 2 * time.Second
+
 // telemetry is what design 017 turns on, per role: the logger every line goes
 // through, the word the start-up line says, and the flush.
 type telemetry struct {

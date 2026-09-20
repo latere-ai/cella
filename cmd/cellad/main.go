@@ -215,13 +215,19 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 			}
 			return phaseCounts(phases)
 		},
-		Pending: func() int {
-			n, err := store.EventJournal(journal, delivery).Undelivered(ctx)
+		Pending: func() (int, bool) {
+			// A scrape is bounded like the probes of design 002 and
+			// outlives the drain: a store that has stopped answering must
+			// not hold a scrape open, and a shutdown must not turn every
+			// remaining scrape into a warning.
+			read, cancel := context.WithTimeout(context.WithoutCancel(ctx), scrapeTimeout)
+			defer cancel()
+			n, err := store.EventJournal(journal, delivery).Undelivered(read)
 			if err != nil {
-				tel.log.WarnContext(ctx, "the journal's backlog could not be read", "err", err)
-				return 0
+				tel.log.WarnContext(read, "the journal's backlog could not be read", "err", err)
+				return 0, false
 			}
-			return n
+			return n, true
 		},
 	})
 	// The store measures itself where it is design 010's, which is the one

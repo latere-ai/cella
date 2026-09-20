@@ -224,11 +224,12 @@ func stampSpan(ctx context.Context, subject, requestID string) {
 	span.SetAttributes(attrs...)
 }
 
-// stampSandbox adds the sandbox a route names, once the handler has resolved
-// it. It is a separate call because the id is a path value the mux produced
-// and not something the outer handler could know.
-func stampSandbox(ctx context.Context, id string) {
-	if span := trace.SpanFromContext(ctx); span.IsRecording() && id != "" {
-		span.SetAttributes(attribute.String("cella.sandbox_id", id))
+// stampSandbox adds the sandbox a route names. The value is the path segment
+// the mux matched, which design 008 lets a caller write as an id or as a
+// name, so the attribute is cella.sandbox and not cella.sandbox_id: it is
+// what the caller asked for and not always what the store calls it.
+func stampSandbox(ctx context.Context, key string) {
+	if span := trace.SpanFromContext(ctx); span.IsRecording() && key != "" {
+		span.SetAttributes(attribute.String("cella.sandbox", key))
 	}
 }

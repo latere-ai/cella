@@ -258,8 +258,21 @@ func TestTheAPIDrawsAServerSpan(t *testing.T) {
 	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", collector.URL)
 	t.Setenv("OTEL_TRACES_SAMPLER_ARG", "1.0")
 
+	// An operator's authorizer is the child span design 017 names. Under the
+	// built-in owner policy there is no call and so no child, which is why
+	// this case configures a stub of one.
+	authorizer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"allow":true}`))
+	}))
+	defer authorizer.Close()
+
 	issuer := issuertest.New(t, issuertest.WithDefaultAudience("cella"))
-	base, internalURL, _, stop := startServeWithLog(t, map[string]string{"CELLA_OIDC_ISSUERS": issuer.URL()})
+	base, internalURL, _, stop := startServeWithLog(t, map[string]string{
+		"CELLA_OIDC_ISSUERS":     issuer.URL(),
+		"CELLA_AUTHORIZER_URL":   authorizer.URL,
+		"CELLA_AUTHORIZER_TOKEN": "a-bearer-the-stub-ignores",
+	})
 	alice := issuer.Mint(issuertest.Claims{Sub: "alice"})
 
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, base+"/v1/sandboxes", nil)
@@ -296,6 +309,14 @@ func TestTheAPIDrawsAServerSpan(t *testing.T) {
 	}
 	if !strings.Contains(collected.String(), "GET /v1/sandboxes") {
 		t.Errorf("the collector received no span named by the route: %d bytes", collected.Len())
+	}
+	// The authorizer call is instrumented, so it exported a client span of
+	// its own naming the endpoint it dialled. The parent link is in the
+	// span context and not in a string, so this reads the call and not the
+	// linkage.
+	host := strings.TrimPrefix(authorizer.URL, "http://")
+	if !strings.Contains(collected.String(), host) {
+		t.Errorf("the collector received no span for the authorizer call at %s", host)
 	}
 }
 

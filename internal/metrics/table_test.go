@@ -150,7 +150,7 @@ func TestEveryRegisteredRowHasHelp(t *testing.T) {
 		Environment: "default", Driver: "native",
 		Sandboxes: func() map[string]int { return map[string]int{"Running": 1} },
 		Gateways:  func() int { return 0 },
-		Pending:   func() int { return 0 },
+		Pending:   func() (int, bool) { return 0, true },
 	})
 	r.LeaseHeld(metrics.LeaseReaper, true)
 	r.PoolSize(0, 0)

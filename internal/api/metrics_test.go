@@ -245,7 +245,7 @@ func TestRequestSpans(t *testing.T) {
 	for _, kv := range named.Attributes {
 		attrs[string(kv.Key)] = kv.Value.AsString()
 	}
-	for _, key := range []string{"http.route", "cella.subject", "cella.request_id", "cella.sandbox_id"} {
+	for _, key := range []string{"http.route", "cella.subject", "cella.request_id", "cella.sandbox"} {
 		if attrs[key] == "" {
 			t.Errorf("the span carries no %s: %v", key, attrs)
 		}
@@ -255,8 +255,8 @@ func TestRequestSpans(t *testing.T) {
 	if !strings.HasSuffix(attrs["cella.subject"], "|alice") {
 		t.Errorf("the span names the subject %q, want the qualified alice", attrs["cella.subject"])
 	}
-	if attrs["cella.sandbox_id"] != obj.Status.ID {
-		t.Errorf("the span names the sandbox %q, want %q", attrs["cella.sandbox_id"], obj.Status.ID)
+	if attrs["cella.sandbox"] != obj.Status.ID {
+		t.Errorf("the span names the sandbox %q, want %q", attrs["cella.sandbox"], obj.Status.ID)
 	}
 }
 

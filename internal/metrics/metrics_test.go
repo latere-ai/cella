@@ -24,7 +24,7 @@ func full() *metrics.Registry {
 		Driver:      "native",
 		Sandboxes:   func() map[string]int { return map[string]int{"Running": 2, "Stopped": 1} },
 		Gateways:    func() int { return 3 },
-		Pending:     func() int { return 7 },
+		Pending:     func() (int, bool) { return 7, true },
 	})
 }
 
@@ -359,5 +359,23 @@ func TestWithGatewaysPublishesOneFamily(t *testing.T) {
 	}
 	if !series(t, r, `cella_gateways_connected{environment="default"} 4`) {
 		t.Errorf("the second attachment did not replace the first:\n%s", out)
+	}
+}
+
+// TestPendingPublishesNoSeriesWhenTheStoreCannotAnswer is why the closure
+// answers with an ok: a zero on a store that did not answer reads as an empty
+// queue, and the alert on a backlog would go quiet exactly when it should not.
+func TestPendingPublishesNoSeriesWhenTheStoreCannotAnswer(t *testing.T) {
+	answered := true
+	r := metrics.New(metrics.Options{
+		Environment: "default",
+		Pending:     func() (int, bool) { return 4, answered },
+	})
+	if !series(t, r, "cella_events_pending 4") {
+		t.Errorf("the backlog the store answered is not in the exposition:\n%s", exposition(t, r))
+	}
+	answered = false
+	if out := exposition(t, r); strings.Contains(out, "cella_events_pending") {
+		t.Errorf("a store that did not answer published a series:\n%s", out)
 	}
 }

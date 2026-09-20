@@ -97,9 +97,11 @@ a quiet installation reads zero rather than nothing.
 
 With the endpoint set, each request draws one span named after its route,
 carrying the subject, the request id and the sandbox the route names. The
-calls `cellad` makes outward, to your authorizer, your admission endpoint
-and your event sink, are child spans on the same trace, so one trace
-shows what a refusal or a slow create was waiting on.
+calls `cellad` makes on the request's own path, to your authorizer and
+your admission endpoint, are child spans on the same trace, so one trace
+shows what a refusal or a slow create was waiting on. Delivery to your
+event sink runs on a loop of its own and draws its own trace: it is not
+on any request's path.
 
 The response header `X-Trace-Id` carries the trace, and every log line of
 the request carries `trace_id` and the request id. Copy either out of
@@ -120,7 +122,11 @@ destinations.
 
 If you are reading this because a log line looks over-redacted: that is
 the design. The rule is deliberately wide, and nothing that identifies a
-sandbox, a subject or a request is touched by it.
+sandbox, a subject or a request is touched by it. It does reach a few
+names that are not secret: a line naming which Secret could not be read
+carries `[redacted]` in place of that Secret's own id, and the gateway's
+start-up line carries it in place of the environment's name. The sandbox
+id on the same line says which workload it was about.
 
 ## Alerts
 
