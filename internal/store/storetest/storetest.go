@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -1027,6 +1028,38 @@ func ledger(t TB, open Opener) {
 	with(t, s, func(tx store.Tx) error { return tx.Ledger().Forget(ctx, parent) })
 	if used := spawned(t, s, parent); used != 0 {
 		t.Errorf("used = %d after the row was forgotten, want 0", used)
+	}
+
+	// The whole point of the ledger: several callers debiting one remaining
+	// unit at once yield one success. A count read and written in two
+	// statements would yield several.
+	const racers = 8
+	var wg sync.WaitGroup
+	won := make([]error, racers)
+	for i := range won {
+		wg.Go(func() {
+			won[i] = s.Tx(ctx, func(tx store.Tx) error {
+				return tx.Ledger().Debit(ctx, "sbx_race", 1)
+			})
+		})
+	}
+	wg.Wait()
+	granted, refused := 0, 0
+	for _, err := range won {
+		switch {
+		case err == nil:
+			granted++
+		case errors.Is(err, store.ErrBudgetExhausted):
+			refused++
+		default:
+			t.Fatalf("a racing debit answered %v", err)
+		}
+	}
+	if granted != 1 || refused != racers-1 {
+		t.Errorf("%d debits of one unit were granted and %d refused", granted, refused)
+	}
+	if used := spawned(t, s, "sbx_race"); used != 1 {
+		t.Errorf("the race left used = %d, want 1", used)
 	}
 }
 
