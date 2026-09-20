@@ -354,8 +354,11 @@ revalidates. `limits` is optional and
 every field in it is optional: an absent field means the configured
 value. `requests_per_minute` overrides
 `CELLA_REQUESTS_PER_MINUTE` for this subject ([[008-api]]);
-`max_sandboxes` overrides `CELLA_MAX_SANDBOXES_PER_SUBJECT`
-([[007-admission]]); `max_priority` caps `scheduling.priority` and
+`max_sandboxes` overrides `CELLA_MAX_SANDBOXES_PER_SUBJECT`, and it means
+the count [[007-admission]] defines: every desired `Sandbox` of the
+subject whose phase is not `Deleting`, a queued and a stopped one
+included, because each holds a name and a workspace;
+`max_priority` caps `scheduling.priority` and
 reaches `Resolve` as `Limits.MaxPriority` ([[003-manifest-contract]]).
 `filter`, on `sandbox.list` only, narrows the list to the owners and
 labels named.
