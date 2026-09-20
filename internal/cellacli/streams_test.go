@@ -334,3 +334,25 @@ func TestASessionThatFailsMidStreamIs125(t *testing.T) {
 		t.Fatalf("what arrived before the failure is %q", got.stdout)
 	}
 }
+
+// TestATerminalCarriesInputWithoutTheInputFlag: -t alone is a terminal, and
+// a terminal that carried no input would leave the caller unable to type
+// into the command or to interrupt it, because raw mode has already taken
+// the interrupt away from the line discipline.
+func TestATerminalCarriesInputWithoutTheInputFlag(t *testing.T) {
+	p := newSocketPlane(t, func(p *socketPlane, conn *websocket.Conn) {
+		go p.read(conn)
+		p.waitFor(func() bool { return len(p.input) >= len("typed in") })
+		_ = conn.WriteJSON(map[string]int{"exit": 0})
+		_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+	})
+	got := p.run(t, "typed in", newFakeTerminal(80, 24), "exec", "dev", "-t", "--", "sh")
+	if got.code != 0 {
+		t.Fatalf("exit %d, stderr %q", got.code, got.stderr)
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if string(p.input) != "typed in" {
+		t.Fatalf("what the caller typed arrived as %q", p.input)
+	}
+}

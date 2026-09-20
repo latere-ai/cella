@@ -62,7 +62,10 @@ func exec(ctx context.Context, c *invocation, args []string) error {
 	if err != nil {
 		return err
 	}
-	return c.drive(session, *stdin, *tty)
+	// A terminal carries input by definition: design 011 pumps stdin under
+	// either flag, and a raw terminal whose bytes reached nothing would
+	// leave the caller unable to type or to interrupt.
+	return c.drive(session, *stdin || *tty, *tty)
 }
 
 // execWait is the synchronous route: one answer carrying both outputs, the
