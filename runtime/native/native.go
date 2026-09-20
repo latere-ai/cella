@@ -63,6 +63,12 @@ func New(root string) (*Driver, error) {
 			continue
 		}
 		r, err := d.load(entry.Name())
+		if errors.Is(err, driver.ErrNotFound) {
+			// A directory with no record is a sandbox another instance is
+			// still creating or a delete is still removing; it is not one
+			// this instance recovers.
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}

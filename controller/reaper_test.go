@@ -281,7 +281,10 @@ func created(t *testing.T, c *Controller, name string) v1.Sandbox {
 // runs on its own goroutine and a fixed sleep would be a race either way.
 func waitFor(t *testing.T, what string, ok func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
+	// Thirty seconds is far above what any case needs on an idle machine;
+	// the instrumented run of the cover gate beside other suites is what
+	// the bound is for.
+	deadline := time.Now().Add(30 * time.Second)
 	for !ok() {
 		if time.Now().After(deadline) {
 			t.Fatalf("timed out waiting for %s", what)

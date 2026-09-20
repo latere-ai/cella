@@ -317,3 +317,22 @@ func TestListSkipsADirectoryWithoutARecord(t *testing.T) {
 		t.Fatalf("List = %d states, want none", len(states))
 	}
 }
+
+// TestNewSkipsADirectoryWithoutARecord: a second driver instance opening a
+// root another instance is writing into recovers what has a record and
+// ignores a directory that has none yet.
+func TestNewSkipsADirectoryWithoutARecord(t *testing.T) {
+	_, root := fresh(t)
+	if err := os.MkdirAll(filepath.Join(root, "sbx_01j0000000000000000000000y"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	second, err := New(root)
+	if err != nil {
+		t.Fatalf("New = %v, want the half-made entry skipped", err)
+	}
+	defer func() { _ = second.Close() }()
+	states, err := second.List(t.Context(), driver.Filter{})
+	if err != nil || len(states) != 0 {
+		t.Fatalf("List = %v, %v; want no state", states, err)
+	}
+}
