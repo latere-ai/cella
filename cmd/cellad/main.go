@@ -366,7 +366,18 @@ func openStore(ctx context.Context, cfg config.Config) (controller.Store, contro
 		delivery = store.Delivered
 	}
 	if cfg.DBURL == "" {
-		local, err := controller.OpenFileStore(filepath.Join(cfg.DataDir, "controller"))
+		// The snapshot store seals a secret value under the same envelope
+		// the durable store uses, and holds none where the operator set no
+		// key (spec 010).
+		var sealer controller.Sealer
+		if len(cfg.SecretKey) > 0 {
+			envelope, err := store.NewEnvelope(cfg.SecretKey)
+			if err != nil {
+				return nil, nil, nil, nil, fmt.Errorf("controller store: %w", err)
+			}
+			sealer = envelope
+		}
+		local, err := controller.OpenSealedFileStore(filepath.Join(cfg.DataDir, "controller"), sealer)
 		if err != nil {
 			return nil, nil, nil, nil, fmt.Errorf("controller store: %w", err)
 		}

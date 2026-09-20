@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -303,35 +304,48 @@ type plane struct {
 	bearer string
 	signer *auth.Signer
 	stop   func() int
+	// dataDir is where this control plane writes its state, and out and
+	// errOut are everything it printed. A canary test reads all three.
+	dataDir string
+	out     *syncBuffer
+	errOut  *syncBuffer
 }
 
 // startPlane runs cellad serve on loopback, pointed at the gateway addresses
 // the test reserved.
 func startPlane(t *testing.T, proxyAddr, reverseAddr string) *plane {
+	return startPlaneWith(t, proxyAddr, reverseAddr, nil)
+}
+
+// startPlaneWith is startPlane with the configuration a test adds, which is
+// how a tier that stores secret values gets its key.
+func startPlaneWith(t *testing.T, proxyAddr, reverseAddr string, extra map[string]string) *plane {
 	t.Helper()
 	issuer := issuertest.New(t)
 	key := signingKey(t, 1)
+	dataDir := t.TempDir()
 	e := map[string]string{
 		"CELLA_OIDC_ISSUERS":        issuer.URL(),
 		"CELLA_RUNTIME":             "native",
 		"CELLA_ALLOW_UNSAFE_NATIVE": "true",
 		"CELLA_PUBLIC_URL":          "https://control.example.com",
 		"CELLA_TOKEN_KEY":           signingKeyPEM(t, 1),
-		"CELLA_DATA_DIR":            t.TempDir(),
+		"CELLA_DATA_DIR":            dataDir,
 		"CELLA_PUBLIC_ADDR":         "127.0.0.1:0",
 		"CELLA_INTERNAL_ADDR":       "127.0.0.1:0",
 		"CELLA_GATEWAY":             proxyAddr,
 		"CELLA_GATEWAY_REVERSE":     reverseAddr,
 		"CELLA_EGRESS_ACK_TIMEOUT":  "10s",
 	}
-	var out syncBuffer
-	var errOut bytes.Buffer
+	maps.Copy(e, extra)
+	var out, errOut syncBuffer
 	ctx, cancel := context.WithCancel(t.Context())
 	codec := make(chan int, 1)
 	go func() { codec <- run(ctx, nil, env(e), &out, &errOut) }()
 	p := &plane{
-		bearer: issuer.Mint(issuertest.Claims{Sub: "alice", Aud: issuertest.StringList{"cella"}}),
-		signer: newSigner(t, key, "https://control.example.com"),
+		bearer:  issuer.Mint(issuertest.Claims{Sub: "alice", Aud: issuertest.StringList{"cella"}}),
+		signer:  newSigner(t, key, "https://control.example.com"),
+		dataDir: dataDir, out: &out, errOut: &errOut,
 		stop: func() int {
 			cancel()
 			select {
