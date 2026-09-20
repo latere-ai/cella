@@ -290,6 +290,9 @@ rewrite, which is a cluster concern and not a driver call.
 | k8s renders the policy admitting the mesh and nothing else, the headless Service, and each Pod's `hostname` and `subdomain`; both end with the last member | `TestRenderMesh`, `TestMeshPolicyAdmitsTheMeshAndNothingElse`, `TestMeshLifetime`, `TestMeshObjectsAlreadyGone` | built |
 | The mesh object's name is a DNS label whatever the mesh id is; the two stamped fields narrow a list | `TestMeshObjectName`, `TestFilterSelectsTheTree` | built |
 | native declares no `Mesh` | `TestNativeDeclaresNoMesh` | built |
+| The reaper's delete cascades as a request's does, so a deadline on an ancestor ends the tree | `TestADeadlineEndsTheTree` | built |
+| A spawn and a mesh root take the slow path rather than adopting a prewarmed entry, because the tree position is create-time identity | `TestATreeNeverAdoptsAnEntry` | built |
+| A first member whose mesh objects could not be made leaves neither the sandbox nor the objects | `TestMeshJoinFailureLeavesNoObjects`, `TestMeshJoinFailureUndoesTheCreate` | built |
 | A node on native serves a spawn tree end to end: two children, a third refused with `spawn_budget_exhausted`, a grandchild refused at `spec.mesh.spawn.depth`, a child reaching one more host refused with `boundary_exceeded`, and the root's delete taking both children | `TestSpawnTreeEndToEnd` in `cmd/cellad` | built |
 
 ## Outcome
@@ -348,6 +351,18 @@ members carry it, it survives the first delete and is gone after the second.
   carries the API group, which it did not before.
 
 ### Left open
+
+- **Two last members deleted at once both leave the mesh's objects.** Each
+  sees the other in its own list and neither removes the network or the
+  policy and Service. The objects leak; nothing reads them, and the next
+  member of a mesh with that id finds them made. A count the driver takes
+  under one lock would end it.
+- **`NarrowingRefusal` has no caller.** The rule is built and tested; the
+  route that would run it is the `PUT` of a sandbox [[008-api]] has yet to
+  serve.
+- **A sandbox written before this slice has no `status.root`.** `?root=` and
+  the `root` field of an authorizer request skip it, because the field is
+  written at create and a stored object is never rewritten.
 
 - **A workload cannot mount a secret over the API.** Rule 3 is proven in
   `manifest` against a lookup; through the API the mount decision reaches
