@@ -110,6 +110,10 @@ func (f *fixture) request(method, path, token, body string, status int) []byte {
 
 const createBody = `{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox","metadata":{"name":"work","labels":{"team":"a"}},"spec":{}}`
 
+// spawningBody is createBody with the spawn rights of design 022, for a test
+// whose sandbox creates children of its own.
+const spawningBody = `{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox","metadata":{"name":"work","labels":{"team":"a"}},"spec":{"mesh":{"spawn":{"budget":2,"depth":1}}}}`
+
 func TestNativeHTTPWorkspaceEndToEnd(t *testing.T) {
 	f := setup(t, nil)
 	body := f.request("POST", "/v1/sandboxes", f.alice, createBody, 201)
@@ -312,7 +316,12 @@ func TestExecStreamFailureCannotReportSuccess(t *testing.T) {
 	if !bytes.Contains(b, []byte("driver_unavailable")) || !execution.closed {
 		t.Fatal(string(b), execution.closed)
 	}
-	f.request("GET", "/v1/sandboxes?root=sbx_unknown", f.alice, "", 422)
+	// A tree selector naming a root this node does not hold is an empty
+	// page and not a refusal: a root that was deleted and one that never
+	// existed read the same way (design 008).
+	if body := f.request("GET", "/v1/sandboxes?root=sbx_unknown", f.alice, "", 200); !bytes.Contains(body, []byte(`"items":[]`)) {
+		t.Fatalf("the tree of an unknown root is %s", body)
+	}
 }
 
 func TestEnvironmentKeysCannotAccessSandboxRoutes(t *testing.T) {
