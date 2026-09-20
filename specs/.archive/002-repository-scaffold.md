@@ -216,7 +216,7 @@ operator's own second check over whatever the endpoint returned.
 | `CELLA_MAX_BODY_BYTES` | 008 | `65536` | the largest manifest or JSON body accepted |
 | `CELLA_MAX_UPLOAD_BYTES` | 008 | `1Gi` | the largest tar upload accepted |
 | `CELLA_UNAUTHENTICATED_REQUESTS_PER_MINUTE` | 008 | `60` | requests one client address may send before authentication in a minute |
-| `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_*` | 017 | unset | the standard OpenTelemetry exporter variables, read by `latere.ai/x/pkg/otel`; telemetry is off without the endpoint |
+| `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_HEADERS`, `OTEL_SDK_DISABLED`, `OTEL_TRACES_SAMPLER_ARG`, `LATERE_ENV`, `POD_NAME` | 017 | unset, unset, unset, `0.2`, `production`, the hostname | not this project's: they are the variables `latere.ai/x/pkg/otel` reads, and 017 adds none of its own. The endpoint turns OTLP export on for traces, logs and process telemetry; the scrape surface on the internal listener is served whether or not one is set, and the start-up line says `telemetry=otlp` or `telemetry=off` (053) |
 
 ### The gate
 

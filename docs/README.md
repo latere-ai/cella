@@ -12,6 +12,7 @@ packages.
 | [Install](install.md) | A cluster, the manifests from the release's `deploy-<tag>.tar.gz`, the first sandbox, and `cellad check` |
 | Configuration | the table in the [repository scaffold spec](../specs/.archive/002-repository-scaffold.md) until `docs/configuration.md` is generated from the code |
 | [Deploy reference](../deploy/README.md) | What each manifest and each Secret of `deploy/` is, and why the Role grants what it does |
+| [Observability](observability.md) | The scrape surface and what it carries, traces and logs over OTLP, redaction, and the alert rules |
 | Identity | the [section in the README](../README.md#identity) is what an operator needs: the issuers, the authorizer, the signing key and its rotation |
 
 Trying it out before there is anything to install takes one command and
