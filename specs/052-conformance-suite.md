@@ -131,7 +131,7 @@ can run reports one skip with its reason and never nothing.
 
 | Group | Cases | Skips when |
 |---|---|---|
-| decode | 7: `case008UnsupportedMediaType`, `case008NotAcceptable`, `case008BodyTooLarge`, `case003MultiDocument`, `case003UnsupportedVersion`, `case003UnsupportedKind`, `case003UnknownField` | never |
+| decode | 8: `case003ContentTypes`, `case008UnsupportedMediaType`, `case008NotAcceptable`, `case008BodyTooLarge`, `case003MultiDocument`, `case003UnsupportedVersion`, `case003UnsupportedKind`, `case003UnknownField` | never |
 | resolve | 6: `case003DefaultsAreReturned`, `case008GeneratedName`, `case008NameTaken`, `case008NameOnPathAndBody`, `case007AdmissionRefused`, `case007AdmissionUnavailable` | the admission cases without `AdmissionControl` |
 | lifecycle | 4: `case005CreateReachesRunning`, `case005StopAndStart`, `case005PhaseConflict`, `case005DeleteInEveryPhase` | never |
 | identity | 5: `case006Unauthenticated`, `case006Forbidden`, `case006NotFound`, `case006WorkloadTokenScope`, `case006AuthorizerUnavailable` | the last without `AuthorizerControl` |
@@ -150,7 +150,7 @@ can run reports one skip with its reason and never nothing.
 | indistinguishability | 1: `case001Indistinguishable` | without `WorkerEnvironment` |
 | capability | 1: `case004CapabilityGates` | without a declared capability set |
 
-50 cases. The `NNN` of a case is the spec whose criterion it proves, not
+51 cases. The `NNN` of a case is the spec whose criterion it proves, not
 this slice: a case is the spec's, and this slice only writes it.
 
 ### What of 008 is a case and what is not
@@ -221,7 +221,7 @@ change to a server package: a case that fails is recorded here.
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| The decode group holds every refusal of the two content types and the manifest's envelope: conformance cases `case008UnsupportedMediaType`, `case008NotAcceptable`, `case008BodyTooLarge`, `case003MultiDocument`, `case003UnsupportedVersion`, `case003UnsupportedKind`, `case003UnknownField` | `TestSuiteAgainstThisServer` | not built |
+| The decode group holds the two content types and every refusal of the manifest's envelope: conformance cases `case003ContentTypes`, `case008UnsupportedMediaType`, `case008NotAcceptable`, `case008BodyTooLarge`, `case003MultiDocument`, `case003UnsupportedVersion`, `case003UnsupportedKind`, `case003UnknownField` | `TestSuiteAgainstThisServer` | not built |
 | The resolve group holds the defaults, the names and the admission step: conformance cases `case003DefaultsAreReturned`, `case008GeneratedName`, `case008NameTaken`, `case008NameOnPathAndBody`, `case007AdmissionRefused`, `case007AdmissionUnavailable` | `TestSuiteAgainstThisServer` | not built |
 | The lifecycle group holds the transitions and their refusals: conformance cases `case005CreateReachesRunning`, `case005StopAndStart`, `case005PhaseConflict`, `case005DeleteInEveryPhase` | `TestSuiteAgainstThisServer` | not built |
 | The identity group holds every refusal class of a caller and the authorizer's outage: conformance cases `case006Unauthenticated`, `case006Forbidden`, `case006NotFound`, `case006WorkloadTokenScope`, `case006AuthorizerUnavailable` | `TestSuiteAgainstThisServer` | not built |

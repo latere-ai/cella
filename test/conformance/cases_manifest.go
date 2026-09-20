@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
-	"strings"
 )
 
 // decodeCases prove what a body may be: the content types the manifest
@@ -69,13 +68,7 @@ func case003ContentTypes(ctx context.Context, e *Env) error {
 // case008UnsupportedMediaType: a body of any other type is 415 with the
 // sentence of the table.
 func case008UnsupportedMediaType(ctx context.Context, e *Env) error {
-	x, err := e.caller.send(ctx, http.MethodPost, "/v1/sandboxes", request{
-		Body: e.manifest(e.name()), ContentType: "text/plain",
-	})
-	if err != nil {
-		return err
-	}
-	return x.refusal("unsupported_media_type")
+	return e.refuseApply(ctx, request{Body: e.manifest(e.name()), ContentType: "text/plain"}, "unsupported_media_type")
 }
 
 // case008NotAcceptable: an Accept that excludes JSON and YAML is 406.
@@ -91,15 +84,8 @@ func case008NotAcceptable(ctx context.Context, e *Env) error {
 // is created.
 func case008BodyTooLarge(ctx context.Context, e *Env) error {
 	name := e.name()
-	body := e.manifest(name, func(body map[string]any) {
-		spec, _ := body["spec"].(map[string]any)
-		spec["env"] = map[string]any{"PADDING": strings.Repeat("p", 1<<20)}
-	})
-	x, err := e.caller.post(ctx, "/v1/sandboxes", body)
-	if err != nil {
-		return err
-	}
-	if err := x.refusal("body_too_large"); err != nil {
+	body := e.manifest(name, padding(1<<20))
+	if err := e.refuseApply(ctx, request{Body: body, ContentType: "application/json"}, "body_too_large"); err != nil {
 		return err
 	}
 	read, err := e.caller.get(ctx, "/v1/sandboxes/"+name)
@@ -115,32 +101,20 @@ func case008BodyTooLarge(ctx context.Context, e *Env) error {
 // case003MultiDocument: two documents in one request are refused.
 func case003MultiDocument(ctx context.Context, e *Env) error {
 	two := append(append([]byte{}, e.manifest(e.name())...), e.manifest(e.name())...)
-	x, err := e.caller.post(ctx, "/v1/sandboxes", two)
-	if err != nil {
-		return err
-	}
-	return x.refusal("multi_document")
+	return e.refuseApply(ctx, request{Body: two, ContentType: "application/json"}, "multi_document")
 }
 
 // case003UnsupportedVersion: the version is read before any field.
 func case003UnsupportedVersion(ctx context.Context, e *Env) error {
 	body := replaceField(e.manifest(e.name()), "apiVersion", "cella.latere.ai/v1alpha0")
-	x, err := e.caller.post(ctx, "/v1/sandboxes", body)
-	if err != nil {
-		return err
-	}
-	return x.refusal("unsupported_version")
+	return e.refuseApply(ctx, request{Body: body, ContentType: "application/json"}, "unsupported_version")
 }
 
 // case003UnsupportedKind: a kind this server does not serve is refused, and
 // the refusal is the kind's and not the schema's.
 func case003UnsupportedKind(ctx context.Context, e *Env) error {
 	body := replaceField(e.manifest(e.name()), "kind", "Widget")
-	x, err := e.caller.post(ctx, "/v1/sandboxes", body)
-	if err != nil {
-		return err
-	}
-	return x.refusal("unsupported_kind")
+	return e.refuseApply(ctx, request{Body: body, ContentType: "application/json"}, "unsupported_kind")
 }
 
 // case003UnknownField: a field the schema does not know is refused wherever
@@ -156,11 +130,7 @@ func case003UnknownField(ctx context.Context, e *Env) error {
 	if err != nil {
 		return err
 	}
-	x, err := e.caller.post(ctx, "/v1/sandboxes", raw)
-	if err != nil {
-		return err
-	}
-	return x.refusal("unknown_field")
+	return e.refuseApply(ctx, request{Body: raw, ContentType: "application/json"}, "unknown_field")
 }
 
 // case003DefaultsAreReturned: an apply answers the resolved manifest with
@@ -242,11 +212,7 @@ func case008NameTaken(ctx context.Context, e *Env) error {
 	if _, err := e.create(ctx, e.caller, e.manifest(name)); err != nil {
 		return err
 	}
-	x, err := e.caller.post(ctx, "/v1/sandboxes", e.manifest(name))
-	if err != nil {
-		return err
-	}
-	return x.refusal("name_taken")
+	return e.refuseApply(ctx, request{Body: e.manifest(name), ContentType: "application/json"}, "name_taken")
 }
 
 // case008NameOnPathAndBody: an apply by name whose body names another object
@@ -276,11 +242,7 @@ func case007AdmissionRefused(ctx context.Context, e *Env) error {
 		return err
 	}
 	defer func() { _ = e.control(context.WithoutCancel(ctx), e.cfg.AdmissionControl, "") }()
-	x, err := e.caller.post(ctx, "/v1/sandboxes", e.manifest(e.name()))
-	if err != nil {
-		return err
-	}
-	return x.refusal("admission_refused")
+	return e.refuseApply(ctx, request{Body: e.manifest(e.name()), ContentType: "application/json"}, "admission_refused")
 }
 
 // case007AdmissionUnavailable: an endpoint that does not answer fails
@@ -293,11 +255,7 @@ func case007AdmissionUnavailable(ctx context.Context, e *Env) error {
 		return err
 	}
 	defer func() { _ = e.control(context.WithoutCancel(ctx), e.cfg.AdmissionControl, "") }()
-	x, err := e.caller.post(ctx, "/v1/sandboxes", e.manifest(e.name()))
-	if err != nil {
-		return err
-	}
-	return x.refusal("admission_unavailable")
+	return e.refuseApply(ctx, request{Body: e.manifest(e.name()), ContentType: "application/json"}, "admission_unavailable")
 }
 
 // replaceField rewrites one top-level string field of a manifest.

@@ -383,6 +383,21 @@ func (e *Env) manifest(name string, mutate ...func(body map[string]any)) []byte 
 	return out
 }
 
+// refuseApply posts one manifest that must be refused with the code named.
+// An object that came back instead is recorded before the case fails, so a
+// server that created what it was asked to refuse does not leave the object
+// behind as well.
+func (e *Env) refuseApply(ctx context.Context, req request, code string) error {
+	x, err := e.caller.send(ctx, http.MethodPost, "/v1/sandboxes", req)
+	if err != nil {
+		return err
+	}
+	if obj, decodeErr := x.object(); decodeErr == nil && obj.Status.ID != "" {
+		e.record(e.caller, "/v1/sandboxes", obj.Status.ID)
+	}
+	return x.refusal(code)
+}
+
 // create applies one manifest and records the object. It returns the created
 // object, so a case reads the status the server resolved.
 func (e *Env) create(ctx context.Context, c *client, body []byte) (object, error) {
