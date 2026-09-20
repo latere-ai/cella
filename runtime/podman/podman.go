@@ -77,6 +77,8 @@ const (
 	// The pool's three keys, on the record volume rather than the workspace
 	// one: podman fixes a volume's labels at create, and an adoption
 	// rewrites all three (spec 020).
+	labelMesh      = prefix + "mesh"
+	labelParent    = prefix + "parent"
 	labelPool      = driver.PoolLabel
 	labelAdopted   = prefix + "adopted-at"
 	labelAdoptedBy = prefix + "adopted-by"
@@ -160,7 +162,7 @@ func (d *Driver) Isolation() string { return v1.IsolationContainer }
 // Pool, because a generation of the record is written once: the engine refuses
 // a second volume of one name, which is the compare-and-swap adoption needs.
 func (d *Driver) Capabilities() driver.Capabilities {
-	return driver.Capabilities{Files: true, Detach: true, Attach: true, Pool: true}
+	return driver.Capabilities{Files: true, Detach: true, Attach: true, Pool: true, Mesh: true}
 }
 
 // Socket is the socket the driver last found answering, for the start-up line.
@@ -303,6 +305,10 @@ type identity struct {
 	workspacePath   string
 	disk            string
 	createdAt       time.Time
+	// mesh is the mesh this sandbox belongs to and parent the sandbox that
+	// spawned it (spec 022). Both are fixed at create, which is why they
+	// are on the identity and not on the record.
+	mesh, parent string
 }
 
 func (i identity) labels() map[string]string {
@@ -317,6 +323,12 @@ func (i identity) labels() map[string]string {
 	if i.disk != "" {
 		l[labelDisk] = i.disk
 	}
+	if i.mesh != "" {
+		l[labelMesh] = i.mesh
+	}
+	if i.parent != "" {
+		l[labelParent] = i.parent
+	}
 	return l
 }
 
@@ -329,6 +341,7 @@ func identityOf(l map[string]string) identity {
 	return identity{
 		id: l[labelID], name: l[labelName], owner: l[labelOwner], image: l[labelImage],
 		digest: l[labelDigest], workspacePath: p, disk: l[labelDisk], createdAt: created.UTC(),
+		mesh: l[labelMesh], parent: l[labelParent],
 	}
 }
 
@@ -664,7 +677,8 @@ func (d *Driver) Create(ctx context.Context, s driver.CreateSpec) (driver.Ref, e
 	// sandbox was created does not read as started before it.
 	now := time.Now().UTC().Truncate(time.Second)
 	ident := identity{id: s.ID, name: s.Name, owner: s.Owner, image: s.Image, digest: digest,
-		workspacePath: root, disk: s.Resources.Disk, createdAt: now}
+		workspacePath: root, disk: s.Resources.Disk, createdAt: now,
+		mesh: s.Mesh.ID, parent: s.Parent}
 	if err := d.createVolume(ctx, workspaceVolume(s.ID), ident.labels()); err != nil {
 		if conflict(err) {
 			return driver.Ref{}, driver.ErrAlreadyExists
@@ -700,6 +714,13 @@ func (d *Driver) Create(ctx context.Context, s driver.CreateSpec) (driver.Ref, e
 	if err := d.client().json(ctx, http.MethodPost, "/containers/create", sg, nil); err != nil {
 		undo()
 		return driver.Ref{}, fmt.Errorf("podman: creating the container: %w", err)
+	}
+	// The mesh network is joined between the create and the start, so a
+	// member is reachable by its peers from the moment its workload runs
+	// (spec 022).
+	if err := d.joinMesh(ctx, s.ID, s.Name, s.Mesh.ID); err != nil {
+		undo()
+		return driver.Ref{}, err
 	}
 	// The authority the gateway signs with is projected between the create
 	// and the start, so the workload's first request already trusts the
@@ -796,6 +817,12 @@ func (d *Driver) Delete(ctx context.Context, id string) error {
 // deleteLocked is Delete with this sandbox's lock already held, for the
 // adoption that discards an entry it could not finish projecting into.
 func (d *Driver) deleteLocked(ctx context.Context, id string) error {
+	// The mesh is read before anything goes, because the membership the
+	// last-member rule counts is on the workspace volume this delete removes.
+	mesh := ""
+	if state, err := d.Inspect(ctx, id); err == nil {
+		mesh = state.MeshID
+	}
 	if err := d.removeContainer(ctx, id); err != nil {
 		return err
 	}
@@ -808,7 +835,10 @@ func (d *Driver) deleteLocked(ctx context.Context, id string) error {
 			return err
 		}
 	}
-	return d.removeVolume(ctx, workspaceVolume(id))
+	if err := d.removeVolume(ctx, workspaceVolume(id)); err != nil {
+		return err
+	}
+	return d.leaveMesh(ctx, id, mesh)
 }
 
 // Update writes the next record. Podman fixes a container's labels and
@@ -938,6 +968,7 @@ func stateOf(i identity, r record, st status) driver.State {
 		ID: i.id, Name: i.name, Owner: i.owner, Isolation: v1.IsolationContainer,
 		Labels: maps.Clone(r.labels), CreatedAt: i.createdAt, LastActivityAt: r.lastActivityAt,
 		AutoStop: r.autoStop, AutoDelete: r.autoDelete, Pool: r.pool,
+		MeshID: i.mesh, Parent: i.parent,
 	}
 	// An adopted sandbox reads its owner, its name and its beginning from
 	// the record, which is the half a mutation may rewrite. Nothing else
