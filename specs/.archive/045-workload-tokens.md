@@ -1,6 +1,6 @@
 ---
 title: "Workload tokens: the identity every sandbox carries, projected by the driver, rotated by the reaper, revoked by the jti"
-status: in-progress
+status: complete
 track: core
 depends_on:
   - specs/006-identity.md
@@ -235,17 +235,92 @@ environment key, which belongs with the rest of the reserved set in
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| A minted workload token carries every claim of the table above, with `exp` capped by the sandbox's own expiry | `TestMintedClaims`, golden over the decoded payload; `TestWorkloadTokenLifetimeIsCapped` | |
-| A revoked `jti` is refused by the verifier, an unrevoked one is accepted, and a minted token with no `jti` is refused | `TestRevokedTokenIsRefused` | |
-| `Forget` drops a row whose `exp` passed and keeps one whose has not, on both store adapters | the revocations case of `internal/store/storetest` | |
-| A sandbox is created with a token, the driver projects it, and the control plane records the `jti` and never the value | `TestCreateMintsAndProjects`; `TestStatusCarriesNoTokenValue` | |
-| A create whose driver call fails revokes the `jti` it minted | `TestCreateFailureRevokes` | |
-| A token past two thirds of its life is re-minted, re-projected and the old `jti` revoked in one act, and a token already capped by the sandbox's expiry is not rotated | `TestTokenReprojection` under the fake clock; `TestCappedTokenIsNotRotated` | |
-| A recovered sandbox carries a new token and the previous `jti` is revoked | `TestRecoveryMintsAndRevokes` | |
-| A delete revokes the sandbox's `jti` | `TestDeleteRevokes` | |
-| A control plane with no `Tokens` creates a sandbox with no token and projects no file | `TestNoTokensNoProjection` | |
-| Every driver projects the token at the path its row names, mode 0400, and an `Update` with a new token is what the next read returns | the `TokenProjection` case of `runtime/runtimetest`, run by native, podman and k8s | |
-| A workload token reads its own sandbox and execs into it, and is refused on another sandbox's routes | `TestWorkloadReachesItsOwnSandbox` | |
-| A sandbox created by `cellad serve` reads its token out of the projection, calls the API with it, and is refused on another sandbox | `TestWorkloadTokenEndToEnd` in `cmd/cellad` | |
+| A minted workload token carries every claim of the table above and no others, with `exp` capped by the sandbox's own expiry | `TestWorkloadTokensMintClaims` over the decoded payload; `TestWorkloadTokensMintIsCappedByTheSandbox` | built |
+| A revoked `jti` is refused by the verifier, an unrevoked one is accepted, a list that cannot answer refuses rather than accepts, and a minted token with no `jti` is refused | `TestRevokedTokenIsRefused`, `TestRevocationListThatCannotAnswerRefusesTheToken`, `TestMintedTokenWithoutAJTIIsRefused` | built |
+| `Forget` drops a row whose `exp` passed and keeps one whose has not, on both store adapters, and a repeated revocation is one row | the `Revocations` case of `internal/store/storetest`, run against memory and Postgres and required to fail two deliberately wrong adapters | built |
+| A sandbox is created with a token, the driver projects it, and the control plane records the `jti` and never the value, in no answer a caller reads | `TestCreateMintsAndProjects`; `TestTokenIsNotInTheClaimsRecord` for the k8s claim | built |
+| A create whose driver call fails revokes the `jti` it minted, and one whose mint fails reaches no driver | `TestCreateFailureRevokes`, `TestCreateRefusesWhenTheMintFails` | built |
+| A token past two thirds of its life is re-minted, re-projected and the old `jti` revoked in one act, and a token already capped by the sandbox's expiry is not rotated | `TestTokenReprojection` and `TestTokenRuleRunsUnderTheReaperLoop` under the fake clock; `TestCappedTokenIsNotRotated`; `TestDueForRotation` over the rule; `TestRotationFailureKeepsTheOldToken` | built |
+| A recovered sandbox carries a new token and the previous `jti` is revoked, and an adopted one is re-projected before the previous is ended | `TestRecoveryMintsAndRevokes`, `TestRecoveryAdoptionReprojectsBeforeRevoking` | built |
+| A delete revokes the sandbox's `jti`, whether a caller asked for it or a deadline rule did | `TestDeleteRevokes`, `TestReapedSandboxRevokes` | built |
+| A control plane with no `Tokens` creates a sandbox with no token and projects no file | `TestNoTokensNoProjection`, and the per driver `TestNativeProjectsNoTokenWhenThereIsNone`, `TestPodmanWithoutATokenProjectsNothing`, `TestNoTokenProjectsNothing` | built |
+| Every driver projects the token at the path its row names, mode 0400, and an `Update` with a new token is what the next read returns | the `TokenProjection` case of `runtime/runtimetest`, which a driver that drops a re-projection fails; the k8s half over the client double | built |
+| A workload token reads its own sandbox and execs into it, and is refused on another sandbox's routes and on its own delete and stop | `TestWorkloadReachesItsOwnSandbox`, `TestRevokedWorkloadTokenIsRefusedByTheAPI` | built |
+| A sandbox created by `cellad serve` reads its token out of the projection, calls the API with it, is refused on another sandbox, and is refused everywhere once it is deleted | `TestWorkloadTokenEndToEnd` in `cmd/cellad` | built |
 
 ## Outcome
+
+Every sandbox carries an identity. The controller mints one at step 5 of the
+create order, the driver projects it as a file the sandbox's own user reads,
+the reaper re-mints and re-projects it once two thirds of its lifetime has
+passed, and the `jti` of every token the control plane replaced or ended is
+refused by the verifier from that moment.
+
+What each package holds:
+
+- `runtime` carries `CreateSpec.Token` and `Change.Token`, `TokenPath` and
+  `TokenFileEnv`. `CreateSpec.Token` is tagged `json:"-"`, because the k8s
+  driver keeps the create spec in a claim annotation and a credential does
+  not belong in one. The conformance suite gained `TokenProjection`, which
+  reads the token back through `Exec` at the path the variable names, checks
+  the mode, and reads the re-projection an `Update` makes; a driver that
+  drops `Change.Token` fails it, which the suite's own liar case proves.
+- `native` writes `<sandbox dir>/run/cella/token` at mode 0400 through a
+  temporary file and a rename, so a workload reading while the controller
+  re-projects reads one whole token or the other. `podman` puts it in the
+  container at `/run/cella/token` with an archive PUT, owned by the numeric
+  user the spec names, and the gateway authority of slice 039 now goes
+  through the same helper. `k8s` projects a Secret `cella-token-<name>` on
+  `/run/cella` as a `projected` volume with one `secret` source, which is
+  what lets slice 018 add the authority beside it and what makes a rotation
+  reach a running Pod: a `subPath` mount does not follow a Secret that
+  changed. A claim annotation records that a token was projected, so a
+  `Start` renders the mount without holding the value, and the transfer
+  helper Pod carries no identity at all.
+- `controller` declares `Tokens` and the optional `TokenSweeper`. The mint
+  sits between the boundary and the driver with a revocation as its undo;
+  the `token` rule is asked only of a sandbox no deadline rule claimed, and
+  skips a token whose expiry is already the sandbox's own, because a re-mint
+  cannot extend it and the rule would otherwise fire on every tick. A
+  rotation mints, re-projects, then revokes, so the sandbox never holds a
+  revoked token and never holds none. Recovery mints before the driver call
+  and revokes the previous token after; an adopted sandbox is re-projected
+  first, because it is running with the token it was created with. Every
+  delete revokes, whether a caller asked for it or a deadline rule did.
+- `internal/auth` gained `WorkloadTokens` over the signer and the list, and
+  `Verifier.VerifyContext`, which refuses a revoked `jti`, refuses a minted
+  token that carries none, and refuses rather than accepts when the list
+  cannot answer.
+- `internal/store` filled the `Revocations` seam on both adapters, with an
+  idempotent `Revoke`, and `NewRevocations` for the three callers that are
+  not inside a transaction of their own.
+- `manifest/v1` gained `SandboxStatus.TokenState`, three fields and never
+  the token, stripped from every answer the way `EgressState` is.
+
+Nothing emits an event. [[009-events]]'s set is closed and its one token
+type is for a mint outside the projection, which is [[008-api]]'s route; a
+rotation writes the status under `MutationStatus`, which [[042-events]]
+journals and never delivers.
+
+The `cellad` run that proves it end to end is `TestWorkloadTokenEndToEnd`:
+a node serving the native driver, two sandboxes created over `/v1`, the
+first reading its own token out of the projection with
+`cat "$CELLA_TOKEN_FILE"`, calling `GET /v1/sandboxes/{id}` with it and
+reading itself, refused on the second sandbox's read and delete, and
+refused everywhere once it is deleted. The rotation is proven at the
+controller under the fake clock, in `TestTokenReprojection` and in
+`TestTokenRuleRunsUnderTheReaperLoop`, which drives it through the loop a
+tick runs.
+
+Coverage on the packages this slice touched: `internal/auth` 95.2%,
+`controller` 94.6%, `runtime/runtimetest` 96.8%, `runtime/k8s` 93.3%,
+`runtime/podman` 93.6%, `runtime/native` 90.4%, `internal/store` 91.3%,
+`internal/store/memory` 95.8%, `internal/store/postgres` 92.3%,
+`internal/api` 91.2%, `manifest/v1` 100%, `cmd/cellad` 90.6%. `go test
+-race` passes and `go tool lateregate` reports sixteen gates passed.
+
+One thing left open. `CELLA_TOKEN_FILE` is not in the reserved environment
+set that `egress` and `manifest` share, so a manifest that sets it has its
+value overwritten by the projection without being refused. The set belongs
+to those two packages and to [[018-egress-and-secrets]]'s slice, and adding
+one key to it there is smaller than reaching into them from here.

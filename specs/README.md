@@ -270,4 +270,4 @@ The map, the order, and the rule for a slice are in 031.
 | [042-events.md](.archive/042-events.md) | complete | Signed event records per mutation and operation, the journal's delivery half, the operator's sink |
 | [044-manifest-fields.md](.archive/044-manifest-fields.md) | complete | Resource, user, workspace and lifecycle manifest fields with the staged resolver |
 | [036-k8s-driver.md](.archive/036-k8s-driver.md) | complete | Kubernetes driver: a claim and a Pod per sandbox, the baseline, exec, logs, archives, identity on the objects |
-| [045-workload-tokens.md](045-workload-tokens.md) | in-progress | The workload token minted at create, projected by every driver, rotated at two thirds of its life, revoked by jti |
+| [045-workload-tokens.md](.archive/045-workload-tokens.md) | complete | The workload token minted at create, projected by every driver, rotated at two thirds of its life, revoked by jti |
