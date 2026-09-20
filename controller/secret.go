@@ -130,7 +130,9 @@ func (c *Controller) DeleteSecret(ctx context.Context, id string) (v1.Secret, er
 		c.emitSecret(ctx, MutationSecretDeleted, held)
 	}
 	c.repushMounts(ctx, id)
-	return held, nil
+	// Every answer this type gives goes through the same strip, so the rule
+	// that a value is never read back is one line and not a habit.
+	return manifest.StripSecretValue(held), nil
 }
 
 // GetSecret reads one Secret by its id, or by the name its owner gave it.
