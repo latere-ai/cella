@@ -102,21 +102,36 @@ cella cp dev:/workspace/out ./out
 ## Try it
 
 ```sh
-CELLA_OIDC_ISSUERS=<your issuer url> make run   # cellad on loopback
-make                                            # the quality gate
+make run   # the stubs and cellad on loopback, with a token to call it with
+make       # the quality gate
 ```
 
-`CELLA_RUNTIME=podman` runs the same server against a podman engine instead,
-one container per sandbox, which is the isolated backend to develop against on
-a laptop. Point `CELLA_PODMAN_SOCKET` at the libpod socket, or leave it unset
-where the rootless socket is in its usual place.
+`make run` needs nothing of your own. It starts `cella-stubs`, which serves
+an OpenID Connect issuer, an authorization endpoint, an admission endpoint
+and an event sink on loopback, then starts `cellad serve` wired to them, and
+prints the one command that mints a caller token and the `curl` that creates
+the first sandbox. Interrupt it to stop both. The signing key and the sink's
+secret are generated once under `out/run/` and kept, so a restart does not
+invalidate the token you are holding; `make clean` removes them. A second
+clone runs beside the first with `CELLA_RUN_PORT=8090 make run`.
 
-`make run` opts into native execution and binds loopback. It needs a reachable
-OIDC issuer and generates the local signing key once under `out/run/`.
-The public listener serves `/v1/sandboxes` and the key set; the internal
-listener serves probes. Follow [the native quickstart](docs/native.md) for
-the currently implemented manifest and API. The larger manifest and client
+`cella-stubs` is a test binary. It answers what a flag tells it to answer,
+it holds nothing across a restart, and no installation runs it: in a real
+one, each of those four endpoints is yours.
+
+`make run` opts into native execution, which runs commands on this host with
+no isolation and binds loopback. Follow [the native quickstart](docs/native.md)
+for the manifest and the API it covers. `CELLA_RUNTIME=podman` runs the same
+server against a podman engine instead, one container per sandbox, which is
+the isolated backend to develop against on a laptop: point
+`CELLA_PODMAN_SOCKET` at the libpod socket, or leave it unset where the
+rootless socket is in its usual place. The larger manifest and client
 commands above describe the planned contract.
+
+The tiers: `make test` is the unit suite, `make test-podman` runs the
+container driver's suite against a rootless engine, and `make test-kind`
+brings up a kind cluster with the stubs beside `cellad` and runs the
+lifecycle through the API against it.
 
 ## Identity
 
