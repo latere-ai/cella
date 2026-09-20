@@ -9,7 +9,12 @@ package cella_test
 import (
 	"bufio"
 	"context"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"io/fs"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -98,4 +103,133 @@ func deps(t *testing.T, goBin, pkg string) []string {
 		t.Fatalf("the build list of %s holds no package of this module; the check would pass vacuously", pkg)
 	}
 	return deps
+}
+
+// confined names the calls that return a secret's plaintext and the one
+// caller each of them is allowed. Design 010 gives the decrypting method one
+// caller and design 018 says which: the control plane's compile path, which
+// hands what it reads to the map the gateway receives and to nothing else.
+var confined = []struct {
+	// what names the call, for the failure sentence; match reports whether
+	// one call expression is it; caller is the only function allowed to
+	// make it, written as the receiver type and the method name.
+	what   string
+	match  func(*ast.SelectorExpr) bool
+	caller string
+}{
+	{
+		what:   "Values().Open",
+		match:  func(sel *ast.SelectorExpr) bool { return sel.Sel.Name == "Open" && receiverCall(sel) == "Values" },
+		caller: "Controlled.OpenValue",
+	},
+	{
+		what:   "OpenValue",
+		match:  func(sel *ast.SelectorExpr) bool { return sel.Sel.Name == "OpenValue" },
+		caller: "Controller.secretViews",
+	},
+}
+
+// TestValuesAreConfined parses every non-test file of this module and reports
+// any call that returns a secret's plaintext from a function the table above
+// does not name. It reads the syntax rather than grepping, so a call written
+// across two lines, behind a variable of the interface type, or in a file a
+// grep pattern did not anticipate is still a failure here.
+func TestValuesAreConfined(t *testing.T) {
+	callers := map[string]map[string]bool{}
+	fset := token.NewFileSet()
+	root, err := filepath.Abs(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		switch {
+		case err != nil:
+			return err
+		// storetest is the store contract's own suite: every file in it is
+		// a test that happens not to carry the suffix, because one suite
+		// runs against two adapters from their own packages.
+		case d.IsDir() && (d.Name() == ".git" || d.Name() == "testdata" || d.Name() == "storetest"):
+			return filepath.SkipDir
+		case d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go"):
+			return nil
+		}
+		file, err := parser.ParseFile(fset, path, nil, 0)
+		if err != nil {
+			return err
+		}
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Body == nil {
+				continue
+			}
+			from := qualifiedName(fn)
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				call, ok := n.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				sel, ok := call.Fun.(*ast.SelectorExpr)
+				if !ok {
+					return true
+				}
+				for _, c := range confined {
+					if !c.match(sel) {
+						continue
+					}
+					if callers[c.what] == nil {
+						callers[c.what] = map[string]bool{}
+					}
+					callers[c.what][from] = true
+				}
+				return true
+			})
+		}
+		return nil
+	})
+	if walkErr != nil {
+		t.Fatalf("reading the module's files: %v", walkErr)
+	}
+	for _, c := range confined {
+		found := callers[c.what]
+		if len(found) == 0 {
+			t.Errorf("%s has no caller at all; the confinement check would pass vacuously", c.what)
+			continue
+		}
+		for from := range found {
+			if from != c.caller {
+				t.Errorf("%s is called from %s; design 010 gives it one caller, %s", c.what, from, c.caller)
+			}
+		}
+	}
+}
+
+// receiverCall is the method name of a call the selector is taken on, as in
+// the "Values" of tx.Values().Open, and the empty string when the selector
+// stands on anything else.
+func receiverCall(sel *ast.SelectorExpr) string {
+	call, ok := sel.X.(*ast.CallExpr)
+	if !ok {
+		return ""
+	}
+	inner, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return ""
+	}
+	return inner.Sel.Name
+}
+
+// qualifiedName is a function as the table names it: the receiver's type and
+// the method, or the function's own name where it has no receiver.
+func qualifiedName(fn *ast.FuncDecl) string {
+	if fn.Recv == nil || len(fn.Recv.List) == 0 {
+		return fn.Name.Name
+	}
+	typ := fn.Recv.List[0].Type
+	if star, ok := typ.(*ast.StarExpr); ok {
+		typ = star.X
+	}
+	if ident, ok := typ.(*ast.Ident); ok {
+		return ident.Name + "." + fn.Name.Name
+	}
+	return fn.Name.Name
 }
