@@ -1,6 +1,6 @@
 ---
 title: "Mesh and spawn: the spawn tree, the propagated budget, the boundary as a subset check"
-status: in-progress
+status: complete
 track: core
 depends_on:
   - specs/022-mesh-and-spawn.md
@@ -267,19 +267,101 @@ rewrite, which is a cluster concern and not a driver call.
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| Each boundary rule with a field, violated one at a time, is `boundary_exceeded` naming the path; a conforming child passes | `TestBoundaryCheck` in `manifest`, table-driven | |
-| A child that names no `ttl` is cut to the parent's remaining life; one that names a longer `ttl` is refused | `TestChildTTLIsBoundedByTheParent` | |
-| A child's absent `spawn` is zero; one asking above the remainder is refused; a parent at `depth: 0` refuses at `spec.mesh.spawn.depth` | `TestSpawnFieldsAndDepth` | |
-| `MeshMember` answers membership for a root and for a child, and stage 7 refuses `mesh.enabled` where the environment declares no `Mesh` | `TestMeshMembership`, `TestMeshCapability` | |
-| `Debit` at one remaining unit under contention yields one success and one `ErrBudgetExhausted`; `Credit` restores it; both adapters agree | `storetest.Run`'s ledger case, over memory and Postgres | |
-| The debit and the child's row commit together: a failure injected between them leaves neither | `TestSpawnDebitIsAtomic` | |
-| A child is created with `parent`, `root`, the inherited mesh and the root's owner; a grandchild's parent is its immediate parent | `TestSpawnInheritance` | |
-| Two concurrent spawns against one remaining unit yield one child and one `spawn_budget_exhausted` | `TestConcurrentSpawnsRaceForTheLastUnit` | |
-| A create that fails after the debit credits the parent back; a deleted child does not | `TestFailedSpawnCreditsBack`, `TestDeletedChildDoesNotCredit` | |
-| Deleting a root deletes every descendant deepest first with reason `Parent`, and the root with the request's reason | `TestCascade` | |
-| Narrowing a root below a live descendant is `boundary_exceeded` naming the descendant | `TestParentCannotBeNarrowedBelowAChild` | |
-| The token's `spawn` claim equals the grant at mint; a forged higher budget does not raise the ledger | `TestClaimsAreTheGrant` | |
-| `sandbox.spawned` is emitted on the parent with the child and the budget left | `TestSpawnedEvent` | |
-| `GET /v1/sandboxes?root=` returns the tree | `TestRootQuery` | |
-| podman creates one network per mesh and attaches members with a `.mesh` alias; k8s renders the policy and the headless Service and sets `hostname` and `subdomain`; native declares no `Mesh` | `TestMeshNetwork` (podman, fake and real engine), `TestRenderMesh` (k8s), `TestNativeDeclaresNoMesh` | |
-| A node on native serves a spawn tree end to end: two children, a third refused with `spawn_budget_exhausted`, a grandchild refused at `spec.mesh.spawn.depth`, a wider child refused with `boundary_exceeded`, and the root's delete taking both children | `TestSpawnTreeEndToEnd` in `cmd/cellad` | |
+| Each boundary rule with a field, violated one at a time, is `boundary_exceeded` naming the path; a conforming child passes | `TestBoundaryCheck` in `manifest`, table-driven over thirteen widenings | built |
+| Each host list is read under its own mode: a child narrowing from open is not refused for the list it does not carry, and a narrowed mode does not lift the parent's deny list | `TestBoundaryReadsEachListUnderItsOwnMode`, `TestDeniedHostsAreInheritedByTheChild` | built |
+| A child that declares no boundary takes its parent's; one that declares one keeps it; one that mounts a secret infers the allowlist the mount asks for | `TestChildInheritsTheParentsBoundary` | built |
+| A child that names no `ttl` is cut to the parent's remaining life with its idle stop; one that names a longer `ttl` is refused; an expired parent spawns nothing | `TestChildTTLIsBoundedByTheParent`, `TestChildIdleStopIsCutWithItsLife`, `TestChildOfAnExpiredParentIsRefused`, `TestParentThatNeverExpiresBoundsNoLife` | built |
+| A child's absent `spawn` is zero; one asking above the remainder is refused; a parent at `depth: 0` refuses at `spec.mesh.spawn.depth`; a spent budget resolves and is refused at the debit | `TestSpawnFieldsAndDepth`, `TestASpentBudgetIsTheLedgersRefusal` | built |
+| `MeshMember` answers membership for a root and for a child; stage 7 refuses `mesh.enabled` where the environment declares no `Mesh`; the field is immutable | `TestMeshMembership`, `TestMeshCapability`, `TestMeshEnabledIsImmutable` | built |
+| A workload may lower either spawn axis and may not raise one; its owner may do either | `TestWorkloadCannotRaiseItsOwnBudget` | built |
+| `Debit` at one remaining unit under contention yields one success; `Credit` restores it; both adapters agree | `storetest.Run`'s `Ledger` case, eight goroutines over memory and Postgres | built |
+| The debit and the child's row commit together: exhaustion writes neither the row nor the record | `TestBridgeSpawnDebitsWithTheChild`, `TestSpawnDebitIsAtomic` | built |
+| A child is created with `parent`, `root`, the inherited mesh and the root's owner; a grandchild's parent is its immediate parent | `TestSpawnInheritance`, `TestSpawnMintsAMesh` | built |
+| Two concurrent spawns against one remaining unit yield one child and one `spawn_budget_exhausted` | `TestConcurrentSpawnsRaceForTheLastUnit` | built |
+| A create that fails after the debit credits the parent back; a deleted child does not | `TestFailedSpawnCreditsBack`, `TestDeletedChildDoesNotCredit` | built |
+| Deleting a root deletes every descendant deepest first with reason `Parent`, and the root with the request's reason | `TestCascade`, `TestCascadeOverTheAPI` | built |
+| Narrowing a root below a live descendant is `boundary_exceeded` naming the descendant | `TestParentCannotBeNarrowedBelowAChild`, `TestDescendantOutsideBoundary` | built |
+| The token's `spawn` claim equals the grant at mint; a forged higher budget does not raise the ledger; a token cellad did not mint carries no grant | `TestTheMintCarriesTheGrantFromDesiredState`, `TestCallerSpawnIsTheGrantAtMint`, `TestClaimsAreTheGrant` | built |
+| The authorizer's `workload` member carries the store's tree position and budget, never the claim's | `TestTheWorkloadMemberIsTheStores` | built |
+| `sandbox.spawned` is recorded on the parent with the child, the root and the budget left | `TestSpawnedEvent`, `TestBridgeWritesARecordWithItsOwnData` | built |
+| `GET /v1/sandboxes?root=` returns the tree and composes with the other selectors | `TestRootQuery` | built |
+| A person cannot apply a child: `status` is ignored on apply and the named parent's budget is untouched | `TestOnlyWorkloadsSpawn` | built |
+| podman creates one network per mesh and attaches members with a `.mesh` alias; the network ends with the last member; a failed join leaves nothing behind | `TestMeshNetwork`, `TestMeshJoinFailureUndoesTheCreate`, `TestMeshConnectFailureUndoesTheCreate`, `TestMeshNetworkAlreadyGone`, and `TestPodmanMeshOnARealEngine` against an engine | built |
+| k8s renders the policy admitting the mesh and nothing else, the headless Service, and each Pod's `hostname` and `subdomain`; both end with the last member | `TestRenderMesh`, `TestMeshPolicyAdmitsTheMeshAndNothingElse`, `TestMeshLifetime`, `TestMeshObjectsAlreadyGone` | built |
+| The mesh object's name is a DNS label whatever the mesh id is; the two stamped fields narrow a list | `TestMeshObjectName`, `TestFilterSelectsTheTree` | built |
+| native declares no `Mesh` | `TestNativeDeclaresNoMesh` | built |
+| A node on native serves a spawn tree end to end: two children, a third refused with `spawn_budget_exhausted`, a grandchild refused at `spec.mesh.spawn.depth`, a child reaching one more host refused with `boundary_exceeded`, and the root's delete taking both children | `TestSpawnTreeEndToEnd` in `cmd/cellad` | built |
+
+## Outcome
+
+Completed on 2026-09-20. `go tool lateregate` passes; the whole tree is green
+under `-race`, hermetic and tempdir included. Coverage on the packages this
+slice touched: `manifest` 97.4%, `manifest/v1` 100%, `controller` 91.3%,
+`internal/store` 91.0% with its adapters at 94.9% and 91.0%, `internal/auth`
+95.5%, `internal/api` 91.5%, `runtime` 100%, `runtime/k8s` 92.4%,
+`runtime/podman` 93.0%, `cmd/cellad` 91.1%.
+
+`TestSpawnTreeEndToEnd` is the acceptance run: one `cellad serve` on the
+native environment with one gateway connected, a root with
+`mesh.spawn.budget: 2, depth: 1` and an allow list of one host, a process
+inside it reading `$CELLA_TOKEN_FILE` and applying two children through
+`POST /v1/sandboxes` with that token, the third refused
+`spawn_budget_exhausted`, a grandchild refused `boundary_exceeded` at
+`spec.mesh.spawn.depth`, a child asking for a second host refused
+`boundary_exceeded` at `spec.network.egress.allowedHosts`, the root's
+`status.spawn.used` reading two, `?root=` returning three sandboxes, and the
+root's delete leaving none of them. `TestPodmanMeshOnARealEngine` ran against
+a live podman machine: the network is created with the first member, both
+members carry it, it survives the first delete and is gone after the second.
+
+### What differs from what the specs said
+
+- **The ledger's shape.** [[010-state]] declares `Debit(parentID)`,
+  `Credit(parentID)` and `Balance(parentID) (budget, used int, error)` over a
+  row holding both numbers. This slice implements `Debit(parentID, budget)`,
+  `Credit(parentID)`, `Used(parentID) (int, error)` and `Forget(parentID)`
+  over a row holding the count alone. The budget stays in desired state, where
+  the manifest already keeps it, so a root narrowed after its children exist
+  takes effect at the next debit with no second write and one number has one
+  source of truth. [[010-state]]'s `TestLedgerIsAtomic` row is filled by the
+  suite's `Ledger` case.
+- **Rule 4 has no field.** `spec.volumes[]` and `spec.workspace.volume` arrive
+  with [[019-volumes]]; the containment is written in this spec's table and
+  has nothing to check yet.
+- **A child with no boundary inherits its parent's.** Neither
+  [[003-manifest-contract]] nor [[022-mesh-and-spawn]] said what an absent
+  `network.egress` resolves to for a child. Left to the open-mode inference,
+  every simple child of a narrowed root was refused at rule 1 for a boundary
+  nobody wrote. Stage 2 now takes the parent's egress for a child that
+  declares none and mounts no secret, which is the rule
+  [[003-manifest-contract]] already states for defaulting: an absent field
+  takes its default from `Parent`.
+- **A spent budget is the ledger's refusal, not the boundary's.** Rule 7's
+  containment on `spawn.budget` is read only where a unit remains. A parent
+  with none resolves its child and is refused at the debit, which keeps
+  `spawn_budget_exhausted` (a race a caller retries) apart from
+  `boundary_exceeded` (a manifest a caller rewrites).
+- **The k8s Role grew two rules.** The driver now writes a headless Service
+  and a NetworkPolicy per mesh, and `Preflight` proves both with an access
+  review, so `deploy/base/rbac.yaml` grants `create` and `delete` on
+  `services` and on `networking.k8s.io/networkpolicies`. The review now
+  carries the API group, which it did not before.
+
+### Left open
+
+- **A workload cannot mount a secret over the API.** Rule 3 is proven in
+  `manifest` against a lookup; through the API the mount decision reaches
+  `workloadDecision`, whose default is `not_its_own`, so a child mounts
+  nothing even where its parent mounts it. The fix belongs in the API's secret
+  lookup: for a workload actor, answer from `Parent.Spec.Secrets` by name
+  rather than asking the authorizer, since the parent's own mount was already
+  decided.
+- **A workload's list pages the tree by asking per row.** [[006-identity]]
+  narrows a sandbox's `list` to its descendants, and the API does that with
+  one `sandbox.read` decision per row rather than by selecting the tree. The
+  output is right and the cost is quadratic in the page.
+- **The mesh policy admits peers and the control plane's own pods are not in
+  it.** Nothing in this contract dials a member's port from `cellad`: exec,
+  logs and files go through the API server. A capability that dials a Pod
+  directly ([[004-runtime-contract]]'s `Dial`) needs a second `from` on the
+  policy.
