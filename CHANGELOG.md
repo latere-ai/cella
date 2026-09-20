@@ -6,6 +6,27 @@ refused before it is pushed.
 
 ## Unreleased
 
+- A sandbox reaches the services it needs and holds none of their
+  credentials. The new `Secret` kind at `/v1/secrets` takes a value, the hosts
+  that value may be sent to, and where in a request it goes: a header, a query
+  parameter, verbatim or base64 of a `user:pass` pair, or an OAuth 2.0
+  client-credentials grant the gateway mints a token from. The value is
+  write-only: it is accepted on apply and absent from every read, every list,
+  every event and every log line, and it is stored under envelope encryption
+  with the key in `CELLA_SECRET_KEY`. A manifest mounts one with
+  `spec.secrets: [{name, env}]`, and what the sandbox's environment carries is
+  an opaque placeholder, plus `<env>_HEADER` or `<env>_QUERY` where the secret
+  injects somewhere a client would not look by itself. The gateway swaps the
+  placeholder for the value on the way out, toward a host the secret's own
+  owner named and nowhere else: sent anywhere else it leaves verbatim, so an
+  exfiltration attempt carries an opaque token. Two mounted secrets that apply
+  to one host are refused rather than silently collapsed, and a mount with no
+  allowed host of its own puts the secret's scope on the sandbox's allow list.
+  Rotating a value reaches a running sandbox's next request without restarting
+  it; deleting the secret marks the sandbox `notInjectable` and its next
+  request leaves unauthenticated. `status.secrets` says which placeholders are
+  mounted and which of them the gateway will not substitute.
+
 - Every change to a sandbox and every operation on one produces a signed
   record, delivered to the endpoint `CELLA_EVENTS_URL` names. A record says
   who did what to which object, when, and why, with the object's labels and a
