@@ -1,0 +1,25 @@
+# SPDX-FileCopyrightText: 2026 Latere AI
+# SPDX-License-Identifier: Apache-2.0
+#
+# The base admits ingress to the public listener alone. This stack also
+# publishes two of the stubs' ports to the machine the cluster runs on, so
+# a caller outside the cluster can mint a token and read the records back,
+# and a cluster whose network plugin enforces policy would otherwise drop
+# both.
+#
+# The list replaces the base's rather than adding to it, which is what a
+# strategic merge does to a list with no merge key, so all three ports are
+# written out here.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cellad
+spec:
+  ingress:
+    - ports:
+        - port: 8080
+          protocol: TCP
+        - port: 9080
+          protocol: TCP
+        - port: 9083
+          protocol: TCP

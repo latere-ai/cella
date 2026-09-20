@@ -3,7 +3,7 @@
 
 GO ?= go
 
-.PHONY: build check clean fmt hooks run
+.PHONY: build check clean fmt hooks run test test-podman test-kind
 
 # The whole bar. Every gate lives in latere.ai/x/ci-gate, pinned as a tool
 # in go.mod and configured in .lateregate.yaml, so this target is a name for
@@ -36,27 +36,34 @@ build:
 		-o $(OUT_DIR)/$(SERVICE) ./cmd/$(SERVICE)
 	@echo "built $(OUT_DIR)/$(SERVICE)"
 
-# The server on loopback with its state under out/, the native backend
-# selected because it needs no cluster and no container engine. It has no
-# isolation and runs only trusted development commands.
-RUN_DIR = $(CURDIR)/$(OUT_DIR)/run
-# Run the server on loopback. cellad verifies a token from an issuer you
-# list, so CELLA_OIDC_ISSUERS names one; the stub issuer that makes this
-# self-contained is the test stubs spec's and is not built. The signing
-# key is generated once under out/run/ and kept, so a restart does not
-# invalidate the tokens of the last one.
-run: build
-	@mkdir -p $(RUN_DIR)
-	@test -s $(RUN_DIR)/token.pem || openssl genrsa -out $(RUN_DIR)/token.pem 2048 2>/dev/null
-	@test -n "$(CELLA_OIDC_ISSUERS)" || { \
-		echo "make run needs CELLA_OIDC_ISSUERS=<issuer url>: cellad verifies every caller"; \
-		echo "and there is no anonymous access. An http:// issuer off loopback also needs"; \
-		echo "CELLA_OIDC_INSECURE_ISSUERS."; exit 1; }
-	CELLA_DATA_DIR=$(RUN_DIR) CELLA_RUNTIME=native CELLA_ALLOW_UNSAFE_NATIVE=true \
-	CELLA_PUBLIC_ADDR=127.0.0.1:8080 CELLA_INTERNAL_ADDR=127.0.0.1:8081 \
-	CELLA_PUBLIC_URL=http://127.0.0.1:8080 \
-	CELLA_TOKEN_KEY="$$(cat $(RUN_DIR)/token.pem)" \
-		$(OUT_DIR)/$(SERVICE)
+# The development stack: cella-stubs and `cellad serve` on loopback, wired
+# to each other, with the command that mints a caller token printed at the
+# end. It needs no issuer of your own: the stub issuer is one of the four
+# roles. The bootstrap is tools/run/up.sh and this target is its name.
+#
+# The state lives under out/run/ and `make clean` removes it. A second
+# clone runs beside this one with CELLA_RUN_PORT=8090 make run.
+run:
+	@tools/run/up.sh
+
+# The tiers of spec 012. The unit tier is the gate's own suite; the other
+# two need a substrate beside them and say what they need when it is not
+# there.
+test:
+	$(GO) test ./...
+
+# The container driver's suite against a rootless engine. It skips where no
+# socket answers, which is why the release pipeline reads the log for the
+# pass rather than the exit code.
+test-podman:
+	$(GO) test -count=1 -v -run '^TestPodman' ./runtime/podman/...
+
+# The kind stack: the overlay with the stubs beside cellad, the lifecycle
+# through the API, and the check Job. It brings the cluster up and takes it
+# down; against a cluster somebody else brought up, set CELLA_TEST_URL and
+# CELLA_TEST_TOKEN instead.
+test-kind:
+	CELLA_TEST_KIND=1 $(GO) test -tags=e2e -count=1 -v -timeout 30m -run '^TestCluster' ./test/kind/...
 
 fmt:
 	gofmt -w $$(git ls-files '*.go')

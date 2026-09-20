@@ -1,0 +1,15 @@
+# SPDX-FileCopyrightText: 2026 Latere AI
+# SPDX-License-Identifier: Apache-2.0
+#
+# What this installation verifies against: the stub issuer inside the Pod.
+# The URL is loopback, which is the address the control plane dials and the
+# iss of every token the stub signs; a caller outside the cluster mints at
+# the node port of service-stubs.yaml and the token it gets carries this
+# same iss.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cellad
+data:
+  CELLA_OIDC_ISSUERS: "http://127.0.0.1:9080"
+  CELLA_ADMIN_SUBJECTS: "http://127.0.0.1:9080|dev"

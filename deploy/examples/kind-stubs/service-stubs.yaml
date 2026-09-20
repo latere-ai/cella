@@ -1,0 +1,29 @@
+# SPDX-FileCopyrightText: 2026 Latere AI
+# SPDX-License-Identifier: Apache-2.0
+#
+# The two stub routes a caller outside the cluster reads: the issuer's mint
+# route, because a caller needs a token from the same issuer the control
+# plane verifies against, and the sink's feed, because a tier proves that
+# the records of spec 009 arrived. Everything else about the stubs is
+# reached over loopback inside the Pod and is published nowhere.
+apiVersion: v1
+kind: Service
+metadata:
+  name: cella-stubs
+  labels:
+    app.kubernetes.io/name: cella-stubs
+    app.kubernetes.io/component: test-stubs
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: cellad
+    app.kubernetes.io/component: control-plane
+  ports:
+    - name: issuer
+      port: 9080
+      targetPort: issuer
+      nodePort: 30081
+    - name: sink
+      port: 9083
+      targetPort: sink
+      nodePort: 30082

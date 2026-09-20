@@ -1,0 +1,25 @@
+# SPDX-FileCopyrightText: 2026 Latere AI
+# SPDX-License-Identifier: Apache-2.0
+#
+# The cluster this overlay runs on: one node, with the control plane's node
+# port and the stub issuer's mint route published to the host.
+#
+#	kind create cluster --name cella --config kind.yaml
+#
+# The sidecar of this overlay is an init container with restartPolicy
+# Always, which Kubernetes 1.29 and later run as a sidecar; an older node
+# image starts it and never finishes the check Job.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      - containerPort: 30080
+        hostPort: 30080
+        protocol: TCP
+      - containerPort: 30081
+        hostPort: 30081
+        protocol: TCP
+      - containerPort: 30082
+        hostPort: 30082
+        protocol: TCP

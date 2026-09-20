@@ -276,3 +276,4 @@ The map, the order, and the rule for a slice are in 031.
 | [048-release-and-check.md](.archive/048-release-and-check.md) | complete | The v* tag pipeline, the deploy tree an operator installs from, the install walk, and `cellad check` |
 | [047-admission-client.md](.archive/047-admission-client.md) | complete | The admission webhook client over `CELLA_ADMISSION_URL`, the image rule that closes stage 3, and the count ceiling's one definition |
 | [038-environment-pools.md](.archive/038-environment-pools.md) | complete | The environment's prewarmed pool, the match rule, adoption as one exclusive driver act, the refill loop |
+| [049-stubs-and-tiers.md](.archive/049-stubs-and-tiers.md) | complete | `cella-stubs`, `make run` with no issuer of your own, the unit, podman and kind tiers, the kind overlay, and the install walk on every push and every tag |

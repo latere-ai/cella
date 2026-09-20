@@ -6,6 +6,16 @@ refused before it is pushed.
 
 ## Unreleased
 
+- `make run` needs no issuer of your own. It starts `cella-stubs`, a test
+  binary that serves an OpenID Connect issuer, an authorization endpoint, an
+  admission endpoint and an event sink on loopback, then starts `cellad serve`
+  wired to them, and prints the one command that mints a token to call it
+  with. `make test`, `make test-podman` and `make test-kind` are the tiers,
+  and `deploy/examples/kind-stubs` runs the same stubs beside the control
+  plane in a kind cluster, which is what lets
+  [`docs/install.md`](docs/install.md) walk green on every push and on every
+  tag rather than waiting for an issuer somebody has to supply.
+
 - An environment can keep sandboxes ready, so a create that matches one
   starts in milliseconds instead of waiting for an image pull and a container
   start. `CELLA_POOL_SIZE` with `CELLA_POOL_IMAGE`, `CELLA_POOL_CPU`,

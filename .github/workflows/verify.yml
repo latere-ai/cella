@@ -51,23 +51,24 @@ jobs:
         run: |
           docker run --rm cellad:candidate -version | grep -q '^cellad '
 
-  # The deploy tree of spec 014 on every push. kubectl is on the runner, so
-  # the render here is the same one the Go test runs where kubectl is
-  # present and skips where it is not, and this job is the run that always
-  # has it.
+  # The deploy tree of spec 014 on every push, and the walk of
+  # docs/install.md against a kind cluster, which spec 014 puts in this job
+  # and slice 048 could not run: `cellad serve` verifies every caller
+  # against an OpenID Connect issuer and ships none. The stub issuer of spec
+  # 012 is now one of the four roles of `cella-stubs`, and the overlay
+  # deploy/examples/kind-stubs runs it beside the control plane, so the walk
+  # has an issuer, an authorizer and a sink with no dependency of the
+  # runner's own.
   #
-  # Spec 014 also puts the walk of docs/install.md against a kind cluster
-  # in this job. It is not here yet: a `cellad serve` in a cluster verifies
-  # every caller against an OpenID Connect issuer, cellad ships none, and
-  # the stub issuer is spec 012's and is not built, so a Pod in a CI
-  # cluster has nothing to verify against and cannot become ready. The
-  # walk joins this job with that spec; the release pipeline's
-  # `install-release` says the same about the published artifacts.
+  # One cluster per run, and the walk and the tier share it: the stack is
+  # brought up by the overlay's own up.sh, the document is then walked over
+  # the cluster it left standing, and the kind tier runs against the same
+  # URL with the same token.
   install:
-    name: every deploy overlay renders
+    name: the deploy tree renders and the install document walks
     if: "!startsWith(github.ref, 'refs/tags/')"
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -87,3 +88,54 @@ jobs:
           set -o pipefail
           go test -count=1 -v . 2>&1 | tee out.txt
           ! grep -q -- '--- SKIP' out.txt
+      # `make run` on a clean clone: the stubs and cellad come up, a token
+      # is minted at the stub issuer, and one sandbox is created with it.
+      # It needs no cluster, so it runs before the slowest step.
+      - name: The development stack comes up and creates a sandbox
+        shell: bash
+        run: |
+          set -o pipefail
+          go test -tags=e2e -count=1 -v -run '^TestRunBootstrap$' ./test/run/... 2>&1 | tee run.txt
+          grep -q -- '--- PASS: TestRunBootstrap' run.txt
+      - uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2 # v1.15.0
+        with:
+          install_only: true
+      - name: The two images the stack runs
+        run: |
+          docker build -t cellad:dev .
+          docker build -f Dockerfile.stubs -t cella-stubs:dev .
+      - name: The cluster, the stubs and the control plane
+        env:
+          CELLA_KIND_BUILD: '0'
+        run: |
+          bash deploy/examples/kind-stubs/up.sh -name cella >> "$GITHUB_ENV"
+          echo "CELLA_TEST_SINK=http://localhost:30082" >> "$GITHUB_ENV"
+      # The tier runs before the document's walk, because the document ends
+      # by deleting the cluster: its last block is how an operator removes
+      # the installation, and the walk runs every block.
+      - name: The kind tier against the stack
+        shell: bash
+        run: |
+          set -o pipefail
+          go test -tags=e2e -count=1 -v -timeout 30m -run '^TestCluster' ./test/kind/... 2>&1 | tee kind.txt
+          grep -q -- '--- PASS: TestClusterLifecycle' kind.txt
+      # The document is a program, and this is the run that proves it: the
+      # same blocks an operator pastes, against the cluster above, with the
+      # stub issuer as this installation's issuer.
+      - name: Walk docs/install.md
+        env:
+          CELLA_INSTALL_IMAGE: cellad:dev
+          CELLA_INSTALL_MANIFESTS: deploy
+          CELLA_INSTALL_OVERLAY: examples/kind-stubs
+          CELLA_INSTALL_ISSUER: http://127.0.0.1:9080
+          CELLA_INSTALL_ADMIN: http://127.0.0.1:9080|dev
+        run: |
+          export CELLA_INSTALL_TOKEN="${CELLA_TEST_TOKEN}"
+          bash tools/docs/run-blocks.sh docs/install.md
+      - name: The cluster's state, for a failed run
+        if: failure()
+        run: |
+          kubectl -n cella get all || true
+          kubectl -n cella describe pod -l app.kubernetes.io/name=cellad || true
+          kubectl -n cella logs deploy/cellad --tail=200 || true
+          kubectl -n cella logs deploy/cellad -c stubs --tail=200 || true

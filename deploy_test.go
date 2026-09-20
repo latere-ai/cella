@@ -24,6 +24,7 @@ import (
 var kustomizations = []string{
 	"deploy/base",
 	"deploy/examples/kind",
+	"deploy/examples/kind-stubs",
 	"deploy/examples/generic",
 }
 
