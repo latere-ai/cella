@@ -61,6 +61,7 @@ var cases = []struct {
 	{"Delivery", delivery},
 	{"Leases", leases},
 	{"Revocations", revocations},
+	{"Ledger", ledger},
 	{"Values", values},
 	{"Rewrap", rewrap},
 	{"Ready", ready},
@@ -979,4 +980,64 @@ func revocations(t TB, open Opener) {
 	if !revoked(t, s, "01JLIVE") {
 		t.Errorf("the sweep dropped a revocation whose exp has not passed")
 	}
+}
+
+// ledger: the spawn budget of design 022. A debit is conditional on the
+// budget it carries, exhaustion is a sentinel and not a silent no-op, a
+// credit is its undo, and the count a read returns is what the next debit is
+// judged against.
+func ledger(t TB, open Opener) {
+	s := opened(t, open, Key)
+	ctx := context.Background()
+	const parent = "sbx_parent"
+
+	if used := spawned(t, s, parent); used != 0 {
+		t.Errorf("a sandbox that created nothing has used %d", used)
+	}
+	with(t, s, func(tx store.Tx) error { return tx.Ledger().Debit(ctx, parent, 2) })
+	with(t, s, func(tx store.Tx) error { return tx.Ledger().Debit(ctx, parent, 2) })
+	if used := spawned(t, s, parent); used != 2 {
+		t.Errorf("used = %d after two debits, want 2", used)
+	}
+	fails(t, s, store.ErrBudgetExhausted, "a third debit against a budget of two",
+		func(tx store.Tx) error { return tx.Ledger().Debit(ctx, parent, 2) })
+	// A budget narrowed below what is already used refuses at once, and a
+	// budget of nothing refuses without a row.
+	fails(t, s, store.ErrBudgetExhausted, "a debit against a narrowed budget",
+		func(tx store.Tx) error { return tx.Ledger().Debit(ctx, parent, 1) })
+	fails(t, s, store.ErrBudgetExhausted, "a debit against no budget",
+		func(tx store.Tx) error { return tx.Ledger().Debit(ctx, "sbx_none", 0) })
+
+	// The credit is the undo of a create that did not complete, and it never
+	// takes the count below zero.
+	with(t, s, func(tx store.Tx) error { return tx.Ledger().Credit(ctx, parent) })
+	if used := spawned(t, s, parent); used != 1 {
+		t.Errorf("used = %d after one credit, want 1", used)
+	}
+	with(t, s, func(tx store.Tx) error { return tx.Ledger().Credit(ctx, "sbx_none") })
+	if used := spawned(t, s, "sbx_none"); used != 0 {
+		t.Errorf("crediting a sandbox with no row left used = %d", used)
+	}
+	// The unit the credit returned is available again.
+	with(t, s, func(tx store.Tx) error { return tx.Ledger().Debit(ctx, parent, 2) })
+
+	refuses(t, s, "a debit that names no sandbox",
+		func(tx store.Tx) error { return tx.Ledger().Debit(ctx, "", 1) })
+
+	with(t, s, func(tx store.Tx) error { return tx.Ledger().Forget(ctx, parent) })
+	if used := spawned(t, s, parent); used != 0 {
+		t.Errorf("used = %d after the row was forgotten, want 0", used)
+	}
+}
+
+// spawned reads one sandbox's ledger count in its own transaction.
+func spawned(t TB, s store.Store, id string) int {
+	t.Helper()
+	var used int
+	with(t, s, func(tx store.Tx) error {
+		var err error
+		used, err = tx.Ledger().Used(context.Background(), id)
+		return err
+	})
+	return used
 }
