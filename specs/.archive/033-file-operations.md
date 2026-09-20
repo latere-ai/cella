@@ -308,6 +308,13 @@ a write cannot commit inside one program, because a body that ends early
 is indistinguishable from one that ended, so the write became a staged
 program and a commit the control plane runs only once the body is whole.
 
+The k8s store is not cluster-verified: `TestClusterConformance` is
+skipped without a kubeconfig, so what holds it is the client double over
+the argv, the exit mapping, the two-step commit and the helper Pod, plus
+the programs themselves against BusyBox and GNU coreutils. A cluster run
+is what closes that gap, and it closes it for [[036-k8s-driver]] at the
+same time.
+
 Departures from what the slice was set out with, each recorded above:
 the directory listing is `ReadDir`, not `List`, because `Driver.List` is
 the substrate's own listing and one type implements both interfaces;
@@ -316,4 +323,5 @@ the same URL and that `GET` is an archive, so `stat` is its own route;
 and the two writes on the files collection are told apart by the
 selector rather than by the content type, so a caller can store a tar
 file as one file. [[009-events]] is amended with `operation` on the
-`sandbox.files` record, which is what names a call that moved no bytes.
+`sandbox.files` record, which is what names a call that moved no bytes;
+`direction` is now set on a transfer only, so a sink reads it as optional.
