@@ -200,6 +200,7 @@ jobs:
     env:
       OWNER: ${{ needs.build.outputs.owner }}
       DIGEST: ${{ needs.build.outputs.digest }}
+      XDG_RUNTIME_DIR: /tmp/xdg
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -207,13 +208,31 @@ jobs:
           go-version-file: go.mod
       # ubuntu-latest ships Podman, so the container driver's conformance
       # run is a real one rather than a skip.
+      # The driver looks for $XDG_RUNTIME_DIR/podman/podman.sock and then
+      # /run/podman/podman.sock. A hosted runner sets neither variable nor
+      # socket, so the job names the directory itself, at the job level so
+      # the test step reads the same one, and starts the engine detached so
+      # it outlives the step that started it.
       - name: A rootless engine for the container driver's suite
         run: |
-          podman system service --time=0 "unix://${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/podman/podman.sock" &
-          for _ in $(seq 1 50); do podman info >/dev/null 2>&1 && break; sleep 0.2; done
-          podman info --format '{{.Host.RemoteSocket.Path}}'
+          mkdir -p "${XDG_RUNTIME_DIR}/podman"
+          nohup podman system service --time=0 "unix://${XDG_RUNTIME_DIR}/podman/podman.sock" >/tmp/podman.log 2>&1 &
+          for _ in $(seq 1 100); do [ -S "${XDG_RUNTIME_DIR}/podman/podman.sock" ] && break; sleep 0.2; done
+          test -S "${XDG_RUNTIME_DIR}/podman/podman.sock" || { cat /tmp/podman.log; exit 1; }
       - name: The race tier at the tag
-        run: go test -race -count=1 ./...
+        shell: bash
+        run: |
+          set -o pipefail
+          go test -race -count=1 ./... 2>&1 | tee /tmp/race.log
+      # The driver suite skips where no engine answers, so a green race
+      # tier alone does not say the container driver was exercised.
+      - name: The container driver's conformance suite ran
+        shell: bash
+        run: |
+          set -o pipefail
+          go test -race -count=1 -v -run '^TestPodmanConformance$' ./runtime/podman/... 2>&1 | tee /tmp/podman-suite.log
+          grep -q -- '--- PASS: TestPodmanConformance' /tmp/podman-suite.log \
+            || { echo "the container driver's suite did not run; no engine answered" >&2; exit 1; }
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ${{ env.REGISTRY }}

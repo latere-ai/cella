@@ -17,8 +17,14 @@
 # its API server answer on. A cluster whose API server is outside the pod
 # network needs that address, which is a CIDR only the operator knows, so
 # the rule admits every destination on those ports rather than pretending
-# to a precision this base does not have. An installation that can name
-# them narrows this document and nothing else.
+# to a precision this base does not have.
+#
+# A port here is the destination pod's own, after the Service's address
+# translation, and not the Service's port. An in-cluster webhook served on
+# Service port 443 by a container listening on 8443 is refused by this
+# rule until the operator adds 8443, and the same holds for a Postgres
+# whose pod listens off 5432. An installation that can name its
+# destinations narrows this document and nothing else.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

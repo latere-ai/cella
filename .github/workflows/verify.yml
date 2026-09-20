@@ -79,6 +79,11 @@ jobs:
       # tests is a run that is not doing its job.
       - run: kubectl version --client
       - name: The base and every example render
+        # `shell: bash` for pipefail: the default shell is `bash -e`
+        # without it, `tee` exits 0, and a failing `go test` would be
+        # swallowed by the pipe.
+        shell: bash
         run: |
+          set -o pipefail
           go test -count=1 -v . 2>&1 | tee out.txt
           ! grep -q -- '--- SKIP' out.txt

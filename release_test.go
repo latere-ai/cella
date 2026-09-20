@@ -334,12 +334,54 @@ func TestVerifyRendersTheDeployTreeOnEveryPush(t *testing.T) {
 		t.Fatal("verify.yml has no install job; spec 014 walks the deploy tree on every push")
 	}
 	var steps string
+	piped := false
 	for _, s := range list(job["steps"]) {
-		steps += str(dig(s, "run")) + "\n"
+		run := str(dig(s, "run"))
+		steps += run + "\n"
+		// A step whose command is a pipe needs a shell with pipefail: the
+		// default is `bash -e`, `tee` exits 0, and a failing `go test`
+		// would be swallowed by the pipe.
+		if strings.Contains(run, "| tee ") {
+			piped = true
+			if str(dig(s, "shell")) != "bash" || !strings.Contains(run, "set -o pipefail") {
+				t.Error("a step pipes into tee without `shell: bash` and `set -o pipefail`, so a failing command would pass")
+			}
+		}
+	}
+	if !piped {
+		t.Error("the install job runs no test whose output is read, so the skip check has nothing to read")
 	}
 	for _, want := range []string{"kubectl version --client", "--- SKIP"} {
 		if !strings.Contains(steps, want) {
 			t.Errorf("the install job does not run %q, so a skipped render would pass unnoticed", want)
+		}
+	}
+}
+
+// TestEveryPipedStepFailsOnTheCommandAndNotTheTee is the same rule over the
+// release pipeline: a step that reads a command's output through a pipe
+// reports the command's exit code and not the reader's.
+func TestEveryPipedStepFailsOnTheCommandAndNotTheTee(t *testing.T) {
+	for _, name := range []string{"release.yml", "verify.yml"} {
+		data, err := os.ReadFile(filepath.Join(".github", "workflows", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var o object
+		if err := unmarshalYAML(data, &o); err != nil {
+			t.Fatal(err)
+		}
+		jobs, _ := o["jobs"].(map[string]any)
+		for job, spec := range jobs {
+			for _, s := range list(dig(spec, "steps")) {
+				run := str(dig(s, "run"))
+				if !strings.Contains(run, "| tee ") {
+					continue
+				}
+				if str(dig(s, "shell")) != "bash" || !strings.Contains(run, "set -o pipefail") {
+					t.Errorf("%s: %s pipes into tee without `shell: bash` and `set -o pipefail`", name, job)
+				}
+			}
 		}
 	}
 }
