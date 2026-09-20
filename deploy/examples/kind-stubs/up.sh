@@ -62,7 +62,9 @@ kubectl -n cella rollout status deploy/cellad --timeout=300s >&2
 # 4. A caller token from the stub issuer, minted through the node port. The
 # iss it carries is the loopback address the control plane verifies against,
 # which is the whole point of the issuer running in that Pod.
-token=$(curl -fsS -X POST http://localhost:30081/mint \
+# The node port is programmed a moment after the rollout reports done, so
+# the first request retries a connection kube-proxy resets or refuses.
+token=$(curl -fsS --retry 10 --retry-delay 1 --retry-all-errors -X POST http://localhost:30081/mint \
   -H 'content-type: application/json' -d '{"sub":"dev"}' \
   | sed -e 's/.*"token":"//' -e 's/".*//')
 [ -n "$token" ] || { echo "the stub issuer minted nothing" >&2; exit 1; }

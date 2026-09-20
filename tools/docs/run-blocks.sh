@@ -32,4 +32,6 @@ fi
 
 echo "run-blocks: $doc" >&2
 cat -n "$program" >&2
-exec bash -euo pipefail "$program"
+# Not exec: replacing this shell would skip the trap that removes the
+# program, and the tempdir gate counts what a test run leaves behind.
+bash -euo pipefail "$program"
