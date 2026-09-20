@@ -153,7 +153,7 @@ the destination already or is not wanted.
 | `docs/internal`, user docs | - | platform docs where user facing; cella `docs/` where operator facing | platform 62 | - |
 | `test/cellae2e` | 0.6k | drop: [[015-conformance-suite]] is the executable contract | - | - |
 | (no source: the admission client of 007, which the platform's webhook of slice 58 answers) | - | cella `manifest` `AdmitFunc` over HTTP, `CELLA_ADMISSION_URL`, fail closed, no retry | 047 | [[007-admission]] |
-| (no source: the release pipeline of 014; the platform's deploy of slice 60 pins `ghcr.io/latere-ai/cellad:vX.Y.Z` and no tag past v0.1.0 exists) | - | the image and binary release of `cellad`, `cellad check`, the install document CI executes | 048 | [[014-release-and-installation]] |
+| (no source: the release pipeline of 014, which the platform's deploy of slice 60 pins) | - | the `v*` tag pipeline, the deploy tree, `cellad check`, the install walk | 048 | [[014-release-and-installation]] |
 
 ### Slice order
 
