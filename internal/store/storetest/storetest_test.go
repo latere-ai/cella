@@ -139,6 +139,23 @@ func (stubTx) Leases() store.Leases     { return stubLeases{} }
 
 func (stubTx) Revocations() store.Revocations { return stubRevocations{} }
 func (stubTx) Ledger() store.Ledger           { return stubLedger{} }
+func (stubTx) Operations() store.Operations   { return stubOperations{} }
+
+type stubOperations struct{}
+
+func (stubOperations) Enqueue(context.Context, store.Operation) error { return nil }
+func (stubOperations) Claim(context.Context, string, string, int, time.Time) ([]store.Operation, error) {
+	return nil, nil
+}
+func (stubOperations) Acknowledge(context.Context, string, []byte) error { return nil }
+func (stubOperations) Get(context.Context, string) (store.Operation, error) {
+	return store.Operation{}, nil
+}
+func (stubOperations) Register(context.Context, store.Worker) error               { return nil }
+func (stubOperations) Heartbeat(context.Context, string, string, time.Time) error { return nil }
+func (stubOperations) Workers(context.Context, string) ([]store.Worker, error)    { return nil, nil }
+func (stubOperations) Forget(context.Context, string, string) error               { return nil }
+func (stubOperations) Prune(context.Context, time.Time) (int, error)              { return 0, nil }
 
 type stubDesired struct{}
 

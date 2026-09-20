@@ -18,6 +18,20 @@ refused before it is pushed.
   each declaration. Every push runs the suite against this server, and every
   tag runs it against the images it published. `docs/conformance.md` is the
   page for whoever runs it or writes a server of their own.
+- A self-hosted data plane. `cellad worker` runs beside your own sandboxes,
+  on your own engine or cluster, and connects outbound to a control plane
+  somebody else operates; nothing ever dials it, so it needs no inbound
+  port and no public address. It authenticates with an environment key,
+  which an administrator now mints through `POST
+  /v1/environments/{id}/keys` (shown once) and ends through `DELETE
+  /v1/environments/{id}/keys/{jti}`; the same key is what `cellad egress`
+  carries, so a gateway no longer needs one signed by hand. The worker
+  checks its own driver before it registers, declares what that driver
+  provides, and reconnects with a backoff when the connection drops,
+  keeping the sandboxes it is already running. The `Environment` kind
+  gains the full shape an operator declares, with a refusal per field, and
+  `/v1/environments` serves it. [Self-hosting a data plane](docs/workers.md)
+  is the walkthrough, with the Kubernetes manifest to apply.
 
 ## v0.2.1 - 2026-09-20
 

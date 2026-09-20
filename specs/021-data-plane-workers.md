@@ -10,7 +10,7 @@ depends_on:
 affects: [manifest/v1/, runtime/remote/, internal/worker/, internal/api/, internal/auth/, internal/config/, controller/, internal/store/]
 effort: large
 created: 2026-09-12
-updated: 2026-09-13
+updated: 2026-09-20
 author: changkun
 ---
 
@@ -252,17 +252,17 @@ connection ([[012-test-stubs-and-tiers]]).
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| Every field rule in the table has a refusing case; `auto` on `mode: worker` is `invalid_field`; a missing `gateway` with enforced egress is `missing_field` | `TestEnvironmentFieldRules` | not built |
+| Every field rule in the table has a refusing case; `auto` on `mode: worker` is `invalid_field`; a missing `gateway` with enforced egress is `missing_field` | `TestEnvironmentFieldRules` | built, [[051-environments-and-workers]] |
 | Each phase transition fires on its trigger, is written by the lease holder, and gates what the table says; `Degraded NoGateway` fails a create with `driver_unavailable` | `TestEnvironmentPhases` under a fake clock | not built |
 | The default environment is created from the variables at first start, is authoritative afterwards, is not deletable, and with `CELLA_RUNTIME=none` the named default is what a manifest gets and non-admins may use | `TestDefaultEnvironment`, three cases | not built |
-| A worker with a valid key registers and receives a `wrk_` id; a revoked key, a mismatched isolation, and a mismatched driver are refused with their codes; a failed `Preflight` exits 1 without registering | `TestWorkerRegistration`, [[006-identity]]'s `TestEnvironmentKeys` | not built |
+| A worker with a valid key registers and receives a `wrk_` id; a revoked key, a mismatched isolation, and a mismatched driver are refused with their codes; a failed `Preflight` exits 1 without registering | `TestWorkerRegistration`, [[006-identity]]'s `TestEnvironmentKeys` | built as `TestWorkerRegistrationRoute`, `TestRegistrationMismatch`, `TestRevokedKeyIsRefusedOnTheWorkerRoutes` and `TestWorkerRefusals`, [[051-environments-and-workers]] |
 | Placement admits against the lesser of `spec.capacity` and the live workers' reports; `capabilities` is the intersection | `TestWorkerCapacityAndCapabilities` | not built |
-| Every driver method and optional-interface method, issued through `runtime/remote`, executes on a worker running `native` and returns the same result as the direct call; the framing per row holds | `TestWorkerConformance` in `runtimetest`, `TestStreamFraming` | not built |
+| Every driver method and optional-interface method, issued through `runtime/remote`, executes on a worker running `native` and returns the same result as the direct call; the framing per row holds | `TestWorkerConformance` in `runtimetest`, `TestStreamFraming` | built, [[051-environments-and-workers]] |
 | An exec of 64 MiB output, an attach with resize, a dial, a screen, and a tar both ways stream through one connection under credit without buffering more than the window | `TestRemoteStreams` | not built |
-| A caller's disconnect cancels the operation on the worker within one heartbeat | `TestCancelCrossesTheSeam` | not built |
+| A caller's disconnect cancels the operation on the worker within one heartbeat | `TestCancelCrossesTheSeam` | built, [[051-environments-and-workers]] |
 | `Watch` events cross the seam and a `relist` triggers a `List` | `TestRemoteWatch` | not built |
-| A dropped connection redelivers unacknowledged operations exactly once to a live worker after the lease | `TestRedelivery` | not built |
+| A dropped connection redelivers unacknowledged operations exactly once to a live worker after the lease | `TestRedelivery` | built at the store as `storetest`'s `Redelivery` case over both adapters; the hub reads the live registrations from memory and a fleet reads them from the table, [[051-environments-and-workers]] |
 | An environment with no heartbeat goes `Offline`, its running sandboxes are held `Lost`, and recover when a worker returns | `TestOfflineAndRecovery` | not built |
 | The control plane makes no outbound connection to a worker's host during the whole worker and kind tiers | `TestNoInboundToTheDataPlane`, run as [[012-test-stubs-and-tiers]]'s `TestWorkerNoInbound` and `TestClusterWorkerNoInbound` | not built |
-| A non-loopback `http://` `CELLA_URL` is refused at start unless the hatch is set | `TestControlPlaneURLRule` | not built |
-| Every variable this spec names is in [[002-repository-scaffold]]'s table with the same default | `TestConfigTableAgrees` | not built |
+| A non-loopback `http://` `CELLA_URL` is refused at start unless the hatch is set | `TestControlPlaneURLRule` | built as `TestLoadWorkerRefusals` and `TestWorkerRoleRefusesItsConfiguration`, [[051-environments-and-workers]] |
+| Every variable this spec names is in [[002-repository-scaffold]]'s table with the same default | `TestConfigTableAgrees` | the table carries every variable, the worker's own included; the test that compares it to the code is not built, [[051-environments-and-workers]] |

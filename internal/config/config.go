@@ -43,6 +43,10 @@ const (
 	// held before it is deleted, where no durable store can recover it
 	// (spec 005). It takes the same bounds as the intervals.
 	DefaultLostGrace = 10 * time.Minute
+	// DefaultEnvironmentOffline is how long an environment is held live
+	// without a worker heartbeat, or with its in-process driver failing
+	// Ready, before it is Offline (spec 021).
+	DefaultEnvironmentOffline = 2 * time.Minute
 	// DefaultDBMaxConns is the pool one replica opens on the database, and
 	// MaxDBMaxConns the most it may ask for: a database shared by a fleet
 	// has a connection ceiling, and one replica does not hold it (spec 010).
@@ -125,6 +129,10 @@ type Config struct {
 	// Scheduling is spec 020's half: the default environment's mode and the
 	// pool it keeps prewarmed.
 	Scheduling Scheduling
+	// EnvironmentOffline is how long without a worker heartbeat, or with the
+	// in-process driver not ready, before an environment is Offline (spec
+	// 021). CELLA_ENVIRONMENT_OFFLINE sets it.
+	EnvironmentOffline time.Duration
 	// Identity is spec 006's half: the issuers, the audience, the signing
 	// keys, the authorizer, and the owner policy's admins.
 	Identity
@@ -163,6 +171,7 @@ func Load(getenv Getenv) (Config, error) {
 	}
 	c.Gateway = loadEgressGateway(getenv, &problems)
 	c.Scheduling = loadScheduling(getenv, &problems)
+	c.EnvironmentOffline = interval(getenv, "CELLA_ENVIRONMENT_OFFLINE", DefaultEnvironmentOffline, &problems)
 	c.PodmanSocket = strings.TrimSpace(getenv("CELLA_PODMAN_SOCKET"))
 	if c.PodmanSocket != "" && !filepath.IsAbs(c.PodmanSocket) {
 		problems = append(problems, "CELLA_PODMAN_SOCKET must be an absolute path to a unix socket")

@@ -32,6 +32,7 @@ import (
 	"latere.ai/x/cella/manifest"
 	v1 "latere.ai/x/cella/manifest/v1"
 	driver "latere.ai/x/cella/runtime"
+	"latere.ai/x/cella/runtime/remote"
 )
 
 // Verifier verifies a bearer without interpreting hosted identity claims.
@@ -52,6 +53,15 @@ type Options struct {
 	// Events is design 009's emitter. Nil journals no operation; the
 	// mutations below it are journaled by the store either way.
 	Events *events.Emitter
+	// Keys mints and revokes the credential a data plane carries (spec
+	// 021). Nil serves no key route, which is a control plane whose data
+	// plane roles were keyed elsewhere.
+	Keys EnvironmentKeys
+	// Workers is the control plane's side of every worker stream (spec
+	// 021). Nil serves no worker environment: the two routes an
+	// environment key reaches on a worker's behalf answer
+	// capability_unsupported.
+	Workers *remote.Hub
 	// Admit is stage 3 of a resolve, design 007's admission step. Nil is
 	// the identity: the operator configured no endpoint.
 	Admit manifest.AdmitFunc
@@ -117,6 +127,10 @@ func New(o Options) (http.Handler, error) {
 	h.handle("PUT /v1/secrets/{key}", h.applySecret)
 	h.handle("GET /v1/secrets/{key}", h.secretItem)
 	h.handle("DELETE /v1/secrets/{key}", h.secretItem)
+	h.handle("GET /v1/environments", h.environmentList)
+	h.handle("GET /v1/environments/{id}", h.environmentItem)
+	h.handle("POST /v1/environments/{id}/keys", h.environmentKeyMint)
+	h.handle("DELETE /v1/environments/{id}/keys/{jti}", h.environmentKeyRevoke)
 	return h, nil
 }
 
@@ -156,6 +170,10 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			h.Egress.ServeGateway(w, r, environment)
+			return
+		}
+		if route, ok := workerPath(r); ok {
+			h.serveWorkerRoute(w, r, route, environment)
 			return
 		}
 		respondError(w, &auth.Error{Code: auth.CodeForbidden, Detail: "environment keys authorize data plane streams only"})
@@ -623,6 +641,9 @@ func errorEnvelope(err error, requestID string) (int, httpjson.Error) {
 	case "capability_unsupported":
 		status = 422
 		message = "The environment cannot provide this."
+	case "environment_mismatch":
+		status = 422
+		message = "This worker does not match the environment it registered on."
 	case "invalid_field":
 		status = 400
 		message = "A field has a value it cannot take."
