@@ -890,6 +890,17 @@ func revocations(t TB, open Opener) {
 	if !revoked(t, s, "01JLIVE") {
 		t.Errorf("a repeated revocation dropped the row")
 	}
+	// The later expiry is the one the row keeps, so a revocation outlives
+	// every token that could present it and not merely the first.
+	var kept int
+	with(t, s, func(tx store.Tx) error {
+		var err error
+		kept, err = tx.Revocations().Forget(ctx, now.Add(90*time.Minute))
+		return err
+	})
+	if kept != 0 || !revoked(t, s, "01JLIVE") {
+		t.Errorf("the sweep dropped %d rows at an instant inside the later expiry", kept)
+	}
 	// A revocation with no jti revokes nothing and says so, rather than
 	// writing a row every token would match on an empty claim.
 	if err := s.Tx(ctx, func(tx store.Tx) error {

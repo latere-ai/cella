@@ -467,3 +467,31 @@ func TestDueForRotation(t *testing.T) {
 		})
 	}
 }
+
+// TestRecoveryAdoptionFailureKeepsTheOldToken: a re-projection into an
+// adopted sandbox that does not land ends the token it could not deliver,
+// and the sandbox keeps the one it is running with.
+func TestRecoveryAdoptionFailureKeepsTheOldToken(t *testing.T) {
+	clock := newClock()
+	fake := newDriver(clock)
+	tokens := newTokens(clock, 24*time.Hour)
+	armed := false
+	c := withDriver(t, newDurable(true), adopting{fakeDriver: fake, armed: &armed}, clock,
+		Options{Tokens: tokens})
+	obj := created(t, c, "work")
+	id := obj.Status.ID
+	vanish(fake, id)
+	armed = true
+	fake.set(func(d *fakeDriver) { d.updateErr = errors.New("the driver refused") })
+
+	if acted, err := c.Reap(t.Context()); err == nil || acted != 0 {
+		t.Fatalf("a recovery whose re-projection failed was reported as done: acted=%d err=%v", acted, err)
+	}
+	minted, revoked, _ := tokens.read()
+	if minted != 2 || !slices.Equal(revoked, []string{"jti-2"}) {
+		t.Fatalf("the failed adoption minted %d and revoked %v, want the undelivered token revoked", minted, revoked)
+	}
+	if held := c.objects[id].Status.TokenState; held == nil || held.JTI != "jti-1" {
+		t.Fatalf("the record reads %+v, want the token the adopted sandbox still holds", held)
+	}
+}
