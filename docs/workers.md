@@ -181,19 +181,6 @@ Nothing here listens, so the workload needs no Service, no Ingress and no
 inbound rule. Mint the key first and put it in the Secret.
 
 ```yaml
-# A self-hosted data plane: cellad worker on your own cluster, against a
-# control plane somebody else operates (spec 021, docs/workers.md).
-#
-# Nothing here listens. The worker opens one outbound connection to
-# CELLA_URL and everything travels on it, so this workload needs no
-# Service, no Ingress, and no inbound rule in your network policy.
-#
-# Before applying, mint the key as an administrator of the control plane:
-#
-#   curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
-#     https://cella.example.com/v1/environments/eu-gpu/keys
-#
-# and put the token it returns, shown once, in the Secret below.
 apiVersion: v1
 kind: Secret
 metadata:
