@@ -50,6 +50,10 @@ type Options struct {
 	// Observe receives every authorizer call's result and duration, for
 	// the metric of spec 017. Optional.
 	Observe func(result string, seconds float64)
+	// Revocations is the list a token cellad minted is checked against.
+	// Optional: without one nothing is revoked and every token cellad
+	// signed lives to its exp.
+	Revocations Revocations
 }
 
 // Identity is what the node holds once spec 006 is wired: who a caller
@@ -84,7 +88,7 @@ func Start(ctx context.Context, o Options) (*Identity, error) {
 	verifier, err := NewVerifier(ctx, VerifierOptions{
 		Issuers: o.Issuers, Audience: o.Audience, Audiences: o.Audiences,
 		LocalIssuer: o.PublicURL, LocalKeys: signer.PublicKeys(),
-		HTTP: client,
+		HTTP: client, Revocations: o.Revocations,
 	})
 	if err != nil {
 		return nil, err
