@@ -88,6 +88,9 @@ const (
 	TypeRecovered  Type = "sandbox.recovered"
 	TypeExec       Type = "sandbox.exec"
 	TypeFiles      Type = "sandbox.files"
+	TypeScreenshot Type = "sandbox.screenshot"
+	TypeInput      Type = "sandbox.input"
+	TypeScreen     Type = "sandbox.screen"
 )
 
 // Types is every type this slice emits, in the order design 009's table
@@ -95,6 +98,7 @@ const (
 var Types = []Type{
 	TypeCreated, TypeUpdated, TypeStarted, TypeStopped, TypeDeleted,
 	TypeFailed, TypeLost, TypeRecovering, TypeRecovered, TypeExec, TypeFiles,
+	TypeScreenshot, TypeInput, TypeScreen,
 	TypeSecretCreated, TypeSecretUpdated, TypeSecretDeleted,
 }
 
