@@ -6,11 +6,13 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -107,9 +109,13 @@ func setupWithStore(t *testing.T, policy authz.Authorizer, open func(string) (co
 	}
 	server := httptest.NewServer(h)
 	t.Cleanup(server.Close)
-	return &fixture{t: t, url: server.URL, issuerURL: issuer.URL(),
+	f := &fixture{t: t, url: server.URL, issuerURL: issuer.URL(),
 		alice: issuer.Mint(issuertest.Claims{Sub: "alice"}), bob: issuer.Mint(issuertest.Claims{Sub: "bob"}),
 		h: h, c: c, gateway: gateway}
+	if deferred, ok := policy.(*failingPolicy); ok {
+		f.failing = &deferred.armed
+	}
+	return f
 }
 
 // secretBody is one Secret manifest as a caller writes it.
@@ -384,4 +390,118 @@ func decodeSandbox(t *testing.T, body []byte) v1.Sandbox {
 		t.Fatalf("the answer is %s: %v", body, err)
 	}
 	return got
+}
+
+// TestSecretRouteRefusals drives the branch each route takes when something
+// before the store says no: a body too large to read, a manifest the contract
+// refuses, and a decision the authorizer declined.
+func TestSecretRouteRefusals(t *testing.T) {
+	f := setupSealed(t, nil)
+	f.request(http.MethodPost, "/v1/secrets", f.alice,
+		secretBody("github", "api.github.com", "ghp_canary"), http.StatusCreated)
+	oversized := secretBody("big", "api.example.com", strings.Repeat("x", 70<<10))
+
+	t.Run("aBodyLargerThanThisServerReads", func(t *testing.T) {
+		f.request(http.MethodPost, "/v1/secrets", f.alice, oversized, http.StatusRequestEntityTooLarge)
+		f.request(http.MethodPut, "/v1/secrets/github", f.alice, oversized, http.StatusRequestEntityTooLarge)
+		f.request(http.MethodPut, "/v1/secrets/fresh", f.alice, oversized, http.StatusRequestEntityTooLarge)
+	})
+
+	t.Run("aBodyTheContractRefuses", func(t *testing.T) {
+		f.request(http.MethodPut, "/v1/secrets/github", f.alice, `{`, http.StatusBadRequest)
+		f.request(http.MethodPut, "/v1/secrets/fresh", f.alice, `{`, http.StatusBadRequest)
+		// A create through PUT still needs a value.
+		f.request(http.MethodPut, "/v1/secrets/fresh", f.alice,
+			`{"apiVersion":"`+v1.APIVersion+`","kind":"Secret","spec":{"scope":{"hosts":["api.example.com"]}}}`,
+			http.StatusBadRequest)
+		// An update still needs a scope.
+		f.request(http.MethodPut, "/v1/secrets/github", f.alice,
+			`{"apiVersion":"`+v1.APIVersion+`","kind":"Secret","spec":{}}`, http.StatusBadRequest)
+	})
+
+	t.Run("aCreateThroughPutWithNoKey", func(t *testing.T) {
+		plain := setup(t, nil)
+		plain.request(http.MethodPut, "/v1/secrets/fresh", plain.alice,
+			secretBody("fresh", "api.example.com", "x"), http.StatusUnprocessableEntity)
+	})
+
+	for _, tc := range []struct {
+		name, action, method, path string
+		body                       string
+	}{
+		{"read", authorizer.ActionSecretRead, http.MethodGet, "/v1/secrets/github", ""},
+		{"delete", authorizer.ActionSecretDelete, http.MethodDelete, "/v1/secrets/github", ""},
+		{"update", authorizer.ActionSecretUpdate, http.MethodPut, "/v1/secrets/github", secretBody("github", "api.github.com", "x")},
+		{"create", authorizer.ActionSecretCreate, http.MethodPost, "/v1/secrets", secretBody("other", "api.other.com", "x")},
+	} {
+		t.Run("aDecisionTheAuthorizerDeclined/"+tc.name, func(t *testing.T) {
+			denied := setupSealed(t, refusing(tc.action))
+			denied.request(http.MethodPost, "/v1/secrets", denied.alice,
+				secretBody("github", "api.github.com", "ghp_canary"), statusFor(tc.action))
+			if tc.action == authorizer.ActionSecretCreate {
+				return
+			}
+			denied.request(tc.method, tc.path, denied.alice, tc.body, http.StatusForbidden)
+		})
+	}
+
+	t.Run("aListTheAuthorizerDeclined", func(t *testing.T) {
+		denied := setupSealed(t, refusing(authorizer.ActionSecretList))
+		denied.request(http.MethodGet, "/v1/secrets", denied.alice, "", http.StatusForbidden)
+	})
+
+	t.Run("aLookupTheAuthorizerCouldNotDecide", func(t *testing.T) {
+		broken := setupSealed(t, failing(authorizer.ActionSecretMount))
+		broken.request(http.MethodPost, "/v1/secrets", broken.alice,
+			secretBody("github", "api.github.com", "ghp_canary"), http.StatusCreated)
+		broken.request(http.MethodPost, "/v1/sandboxes", broken.alice,
+			`{"apiVersion":"`+v1.APIVersion+`","kind":"Sandbox","metadata":{"name":"work"},`+
+				`"spec":{"command":["/bin/sh","-c","sleep 30"],"secrets":[{"name":"github","env":"GITHUB_TOKEN"}]}}`,
+			http.StatusServiceUnavailable)
+	})
+
+	t.Run("aReadTheAuthorizerCouldNotDecideEndsTheList", func(t *testing.T) {
+		broken := setupSealed(t, failingAfter(authorizer.ActionSecretRead))
+		broken.request(http.MethodPost, "/v1/secrets", broken.alice,
+			secretBody("github", "api.github.com", "ghp_canary"), http.StatusCreated)
+		broken.failing.Store(true)
+		broken.request(http.MethodGet, "/v1/secrets", broken.alice, "", http.StatusServiceUnavailable)
+	})
+}
+
+// statusFor is the status a create takes when the named action is the one
+// that was declined: a declined create is forbidden, and any other decline
+// lets the create through.
+func statusFor(action string) int {
+	if action == authorizer.ActionSecretCreate {
+		return http.StatusForbidden
+	}
+	return http.StatusCreated
+}
+
+// failing is the owner policy with one action the endpoint cannot answer at
+// all, which is the branch a caller reads as authorizer_unavailable.
+func failing(action string) authz.Authorizer { return newFailingPolicy(action, false) }
+
+// failingAfter is failing from the moment a test says so, for a route that
+// must first have an object to read.
+func failingAfter(action string) authz.Authorizer { return newFailingPolicy(action, true) }
+
+func newFailingPolicy(action string, deferred bool) *failingPolicy {
+	p := &failingPolicy{inner: &auth.OwnerPolicy{DefaultEnvironment: "default"}, action: action}
+	p.armed.Store(!deferred)
+	return p
+}
+
+type failingPolicy struct {
+	inner  authz.Authorizer
+	action string
+	armed  atomic.Bool
+}
+
+func (p *failingPolicy) Authorize(ctx context.Context, req authz.Request) (authz.Decision, error) {
+	if req.Action == p.action && p.armed.Load() {
+		return authz.Decision{}, errors.New("the endpoint did not answer")
+	}
+	return p.inner.Authorize(ctx, req)
 }
