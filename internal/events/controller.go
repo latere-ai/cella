@@ -22,8 +22,12 @@ func (e *Emitter) Emit(ctx context.Context, a controller.Act) {
 	if !Deliverable(kind) {
 		return
 	}
+	data := a.Data
+	if data == nil {
+		data = MutationData(kind, a.Object)
+	}
 	record, err := Mutation(kind, ReasonOf(a.Object.Status.Reason, kind),
-		OfSandbox(a.Object), MutationData(kind, a.Object), ActorFrom(ctx), time.Now().UTC())
+		OfSandbox(a.Object), data, ActorFrom(ctx), time.Now().UTC())
 	if err != nil {
 		e.log.WarnContext(ctx, "the event was not built",
 			"type", a.Type, "object", a.Object.Status.ID, "error", err)
