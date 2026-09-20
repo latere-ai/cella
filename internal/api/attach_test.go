@@ -495,6 +495,11 @@ func TestAttachStampsActivity(t *testing.T) {
 	if got := stamps.stamped(); got[0] != obj.Status.ID {
 		t.Fatalf("opening a session stamped %v", got)
 	}
+	// The controller coalesces stamps inside one window, so a frame that
+	// lands within it after the open stamp is correctly folded into it. On
+	// a fast host the typed frame arrives well under a millisecond later,
+	// which is what this test saw on Linux, so the window is let pass first.
+	time.Sleep(3 * testTouchInterval)
 	typeIn(t, conn, `printf 'TYP%s\n' ED`)
 	r.await(t, "TYPED")
 	deadline := time.Now().Add(10 * time.Second)

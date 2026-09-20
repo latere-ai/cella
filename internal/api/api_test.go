@@ -49,6 +49,12 @@ type fixture struct {
 }
 
 func setup(t *testing.T, policy authz.Authorizer) *fixture { return setupDriver(t, policy, nil) }
+
+// testTouchInterval is the activity window the fixture's controller coalesces
+// stamps in: short enough that a test sees a second stamp, long enough that
+// a test which wants one waits past it on purpose rather than by luck.
+const testTouchInterval = time.Millisecond
+
 func setupDriver(t *testing.T, policy authz.Authorizer, wrap func(runtime.Driver) runtime.Driver) *fixture {
 	t.Helper()
 	issuer := issuertest.New(t, issuertest.WithDefaultAudience("cella"))
@@ -67,7 +73,7 @@ func setupDriver(t *testing.T, policy authz.Authorizer, wrap func(runtime.Driver
 	}
 	// The activity window is all but open, so a test observes each stamp a
 	// handler makes rather than the one the default minute lets through.
-	c, err := controller.Open(controller.Options{DataDir: t.TempDir(), Driver: runtimeDriver, Environment: "default", TouchInterval: time.Millisecond})
+	c, err := controller.Open(controller.Options{DataDir: t.TempDir(), Driver: runtimeDriver, Environment: "default", TouchInterval: testTouchInterval})
 	if err != nil {
 		t.Fatal(err)
 	}
