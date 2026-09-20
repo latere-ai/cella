@@ -308,7 +308,10 @@ narrowed egress with its warning, and reads the same object back on a
 second request; a create above the endpoint's ceiling is a 422
 `admission_refused` carrying `ceiling_exceeded: spec.resources.cpu is 8,
 above the plan's 4`; and a create after the endpoint has stopped is a 503
-`admission_unavailable` with no second request and no object left behind.
+`admission_unavailable` with no object left behind. The no-retry rule
+itself is counted in `TestFailsClosedWithoutRetry`, which asserts exactly
+one request per failure mode against a server that is still running; a
+stopped endpoint cannot count what it was not sent.
 `TestServeWithoutAdmissionSaysBuiltin` is the other half:
 `admission=builtin` and a create that goes through.
 
@@ -354,7 +357,14 @@ above the plan's 4`; and a create after the endpoint has stopped is a 503
    configuration for one client is a second place for a deployment's
    trust to be wrong.
 
-7. **The count ceiling needed no code.** `controller.Create` already
+7. **The status an endpoint is handed is the exported one.** A workload's
+   apply carries the calling sandbox's status, which holds the boundary's
+   credential and the record its token is revoked by. `Controller.Get`
+   already strips both, and `envelopeOf` strips them again on the member
+   that leaves the process, so a later caller of the package cannot
+   reintroduce the leak by handing it a raw status.
+
+8. **The count ceiling needed no code.** `controller.Create` already
    counted every desired sandbox of the owner whose phase is not
    `Deleting`, under the same lock that reserves the name, which is
    [[007-admission]]'s definition. `authorizer/limits.go` and

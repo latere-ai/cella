@@ -47,8 +47,7 @@ type admissionEnvelope struct {
 // document it received, and answers a refusal as a 200 with a code.
 type admissionEndpoint struct {
 	*httptest.Server
-	seen  atomic.Pointer[admissionEnvelope]
-	calls atomic.Int64
+	seen atomic.Pointer[admissionEnvelope]
 }
 
 // The annotations a platform stamps. The prefix is one deployment's own
@@ -62,7 +61,6 @@ func startAdmission(t *testing.T) *admissionEndpoint {
 	t.Helper()
 	e := &admissionEndpoint{}
 	e.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		e.calls.Add(1)
 		if r.Header.Get("Authorization") != "Bearer "+admissionToken {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
@@ -254,7 +252,6 @@ func TestServeWithAdmission(t *testing.T) {
 	})
 
 	t.Run("anEndpointThatStoppedFailsEveryCreateClosed", func(t *testing.T) {
-		before := endpoint.calls.Load()
 		endpoint.Close()
 		status, answer := plane.do(t, http.MethodPost, "/v1/sandboxes", strings.NewReader(
 			`{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox","metadata":{"name":"orphan"},"spec":{}}`))
@@ -263,9 +260,6 @@ func TestServeWithAdmission(t *testing.T) {
 		}
 		if !strings.Contains(answer, "admission_unavailable") {
 			t.Fatalf("answer = %s", answer)
-		}
-		if endpoint.calls.Load() != before {
-			t.Fatalf("calls = %d, want no retry against a stopped endpoint", endpoint.calls.Load()-before)
 		}
 		// The sandbox does not exist: a create that could not be decided on
 		// is refused and never half made.

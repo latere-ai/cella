@@ -19,14 +19,12 @@ refused before it is pushed.
   422 carrying your endpoint's own reason; an endpoint that times out,
   answers anything else, or cannot be reached fails the create with a 503
   and never lets one through, and nothing is ever resent. Leave the URL
-  unset and the step is the identity, as before.
-
-- `spec.image` is now required after your admission endpoint has run
-  rather than before, so a catalogue can supply it, and
-  `CELLA_DEFAULT_IMAGE` fills it in on an installation with no endpoint.
-  A manifest that names no image after both is refused with
-  `missing_field`. An environment that runs no image, such as the native
-  one, still refuses an image whoever named it.
+  unset and the step is the identity, as before. `spec.image` moves with
+  it: it is now required after your endpoint has run rather than before,
+  so a catalogue can supply it, and `CELLA_DEFAULT_IMAGE` fills it in on
+  an installation with no endpoint. A manifest that names no image after
+  both is refused with `missing_field`, and an environment that runs no
+  image, such as the native one, still refuses an image whoever named it.
 
 - A sandbox reaches the services it needs and holds none of their
   credentials. The new `Secret` kind at `/v1/secrets` takes a value, the hosts
