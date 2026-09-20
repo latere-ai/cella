@@ -19,7 +19,7 @@ refused before it is pushed.
   keeping the sandboxes it is already running. The `Environment` kind
   gains the full shape an operator declares, with a refusal per field, and
   `/v1/environments` serves it. [Self-hosting a data plane](docs/workers.md)
-  is the walkthrough.
+  is the walkthrough, with the Kubernetes manifest to apply.
 
 - A second binary, `cella`, speaks the API from a shell and from inside a
   sandbox: apply a Sandbox or a Secret, list and read objects, exec with or

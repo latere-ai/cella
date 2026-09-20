@@ -175,6 +175,125 @@ It keeps nothing of its own. Everything a worker knows is either in its
 driver's own records or arrives on the stream, so a replaced host loses
 nothing the control plane had.
 
+## On Kubernetes
+
+Nothing here listens, so the workload needs no Service, no Ingress and no
+inbound rule. Mint the key first and put it in the Secret.
+
+```yaml
+# A self-hosted data plane: cellad worker on your own cluster, against a
+# control plane somebody else operates (spec 021, docs/workers.md).
+#
+# Nothing here listens. The worker opens one outbound connection to
+# CELLA_URL and everything travels on it, so this workload needs no
+# Service, no Ingress, and no inbound rule in your network policy.
+#
+# Before applying, mint the key as an administrator of the control plane:
+#
+#   curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
+#     https://cella.example.com/v1/environments/eu-gpu/keys
+#
+# and put the token it returns, shown once, in the Secret below.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cellad-worker
+type: Opaque
+stringData:
+  # The environment key. It names one environment and authorizes that
+  # environment's registration and its stream, and nothing else: it cannot
+  # create a sandbox, read one, or reach any route that decides on a
+  # person. Revoke it by the jti the mint returned.
+  CELLA_ENVIRONMENT_KEY: "replace-me"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cellad-worker
+  labels:
+    app.kubernetes.io/name: cellad
+    app.kubernetes.io/component: worker
+spec:
+  # Several workers may serve one environment: each registers, each claims
+  # what it can, and the operations table is the arbiter. They must agree
+  # on the driver and the isolation class, which one image and one
+  # configuration give them.
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cellad
+      app.kubernetes.io/component: worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cellad
+        app.kubernetes.io/component: worker
+    spec:
+      serviceAccountName: cellad-worker
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: worker
+          image: ghcr.io/example/cellad:v0.5.0
+          args: ["worker"]
+          env:
+            # The control plane this worker joins. A key travels on every
+            # request, so this is https:// unless it is loopback.
+            - name: CELLA_URL
+              value: "https://cella.example.com"
+            - name: CELLA_ENVIRONMENT_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: cellad-worker
+                  key: CELLA_ENVIRONMENT_KEY
+            # The driver this worker runs, and the cluster it drives. The
+            # control plane records the name from the first registration
+            # and refuses a later worker that reports another.
+            - name: CELLA_RUNTIME
+              value: "k8s"
+            - name: CELLA_K8S_NAMESPACE
+              value: "cella-sandboxes"
+            # What this worker declares it can hold. Placement admits
+            # against the lesser of it and the environment's own ceiling.
+            - name: CELLA_CAPACITY_CPU
+              value: "128"
+            - name: CELLA_CAPACITY_MEMORY
+              value: "512Gi"
+            - name: CELLA_CAPACITY_SANDBOXES
+              value: "100"
+            - name: CELLA_WORKER_LABELS
+              value: "region=eu,gpu=true"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "1"
+              memory: "512Mi"
+          volumeMounts:
+            - name: state
+              mountPath: /var/lib/cella
+      volumes:
+        # The worker keeps nothing that has to outlive it: everything it
+        # knows is in its driver's own records or arrives on the stream.
+        - name: state
+          emptyDir: {}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cellad-worker
+```
+
 ## Running a gateway beside it
 
 Sandboxes on your infrastructure reach the egress gateway on your
