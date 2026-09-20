@@ -67,7 +67,7 @@ can mint and the first create needs the gateway's acknowledgement:
 
 1. Build `cellad`, `cella-stubs`, and `cella` when its package exists.
 2. Generate once under `out/run/`: `CELLA_TOKEN_KEY` with `openssl
-   genrsa 2048`, `CELLA_SECRETS_KEK` from 32 random bytes,
+   genrsa 2048`, `CELLA_SECRET_KEY` from 32 random bytes,
    `CELLA_EGRESS_CA_KEY`.
 3. Start `cella-stubs`; wait for the issuer's key set.
 4. Start `cellad serve` with `CELLA_RUNTIME=local` where the sandbox

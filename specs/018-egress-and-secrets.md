@@ -116,7 +116,7 @@ Rules:
 - `value` is write-only. `GET` returns the object with `spec.value`
   absent; list never returns values; no event or record carries one.
   Stored under envelope encryption by [[010-state]] under
-  `CELLA_SECRETS_KEK`.
+  `CELLA_SECRET_KEY`.
 - `scope.hosts` is required and non-empty, under the host rule of
   [[003-manifest-contract]]: exact names or one leading `*.` wildcard
   matched by `hostmatch`, normalized the same way, with IP literals,
