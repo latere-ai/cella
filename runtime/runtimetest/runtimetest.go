@@ -31,6 +31,15 @@ type Options struct {
 	NoMainCommand bool
 	// Down makes Ready fail and Up restores it; nil skips that half of PreflightAndReady.
 	Down, Up func()
+	// DisplayImage carries the desktop's tools: the X server, the window
+	// manager, the capture tool and the input tool. Empty skips every case
+	// about a screen, because a sandbox whose image has no desktop in it
+	// proves nothing about the driver.
+	DisplayImage string
+	// Listen is the main command that binds one port inside a sandbox, for
+	// the port probe. Nil skips that case: what binds a port is the image's,
+	// not the contract's.
+	Listen func(port int) []string
 }
 
 // tb is the part of testing.TB the cases use. testing.TB cannot be implemented
@@ -76,6 +85,10 @@ var cases = []caseDef{
 	{"FilesWhileStopped", filesWhileStopped},
 	{"TouchStampsActivity", touchStampsActivity},
 	{"TokenProjection", tokenProjection},
+	{"DisplayScreenshot", displayScreenshot},
+	{"ScreenStream", screenStream},
+	{"InputAcceptsAndRefuses", inputAcceptsAndRefuses},
+	{"PortsReportListening", portsReportListening},
 	{"DetachRecovers", detachRecovers},
 }
 
@@ -110,7 +123,7 @@ func declaredWithoutCase(c runtime.Capabilities) []string {
 	for _, f := range []struct {
 		name string
 		on   bool
-	}{{"Egress", len(c.Egress) > 0}, {"Mesh", c.Mesh}, {"Ingress", c.Ingress}, {"Volumes", c.Volumes}, {"Snapshots", c.Snapshots}, {"Dial", c.Dial}, {"Display", c.Display}, {"Input", c.Input}, {"Resize", c.Resize}, {"Pool", c.Pool}} {
+	}{{"Egress", len(c.Egress) > 0}, {"Mesh", c.Mesh}, {"Ingress", c.Ingress}, {"Volumes", c.Volumes}, {"Snapshots", c.Snapshots}, {"Dial", c.Dial}, {"Resize", c.Resize}, {"Pool", c.Pool}} {
 		if f.on {
 			out = append(out, f.name)
 		}
