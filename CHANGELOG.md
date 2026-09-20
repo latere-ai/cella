@@ -6,6 +6,28 @@ refused before it is pushed.
 
 ## Unreleased
 
+- An agent that uses a computer gets one. A manifest asks for a virtual
+  desktop with `spec.display: {width, height}`, and the environment runs an X
+  server, a window manager and the capture and input tools beside the
+  workload: a second container on Kubernetes sharing the sandbox's `/tmp`, a
+  second process in the container on podman. `GET /v1/sandboxes/{id}/display`
+  answers the geometry and whether the desktop is up, which
+  `status.conditions` carries as `DisplayReady`;
+  `GET /v1/sandboxes/{id}/screenshot` answers one frame as a PNG or a JPEG at
+  a scale you choose; `GET /v1/sandboxes/{id}/screen` is a WebSocket of frames
+  paced up to ten a second, where a viewer that falls behind loses the newest
+  frame rather than a growing backlog; and `POST /v1/sandboxes/{id}/input`
+  takes a batch of pointer and keyboard events, moves, clicks, drags, scrolls,
+  keys, typed text and waits, validated whole against your own desktop before
+  the first one runs, so a coordinate off the screen or a key that is not a
+  key refuses the batch and changes nothing. A batch the desktop stops part
+  way through answers with how much of it landed and where it stopped. A
+  manifest also declares what runs inside with `spec.network.ports`, and
+  `GET /v1/sandboxes/{id}/ports` and `status.ports` say which of them
+  something is listening on. No screenshot, keystroke or character of typed
+  text reaches an event or a log line: the records carry a frame's size, a
+  batch's count and a session's duration and nothing else.
+
 - A sandbox reaches the services it needs and holds none of their
   credentials. The new `Secret` kind at `/v1/secrets` takes a value, the hosts
   that value may be sent to, and where in a request it goes: a header, a query
