@@ -11,6 +11,7 @@ import (
 	"path"
 	"slices"
 	"strings"
+	"sync"
 
 	driver "latere.ai/x/cella/runtime"
 	"latere.ai/x/cella/runtime/internal/fileshell"
@@ -109,7 +110,7 @@ func (d *Driver) Write(ctx context.Context, id string, req driver.WriteRequest) 
 	}
 	out, err := session.run(ctx, fileshell.WriteBody(session.root, staged, req.MaxBytes), body, req.Path)
 	if err == nil {
-		err = body.err
+		err = body.err()
 	}
 	var n int64
 	if err == nil {
@@ -231,16 +232,28 @@ func (s *fileSession) stat(ctx context.Context, p string) (driver.FileInfo, erro
 }
 
 // recordingReader keeps the reason a body ended, which the copy into the
-// container does not report back.
+// container does not report back. The copy runs on the transport's goroutine,
+// so the reason crosses one and is guarded.
 type recordingReader struct {
-	r   io.Reader
-	err error
+	r  io.Reader
+	mu sync.Mutex
+	// failure is why the body ended, if it did not end of its own accord.
+	failure error
 }
 
 func (r *recordingReader) Read(p []byte) (int, error) {
 	n, err := r.r.Read(p)
 	if err != nil && err != io.EOF {
-		r.err = err
+		r.mu.Lock()
+		r.failure = err
+		r.mu.Unlock()
 	}
 	return n, err
+}
+
+// err is why the body ended, read once the copy of it has finished.
+func (r *recordingReader) err() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.failure
 }

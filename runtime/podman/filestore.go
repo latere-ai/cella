@@ -127,7 +127,7 @@ func (d *Driver) Write(ctx context.Context, id string, req driver.WriteRequest) 
 	}
 	out, err := d.run(ctx, id, fileshell.WriteBody(root, staged, req.MaxBytes), body, req.Path)
 	if err == nil {
-		err = body.err
+		err = body.err()
 	}
 	if err != nil {
 		d.discard(ctx, id, root, staged)
@@ -234,18 +234,30 @@ func (d *Driver) run(ctx context.Context, id string, argv []string, stdin io.Rea
 }
 
 // recordingReader keeps the reason a body ended, which the engine's own copy
-// of it does not report back.
+// of it does not report back. The copy runs on the transport's goroutine, so
+// the reason crosses one and is guarded.
 type recordingReader struct {
-	r   io.Reader
-	err error
+	r  io.Reader
+	mu sync.Mutex
+	// failure is why the body ended, if it did not end of its own accord.
+	failure error
 }
 
 func (r *recordingReader) Read(p []byte) (int, error) {
 	n, err := r.r.Read(p)
 	if err != nil && err != io.EOF {
-		r.err = err
+		r.mu.Lock()
+		r.failure = err
+		r.mu.Unlock()
 	}
 	return n, err
+}
+
+// err is why the body ended, read once the copy of it has finished.
+func (r *recordingReader) err() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.failure
 }
 
 // boundedBuffer keeps the head of a program's diagnostic output, bounded, so

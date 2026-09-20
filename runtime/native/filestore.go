@@ -114,6 +114,9 @@ func (d *Driver) Write(ctx context.Context, id string, req driver.WriteRequest) 
 		return 0, err
 	}
 	defer func() { _ = root.Close() }()
+	if rel == "." {
+		return 0, fmt.Errorf("%w: the workspace itself is not a file", driver.ErrInvalid)
+	}
 	if err := parents(root, rel); err != nil {
 		return 0, err
 	}
@@ -166,6 +169,9 @@ func (d *Driver) Mkdir(ctx context.Context, id, p string) error {
 		return err
 	}
 	defer func() { _ = root.Close() }()
+	if rel == "." {
+		return fmt.Errorf("%w: the workspace itself is not the caller's to make", driver.ErrInvalid)
+	}
 	if err := root.MkdirAll(rel, 0o755); err != nil {
 		if name, yes := notADirectory(root, rel); yes {
 			return fmt.Errorf("%w: %s is not a directory", driver.ErrInvalid, name)

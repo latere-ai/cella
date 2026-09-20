@@ -193,6 +193,10 @@ func filesMutate(t tb, open func() runtime.Driver, opts Options) {
 	must(t, err, "the tree above a removed one")
 
 	// The workspace holds the caller's files; it is not one of them.
+	wantErr(t, store.Mkdir(ctx, id, runtime.DefaultWorkdir), runtime.ErrInvalid, "Mkdir the workspace")
+	wantErr(t, errOf(store.Write(ctx, id, runtime.WriteRequest{
+		Path: runtime.DefaultWorkdir, Body: strings.NewReader("x"),
+	})), runtime.ErrInvalid, "Write over the workspace")
 	wantErr(t, store.Remove(ctx, id, runtime.DefaultWorkdir), runtime.ErrInvalid, "Remove the workspace")
 	wantErr(t, store.Move(ctx, id, runtime.DefaultWorkdir, ws("elsewhere")), runtime.ErrInvalid, "Move the workspace")
 	wantErr(t, store.Move(ctx, id, ws("m"), runtime.DefaultWorkdir), runtime.ErrInvalid, "Move onto the workspace")
