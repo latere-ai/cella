@@ -1,6 +1,6 @@
 ---
 title: "The admission client: 007's webhook over HTTP, the image rule after admission, and the count ceiling's one definition"
-status: in-progress
+status: complete
 track: core
 depends_on:
   - specs/007-admission.md
@@ -287,4 +287,88 @@ route, so `existing` is always `null` as well.
 
 ## Outcome
 
-To be written when the slice lands.
+Built. `internal/admission` is the client: one `POST` per apply, no
+retry, everything that is not a parsed 200 carrying `allow` answered as
+`admission_unavailable`. Coverage: `internal/admission` 95.2%,
+`manifest` 97.5%, `internal/api` 91.7%, `internal/config` 94.7%,
+`cmd/cellad` 90.1%, `authorizer` 100%; every package of the tree clears
+90%. `go test -race` passes and the `identity` gate passes with no
+exemption added.
+
+The end-to-end tier is `TestServeWithAdmission` in `cmd/cellad`: one
+`cellad serve` on the native driver with `CELLA_ADMISSION_URL` pointed at
+an endpoint that decodes spec 007's envelope into the type the hosted
+plane's own webhook declares, and one gateway of the environment, because
+the endpoint narrows the boundary to an allow list and an allow list is a
+boundary a gateway holds. It proves four things over the wire: the
+start-up line says `admission=webhook`; a create carries the flattened
+actor, the claims, the environment summary and the request id, and the
+caller reads back the endpoint's annotations, resources, lifetime and
+narrowed egress with its warning, and reads the same object back on a
+second request; a create above the endpoint's ceiling is a 422
+`admission_refused` carrying `ceiling_exceeded: spec.resources.cpu is 8,
+above the plan's 4`; and a create after the endpoint has stopped is a 503
+`admission_unavailable` with no second request and no object left behind.
+`TestServeWithoutAdmissionSaysBuiltin` is the other half:
+`admission=builtin` and a create that goes through.
+
+### What was decided along the way
+
+1. **The image rule closes stage 3 rather than becoming a stage of its
+   own.** A new numbered stage would renumber stages 4 to 7 across
+   [[003-manifest-contract]], [[007-admission]], [[022-mesh-and-spawn]]
+   and four archived specs, and an archived spec records what existed
+   when it was written. The rule is inseparable from admission, so it is
+   stated as the sentence stage 3 ends on.
+
+2. **The refusal is quoted, not paraphrased.** `manifest.admit` folded
+   every error the step returned into `admission_refused` and put it
+   through `upperFirst`, which would have rendered an endpoint's
+   `ceiling_exceeded` as `Ceiling_exceeded` and an outage as a policy
+   refusal. A typed error now passes through untouched, which is how
+   `admission_unavailable` and the decoder's `unknown_field` reach the
+   caller at all.
+
+3. **The returned manifest goes through `manifest.Decode`.** It is the
+   same strict decode a caller's manifest gets, so an endpoint that
+   writes a field the schema does not have is `unknown_field` naming it.
+   [[007-admission]] said `invalid_field` for that case and is amended to
+   the code the decoder gives.
+
+4. **A redirect is no decision.** The client refuses to follow one: a 3xx
+   would be a second request carrying the manifest and the bearer to an
+   address the operator did not configure, which is both the retry this
+   contract forbids and a bearer where it does not belong.
+
+5. **The actor is an embedded struct.** [[007-admission]] has an `Actor`
+   type and the wire flattens it, so the envelope embeds a three-member
+   `actor`. This is the literal statement of the flattening and it is not
+   the authorizer's envelope, which one shared package declares and this
+   repository does not re-declare. The `identity` gate passes on it with
+   no `envelope_exempt` entry.
+
+6. **Transport trust is the system roots.** No `CELLA_ADMISSION_CA` was
+   added: a deployment whose endpoint is served under a private authority
+   adds that authority to the trust store of the image, which
+   `SSL_CERT_DIR` and `SSL_CERT_FILE` select, and a second trust
+   configuration for one client is a second place for a deployment's
+   trust to be wrong.
+
+7. **The count ceiling needed no code.** `controller.Create` already
+   counted every desired sandbox of the owner whose phase is not
+   `Deleting`, under the same lock that reserves the name, which is
+   [[007-admission]]'s definition. `authorizer/limits.go` and
+   [[006-identity]] carried a narrower one in prose and now carry this
+   one. The endpoint's allow body has no `limits` member at all, by
+   [[007-admission]]'s rule that ceilings are the authorizer's, so there
+   was no second source of the figure to reconcile.
+
+### Left open
+
+| What | Why, and where it belongs |
+|---|---|
+| The six `CELLA_DEFAULT_*` figures and the four `CELLA_MAX_*` ceilings are read by nothing; `internal/api` passes `Defaults` with only the image set and `Ceilings` zero | The resolver has held both since [[044-manifest-fields]] and the loader is one function; it is [[002-repository-scaffold]]'s table and not the admission client. `TestCeilingsAreAFloorOnStrictness` proves the rule at the resolver |
+| `parent` and `set` are always `null` on the wire | The spawn of [[022-mesh-and-spawn]] and the replicas of [[020-scheduling-and-sets]] have no code to set them |
+| `existing` is always `null`: there is no update route | [[008-api]] has no `PUT /v1/sandboxes/{id}`. The client sends `existing` and the action `update` as soon as one exists, and `TestAdmitCarriesTheWorkloadAndTheExisting` drives that path already |
+| An image rewritten by an endpoint cannot be shown end to end | `internal/api` resolves every runtime against `manifest.NativeEnvironment`, whose isolation class runs no image. The image legs are proven in `manifest` and `internal/admission` against a container environment; the end-to-end tier proves the rest of the mutation. The API's environment modelling is the gap, and it belongs with the driver that needs it |
+| The stub admission endpoint of [[012-test-stubs-and-tiers]] and its `-fail-mode` flags | This slice drove every failure mode from an `httptest` server in-process; the standalone stub is the conformance tier's |
