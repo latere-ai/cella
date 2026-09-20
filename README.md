@@ -226,6 +226,8 @@ whole table, identity and everything else; the
 | [Egress and secrets](specs/018-egress-and-secrets.md) | how a credential reaches a request without reaching the sandbox |
 | [Data plane workers](specs/021-data-plane-workers.md) | running sandboxes on your own infrastructure |
 | [Building a plane](specs/016-building-a-plane.md) | how a platform composes the packages and the webhooks |
+| [Install](docs/install.md) | a cluster, the manifests from a release's deploy archive, the first sandbox, and `cellad check` |
+| [Deploy](deploy/README.md) | what each manifest and each Secret is, and why the Role grants what it does |
 | [docs/](docs/README.md) | for people who run `cellad` or build against it |
 
 ## Contributing
