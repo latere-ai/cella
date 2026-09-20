@@ -36,6 +36,18 @@ func (e *Error) Error() string {
 	return e.Code + ": " + e.Path + ": " + e.Detail
 }
 
+// The two codes of the admission step (spec 007). They are declared here
+// because the step is a seam an operator fills: the client of spec 047
+// writes them and Resolve passes them through, and one declaration keeps
+// the two halves from drifting apart.
+const (
+	// CodeAdmissionRefused is a policy refusal: the step decided, and the
+	// answer was no. The developer detail is the step's own reason.
+	CodeAdmissionRefused = "admission_refused"
+	// CodeAdmissionUnavailable is no decision at all. It is never a pass.
+	CodeAdmissionUnavailable = "admission_unavailable"
+)
+
 func fail(code, detail string) error { return &Error{Code: code, Detail: detail} }
 func failAt(code, path, detail string) error {
 	return &Error{Code: code, Path: path, Detail: detail}

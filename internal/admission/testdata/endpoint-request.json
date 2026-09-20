@@ -1,0 +1,26 @@
+{
+  "subject":     "https://auth.example|alice",
+  "issuer":      "https://auth.example",
+  "sub":         "alice",
+  "claims":      {"org_id": "org-one", "roles": ["member"], "principal_type": "user"},
+  "workload":    null,
+  "action":      "create",
+  "existing":    null,
+  "parent":      null,
+  "environment": {"id": "env_01J9", "name": "default", "isolation": "container", "capabilities": {"egress": ["open", "allowlist"]}},
+  "set":         null,
+  "manifest":    {
+    "apiVersion": "cella.latere.ai/v1beta1",
+    "kind": "Sandbox",
+    "metadata": {"name": "dev", "labels": {"team": "research"}},
+    "spec": {
+      "environment": "default",
+      "image": "base",
+      "command": ["/bin/bash", "-l"],
+      "workdir": "/workspace",
+      "env": {"LOG_LEVEL": "debug"},
+      "network": {"egress": {"mode": "open", "deniedHosts": ["evil.example"]}}
+    }
+  },
+  "request":     {"id": "req_01J9"}
+}

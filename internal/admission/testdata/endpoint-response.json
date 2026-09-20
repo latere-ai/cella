@@ -1,0 +1,28 @@
+{
+  "allow": true,
+  "manifest": {
+    "apiVersion": "cella.latere.ai/v1beta1",
+    "kind": "Sandbox",
+    "metadata": {
+      "name": "dev",
+      "labels": {"team": "research"},
+      "annotations": {
+        "platform.latere.ai/image": "base",
+        "platform.latere.ai/image-tier": "warm"
+      }
+    },
+    "spec": {
+      "environment": "default",
+      "image": "registry.example/base@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "command": ["/bin/bash", "-l"],
+      "workdir": "/workspace",
+      "env": {"LOG_LEVEL": "debug"},
+      "resources": {"cpu": "50m", "memory": "256Mi", "disk": "1Gi"},
+      "lifecycle": {"autoStop": "15m", "ttl": "24h", "autoDelete": "72h"},
+      "network": {"egress": {"mode": "allowlist"}}
+    }
+  },
+  "warnings": [
+    "Egress was narrowed to the allowlist mode this organisation's plan allows, and any denied hosts were dropped because an allow list already denies everything it does not name."
+  ]
+}
