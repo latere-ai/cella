@@ -129,6 +129,12 @@ type Controller struct {
 	// read returns, and a plaintext is read per compile through the seam.
 	secrets       Secrets
 	secretObjects map[string]v1.Secret
+	// spawner is the spawn ledger of design 022 and journaller the seam a
+	// record with a payload of its own is appended through. Both are the
+	// store's, taken where it has them: a store that counts no budget
+	// creates no child.
+	spawner    Spawner
+	journaller Journaller
 	// The environment's pool: its shape and size, the ceiling entries count
 	// against, and the two bounds of the refill loop (spec 020).
 	pool         v1.PoolSpec
@@ -187,6 +193,14 @@ func Open(o Options) (*Controller, error) {
 	if d, ok := store.(Durable); ok {
 		c.durable = d
 		c.recovers = d.Durable()
+	}
+	// A store that counts the spawn budget is what makes a sandbox able to
+	// create one; one that does not serves every other act.
+	if sp, ok := store.(Spawner); ok {
+		c.spawner = sp
+	}
+	if j, ok := store.(Journaller); ok {
+		c.journaller = j
 	}
 	// A store that holds the Secret kind is what makes /v1/secrets and
 	// substitution possible; one that does not serves everything else.
@@ -306,6 +320,13 @@ func (c *Controller) forget(ctx context.Context, id, mutation string) error {
 func (c *Controller) Create(ctx context.Context, obj v1.Sandbox, owner string, max int) (v1.Sandbox, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	return c.create(ctx, obj, owner, max, nil)
+}
+
+// create is the body of one create under the controller's lock, with the
+// spawning parent where the actor was a workload and nil where it was a
+// subject. Spawn is its other caller.
+func (c *Controller) create(ctx context.Context, obj v1.Sandbox, owner string, max int, parent *v1.Sandbox) (v1.Sandbox, error) {
 	if owner == "" {
 		return obj, errors.New("sandbox owner is required")
 	}
@@ -318,11 +339,11 @@ func (c *Controller) Create(ctx context.Context, obj v1.Sandbox, owner string, m
 	}
 	entries := c.poolEntries(ctx)
 	entry := c.matchEntry(entries, obj)
-	out, err := c.createLocked(ctx, obj, owner, max, warnings, lifecycle, entries, entry)
+	out, err := c.createLocked(ctx, obj, owner, max, warnings, lifecycle, entries, entry, parent)
 	if entry != nil && err != nil && adoptionLost(err) {
 		c.log.InfoContext(ctx, "the pool entry could not be adopted; this create takes the slow path",
 			"entry", entry.ID, "err", err)
-		return c.createLocked(ctx, obj, owner, max, warnings, lifecycle, without(entries, entry.ID), nil)
+		return c.createLocked(ctx, obj, owner, max, warnings, lifecycle, without(entries, entry.ID), nil, parent)
 	}
 	return out, err
 }
@@ -332,6 +353,7 @@ func (c *Controller) Create(ctx context.Context, obj v1.Sandbox, owner string, m
 // and is called at most twice per create, the second time with no entry.
 func (c *Controller) createLocked(ctx context.Context, obj v1.Sandbox, owner string, max int,
 	warnings []string, lifecycle driver.Lifecycle, entries []driver.State, entry *driver.State,
+	parent *v1.Sandbox,
 ) (v1.Sandbox, error) {
 	// An adopted sandbox takes the entry's id. The id is the object's name
 	// on a container driver, which cannot be renamed, so carrying it forward
@@ -373,7 +395,14 @@ func (c *Controller) createLocked(ctx context.Context, obj v1.Sandbox, owner str
 	}
 	now := time.Now().UTC()
 	obj.Status = v1.SandboxStatus{ID: id, Owner: owner, Environment: c.environment, Driver: c.driver.Name(), Isolation: c.driver.Isolation(), Phase: driver.Pending, CreatedAt: now, Warnings: warnings}
-	if err := c.persist(ctx, obj, MutationCreated); err != nil {
+	// The tree position is written before the object is: a child's parent,
+	// root and mesh are what the debit, the boundary and the driver all read.
+	if err := c.spawnStatus(&obj, parent); err != nil {
+		return obj, err
+	}
+	// The debit is inside the write, so two spawns racing for one remaining
+	// unit yield one child and one refusal.
+	if err := c.debit(ctx, obj, parent); err != nil {
 		return obj, err
 	}
 	// The boundary is put in a gateway before the driver is called, so a
@@ -385,7 +414,7 @@ func (c *Controller) createLocked(ctx context.Context, obj v1.Sandbox, owner str
 		// answered, so the principal is purged with the object: every map a
 		// gateway holds is a map desired state has.
 		c.purgeEgress(ctx, id)
-		return obj, errors.Join(err, c.forget(ctx, id, MutationDeleted))
+		return obj, errors.Join(err, c.forget(ctx, id, MutationDeleted), c.credit(ctx, parent))
 	}
 	obj.Status.Secrets = boundary.Secrets
 	obj.Status.Conditions = setCondition(obj.Status.Conditions, c.egressCondition(boundary.Map, boundary.Held, now))
@@ -397,7 +426,7 @@ func (c *Controller) createLocked(ctx context.Context, obj v1.Sandbox, owner str
 		obj.Status.Phase = PhaseFailed
 		obj.Status.Reason = ReasonCreateFailed
 		c.purgeEgress(ctx, id)
-		return export(obj), errors.Join(err, c.persist(ctx, obj, MutationFailed))
+		return export(obj), errors.Join(err, c.persist(ctx, obj, MutationFailed), c.credit(ctx, parent))
 	}
 	obj.Status.TokenState = tokenState
 	if entry != nil {
@@ -415,15 +444,19 @@ func (c *Controller) createLocked(ctx context.Context, obj v1.Sandbox, owner str
 			// manifest. Nothing of this attempt survives: no map, no
 			// identity and no row, so the create that follows is an
 			// ordinary first create under an id of its own.
-			return obj, errors.Join(err, revoked, c.forget(ctx, id, MutationDeleted))
+			return obj, errors.Join(err, revoked, c.forget(ctx, id, MutationDeleted), c.credit(ctx, parent))
 		}
 		obj.Status.Phase = PhaseFailed
 		obj.Status.Reason = ReasonCreateFailed
-		return export(obj), errors.Join(err, revoked, c.persist(ctx, obj, MutationFailed))
+		return export(obj), errors.Join(err, revoked, c.persist(ctx, obj, MutationFailed), c.credit(ctx, parent))
 	}
 	obj.Status.Conditions = setCondition(obj.Status.Conditions, scheduledCondition(entry != nil, c.clock.Now()))
 	obj, err = c.refresh(ctx, obj)
-	return export(obj), errors.Join(err, c.persist(ctx, obj, phaseMutation(obj.Status.Phase)))
+	err = errors.Join(err, c.persist(ctx, obj, phaseMutation(obj.Status.Phase)))
+	if parent != nil {
+		err = errors.Join(err, c.spawned(ctx, obj, parent.Status.ID))
+	}
+	return export(obj), err
 }
 
 // phaseMutation is the act the first driver read after a create observed. A
@@ -612,23 +645,19 @@ func (c *Controller) Act(ctx context.Context, id, verb string) (v1.Sandbox, erro
 		err = c.driver.Stop(ctx, id)
 	case "delete":
 		old := obj
+		// The tree below this sandbox goes first, deepest generation
+		// before the one above it, so no sandbox outlives the ancestor
+		// that bounded it (design 022).
+		if err = c.cascade(ctx, id); err != nil {
+			return old, err
+		}
 		obj.Status.Phase = PhaseDeleting
 		if err = c.persist(ctx, obj, MutationDeleting); err != nil {
 			return old, err
 		}
-		err = c.driver.Delete(ctx, id)
-		if errors.Is(err, driver.ErrNotFound) {
-			err = nil
-		}
+		err = c.deleteOne(ctx, &obj)
 		if err == nil {
-			c.forgetTouch(id)
-			c.forgetLost(id)
-			c.purgeEgress(ctx, id)
-			// The token dies with the sandbox rather than with its own
-			// exp, so a deleted sandbox's identity is refused at once
-			// (spec 006).
-			revoked := c.revokeToken(ctx, obj.Status.TokenState)
-			return export(obj), errors.Join(revoked, c.forget(ctx, id, MutationDeleted))
+			return export(obj), nil
 		}
 	default:
 		return obj, ErrPhase
@@ -641,6 +670,49 @@ func (c *Controller) Act(ctx context.Context, id, verb string) (v1.Sandbox, erro
 		return obj, err
 	}
 	return export(obj), c.persist(ctx, obj, verbMutation(verb))
+}
+
+// deleteOne ends one sandbox: the driver's object, the touch and lost
+// bookkeeping, the gateway's map, the identity, the ledger row and the
+// desired row. A sandbox the driver no longer has is already ended by the
+// driver's lights, so its absence is not an error.
+func (c *Controller) deleteOne(ctx context.Context, obj *v1.Sandbox) error {
+	id := obj.Status.ID
+	err := c.driver.Delete(ctx, id)
+	if errors.Is(err, driver.ErrNotFound) {
+		err = nil
+	}
+	if err != nil {
+		return err
+	}
+	c.forgetTouch(id)
+	c.forgetLost(id)
+	c.purgeEgress(ctx, id)
+	// The token dies with the sandbox rather than with its own exp, so a
+	// deleted sandbox's identity is refused at once (spec 006).
+	revoked := c.revokeToken(ctx, obj.Status.TokenState)
+	var forgotten error
+	if c.spawner != nil {
+		forgotten = c.spawner.ForgetSpawns(ctx, id)
+	}
+	return errors.Join(revoked, forgotten, c.forget(ctx, id, MutationDeleted))
+}
+
+// cascade deletes every descendant of one sandbox, deepest generation first,
+// each with reason Parent. The sandbox the request named keeps the request's
+// own reason and is deleted by the caller after this returns.
+func (c *Controller) cascade(ctx context.Context, id string) error {
+	for _, child := range c.descendants(id) {
+		child.Status.Phase = PhaseDeleting
+		child.Status.Reason = ReasonParent
+		if err := c.persist(ctx, child, MutationDeleting); err != nil {
+			return err
+		}
+		if err := c.deleteOne(ctx, &child); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // verbMutation is the act one API verb performed, which is the type of the
@@ -696,16 +768,36 @@ func clone(obj v1.Sandbox) v1.Sandbox {
 	}
 	return obj
 }
+
+// newID mints one sandbox's id: the prefix of design 001 and a ULID, so ids
+// sort by the instant the sandbox was made.
 func newID() (string, error) {
+	raw, err := newULID()
+	if err != nil {
+		return "", err
+	}
+	return "sbx_" + crockfordULID(raw), nil
+}
+
+// newULID is the 128 bits of a ULID: the millisecond of the mint in the first
+// six bytes and eighty random bits behind them.
+func newULID() ([16]byte, error) {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
-		return "", err
+		return b, err
 	}
 	ms := uint64(time.Now().UnixMilli())
 	for i := 5; i >= 0; i-- {
 		b[i] = byte(ms)
 		ms >>= 8
 	}
+	return b, nil
+}
+
+// crockfordULID renders those bits the way every prefixed id of design 001 is
+// rendered: twenty-six lowercase Crockford characters, which sort as the bits
+// sort.
+func crockfordULID(b [16]byte) string {
 	n := new(big.Int).SetBytes(b[:])
 	mask := big.NewInt(31)
 	var out [26]byte
@@ -714,5 +806,5 @@ func newID() (string, error) {
 		out[i] = alphabet[new(big.Int).And(n, mask).Int64()]
 		n.Rsh(n, 5)
 	}
-	return "sbx_" + string(out[:]), nil
+	return string(out[:])
 }

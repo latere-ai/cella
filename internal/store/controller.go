@@ -172,6 +172,98 @@ func (c *Controlled) Write(ctx context.Context, obj v1.Sandbox, mutation string)
 	return nil
 }
 
+// WriteSpawn is Write with the spawn debit of design 022 inside the same
+// transaction: the child's row, its journal record, and the conditional
+// decrement against the parent commit together or not at all. Exhaustion is
+// controller.ErrBudgetExhausted and nothing is written.
+//
+// The budget travels with the call because it is desired state, so a parent
+// narrowed after its children exist takes effect at the next debit.
+func (c *Controlled) WriteSpawn(ctx context.Context, obj v1.Sandbox, mutation, parentID string, budget int) error {
+	row, err := encode(obj)
+	if err != nil {
+		return err
+	}
+	if row.Environment == "" {
+		row.Environment = c.environment
+	}
+	c.mu.Lock()
+	version := c.versions[row.ID]
+	c.mu.Unlock()
+	event, err := c.record(ctx, mutation, obj)
+	if err != nil {
+		return err
+	}
+	var written int64
+	err = c.store.Tx(ctx, func(tx Tx) error {
+		if err := tx.Ledger().Debit(ctx, parentID, budget); err != nil {
+			return err
+		}
+		next, err := tx.Desired().Put(ctx, row, version)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Journal().Append(ctx, event); err != nil {
+			return err
+		}
+		written = next
+		return nil
+	})
+	if errors.Is(err, ErrBudgetExhausted) {
+		return controller.ErrBudgetExhausted
+	}
+	if err != nil {
+		return err
+	}
+	c.mu.Lock()
+	c.versions[row.ID] = written
+	c.mu.Unlock()
+	return nil
+}
+
+// CreditSpawn returns one unit to a parent whose child never started, which
+// is the undo of design 005's create order.
+func (c *Controlled) CreditSpawn(ctx context.Context, parentID string) error {
+	return c.store.Tx(ctx, func(tx Tx) error { return tx.Ledger().Credit(ctx, parentID) })
+}
+
+// SpawnsUsed is how many children one sandbox has created in total, which is
+// what status.spawn.used is projected from.
+func (c *Controlled) SpawnsUsed(ctx context.Context, parentID string) (int, error) {
+	var used int
+	err := c.store.Tx(ctx, func(tx Tx) error {
+		var err error
+		used, err = tx.Ledger().Used(ctx, parentID)
+		return err
+	})
+	return used, err
+}
+
+// ForgetSpawns drops one sandbox's ledger row at the delete that ends it.
+func (c *Controlled) ForgetSpawns(ctx context.Context, parentID string) error {
+	return c.store.Tx(ctx, func(tx Tx) error { return tx.Ledger().Forget(ctx, parentID) })
+}
+
+// WriteRecord appends one journal row for an act whose payload no field of
+// the object carries, without writing desired state. The spawn of design 022
+// is its one caller: the record is about the parent and names the child.
+func (c *Controlled) WriteRecord(ctx context.Context, obj v1.Sandbox, mutation string, data any) error {
+	kind := events.Type(mutation)
+	rec, err := events.Mutation(kind, events.ReasonOf(obj.Status.Reason, kind),
+		events.OfSandbox(obj), data, events.ActorFrom(ctx), time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	event, err := journalRow(rec, c.delivery)
+	if err != nil {
+		return err
+	}
+	return c.store.Tx(ctx, func(tx Tx) error {
+		_, err := tx.Journal().Append(ctx, event)
+		return err
+	})
+}
+
 // Remove deletes one object and appends the mutation, in one transaction. A
 // row another replica already deleted is not an error: the intent is gone
 // either way, and the journal still records that this replica ended it.

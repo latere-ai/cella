@@ -16,11 +16,14 @@ import (
 
 // The reasons the reaper writes, from the one transition enum of design 009.
 const (
-	ReasonExpired           = "Expired"
-	ReasonAutoDelete        = "AutoDelete"
-	ReasonAutoStop          = "AutoStop"
-	ReasonLost              = "Lost"
-	ReasonCreateFailed      = "CreateFailed"
+	ReasonExpired      = "Expired"
+	ReasonAutoDelete   = "AutoDelete"
+	ReasonAutoStop     = "AutoStop"
+	ReasonLost         = "Lost"
+	ReasonCreateFailed = "CreateFailed"
+	// ReasonParent is a sandbox the delete of an ancestor ended, which is
+	// the cascade of design 022.
+	ReasonParent            = "Parent"
 	ReasonRecoveryExhausted = "RecoveryExhausted"
 )
 

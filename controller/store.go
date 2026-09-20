@@ -91,6 +91,11 @@ type fileStore struct {
 	sealer  Sealer
 	objects map[string]v1.Sandbox
 	secrets map[string]secretRow
+	// ledger is the spawn count of design 022, one entry per sandbox that
+	// has created a child. It is in the snapshot because the count outlives
+	// the process that made it, and it commits with the objects because the
+	// file is one document.
+	ledger map[string]int
 }
 
 // secretRow is one Secret in the snapshot: the object a read returns and the
@@ -107,6 +112,7 @@ type snapshot struct {
 	Version int                   `json:"version"`
 	Objects map[string]v1.Sandbox `json:"objects"`
 	Secrets map[string]secretRow  `json:"secrets,omitempty"`
+	Ledger  map[string]int        `json:"ledger,omitempty"`
 }
 
 // OpenFileStore opens a provisional local desired-state snapshot, taking an
@@ -134,7 +140,8 @@ func OpenSealedFileStore(dir string, sealer Sealer) (Store, error) {
 		return nil, fmt.Errorf("controller directory is already in use: %w", err)
 	}
 	return &fileStore{dir: dir, lock: lock, sealer: sealer,
-		objects: map[string]v1.Sandbox{}, secrets: map[string]secretRow{}}, nil
+		objects: map[string]v1.Sandbox{}, secrets: map[string]secretRow{},
+		ledger: map[string]int{}}, nil
 }
 func (s *fileStore) Load() (map[string]v1.Sandbox, error) {
 	b, err := os.ReadFile(filepath.Join(s.dir, "objects.json"))
@@ -155,6 +162,10 @@ func (s *fileStore) Load() (map[string]v1.Sandbox, error) {
 	s.secrets = data.Secrets
 	if s.secrets == nil {
 		s.secrets = map[string]secretRow{}
+	}
+	s.ledger = data.Ledger
+	if s.ledger == nil {
+		s.ledger = map[string]int{}
 	}
 	return data.Objects, nil
 }
@@ -243,7 +254,7 @@ func (s *fileStore) Save(objects map[string]v1.Sandbox) error {
 // write replaces the snapshot atomically: both collections, every time,
 // because the file is one document and a half-written one is no state at all.
 func (s *fileStore) write() error {
-	b, err := json.Marshal(snapshot{Version: 1, Objects: s.objects, Secrets: s.secrets})
+	b, err := json.Marshal(snapshot{Version: 1, Objects: s.objects, Secrets: s.secrets, Ledger: s.ledger})
 	if err != nil {
 		return err
 	}
@@ -282,9 +293,59 @@ func (s *fileStore) Close() error {
 	return err
 }
 
+// WriteSpawn raises the parent's count and writes the child in one snapshot
+// write, which is what makes the debit and the child's own row one act on
+// this store: the file is replaced by one rename, so a reader sees both or
+// neither.
+func (s *fileStore) WriteSpawn(_ context.Context, obj v1.Sandbox, _, parentID string, budget int) error {
+	if parentID == "" {
+		return errors.New("a debit names a sandbox")
+	}
+	if s.ledger[parentID] >= budget {
+		return ErrBudgetExhausted
+	}
+	previous, held := s.objects[obj.Status.ID]
+	s.ledger[parentID]++
+	s.objects[obj.Status.ID] = obj
+	if err := s.write(); err != nil {
+		s.ledger[parentID]--
+		if held {
+			s.objects[obj.Status.ID] = previous
+		} else {
+			delete(s.objects, obj.Status.ID)
+		}
+		return err
+	}
+	return nil
+}
+
+// CreditSpawn returns one unit to a parent whose child never started.
+func (s *fileStore) CreditSpawn(_ context.Context, parentID string) error {
+	if n := s.ledger[parentID]; n > 0 {
+		s.ledger[parentID] = n - 1
+		return s.write()
+	}
+	return nil
+}
+
+// SpawnsUsed is how many children one sandbox has created in total.
+func (s *fileStore) SpawnsUsed(_ context.Context, parentID string) (int, error) {
+	return s.ledger[parentID], nil
+}
+
+// ForgetSpawns drops one sandbox's count at the delete that ends it.
+func (s *fileStore) ForgetSpawns(_ context.Context, parentID string) error {
+	if _, held := s.ledger[parentID]; !held {
+		return nil
+	}
+	delete(s.ledger, parentID)
+	return s.write()
+}
+
 // The seams the snapshot store satisfies. A change to either side that breaks
 // the other is a build failure here rather than a nil store at start-up.
 var (
 	_ Store   = (*fileStore)(nil)
 	_ Secrets = (*fileStore)(nil)
+	_ Spawner = (*fileStore)(nil)
 )
