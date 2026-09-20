@@ -68,7 +68,7 @@ func validateNetwork(n v1.Network) error {
 			}
 		}
 	}
-	return nil
+	return validatePorts(n.Ports)
 }
 
 // ValidateHostPattern holds one host pattern to the contract's host rule: an
@@ -196,4 +196,57 @@ func egressCapability(obj *v1.Sandbox, env *v1.Environment) ([]string, error) {
 		return nil, failAt("capability_unsupported", pathEgressMode, "This environment does not enforce the "+string(e.Mode)+" egress mode.")
 	}
 	return nil, nil
+}
+
+// The JSON paths of the port fields.
+const pathPorts = "spec.network.ports"
+
+func portPath(i int, field string) string {
+	return pathPorts + "[" + strconv.Itoa(i) + "]." + field
+}
+
+// validatePorts holds the declared ports to the field table of spec 003: a
+// name that is a DNS label and a port that is a port, each unique in the list,
+// and a reach the contract has. Uniqueness is on both, because the proxy
+// resolves a name to exactly one port and a probe reports one state per port.
+func validatePorts(ports []v1.Port) error {
+	names := make(map[string]bool, len(ports))
+	numbers := make(map[int]bool, len(ports))
+	for i, p := range ports {
+		switch {
+		case p.Name == "":
+			return failAt("missing_field", portPath(i, "name"), "A port needs a name.")
+		case len(p.Name) > maxNameLength || !namePattern.MatchString(p.Name):
+			return failAt("invalid_field", portPath(i, "name"), "The name must be a DNS label of at most 63 characters.")
+		case names[p.Name]:
+			return failAt("invalid_field", portPath(i, "name"), "Two ports share the name "+p.Name+".")
+		case p.Port < 1 || p.Port > 65535:
+			return failAt("invalid_field", portPath(i, "port"), "A port is between 1 and 65535.")
+		case numbers[p.Port]:
+			return failAt("invalid_field", portPath(i, "port"), "Two ports share the number "+strconv.Itoa(p.Port)+".")
+		case p.Expose != "" && !slices.Contains(v1.Exposes, p.Expose):
+			return failAt("invalid_field", portPath(i, "expose"), "A port is exposed none, mesh or public.")
+		}
+		names[p.Name] = true
+		numbers[p.Port] = true
+	}
+	return nil
+}
+
+// portCapability is the ports' row of stage 7. A reach beyond the control
+// plane's own routes is a boundary the driver has to build: mesh is a network
+// only a driver that declares Mesh can make, and public is an endpoint only an
+// installed exposer can give. An environment without the capability refuses
+// the field rather than recording a reach the sandbox will not have.
+func portCapability(obj *v1.Sandbox, env *v1.Environment) error {
+	caps := env.Status.Capabilities
+	for i, p := range obj.Spec.Network.Ports {
+		switch {
+		case p.Expose == v1.ExposeMesh && !caps.Mesh:
+			return failAt("capability_unsupported", portPath(i, "expose"), "This environment has no mesh for a port to be reached on.")
+		case p.Expose == v1.ExposePublic && !caps.Ingress:
+			return failAt("capability_unsupported", portPath(i, "expose"), "This environment gives a port no public endpoint.")
+		}
+	}
+	return nil
 }

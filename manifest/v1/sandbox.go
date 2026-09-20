@@ -50,6 +50,17 @@ type SandboxSpec struct {
 	Secrets     []SecretMount     `json:"secrets,omitempty"`
 	Network     Network           `json:"network,omitzero"`
 	Lifecycle   Lifecycle         `json:"lifecycle,omitzero"`
+	// Display asks for a virtual desktop of this size. Absent, the sandbox
+	// has no screen and none of the computer-use operations answer for it.
+	Display *Display `json:"display,omitempty"`
+}
+
+// Display is the desktop a sandbox asks for. Both fields are set or neither
+// is, and the size is fixed for the sandbox's life: the X server sizes its
+// frame buffer once.
+type Display struct {
+	Width  int `json:"width,omitempty"`
+	Height int `json:"height,omitempty"`
 }
 
 // Resources is the compute the sandbox asks for. Disk sizes the workspace.
@@ -83,6 +94,9 @@ type SandboxStatus struct {
 	Isolation   string      `json:"isolation"`
 	Phase       string      `json:"phase"`
 	Conditions  []Condition `json:"conditions,omitempty"`
+	// Ports is one entry per declared port with the driver's own probe of it
+	// at the last read.
+	Ports []PortStatus `json:"ports,omitempty"`
 	// Secrets is which placeholders are in the sandbox's environment and
 	// which of them the gateway will not substitute.
 	Secrets        SecretsStatus `json:"secrets,omitzero"`
@@ -139,6 +153,22 @@ type EgressState struct {
 	// place.
 	Secrets []MountedSecret `json:"secrets,omitempty"`
 }
+
+// PortStatus is one declared port and what the driver's probe found:
+// listening when something inside the sandbox holds it, closed otherwise. URL
+// is an endpoint a public port was given, and empty for every other port.
+type PortStatus struct {
+	Name  string `json:"name"`
+	Port  int    `json:"port"`
+	State string `json:"state"`
+	URL   string `json:"url,omitempty"`
+}
+
+// The two states a declared port is in.
+const (
+	PortListening = "listening"
+	PortClosed    = "closed"
+)
 
 // Condition is one statement about the environment, written by the server:
 // what it is, whether it holds, why, and since when.

@@ -332,6 +332,15 @@ func ttlCeiling(ttl, ceiling v1.Duration) error {
 	return nil
 }
 
+// displayEqual compares two desktops by value, so an update that sends the
+// same geometry in a new object is not a change.
+func displayEqual(a, b *v1.Display) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
+}
+
 // immutable names every field the contract marks unchangeable that an update
 // changed, in one error, in the order of the field table.
 func immutable(existing, obj *v1.Sandbox) error {
@@ -350,6 +359,8 @@ func immutable(existing, obj *v1.Sandbox) error {
 		{"spec.workspace.path", existing.Spec.Workspace.Path != obj.Spec.Workspace.Path},
 		{"spec.workspace.source", existing.Spec.Workspace.Source != obj.Spec.Workspace.Source},
 		{"spec.env", !maps.Equal(existing.Spec.Env, obj.Spec.Env)},
+		{"spec.display", !displayEqual(existing.Spec.Display, obj.Spec.Display)},
+		{"spec.network.ports", !slices.Equal(existing.Spec.Network.Ports, obj.Spec.Network.Ports)},
 	} {
 		if f.changed {
 			paths = append(paths, f.path)
@@ -392,6 +403,15 @@ func capabilities(obj *v1.Sandbox, env *v1.Environment, o Options) ([]string, er
 	}
 	if o.Existing != nil && obj.Spec.Resources != o.Existing.Spec.Resources && !env.Status.Capabilities.Resize {
 		return nil, failAt("capability_unsupported", "spec.resources", "This environment cannot change the resources of a sandbox that exists.")
+	}
+	// A desktop is two capabilities, not one: a screen with no way to act on
+	// it is not what the field asks for, so an environment that serves only
+	// half of it refuses the whole.
+	if obj.Spec.Display != nil && (!env.Status.Capabilities.Display || !env.Status.Capabilities.Input) {
+		return nil, failAt("capability_unsupported", "spec.display", "This environment has no desktop to give a sandbox.")
+	}
+	if err := portCapability(obj, env); err != nil {
+		return nil, err
 	}
 	warnings, err := egressCapability(obj, env)
 	if err != nil {
