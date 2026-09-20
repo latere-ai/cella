@@ -15,7 +15,7 @@ depends_on:
 affects: [cmd/cella/, internal/cellacli/, internal/cellaclient/, skills/cella/, docs/cli.md, internal/config/]
 effort: medium
 created: 2026-09-12
-updated: 2026-09-13
+updated: 2026-09-20
 author: changkun
 ---
 
@@ -73,6 +73,7 @@ the alias rule of [[008-api]]. `<kind>` is `sandbox`, `secret`,
 | `cella attach <ref> [-- <cmd>]` | the attach WebSocket | raw terminal, `SIGWINCH` to resize, restored on exit |
 | `cella port-forward <ref> <local>:<port>` | the dial WebSocket per accepted connection | binds `<local>` on loopback |
 | `cella cp <ref>:<src>... <dest>`, `cella cp <src>... <ref>:<dest>` | `GET .../files?path=` repeated; `PUT .../files?dest=` | tar streamed, no temporary file |
+| `cella files ls\|stat\|get\|put\|mkdir\|rm\|mv <ref>:<path> [...]` | the granular file routes | one operation on one path, which is what a caller wants when the tree is large and the change is small; the routes are [[033-file-operations]]'s and postdate this table |
 | `cella logs <ref> [-f] [--since t] [--tail n]` | `GET .../logs` | |
 | `cella events <ref> [-f]`, `cella events --object <id> [-f]` | `GET /v1/sandboxes/{id}/events`; `GET /v1/events?object=` | any kind by id |
 | `cella egress <ref>` | `GET .../egress` | the gateway's records |
@@ -203,18 +204,18 @@ semantics ([[008-api]]).
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| Every command in the table calls the route in its row with the method, addressing, and flags named; `apply` dispatches on `kind` and sends `--if-match` | `TestCommandTable` against an `httptest` server | not built |
-| Every error code of [[008-api]] and every status class maps to the exit in the table, outside and under `exec`; an unknown code maps by class | `TestErrorsBecomeExits`, table-driven over every code | not built |
-| The built binary carries the exit codes through the process, and `exec` passes the child's code through unchanged for 0, 3, 7, and 124 | `TestBinaryExitCodes` running `out/cella` | not built |
-| With `HTTPS_PROXY` set to a refusing address, `cella` still reaches `CELLA_URL` | `TestClientIgnoresProxyVariables` | not built |
-| With `CELLA_TOKEN` unset and a token file that changes between two requests, each request sends the file's current bytes | `TestTokenFileIsReadPerRequest` | not built |
-| `CELLA_TOKEN`, the token file, and a secret's value reach no stdout or stderr byte, under `-v` included | `TestSecretsAreNeverWritten` with canaries | not built |
-| `-o json` and `-o yaml` for one object are byte-identical to the response; a two-page list is one envelope with every item's bytes unchanged and `next` empty | `TestOutputFidelity` | not built |
-| Each output row in the columns table renders as stated for each kind; `-o name` and `-o wide` do | `TestColumns` | not built |
-| `exec` writes channel 1 and 2 to the right descriptors as frames arrive, 64 MiB without buffering; `-i` pumps stdin; `attach` enters and restores raw mode and sends a resize; `port-forward` carries bytes both ways; `cp` streams both ways | `TestStreams` | not built |
-| A list follows `next` to the end and stops at `--limit`; every selector flag becomes its query parameter | `TestListPagingAndSelectors` | not built |
-| The three output examples above are what the binary prints | `TestExamplesAreExact` | not built |
-| `unsupported_version` prints the server identity after the refusal; unknown fields render without error | `TestVersionSkew` | not built |
-| The skill's frontmatter is under 256 bytes and an agent given only the skill completes the agent scenario | `TestSkillFrontmatterIsSmall`, conformance case `case011AgentScenario` | not built |
-| `docs/cli.md` equals the binary's `--help` for every command | `TestCLIDocIsCurrent` | not built |
-| `./cmd/cella`'s build list is the standard library plus `pkg/httpjson` | the `depcheck` gate | not built |
+| Every command in the table calls the route in its row with the method, addressing, and flags named; `apply` dispatches on `kind` and sends `--if-match` | `TestCommandTable` against an `httptest` server | passing for the rows [[050-cella-command]] built, as `TestEveryCommandCallsTheRouteOfItsRow`; `--if-match` waits on the `PUT` apply of [[008-api]], which this API does not serve |
+| Every error code of [[008-api]] and every status class maps to the exit in the table, outside and under `exec`; an unknown code maps by class | `TestErrorsBecomeExits`, table-driven over every code | passing, as `TestEveryErrorCodeBecomesItsExit` and `TestTheExitsThatAreNotARefusal` ([[050-cella-command]]) |
+| The built binary carries the exit codes through the process, and `exec` passes the child's code through unchanged for 0, 3, 7, and 124 | `TestBinaryExitCodes` running `out/cella` | passing through the binary's own entry point, as `TestMainIsTheEntryPoint` and the child's codes in `TestTheExitsThatAreNotARefusal` ([[050-cella-command]]) |
+| With `HTTPS_PROXY` set to a refusing address, `cella` still reaches `CELLA_URL` | `TestClientIgnoresProxyVariables` | passing, as `TestTheClientIgnoresProxyVariables` ([[050-cella-command]]) |
+| With `CELLA_TOKEN` unset and a token file that changes between two requests, each request sends the file's current bytes | `TestTokenFileIsReadPerRequest` | passing, as `TestTheTokenFileIsReadPerRequest` ([[050-cella-command]]) |
+| `CELLA_TOKEN`, the token file, and a secret's value reach no stdout or stderr byte, under `-v` included | `TestSecretsAreNeverWritten` with canaries | passing, as `TestNoTokenReachesAnOutput` and `TestASecretValueIsPlacedInTheDocumentAndPrintedNowhere` ([[050-cella-command]]) |
+| `-o json` and `-o yaml` for one object are byte-identical to the response; a two-page list is one envelope with every item's bytes unchanged and `next` empty | `TestOutputFidelity` | the JSON half passes, as `TestOneObjectUnderJSONIsTheAPIsOwnBytes` and `TestAListThatSpannedPagesIsOneEnvelope` ([[050-cella-command]]); `-o yaml` waits on a handler that reads `Accept` |
+| Each output row in the columns table renders as stated for each kind; `-o name` and `-o wide` do | `TestColumns` | passing for the two kinds this API serves, as `TestTheOutputsAreWhatTheGoldenFilesHold` ([[050-cella-command]]) |
+| `exec` writes channel 1 and 2 to the right descriptors as frames arrive, 64 MiB without buffering; `-i` pumps stdin; `attach` enters and restores raw mode and sends a resize; `port-forward` carries bytes both ways; `cp` streams both ways | `TestStreams` | the socket half passes, as `TestExecWithInputIsTheSocket`, `TestATerminalSessionSetsRawModeAndRestoresIt` and the transfers of [[050-cella-command]]; the framed `POST` stream waits on the handler, which serves `?wait=1` only, and `port-forward` on the dial route |
+| A list follows `next` to the end and stops at `--limit`; every selector flag becomes its query parameter | `TestListPagingAndSelectors` | passing, as `TestAListFollowsTheCursorAndCarriesTheSelectors` and `TestALimitStopsTheListAndNeverAsksPastTheCeiling` ([[050-cella-command]]) |
+| The three output examples above are what the binary prints | `TestExamplesAreExact` | the forms pass as golden files ([[050-cella-command]]); the examples themselves carry an `OWNER` and an id of one installation and are not compared byte for byte |
+| `unsupported_version` prints the server identity after the refusal; unknown fields render without error | `TestVersionSkew` | the unknown-field half passes, as `TestAFieldTheServerLeftEmptyIsADash` ([[050-cella-command]]); printing the server's identity after that one refusal is not built |
+| The skill's frontmatter is under 256 bytes and an agent given only the skill completes the agent scenario | `TestSkillFrontmatterIsSmall`, conformance case `case011AgentScenario` | the bound passes, as `TestTheSkillIsSmallEnoughToBeResident` ([[050-cella-command]]); the scenario waits on [[015-conformance-suite]] |
+| `docs/cli.md` equals the binary's `--help` for every command | `TestCLIDocIsCurrent` | passing, as `TestTheDocumentCarriesTheCommandsHelp` ([[050-cella-command]]) |
+| `./cmd/cella`'s build list is the standard library plus `pkg/httpjson` | the `depcheck` gate | passing: the list is the standard library, `latere.ai/x/pkg/httpjson` and the `github.com/google/uuid` it reaches ([[050-cella-command]]) |

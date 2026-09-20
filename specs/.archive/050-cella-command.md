@@ -1,6 +1,6 @@
 ---
 title: "Cella command: the agent client over /v1, its client package, exit codes and the skill"
-status: in-progress
+status: complete
 track: core
 depends_on:
   - specs/011-agent-client.md
@@ -261,19 +261,83 @@ assigns.
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| Every command in the table calls the route in its row with the method, addressing and flags named; `apply` dispatches on `kind` | `TestCommandTable` against an `httptest` server | not built |
-| Every error code of [[008-api]] and every status class maps to the exit in the table, outside and under `exec`; an unknown code maps by class | `TestErrorsBecomeExits`, table-driven over every code | not built |
-| The token is `--token`, then `CELLA_TOKEN`, then the file, and the file is read per request; no token is exit 2 | `TestTokenResolution`, `TestTokenFileIsReadPerRequest` | not built |
-| With `HTTPS_PROXY` set to a refusing address the client still reaches `CELLA_URL` | `TestClientIgnoresProxyVariables` | not built |
-| A token, a token file's bytes and a secret's value reach no stdout or stderr byte, `-v` included | `TestSecretsAreNeverWritten`, canaries through every command | not built |
-| `-o json` for one object is byte-identical to the response; a two-page list is one envelope with every item's bytes unchanged and `next` empty | `TestOutputFidelity` | not built |
-| Each column renders as the table states for both kinds; `-o name` and `-o wide` do | `TestColumns` with golden files | not built |
-| `--json` answers the shape the table states for every command | `TestJSONShapes` with golden files | not built |
-| `exec` with `-i` pumps stdin over the WebSocket and exits with the exit frame; `attach` sends a resize; a PTY makes the terminal raw and restores it | `TestStreams`, `TestTerminalIsRestored` over a real pseudo-terminal | not built |
-| A list follows `next` to the end, stops at `--limit`, and asks for at most 200 a page; every selector becomes its query parameter | `TestListPagingAndSelectors` | not built |
-| `cp` and `files put` stream a tree both ways and a granular write reaches the file | `TestFileTransfers` | not built |
-| The four `cella_<tag>_<os>_<arch>.tar.gz` archives are built, listed in the checksums and asserted by `release-verify`, and no job is added | `TestTheReleaseNamesEveryArtifactItBuilds`, `TestTheReleaseRunsSpec014sJobsInOrder` | not built |
-| `docs/cli.md` carries the binary's `--help` for every command | `TestCLIDocIsCurrent` | not built |
-| The skill's frontmatter is under 256 bytes | `TestSkillFrontmatterIsSmall` | not built |
-| The build list of `./cmd/cella` is the standard library, `pkg/httpjson` and what it reaches | the `depcheck` gate | not built |
-| A `cellad serve` on the native runtime answers `apply`, `get`, `exec`, `files put` and `get`, `logs`, `stop`, `start` and `delete` from the command's own entry point, with the exit codes the table states | `TestCommandAgainstARunningNode` in `cmd/cella` | not built |
+| Every command in the table calls the route in its row with the method, addressing and flags named; `apply` dispatches on `kind` | `TestCommandTable` against an `httptest` server | passing, as `TestEveryCommandCallsTheRouteOfItsRow` and `TestApplyReadsTheDocumentAndSendsItUnchanged` |
+| Every error code of [[008-api]] and every status class maps to the exit in the table, outside and under `exec`; an unknown code maps by class | `TestErrorsBecomeExits`, table-driven over every code | passing, as `TestEveryErrorCodeBecomesItsExit` over 36 codes and two a newer server might send, and `TestTheExitsThatAreNotARefusal` |
+| The token is `--token`, then `CELLA_TOKEN`, then the file, and the file is read per request; no token is exit 2 | `TestTokenResolution`, `TestTokenFileIsReadPerRequest` | passing, as `TestTheAddressAndTheBearerComeFromTheEnvironment`, `TestTheTokenFileIsReadPerRequest` and `TestNoBearerIsNamedByItsVariables` |
+| With `HTTPS_PROXY` set to a refusing address the client still reaches `CELLA_URL` | `TestClientIgnoresProxyVariables` | passing, as `TestTheClientIgnoresProxyVariables` |
+| A token, a token file's bytes and a secret's value reach no stdout or stderr byte, `-v` included | `TestSecretsAreNeverWritten`, canaries through every command | passing, as `TestNoTokenReachesAnOutput` and `TestASecretValueIsPlacedInTheDocumentAndPrintedNowhere`, and over a real node in `TestTheWalkOfARefusalAndASession` |
+| `-o json` for one object is byte-identical to the response; a two-page list is one envelope with every item's bytes unchanged and `next` empty | `TestOutputFidelity` | passing, as `TestOneObjectUnderJSONIsTheAPIsOwnBytes` and `TestAListThatSpannedPagesIsOneEnvelope` |
+| Each column renders as the table states for both kinds; `-o name` and `-o wide` do | `TestColumns` with golden files | passing, as `TestTheOutputsAreWhatTheGoldenFilesHold` over 24 golden files, with `TestTheAgeColumnReadsAtEveryScale` |
+| `--json` answers the shape the table states for every command | `TestJSONShapes` with golden files | passing, in the same golden files, one per command |
+| `exec` with `-i` pumps stdin over the WebSocket and exits with the exit frame; `attach` sends a resize; a PTY makes the terminal raw and restores it | `TestStreams`, `TestTerminalIsRestored` over a real pseudo-terminal | passing, as `TestExecWithInputIsTheSocket`, `TestATerminalSessionSetsRawModeAndRestoresIt`, `TestAttachIsATerminalAndCarriesACommand` and, over a pseudo-terminal opened as the native driver opens one, `TestTheCallersTerminalIsReadSetRawAndRestored` and `TestAWindowChangeReachesTheWatch` |
+| A list follows `next` to the end, stops at `--limit`, and asks for at most 200 a page; every selector becomes its query parameter | `TestListPagingAndSelectors` | passing, as `TestAListFollowsTheCursorAndCarriesTheSelectors`, `TestALimitStopsTheListAndNeverAsksPastTheCeiling` and `TestAPageThatRepeatsItselfEndsTheList` |
+| `cp` and `files put` stream a tree both ways and a granular write reaches the file | `TestFileTransfers` | passing, as `TestCopyCarriesATreeOutOfASandbox`, `TestCopyCarriesATreeIntoASandbox`, `TestFilesGetAndPutReachDisk` and `TestAnArchiveThatWouldLeaveTheDestinationIsRefused` |
+| The four `cella_<tag>_<os>_<arch>.tar.gz` archives are built, listed in the checksums and asserted by `release-verify`, and no job is added | `TestTheReleaseNamesEveryArtifactItBuilds`, `TestTheReleaseRunsSpec014sJobsInOrder` | passing; `tools/release/build.sh v0.0.0-test` was run and wrote eight archives and the two unarchived Linux server binaries the image copies |
+| `docs/cli.md` carries the binary's `--help` for every command | `TestCLIDocIsCurrent` | passing, as `TestTheDocumentCarriesTheCommandsHelp` |
+| The skill's frontmatter is under 256 bytes | `TestSkillFrontmatterIsSmall` | passing, as `TestTheSkillIsSmallEnoughToBeResident`, which also holds the body to the two variables, the verbs and the exit table |
+| The build list of `./cmd/cella` is the standard library, `pkg/httpjson` and what it reaches | the `depcheck` gate | passing: two packages outside this module, `latere.ai/x/pkg/httpjson` and `github.com/google/uuid` |
+| A `cellad serve` on the native runtime answers `apply`, `get`, `exec`, `files put` and `get`, `logs`, `stop`, `start` and `delete` from the command's own entry point, with the exit codes the table states | `TestCommandAgainstARunningNode` in `cmd/cella` | passing, as `TestTheCommandDrivesARunningNode` and `TestTheWalkOfARefusalAndASession` |
+
+## Outcome
+
+Built as designed, less the rows whose routes this API does not serve.
+
+`internal/cellaclient` is the typed client: the objects and their verbs,
+the two file halves, logs, secrets, the egress records, the synchronous
+exec and the exec and attach sockets over the package's own RFC 6455
+implementation. One transport with `Proxy: nil`, one deadline
+(`ResponseHeaderTimeout`, ten seconds to the first byte and none on a
+stream), no retry, the bearer resolved per request, and the error envelope
+of [[008-api]] decoded into one `Error` with the code, the sentence, the
+paths and the server's own request id. `internal/cellacli` is the command
+table with the exit scheme of [[011-agent-client]], columns and `--json`
+for every command, and the terminal seam behind two ioctl files.
+`cmd/cella` is the entry point and nothing else.
+
+| Package | Coverage |
+|---|---|
+| `cmd/cella` | 100.0% |
+| `internal/cellacli` | 90.1% |
+| `internal/cellaclient` | 90.8% |
+
+The end-to-end walk is `TestTheCommandDrivesARunningNode` and
+`TestTheWalkOfARefusalAndASession` in `cmd/cella`: `go build ./cmd/cellad`,
+the server started on loopback over the native runtime with a stub issuer
+and a sealing key, and the command driven through its own `run` for
+`apply -w`, `get` in three forms, `exec` with and without input, `files
+put`, `get` and `ls`, `cp` out, `logs`, `stop`, `start`, `delete`,
+`version`, a `Secret` applied by name and read back without its value, and
+the exit codes each leaves behind, 4 for an object that is gone and 3 for a
+manifest the server refuses. `go test -race` passes, and the hermetic and
+tempdir gates are green: every address is loopback and the only process
+started is the server this test built.
+
+What the API's shape decided, recorded here so a reader of
+[[011-agent-client]] is not surprised:
+
+- **A manifest is JSON.** `manifest.Decode` and `manifest.DecodeSecret`
+  accept `application/json` and nothing else, so `apply` reads the header
+  with `encoding/json`, sends the bytes unchanged, and refuses a document
+  it cannot read with exit 2. YAML input waits on the server.
+- **`-o yaml` is not built.** No handler reads `Accept`, so the form would
+  answer JSON under another name.
+- **`exec` without `-i` or `-t` is `?wait=1`.** The handler serves that
+  answer and refuses the framed stream, so the two 1 MiB caps and the
+  `truncated` flag are what the command prints. The 64 MiB criterion of
+  [[011-agent-client]] waits on the framed stream.
+- **`apply` of a Sandbox is `POST /v1/sandboxes`.** There is no `PUT
+  /v1/sandboxes/{name}` in the mux, so `--if-match` has no route to carry
+  and is not built. Applying a `Secret` is the `PUT` its route serves.
+- **The socket has no half close.** [[008-api]]'s frames carry no end of
+  input, so `exec -i` reaching the end of its own input lets the command
+  inside end on its own; a client that closed the connection would end the
+  command instead.
+- **`cella files` joins the table of [[011-agent-client]]**, which predates
+  the granular routes of [[033-file-operations]].
+
+The egress record is the client's own thin type rather than
+`latere.ai/x/cella/egress`'s: that package reaches
+`latere.ai/x/pkg/egress/placeholder`, and the build list this spec fixes is
+the standard library and the envelope. `manifest/v1` is imported, because
+it is this module's own package, adds no module to the list, and is the
+shape the API's bodies already are.
