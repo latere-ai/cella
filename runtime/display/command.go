@@ -70,6 +70,10 @@ func ReadyScript() string {
 // The body travels as base64 in the command rather than on standard input,
 // because a driver that runs a command without a stdin stream can still send
 // a file this way and the two drivers then run the same text.
+//
+// The lines are joined by newlines and not by semicolons: a shell reads a
+// semicolon after a background command as a syntax error, and the supervisor
+// is started in the background.
 func InstallScript(g Geometry) string {
 	body := base64.StdEncoding.EncodeToString([]byte(StartScript))
 	return strings.Join([]string{
@@ -81,7 +85,7 @@ func InstallScript(g Geometry) string {
 		"setsid env " + HomeEnv + "=" + HomeDir + " " + DisplayEnv + "=" + DisplayValue +
 			" " + GeometryEnv + "=" + g.String() + " sh " + StartPath + " >" + LogPath + " 2>&1 &",
 		"echo $! > " + PIDPath,
-	}, "; ")
+	}, "\n")
 }
 
 // StopScript ends the supervisor and forgets its pid, which is what a stop
@@ -133,7 +137,7 @@ func StreamScript(fps int, format, session string) string {
 		"n=$((n+1))",
 		"sleep " + interval(fps),
 		"done",
-	}, "; ")
+	}, "\n")
 }
 
 // EndStreamScript ends one screen session by removing the file its loop runs
