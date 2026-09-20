@@ -7,7 +7,9 @@ package runtime
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"slices"
 	"time"
 
 	v1 "latere.ai/x/cella/manifest/v1"
@@ -41,6 +43,12 @@ const TokenPath = "/run/cella/token"
 // set only where a token was projected: a sandbox on a control plane that
 // mints none carries neither the file nor the variable.
 const TokenFileEnv = "CELLA_TOKEN_FILE"
+
+// PoolLabel is what a driver stamps on a prewarmed entry, under the control
+// plane's own key domain, and removes at adoption. It is the one key the pool
+// of spec 020 is read by, so a driver instance that did not make the entry,
+// and an operator reading the engine, name the same thing.
+const PoolLabel = "cella.latere.ai/pool"
 
 type Capabilities = v1.Capabilities
 type Isolation = v1.Isolation
@@ -104,6 +112,37 @@ type CreateSpec struct {
 	// that keeps the create spec beside the sandbox keeps the shape of the
 	// sandbox and not the credential it was started with.
 	Token []byte `json:"-"`
+	// Prewarm makes a pool entry rather than a sandbox: no owner, no name,
+	// no token, no boundary, the image's own entrypoint and an empty
+	// workspace, stamped PoolLabel and Running. An Update carrying an
+	// Adoption turns it into one caller's sandbox (spec 020). A driver that
+	// declares no Pool capability refuses it with ErrUnsupported.
+	Prewarm bool `json:"prewarm,omitempty"`
+}
+
+// Adoption is what one pool entry becomes: the half of a sandbox the match
+// rule of spec 020 could not carry, written over the entry in one exclusive
+// act. Every field is the adopting caller's, and what it does not name the
+// entry keeps.
+//
+// The driver claims the entry before it projects the token or the gateway's
+// authority into it. A loser of the claim must not have written its caller's
+// credential into a container the winner owns, and a projection that fails
+// after the claim deletes the entry rather than leaving a sandbox with an
+// identity nobody holds.
+type Adoption struct {
+	Owner, Name string
+	Labels, Env map[string]string
+	// Workspace is where the caller's files live. A path that differs from
+	// the entry's is ErrInvalid: the entry's workspace is already
+	// provisioned, and on a container driver the path is the mount the
+	// container was started with.
+	Workspace Workspace
+	Lifecycle Lifecycle
+	// Token is the workload token to project, and Egress the boundary the
+	// caller's sandbox runs inside. Both are the adopting sandbox's own.
+	Token  []byte
+	Egress Egress
 }
 type Ref struct {
 	ID string `json:"id"`
@@ -124,10 +163,17 @@ type State struct {
 	ExpiresAt      time.Time         `json:"expiresAt,omitzero"`
 	AutoStop       time.Duration     `json:"autoStop,omitempty"`
 	AutoDelete     time.Duration     `json:"autoDelete,omitempty"`
+	// Pool reports a prewarmed entry: a sandbox the control plane made for
+	// nobody, which no caller owns until it is adopted (spec 020).
+	Pool bool `json:"pool,omitempty"`
 }
 type Filter struct {
 	Owner, Phase string
 	IDs          []string
+	// Pool selects prewarmed entries when true and sandboxes a caller owns
+	// when false. Nil is every sandbox of the environment, entries included,
+	// which is what the reaper's list reads.
+	Pool *bool
 }
 type Change struct {
 	Labels    *map[string]string
@@ -137,7 +183,42 @@ type Change struct {
 	// expires, without restarting the workload. Empty leaves the projection
 	// as it is.
 	Token []byte
+	// Adopt turns a prewarmed entry into the caller's sandbox in one
+	// exclusive act. It is exclusive of every other field of this type:
+	// adoption writes the whole record and one call is one act.
+	Adopt *Adoption
 }
+
+// Adoption returns the adoption a change carries, if any, and refuses a change
+// that mixes it with another field. A driver calls it first, so the refusal is
+// the same sentence on every driver.
+func (c Change) Adoption() (*Adoption, error) {
+	if c.Adopt == nil {
+		return nil, nil
+	}
+	if c.Labels != nil || c.Env != nil || c.Lifecycle != nil || len(c.Token) > 0 {
+		return nil, fmt.Errorf("%w: Adopt is exclusive of every other change", ErrInvalid)
+	}
+	return c.Adopt, nil
+}
+
+// Selects reports whether one state passes the filter. Every driver narrows
+// the states it assembled through it, so a field added to Filter reaches every
+// driver at once.
+func (f Filter) Selects(s State) bool {
+	switch {
+	case f.Owner != "" && s.Owner != f.Owner:
+		return false
+	case f.Phase != "" && s.Phase != f.Phase:
+		return false
+	case f.Pool != nil && s.Pool != *f.Pool:
+		return false
+	case len(f.IDs) > 0 && !slices.Contains(f.IDs, s.ID):
+		return false
+	}
+	return true
+}
+
 type ExecRequest struct {
 	Command []string
 	Env     map[string]string
