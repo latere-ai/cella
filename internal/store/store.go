@@ -22,8 +22,9 @@ import (
 // Kinds of design 003 the store holds. The kind is a column, so a later kind
 // needs no migration.
 const (
-	KindSandbox = "Sandbox"
-	KindSecret  = "Secret"
+	KindSandbox     = "Sandbox"
+	KindSecret      = "Secret"
+	KindEnvironment = "Environment"
 )
 
 // PhaseDeleting is the one phase the count ceiling of design 007 excludes: a
@@ -63,10 +64,9 @@ type Store interface {
 
 // Tx is every method set of the store, inside one transaction.
 //
-// Design 010 names four more: Queue (slice 038), Operations (design 021),
-// Ledger (design 022) and Records (design 018). The first two are declared
-// below with their tables in the schema and have no accessor here until a
-// caller exists.
+// Design 010 names three more: Queue (slice 038), Ledger (design 022) and
+// Records (design 018). Queue is declared below with its table in the schema
+// and has no accessor here until a caller exists.
 type Tx interface {
 	Desired() Desired
 	Observed() Observed
@@ -74,6 +74,7 @@ type Tx interface {
 	Values() Values
 	Leases() Leases
 	Revocations() Revocations
+	Operations() Operations
 }
 
 // Object is one desired-state row: the identity every kind is indexed by, the
@@ -306,7 +307,8 @@ type Queue interface {
 	Position(ctx context.Context, sandboxID string) (int, error)
 }
 
-// Operation is one unit of work for a data plane worker.
+// Operation is one unit of work for a data plane worker: one driver call, the
+// worker that holds it, and the answer that ends it.
 type Operation struct {
 	ID          string
 	Environment string
@@ -318,7 +320,17 @@ type Operation struct {
 	ClaimedAt   time.Time
 	Attempts    int
 	Result      []byte
+	CreatedAt   time.Time
 }
+
+// The states one operation passes through. A queued row waits for a worker, a
+// claimed row is one worker's until its lease lapses, and a done row carries
+// the result and is kept until the sweep forgets it.
+const (
+	OperationQueued  = "queued"
+	OperationClaimed = "claimed"
+	OperationDone    = "done"
+)
 
 // Worker is one registration of a data plane worker and its last heartbeat.
 type Worker struct {
@@ -328,13 +340,39 @@ type Worker struct {
 	LastHeartbeat time.Time
 }
 
-// Operations is the seam design 021 fills: the operation queue a worker
-// claims from and the registrations an environment's phase is computed from.
-// The operations and workers tables are in the schema.
+// Operations is the operation queue a worker claims from and the
+// registrations an environment's phase is computed from (design 021). The
+// stream carries the frames; this table is the arbiter of who holds what, so
+// a dropped connection redelivers to whichever worker and replica is live.
 type Operations interface {
+	// Enqueue writes one operation for an environment. An id already in the
+	// table is ErrVersionConflict.
 	Enqueue(ctx context.Context, op Operation) error
-	Claim(ctx context.Context, environment, worker string, n int) ([]Operation, error)
+	// Claim takes at most n operations for one worker: rows nobody holds,
+	// and rows held by a worker whose last heartbeat is before lapsed. The
+	// claimed rows are returned with their attempt count advanced.
+	Claim(ctx context.Context, environment, worker string, n int, lapsed time.Time) ([]Operation, error)
+	// Acknowledge ends one operation with its result. An operation already
+	// done keeps the result it had, so a redelivery that raced a result
+	// cannot overwrite the answer the caller was given.
 	Acknowledge(ctx context.Context, opID string, result []byte) error
+	// Get reads one operation, done or not.
+	Get(ctx context.Context, opID string) (Operation, error)
+	// Register records one worker's registration, replacing any row it held
+	// before, and stamps its heartbeat.
+	Register(ctx context.Context, w Worker) error
+	// Heartbeat stamps a registered worker. A worker with no row is
+	// ErrNotFound, which is how a worker learns the control plane forgot it
+	// and registers again.
 	Heartbeat(ctx context.Context, environment, worker string, at time.Time) error
+	// Workers is every registration of one environment with its last
+	// heartbeat, ordered by worker id.
 	Workers(ctx context.Context, environment string) ([]Worker, error)
+	// Forget drops one worker's registration, which is what a clean
+	// disconnect writes so the environment's phase moves at once rather
+	// than at the end of the lease.
+	Forget(ctx context.Context, environment, worker string) error
+	// Prune drops done operations created before an instant and reports how
+	// many went.
+	Prune(ctx context.Context, before time.Time) (int, error)
 }

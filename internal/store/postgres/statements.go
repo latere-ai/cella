@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -41,6 +42,7 @@ func (t *txn) Values() store.Values     { return values{t.q, t.env} }
 func (t *txn) Leases() store.Leases     { return leases{t.q, t.store} }
 
 func (t *txn) Revocations() store.Revocations { return revocations{t.q} }
+func (t *txn) Operations() store.Operations   { return operations{t.q} }
 
 // The constraints a write can violate, and what each one means to a caller.
 const (
@@ -638,4 +640,214 @@ func (x revocations) Forget(ctx context.Context, before time.Time) (int, error) 
 		return 0, fmt.Errorf("store: forgetting expired revocations: %w", err)
 	}
 	return int(tag.RowsAffected()), nil
+}
+
+const operationColumns = `id, environment, sandbox_id, type, payload, state, claimed_by, claimed_at, attempts, result, created_at`
+
+// operations is the worker queue of design 021: the rows a worker claims
+// from, and the registrations an environment's phase is computed from. The
+// claim is one statement, so two replicas handing work to two workers cannot
+// hand the same row to both.
+type operations struct{ q querier }
+
+func (x operations) Enqueue(ctx context.Context, op store.Operation) error {
+	if op.ID == "" || op.Environment == "" || op.Type == "" {
+		return errors.New("store: an operation names an id, an environment and a type")
+	}
+	if op.State == "" {
+		op.State = store.OperationQueued
+	}
+	if op.CreatedAt.IsZero() {
+		op.CreatedAt = time.Now().UTC()
+	}
+	_, err := x.q.Exec(ctx, `insert into operations
+		(id, environment, sandbox_id, type, payload, state, attempts, created_at)
+		values ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		op.ID, op.Environment, op.SandboxID, op.Type, jsonOrNull(op.Payload), op.State, op.Attempts, op.CreatedAt.UTC())
+	if err != nil {
+		var pg *pgconn.PgError
+		if errors.As(err, &pg) && pg.Code == uniqueViolation {
+			return store.ErrVersionConflict
+		}
+		return fmt.Errorf("store: enqueueing operation %s: %w", op.ID, err)
+	}
+	return nil
+}
+
+// Claim takes rows nobody holds and rows whose holder stopped heartbeating,
+// in one statement with the rows locked, so a row is claimed once however
+// many replicas claim at the same instant.
+func (x operations) Claim(ctx context.Context, environment, worker string, n int, lapsed time.Time) ([]store.Operation, error) {
+	if environment == "" || worker == "" {
+		return nil, errors.New("store: a claim names an environment and a worker")
+	}
+	if n <= 0 {
+		return nil, nil
+	}
+	rows, err := x.q.Query(ctx, `update operations set
+			state = 'claimed', claimed_by = $2, claimed_at = now(), attempts = attempts + 1
+		where id in (
+			select o.id from operations o
+			left join workers w on w.environment = o.environment and w.worker = o.claimed_by
+			where o.environment = $1 and (
+				o.state = 'queued'
+				or (o.state = 'claimed' and o.claimed_by <> $2
+					and (w.worker is null or w.last_heartbeat < $3)))
+			order by o.created_at, o.id
+			limit $4
+			for update of o skip locked)
+		returning `+operationColumns, environment, worker, lapsed.UTC(), n)
+	if err != nil {
+		return nil, fmt.Errorf("store: claiming operations of %s: %w", environment, err)
+	}
+	defer rows.Close()
+	out := []store.Operation{}
+	for rows.Next() {
+		op, scanErr := scanOperation(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		out = append(out, op)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: claiming operations of %s: %w", environment, err)
+	}
+	// returning has no order of its own, and a worker executes what it
+	// claimed in the order the queue holds it.
+	slices.SortFunc(out, func(a, b store.Operation) int {
+		if a.CreatedAt.Equal(b.CreatedAt) {
+			return strings.Compare(a.ID, b.ID)
+		}
+		return a.CreatedAt.Compare(b.CreatedAt)
+	})
+	return out, nil
+}
+
+func (x operations) Acknowledge(ctx context.Context, opID string, result []byte) error {
+	tag, err := x.q.Exec(ctx, `update operations set state = 'done', result = $2
+		where id = $1 and state <> 'done'`, opID, jsonOrNull(result))
+	if err != nil {
+		return fmt.Errorf("store: acknowledging operation %s: %w", opID, err)
+	}
+	if tag.RowsAffected() == 0 {
+		// Either the row is gone, or it is already done and the answer the
+		// caller was given stands.
+		var found bool
+		if err = x.q.QueryRow(ctx, `select exists (select 1 from operations where id = $1)`, opID).Scan(&found); err != nil {
+			return fmt.Errorf("store: acknowledging operation %s: %w", opID, err)
+		}
+		if !found {
+			return store.ErrNotFound
+		}
+	}
+	return nil
+}
+
+func (x operations) Get(ctx context.Context, opID string) (store.Operation, error) {
+	op, err := scanOperation(x.q.QueryRow(ctx, `select `+operationColumns+` from operations where id = $1`, opID))
+	if err != nil {
+		return store.Operation{}, err
+	}
+	return op, nil
+}
+
+func (x operations) Register(ctx context.Context, w store.Worker) error {
+	if w.Environment == "" || w.Worker == "" {
+		return errors.New("store: a registration names an environment and a worker")
+	}
+	if w.LastHeartbeat.IsZero() {
+		w.LastHeartbeat = time.Now()
+	}
+	_, err := x.q.Exec(ctx, `insert into workers (environment, worker, replica, last_heartbeat)
+		values ($1, $2, $3, $4)
+		on conflict (environment, worker) do update
+		set replica = excluded.replica, last_heartbeat = excluded.last_heartbeat`,
+		w.Environment, w.Worker, w.Replica, w.LastHeartbeat.UTC())
+	if err != nil {
+		return fmt.Errorf("store: registering worker %s: %w", w.Worker, err)
+	}
+	return nil
+}
+
+func (x operations) Heartbeat(ctx context.Context, environment, worker string, at time.Time) error {
+	tag, err := x.q.Exec(ctx, `update workers set last_heartbeat = $3
+		where environment = $1 and worker = $2`, environment, worker, at.UTC())
+	if err != nil {
+		return fmt.Errorf("store: stamping worker %s: %w", worker, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return store.ErrNotFound
+	}
+	return nil
+}
+
+func (x operations) Workers(ctx context.Context, environment string) ([]store.Worker, error) {
+	rows, err := x.q.Query(ctx, `select environment, worker, replica, last_heartbeat
+		from workers where environment = $1 order by worker`, environment)
+	if err != nil {
+		return nil, fmt.Errorf("store: reading the workers of %s: %w", environment, err)
+	}
+	defer rows.Close()
+	out := []store.Worker{}
+	for rows.Next() {
+		var w store.Worker
+		if err = rows.Scan(&w.Environment, &w.Worker, &w.Replica, &w.LastHeartbeat); err != nil {
+			return nil, fmt.Errorf("store: reading the workers of %s: %w", environment, err)
+		}
+		w.LastHeartbeat = w.LastHeartbeat.UTC()
+		out = append(out, w)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: reading the workers of %s: %w", environment, err)
+	}
+	return out, nil
+}
+
+func (x operations) Forget(ctx context.Context, environment, worker string) error {
+	_, err := x.q.Exec(ctx, `delete from workers where environment = $1 and worker = $2`, environment, worker)
+	if err != nil {
+		return fmt.Errorf("store: forgetting worker %s: %w", worker, err)
+	}
+	return nil
+}
+
+func (x operations) Prune(ctx context.Context, before time.Time) (int, error) {
+	tag, err := x.q.Exec(ctx, `delete from operations where state = 'done' and created_at < $1`, before.UTC())
+	if err != nil {
+		return 0, fmt.Errorf("store: forgetting finished operations: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
+}
+
+func scanOperation(row pgx.Row) (store.Operation, error) {
+	var (
+		op        store.Operation
+		claimedBy *string
+		claimedAt *time.Time
+	)
+	err := row.Scan(&op.ID, &op.Environment, &op.SandboxID, &op.Type, &op.Payload,
+		&op.State, &claimedBy, &claimedAt, &op.Attempts, &op.Result, &op.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return store.Operation{}, store.ErrNotFound
+	}
+	if err != nil {
+		return store.Operation{}, fmt.Errorf("store: reading an operation: %w", err)
+	}
+	if claimedBy != nil {
+		op.ClaimedBy = *claimedBy
+	}
+	if claimedAt != nil {
+		op.ClaimedAt = claimedAt.UTC()
+	}
+	op.CreatedAt = op.CreatedAt.UTC()
+	return op, nil
+}
+
+// jsonOrNull writes a nil payload as SQL null rather than as the JSON literal
+// null, so a row with no payload reads back as no payload.
+func jsonOrNull(raw []byte) any {
+	if len(raw) == 0 {
+		return nil
+	}
+	return raw
 }
