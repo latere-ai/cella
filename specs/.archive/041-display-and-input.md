@@ -334,9 +334,11 @@ machine with `CELLA_TEST_DISPLAY_IMAGE` naming it: thirty cases, the four
 new ones included, in 28.6 seconds. A real desktop comes up inside a
 sandbox in about a second, `Display` reports the declared geometry, a
 screenshot decodes as an 800 by 600 PNG and a half-scale one as a 400 wide
-JPEG, a frame arrives off the stream, a click and typed text land, a click
-off the screen is refused, and a `nc` listener reads `listening` beside a
-declared port that reads `closed`.
+JPEG, a frame arrives off the stream, a move, a click, a keysym and typed
+text run through the input tool without error, a click off the screen is
+refused, and a `nc` listener reads `listening` beside a declared port that
+reads `closed`. What the desktop then shows is not asserted, which is the
+partial row of [[023-computer-use-operations]].
 
 The first run found a defect no fake could: the install command joined its
 lines with semicolons, and a shell reads a semicolon after a background
@@ -388,4 +390,16 @@ condition.
    against a desktop with something on it, which the browser-ready example
    of that spec is the natural place for.
 5. `docs/examples/browser.yaml` and the `case023BrowserReady` conformance
-   scenario are not built.
+   scenario are not built, and the image was built and run without the
+   browser, so the browser-ready manifest has not been exercised.
+6. A podman `Create` of a sandbox whose image carries no desktop succeeds
+   and leaves `DisplayReady` false: the bring-up is logged and not returned,
+   because a running sandbox with no screen is the honest state and a failed
+   create would throw the workload away with it. Anything that needs the
+   desktop up, a pool entry of [[020-scheduling-and-sets]] among them, waits
+   on the condition and not on the create.
+7. A screen session ends itself after an hour, which the API closes with the
+   same 1000 a stop causes, so a client cannot tell the bound from the
+   sandbox stopping. The bound exists because a container engine cannot end
+   an exec session it started; a close reason that names it would need a
+   frame the design does not have.
