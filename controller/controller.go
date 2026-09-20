@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"latere.ai/x/cella/egress"
 	"latere.ai/x/cella/manifest"
 	v1 "latere.ai/x/cella/manifest/v1"
 	driver "latere.ai/x/cella/runtime"
@@ -65,6 +66,13 @@ type Options struct {
 	// RecoveryAttempts is how many times a lost sandbox is recreated before
 	// it is Failed with reason RecoveryExhausted. Zero takes the default.
 	RecoveryAttempts int
+	// Egress is the environment's connected gateways. It is optional: with
+	// none, a sandbox whose boundary needs a gateway is refused and one
+	// that needs none is created with EgressEnforced false (spec 018).
+	Egress Egress
+	// Gateway is where sandboxes of this environment reach the gateway's
+	// two doors, from CELLA_GATEWAY and CELLA_GATEWAY_REVERSE.
+	Gateway GatewayAddresses
 }
 type Controller struct {
 	mu            sync.Mutex
@@ -91,6 +99,8 @@ type Controller struct {
 	lost             map[string]time.Time
 	attempts         map[string]int
 	retry            map[string]time.Time
+	egress           Egress
+	gateway          GatewayAddresses
 }
 
 // Open restores desired state from an operator-supplied store, or the provisional
@@ -131,6 +141,7 @@ func Open(o Options) (*Controller, error) {
 		lifecycle: o.Lifecycle, touched: map[string]time.Time{},
 		lostGrace: o.LostGrace, recoveryAttempts: o.RecoveryAttempts,
 		lost: map[string]time.Time{}, attempts: map[string]int{}, retry: map[string]time.Time{},
+		egress: o.Egress, gateway: o.Gateway,
 	}
 	// A store of design 010 takes one conditional write per object and
 	// carries the journal; one that is also durable is what lets the lost
@@ -244,25 +255,39 @@ func (c *Controller) Create(ctx context.Context, obj v1.Sandbox, owner string, m
 	if max > 0 && count >= max {
 		return obj, ErrQuota
 	}
-	obj.Status = v1.SandboxStatus{ID: id, Owner: owner, Environment: c.environment, Driver: c.driver.Name(), Isolation: c.driver.Isolation(), Phase: driver.Pending, CreatedAt: time.Now().UTC(), Warnings: warnings}
+	now := time.Now().UTC()
+	obj.Status = v1.SandboxStatus{ID: id, Owner: owner, Environment: c.environment, Driver: c.driver.Name(), Isolation: c.driver.Isolation(), Phase: driver.Pending, CreatedAt: now, Warnings: warnings}
 	if err = c.persist(ctx, obj, MutationCreated); err != nil {
 		return obj, err
 	}
-	_, err = c.driver.Create(ctx, specOf(obj, lifecycle))
+	// The boundary is put in a gateway before the driver is called, so a
+	// sandbox never starts before a gateway knows it (spec 018). A boundary
+	// that no gateway will hold is a refusal here, with nothing created.
+	m, held, err := c.pushEgress(ctx, &obj)
+	if err != nil {
+		// The map may already sit in a gateway that took the put and never
+		// answered, so the principal is purged with the object: every map a
+		// gateway holds is a map desired state has.
+		c.purgeEgress(ctx, id)
+		return obj, errors.Join(err, c.forget(ctx, id, MutationDeleted))
+	}
+	obj.Status.Conditions = setCondition(obj.Status.Conditions, c.egressCondition(m, held, now))
+	_, err = c.driver.Create(ctx, specOf(obj, lifecycle, c.egressSpec(m)))
 	if err != nil {
 		obj.Status.Phase = PhaseFailed
 		obj.Status.Reason = "RuntimeCreateFailed"
-		return obj, errors.Join(err, c.persist(ctx, obj, MutationUpdated))
+		c.purgeEgress(ctx, id)
+		return export(obj), errors.Join(err, c.persist(ctx, obj, MutationUpdated))
 	}
 	obj, err = c.refresh(ctx, obj)
-	return clone(obj), errors.Join(err, c.persist(ctx, obj, MutationUpdated))
+	return export(obj), errors.Join(err, c.persist(ctx, obj, MutationUpdated))
 }
 
-// specOf derives the driver's create spec from one resolved manifest and the
-// deadline set it runs under. It is the one place the manifest's vocabulary
-// meets the driver's, so a create and a recovery of the same sandbox ask for
-// the same object.
-func specOf(obj v1.Sandbox, lifecycle driver.Lifecycle) driver.CreateSpec {
+// specOf derives the driver's create spec from one resolved manifest, the
+// deadline set it runs under, and the boundary its gateway holds. It is the
+// one place the manifest's vocabulary meets the driver's, so a create and a
+// recovery of the same sandbox ask for the same object.
+func specOf(obj v1.Sandbox, lifecycle driver.Lifecycle, boundary driver.Egress) driver.CreateSpec {
 	return driver.CreateSpec{
 		ID: obj.Status.ID, Name: obj.Metadata.Name, Owner: obj.Status.Owner, Image: obj.Spec.Image,
 		Command: obj.Spec.Command, Args: obj.Spec.Args, Env: obj.Spec.Env,
@@ -270,7 +295,18 @@ func specOf(obj v1.Sandbox, lifecycle driver.Lifecycle) driver.CreateSpec {
 		Resources: driver.Resources{CPU: string(obj.Spec.Resources.CPU), Memory: string(obj.Spec.Resources.Memory), Disk: string(obj.Spec.Resources.Disk)},
 		Workspace: driver.Workspace{Path: obj.Spec.Workspace.Path},
 		Lifecycle: lifecycle,
+		Egress:    boundary,
 	}
+}
+
+// purgeEgress drops a principal from every gateway of the environment. It
+// runs on a delete and on a create whose driver refused, so no gateway holds
+// a map for an object that does not exist.
+func (c *Controller) purgeEgress(ctx context.Context, id string) {
+	if c.egress == nil {
+		return
+	}
+	c.egress.Purge(ctx, egress.Principal(id))
 }
 func (c *Controller) Get(ctx context.Context, key, owner string) (v1.Sandbox, error) {
 	c.mu.Lock()
@@ -288,7 +324,7 @@ func (c *Controller) Get(ctx context.Context, key, owner string) (v1.Sandbox, er
 	if !ok {
 		return v1.Sandbox{}, ErrNotFound
 	}
-	return clone(obj), nil
+	return export(obj), nil
 }
 
 // List returns desired records. Runtime refresh is deferred until after API authorization.
@@ -300,7 +336,7 @@ func (c *Controller) List() []v1.Sandbox {
 	defer c.mu.Unlock()
 	out := make([]v1.Sandbox, 0, len(c.objects))
 	for _, obj := range c.objects {
-		out = append(out, clone(obj))
+		out = append(out, export(obj))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Status.ID < out[j].Status.ID })
 	return out
@@ -412,7 +448,8 @@ func (c *Controller) Act(ctx context.Context, id, verb string) (v1.Sandbox, erro
 		if err == nil {
 			c.forgetTouch(id)
 			c.forgetLost(id)
-			return obj, c.forget(ctx, id, MutationDeleted)
+			c.purgeEgress(ctx, id)
+			return export(obj), c.forget(ctx, id, MutationDeleted)
 		}
 	default:
 		return obj, ErrPhase
@@ -424,10 +461,20 @@ func (c *Controller) Act(ctx context.Context, id, verb string) (v1.Sandbox, erro
 	if err != nil {
 		return obj, err
 	}
-	return clone(obj), c.persist(ctx, obj, MutationUpdated)
+	return export(obj), c.persist(ctx, obj, MutationUpdated)
 }
 func (c *Controller) Exec(ctx context.Context, id string, req driver.ExecRequest) (driver.Exec, error) {
 	return c.driver.Exec(ctx, id, req)
+}
+
+// export is the object as a caller reads it: everything clone carries, less
+// the control plane's own record of the boundary. The credential in it is
+// what both gateway doors authenticate, so it leaves the process only toward
+// a gateway and inside the sandbox it belongs to, never in an API response.
+func export(obj v1.Sandbox) v1.Sandbox {
+	out := clone(obj)
+	out.Status.EgressState = nil
+	return out
 }
 func clone(obj v1.Sandbox) v1.Sandbox {
 	obj.Metadata.Labels = maps.Clone(obj.Metadata.Labels)
@@ -435,7 +482,15 @@ func clone(obj v1.Sandbox) v1.Sandbox {
 	obj.Spec.Command = slices.Clone(obj.Spec.Command)
 	obj.Spec.Args = slices.Clone(obj.Spec.Args)
 	obj.Spec.Env = maps.Clone(obj.Spec.Env)
+	obj.Spec.Network.Egress.AllowedHosts = slices.Clone(obj.Spec.Network.Egress.AllowedHosts)
+	obj.Spec.Network.Egress.DeniedHosts = slices.Clone(obj.Spec.Network.Egress.DeniedHosts)
+	obj.Status.Conditions = slices.Clone(obj.Status.Conditions)
 	obj.Status.Warnings = slices.Clone(obj.Status.Warnings)
+	if obj.Status.EgressState != nil {
+		state := *obj.Status.EgressState
+		state.Placeholders = maps.Clone(obj.Status.EgressState.Placeholders)
+		obj.Status.EgressState = &state
+	}
 	if obj.Status.ExitCode != nil {
 		code := *obj.Status.ExitCode
 		obj.Status.ExitCode = &code

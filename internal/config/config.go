@@ -106,6 +106,10 @@ type Config struct {
 	// when CELLA_RUNTIME selects that driver, so an installation that runs
 	// another backend carries no opinion about a cluster.
 	K8s k8s.Options
+	// Gateway is spec 018's half of the boundary: where sandboxes reach
+	// the egress gateway, how long a create waits for one to hold the
+	// sandbox's map, and how many connection records are kept.
+	Gateway EgressGateway
 	// Identity is spec 006's half: the issuers, the audience, the signing
 	// keys, the authorizer, and the owner policy's admins.
 	Identity
@@ -136,6 +140,7 @@ func Load(getenv Getenv) (Config, error) {
 		}
 		c.AllowUnsafeNative = value
 	}
+	c.Gateway = loadEgressGateway(getenv, &problems)
 	c.PodmanSocket = strings.TrimSpace(getenv("CELLA_PODMAN_SOCKET"))
 	if c.PodmanSocket != "" && !filepath.IsAbs(c.PodmanSocket) {
 		problems = append(problems, "CELLA_PODMAN_SOCKET must be an absolute path to a unix socket")

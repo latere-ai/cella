@@ -41,6 +41,9 @@ type Options struct {
 	Authorizer     *auth.Authorizer
 	MaxBodyBytes   int64
 	MaxUploadBytes int64
+	// Egress is the environment's gateways. It is optional: with none, the
+	// sync stream answers not found and a sandbox's records are empty.
+	Egress *EgressHub
 }
 type handler struct {
 	Options
@@ -61,6 +64,7 @@ func New(o Options) (http.Handler, error) {
 	h.mux.HandleFunc("GET /v1/sandboxes/{id}/files", h.files)
 	h.mux.HandleFunc("PUT /v1/sandboxes/{id}/files", h.files)
 	h.mux.HandleFunc("GET /v1/sandboxes/{id}/logs", h.logs)
+	h.mux.HandleFunc("GET /v1/sandboxes/{id}/egress", h.egressRecords)
 	h.mux.HandleFunc("POST /v1/sandboxes", h.create)
 	h.mux.HandleFunc("GET /v1/sandboxes", h.list)
 	h.mux.HandleFunc("GET /v1/sandboxes/{id}", h.item)
@@ -85,8 +89,19 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		respondError(w, err)
 		return
 	}
-	if _, worker := caller.Environment(); worker {
-		respondError(w, &auth.Error{Code: auth.CodeForbidden, Detail: "environment keys authorize worker routes only"})
+	// An environment key authorizes the data plane's own streams and
+	// nothing else: it names an environment, not a subject, so no route
+	// that decides on a subject can be reached with one.
+	if environment, isEnvironment := caller.Environment(); isEnvironment {
+		if id, ok := egressStreamPath(r); ok && h.Egress != nil {
+			if id != environment {
+				respondError(w, &auth.Error{Code: auth.CodeForbidden, Detail: "the key names another environment"})
+				return
+			}
+			h.Egress.ServeGateway(w, r, environment)
+			return
+		}
+		respondError(w, &auth.Error{Code: auth.CodeForbidden, Detail: "environment keys authorize data plane streams only"})
 		return
 	}
 	r = r.WithContext(context.WithValue(r.Context(), callerKey{}, caller))

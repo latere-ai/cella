@@ -172,7 +172,15 @@ func (c *Controller) recoverLocked(ctx context.Context, obj v1.Sandbox, now time
 	// A create that finds the id already stamped adopts the object rather
 	// than making a second one, which is the idempotence of design 005's
 	// create order against a crash between the driver call and the write.
-	if _, err := c.driver.Create(ctx, specOf(obj, lifecycle)); err != nil && !errors.Is(err, driver.ErrAlreadyExists) {
+	// The boundary is put back in a gateway before the driver is asked, as
+	// on create (spec 018): a recovered sandbox runs inside the same map.
+	m, held, err := c.pushEgress(ctx, &obj)
+	if err != nil {
+		c.retry[id] = now.Add(recoveryBackoff(attempt))
+		return false, fmt.Errorf("pushing the boundary: %w", err)
+	}
+	obj.Status.Conditions = setCondition(obj.Status.Conditions, c.egressCondition(m, held, now))
+	if _, err := c.driver.Create(ctx, specOf(obj, lifecycle, c.egressSpec(m))); err != nil && !errors.Is(err, driver.ErrAlreadyExists) {
 		c.retry[id] = now.Add(recoveryBackoff(attempt))
 		return false, fmt.Errorf("recreating the sandbox: %w", err)
 	}

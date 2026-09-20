@@ -16,7 +16,7 @@ import (
 // The walk is recursive, so "." carries every driver package under runtime/
 // and a slice that ports one in adds no root; a slice that adds a sibling
 // tree of runtime/ adds it here.
-var roots = []string{".", "../controller"}
+var roots = []string{".", "../controller", "../egress"}
 
 // drivers are the driver packages the walk has to reach. Naming them keeps a
 // later narrowing of the walk from silently dropping a driver's tree, which is

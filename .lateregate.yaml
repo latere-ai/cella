@@ -130,6 +130,31 @@ depcheck:
         go.yaml.in/yaml: the YAML parser the Kubernetes decoders are built on
         gopkg.in/evanphx/json-patch.v4: the JSON patch the k8s driver's compare-and-swap is written as
         gopkg.in/inf.v0: the arbitrary-precision arithmetic behind a Kubernetes quantity
+    latere.ai/x/cella/internal/egressd:
+      decision: >-
+        the egress role reaches latere.ai/x/pkg/egress, the WebSocket
+        library its one outbound stream speaks, and the standard library,
+        and nothing of the control plane: no store, no issuer, no
+        authorizer, no Kubernetes or Podman client (spec 001). The
+        OpenTelemetry SDK and its transport arrive with
+        latere.ai/x/pkg/egress itself, whose JWT proxy verifier reaches a
+        key set over an instrumented client; the role does not use that
+        verifier, because the credential it authenticates travels in the
+        map and needs no key set
+      allow:
+        latere.ai/x/pkg: the shared library every Latere service is built on, and the substitution engine of spec 018
+        github.com/gorilla/websocket: the transport of the gateway's one outbound stream (spec 018)
+        go.opentelemetry.io: the OpenTelemetry SDK, reached through latere.ai/x/pkg
+        google.golang.org/grpc: the OTLP exporters' transport, a dependency of the OpenTelemetry SDK
+        google.golang.org/protobuf: the OTLP wire format, a dependency of the OpenTelemetry SDK
+        google.golang.org/genproto: the OTLP status types, a dependency of the OpenTelemetry SDK
+        golang.org/x: the Go project's extended library, reached by the substitution engine's HTTP/2 support and by the OpenTelemetry SDK
+        github.com/grpc-ecosystem/grpc-gateway: the OTLP HTTP exporters' dependency
+        github.com/go-logr: the OpenTelemetry SDK's logging seam
+        github.com/google/uuid: request ids in latere.ai/x/pkg/httpjson
+        github.com/felixge/httpsnoop: the response recorder of the SDK's HTTP instrumentation
+        github.com/cespare/xxhash: a hash the OpenTelemetry SDK's metric pipeline uses
+        github.com/cenkalti/backoff: the OTLP exporters' retry
 
 # Spec 010's store reads one operator-supplied URL, CELLA_DB_URL, on a direct
 # endpoint or a session-mode pooler: a migration holds a session-scoped lock

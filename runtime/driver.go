@@ -51,6 +51,32 @@ type Resources struct {
 type Workspace struct {
 	Path string `json:"path,omitempty"`
 }
+
+// Egress is the sandbox's network boundary as the driver receives it: the
+// rule the driver enforces itself, and what it points the workload at so
+// every connection the boundary admits leaves through the gateway.
+//
+// Mode, AllowedHosts and DeniedHosts are the resolved manifest's, already
+// joined with every mounted secret's scope. A driver that declares no egress
+// capability records them and confines nothing, and the sandbox's
+// EgressEnforced condition says so.
+type Egress struct {
+	Mode         string   `json:"mode,omitempty"`
+	AllowedHosts []string `json:"allowedHosts,omitempty"`
+	DeniedHosts  []string `json:"deniedHosts,omitempty"`
+	// ProxyAddr and ReverseAddr are the gateway's two doors as a sandbox of
+	// this environment reaches them, host or host:port. Empty means the
+	// installation runs no such door and the driver sets nothing.
+	ProxyAddr   string `json:"proxyAddr,omitempty"`
+	ReverseAddr string `json:"reverseAddr,omitempty"`
+	// Credential is this sandbox's own, what both doors authenticate. It
+	// lives as long as the sandbox.
+	Credential string `json:"credential,omitempty"`
+	// CAPEM is the authority the gateway signs its leaves with. The driver
+	// projects it read-only inside the sandbox and names it in the trust
+	// variables, so the workload trusts that door and nothing else.
+	CAPEM string `json:"caPem,omitempty"`
+}
 type CreateSpec struct {
 	ID, Name, Owner, Image, Workdir string
 	Command, Args                   []string
@@ -59,6 +85,7 @@ type CreateSpec struct {
 	User                            string
 	Resources                       Resources
 	Workspace                       Workspace
+	Egress                          Egress
 }
 type Ref struct {
 	ID string `json:"id"`
