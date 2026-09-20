@@ -10,6 +10,8 @@ base/prometheusrule.yaml   alert templates, beside the kustomization and outside
 bootstrap/     the Namespace and the Secrets, applied once by hand
 examples/kind/     a laptop cluster: memory store, node port, no dependencies
 examples/generic/  a cluster an installation runs on: Postgres, an authorizer, a sink, a gateway
+examples/worker/   a self-hosted data plane: cellad worker against somebody
+                   else's control plane, outbound only (docs/workers.md)
 ```
 
 ## Apply order

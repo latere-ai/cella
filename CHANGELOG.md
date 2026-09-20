@@ -6,6 +6,21 @@ refused before it is pushed.
 
 ## Unreleased
 
+- A self-hosted data plane. `cellad worker` runs beside your own sandboxes,
+  on your own engine or cluster, and connects outbound to a control plane
+  somebody else operates; nothing ever dials it, so it needs no inbound
+  port and no public address. It authenticates with an environment key,
+  which an administrator now mints through `POST
+  /v1/environments/{id}/keys` (shown once) and ends through `DELETE
+  /v1/environments/{id}/keys/{jti}`; the same key is what `cellad egress`
+  carries, so a gateway no longer needs one signed by hand. The worker
+  checks its own driver before it registers, declares what that driver
+  provides, and reconnects with a backoff when the connection drops,
+  keeping the sandboxes it is already running. The `Environment` kind
+  gains the full shape an operator declares, with a refusal per field, and
+  `/v1/environments` serves it. [Self-hosting a data plane](docs/workers.md)
+  is the walkthrough.
+
 - A second binary, `cella`, speaks the API from a shell and from inside a
   sandbox: apply a Sandbox or a Secret, list and read objects, exec with or
   without a terminal, attach, follow logs, move files whole or one at a
