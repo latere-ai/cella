@@ -27,6 +27,7 @@ import (
 	"latere.ai/x/pkg/health"
 
 	"latere.ai/x/cella/controller"
+	"latere.ai/x/cella/internal/admission"
 	"latere.ai/x/cella/internal/api"
 	"latere.ai/x/cella/internal/auth"
 	"latere.ai/x/cella/internal/config"
@@ -36,6 +37,7 @@ import (
 	"latere.ai/x/cella/internal/store/memory"
 	"latere.ai/x/cella/internal/store/postgres"
 	"latere.ai/x/cella/internal/version"
+	"latere.ai/x/cella/manifest"
 	"latere.ai/x/cella/runtime"
 	"latere.ai/x/cella/runtime/k8s"
 	"latere.ai/x/cella/runtime/native"
@@ -262,7 +264,18 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	go func() { defer close(reaperDone); control.RunReaper(reaperCtx) }()
 	stopReaper := sync.OnceFunc(func() { cancelReaper(); <-reaperDone })
 	defer stopReaper()
-	handler, err := api.New(api.Options{Controller: control, Verifier: identity.Verifier, Authorizer: identity.Authorizer, MaxBodyBytes: cfg.MaxBodyBytes, MaxUploadBytes: cfg.MaxUploadBytes, Egress: hub, Events: emitter})
+	// Stage 3 of every resolve: the operator's endpoint where one is
+	// configured, and the identity step where none is (spec 007).
+	admit, err := admissionStep(cfg)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	handler, err := api.New(api.Options{
+		Controller: control, Verifier: identity.Verifier, Authorizer: identity.Authorizer,
+		MaxBodyBytes: cfg.MaxBodyBytes, MaxUploadBytes: cfg.MaxUploadBytes,
+		Egress: hub, Events: emitter,
+		Admit: admit, Defaults: manifest.Defaults{Image: cfg.Admission.DefaultImage},
+	})
 	if err != nil {
 		return fail(stderr, fmt.Errorf("API: %w", err))
 	}
@@ -328,9 +341,9 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		_ = publicLn.Close()
 		return fail(stderr, fmt.Errorf("CELLA_INTERNAL_ADDR: %w", err))
 	}
-	_, _ = fmt.Fprintf(stdout, "cellad: %s listening public=%s internal=%s runtime=%s issuers=%d authorizer=%s %s\n",
+	_, _ = fmt.Fprintf(stdout, "cellad: %s listening public=%s internal=%s runtime=%s issuers=%d authorizer=%s admission=%s %s\n",
 		version.Version, publicLn.Addr(), internalLn.Addr(), cfg.Runtime, len(cfg.OIDCIssuers), identity.Mode,
-		recovery(cfg, control))
+		cfg.Admission.Mode(), recovery(cfg, control))
 
 	servers := []*http.Server{
 		{Handler: public, ReadHeaderTimeout: 10 * time.Second},
@@ -368,6 +381,23 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		return fail(stderr, fmt.Errorf("runtime shutdown: %w", err))
 	}
 	return 0
+}
+
+// admissionStep is spec 007's stage 3. With CELLA_ADMISSION_URL unset it is
+// nil, which the resolver reads as the identity: the core carries no policy
+// of its own. With it set, every apply is one call to that endpoint, which
+// fails closed and is never retried.
+func admissionStep(cfg config.Config) (manifest.AdmitFunc, error) {
+	if !cfg.Admission.Enabled() {
+		return nil, nil
+	}
+	client, err := admission.New(admission.Options{
+		URL: cfg.Admission.URL, Token: cfg.Admission.Token, Timeout: cfg.Admission.Timeout,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("admission: %w", err)
+	}
+	return client.Admit, nil
 }
 
 // openStore opens desired state: the Postgres of spec 010 where CELLA_DB_URL
