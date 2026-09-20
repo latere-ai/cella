@@ -241,7 +241,8 @@ func (c *Client) Logs(ctx context.Context, ref string, o LogOptions) (io.ReadClo
 	if o.Tail > 0 {
 		q.Set("tail", strconv.Itoa(o.Tail))
 	}
-	return c.stream(ctx, http.MethodGet, KindSandbox.Path()+"/"+url.PathEscape(ref)+"/logs", q, nil, "")
+	body, _, err := c.stream(ctx, http.MethodGet, KindSandbox.Path()+"/"+url.PathEscape(ref)+"/logs", q, nil, "")
+	return body, err
 }
 
 // EgressRecord is one connection the gateway reported, as the route

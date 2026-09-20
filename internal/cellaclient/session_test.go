@@ -64,7 +64,7 @@ func newSocketFixture(t *testing.T, session func(*socketFixture, *websocket.Conn
 	}
 	f.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") == "" {
-			http.Error(w, `{"error":{"code":"unauthenticated","message":"Sign in and send a valid token."}}`, 401)
+			http.Error(w, `{"error":{"code":"unauthenticated","message":"Sign in and send a valid token."}}`, http.StatusUnauthorized)
 			return
 		}
 		conn, err := upgrader.Upgrade(w, r, nil)

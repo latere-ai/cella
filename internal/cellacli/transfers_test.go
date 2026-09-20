@@ -111,7 +111,7 @@ func TestCopyCarriesATreeIntoASandbox(t *testing.T) {
 	tr := tar.NewReader(strings.NewReader(seen.Body))
 	for {
 		header, err := tr.Next()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {

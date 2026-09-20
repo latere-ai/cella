@@ -273,21 +273,30 @@ func (c *Client) send(ctx context.Context, method, path string, query url.Values
 }
 
 // stream is a call whose answer the caller reads: the body is returned open
-// and the caller closes it.
-func (c *Client) stream(ctx context.Context, method, path string, query url.Values, body io.Reader, contentType string) (io.ReadCloser, error) {
+// for the caller to close, with the trailer that says a transfer which had
+// already begun failed. Design 008 puts that failure in a trailer because a
+// status can no longer carry it.
+func (c *Client) stream(ctx context.Context, method, path string, query url.Values, body io.Reader, contentType string) (io.ReadCloser, http.Header, error) {
 	req, err := c.request(ctx, method, path, query, body)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}
 	resp, err := c.do(req)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return resp.Body, nil
+	// The trailer is the same map the transport fills once the body has been
+	// read to its end, so a caller holding it reads what arrived after the
+	// last byte.
+	return resp.Body, resp.Trailer, nil
 }
+
+// errorTrailer is the header design 008 names for a failure after the first
+// byte.
+const errorTrailer = "X-Cella-Error"
 
 // limitValue renders a page size the API accepts: at most 200, which is the
 // ceiling of design 008, so a caller asking for more pages instead of being

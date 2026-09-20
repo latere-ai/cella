@@ -76,9 +76,7 @@ func errorFrom(resp *http.Response, body []byte) *Error {
 		e.Message = envelope.Error.Message
 		e.RequestID, _ = envelope.Error.Details["request_id"].(string)
 		e.Detail, _ = envelope.Error.Details["detail"].(string)
-		for _, p := range list(envelope.Error.Details["paths"]) {
-			e.Paths = append(e.Paths, p)
-		}
+		e.Paths = append(e.Paths, list(envelope.Error.Details["paths"])...)
 	}
 	if e.Message == "" {
 		e.Message = strings.TrimSpace(string(body))

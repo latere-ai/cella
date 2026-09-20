@@ -58,7 +58,8 @@ func (c *Client) FileStat(ctx context.Context, ref, path string) (FileEntry, []b
 
 // FileGet opens one file's body. The caller closes it.
 func (c *Client) FileGet(ctx context.Context, ref, path string) (io.ReadCloser, error) {
-	return c.stream(ctx, http.MethodGet, filesPath(ref, "/content"), url.Values{"path": []string{path}}, nil, "")
+	body, _, err := c.stream(ctx, http.MethodGet, filesPath(ref, "/content"), url.Values{"path": []string{path}}, nil, "")
+	return body, err
 }
 
 // FilePut writes one file of any content type. A mode of zero leaves the
@@ -102,13 +103,13 @@ func (c *Client) FileMove(ctx context.Context, ref, from, to string) error {
 // longer change the status, and the trailer carries its code instead.
 type TarStream struct {
 	io.ReadCloser
-	trailer func() string
+	trailer http.Header
 }
 
 // Err is the failure the trailer reported, or nil. It is meaningful only
 // after the body has been read to its end.
 func (t *TarStream) Err() error {
-	if code := t.trailer(); code != "" {
+	if code := t.trailer.Get(errorTrailer); code != "" {
 		return &StreamError{Code: code}
 	}
 	return nil
@@ -120,15 +121,11 @@ func (c *Client) ExportTar(ctx context.Context, ref string, paths []string) (*Ta
 	for _, p := range paths {
 		q.Add("path", p)
 	}
-	req, err := c.request(ctx, http.MethodGet, filesPath(ref, ""), q, nil)
+	body, trailer, err := c.stream(ctx, http.MethodGet, filesPath(ref, ""), q, nil, "")
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.do(req)
-	if err != nil {
-		return nil, err
-	}
-	return &TarStream{ReadCloser: resp.Body, trailer: func() string { return resp.Trailer.Get("X-Cella-Error") }}, nil
+	return &TarStream{ReadCloser: body, trailer: trailer}, nil
 }
 
 // ImportTar extracts an archive below dest. The body streams: no temporary

@@ -6,6 +6,7 @@ package cellacli
 import (
 	"archive/tar"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -180,7 +181,7 @@ func extract(r io.Reader, destination string) (int, error) {
 	written := 0
 	for {
 		header, err := tr.Next()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			return written, nil
 		}
 		if err != nil {
@@ -344,7 +345,7 @@ func (c *invocation) filePut(ctx context.Context, client *cellaclient.Client, ar
 	if !destination.remote() {
 		return usagef("%q names no sandbox; the form is <ref>:/workspace/...", args[1])
 	}
-	var body io.Reader = c.Stdin
+	body := c.Stdin
 	if args[0] != "-" {
 		f, err := os.Open(args[0])
 		if err != nil {
