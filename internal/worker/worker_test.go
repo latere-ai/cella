@@ -287,3 +287,213 @@ type refusingDriver struct{ driver.Driver }
 func (refusingDriver) Preflight(context.Context) error {
 	return errors.New("this host has no container engine")
 }
+
+// TestStreamURL holds how the control plane's URL becomes the stream's: the
+// scheme's WebSocket equivalent, the environment in the path, and whatever
+// base path the control plane is served under kept.
+func TestStreamURL(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		base string
+		env  string
+		want string
+	}{
+		{"https becomes wss", "https://cella.example.test", "env_a",
+			"wss://cella.example.test/v1/environments/env_a/operations"},
+		{"http on loopback becomes ws", "http://127.0.0.1:8080", "env_a",
+			"ws://127.0.0.1:8080/v1/environments/env_a/operations"},
+		{"a trailing slash is not a path segment", "https://cella.example.test/", "env_a",
+			"wss://cella.example.test/v1/environments/env_a/operations"},
+		{"a base path is kept", "https://example.test/cella", "env_a",
+			"wss://example.test/cella/v1/environments/env_a/operations"},
+		{"no environment is the one the key names", "https://cella.example.test", "",
+			"wss://cella.example.test/v1/environments/self/operations"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := worker.StreamURL(tc.base, tc.env)
+			if err != nil {
+				t.Fatalf("the stream URL was not built: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("the stream URL is %q, want %q", got, tc.want)
+			}
+		})
+	}
+	if _, err := worker.StreamURL("://not a url", "env_a"); err == nil {
+		t.Errorf("a base that is not a URL built a stream URL")
+	}
+}
+
+// TestWorkerRefusesAControlPlaneThatDoesNotSpeakTheProtocol holds the
+// subprotocol rule: a control plane of another release refuses the upgrade or
+// answers another vocabulary, and either way the worker does not go on.
+func TestWorkerRefusesAControlPlaneThatDoesNotSpeakTheProtocol(t *testing.T) {
+	registered := 0
+	mute := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/workers") {
+			registered++
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"worker":"wrk_1","environment":"env_a"}`))
+			return
+		}
+		// An upgrade that never happens: the worker cannot open a stream.
+		http.Error(w, "no websocket here", http.StatusNotFound)
+	}))
+	t.Cleanup(mute.Close)
+
+	w, err := worker.New(worker.Options{URL: mute.URL, Key: "k", Driver: nativeDriver(t)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() { defer close(done); _ = w.Run(ctx) }()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) && registered < 2 {
+		time.Sleep(20 * time.Millisecond)
+	}
+	cancel()
+	<-done
+	if registered < 2 {
+		t.Errorf("the worker tried %d times against a control plane with no stream, want a retry", registered)
+	}
+}
+
+// TestWorkerRefusesAnAnswerItCannotRead holds that a registration answered
+// with something that is not one is a failure rather than a worker that
+// claims under no id.
+func TestWorkerRefusesAnAnswerItCannotRead(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status int
+		body   string
+	}{
+		{"a refusal", http.StatusForbidden, `{"error":{"code":"forbidden"}}`},
+		{"an answer that is not JSON", http.StatusCreated, `not json`},
+		{"an answer that names no worker", http.StatusCreated, `{"environment":"env_a"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			t.Cleanup(server.Close)
+			w, err := worker.New(worker.Options{URL: server.URL, Key: "k", Driver: nativeDriver(t)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if w.ID() != "" {
+				t.Errorf("a worker that has not registered claims under %q", w.ID())
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+			defer cancel()
+			_ = w.Run(ctx)
+			if w.ID() != "" {
+				t.Errorf("a worker whose registration was not read claims under %q", w.ID())
+			}
+		})
+	}
+}
+
+// TestSocketRefusesAnotherFraming holds that every frame of this protocol is
+// binary: a peer sending text is speaking something else, and a stream that
+// half understands is worse than one that closes.
+func TestSocketRefusesAnotherFraming(t *testing.T) {
+	upgrader := websocket.Upgrader{Subprotocols: []string{remote.Protocol}, CheckOrigin: func(*http.Request) bool { return true }}
+	read := make(chan error, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		socket := worker.NewSocket(conn)
+		_, err = socket.ReadFrame()
+		read <- err
+		_ = socket.Close()
+	}))
+	t.Cleanup(server.Close)
+
+	dialer := &websocket.Dialer{Subprotocols: []string{remote.Protocol}, HandshakeTimeout: 5 * time.Second}
+	conn, res, err := dialer.DialContext(t.Context(), "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	if err != nil {
+		t.Fatalf("the stream did not open: %v", err)
+	}
+	if res != nil {
+		_ = res.Body.Close()
+	}
+	if err = conn.WriteMessage(websocket.TextMessage, []byte("hello")); err != nil {
+		t.Fatalf("the text frame was not sent: %v", err)
+	}
+	select {
+	case err = <-read:
+		if err == nil || !strings.Contains(err.Error(), "binary") {
+			t.Errorf("a text frame was read as one of this protocol: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("the socket never answered the text frame")
+	}
+	_ = conn.Close()
+}
+
+// TestSocketRoundTripsAFrame holds the other half: a whole frame travels both
+// ways, and a write on a closed socket is refused rather than lost.
+func TestSocketRoundTripsAFrame(t *testing.T) {
+	upgrader := websocket.Upgrader{Subprotocols: []string{remote.Protocol}, CheckOrigin: func(*http.Request) bool { return true }}
+	echoed := make(chan []byte, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		socket := worker.NewSocket(conn)
+		raw, err := socket.ReadFrame()
+		if err == nil {
+			echoed <- raw
+			_ = socket.WriteFrame(raw)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	dialer := &websocket.Dialer{Subprotocols: []string{remote.Protocol}, HandshakeTimeout: 5 * time.Second}
+	conn, res, err := dialer.DialContext(t.Context(), "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	if err != nil {
+		t.Fatalf("the stream did not open: %v", err)
+	}
+	if res != nil {
+		_ = res.Body.Close()
+	}
+	socket := worker.NewSocket(conn)
+	sent, err := remote.EncodeMessage(remote.NoOperation, remote.Message{Type: remote.MessageHeartbeat})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = socket.WriteFrame(sent); err != nil {
+		t.Fatalf("the frame was not written: %v", err)
+	}
+	select {
+	case got := <-echoed:
+		if string(got) != string(sent) {
+			t.Errorf("the frame arrived as %q", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("the frame never arrived")
+	}
+	back, err := socket.ReadFrame()
+	if err != nil {
+		t.Fatalf("the echoed frame was not read: %v", err)
+	}
+	if string(back) != string(sent) {
+		t.Errorf("the echoed frame is %q", back)
+	}
+	if err = socket.Close(); err != nil {
+		t.Errorf("closing the socket is %v", err)
+	}
+	if err = socket.WriteFrame(sent); err == nil {
+		t.Errorf("a frame was written on a closed socket")
+	}
+	if _, err = socket.ReadFrame(); err == nil {
+		t.Errorf("a frame was read from a closed socket")
+	}
+}

@@ -145,7 +145,7 @@ func (h *handler) environment(nameOrID string) (v1.Environment, error) {
 		Status: v1.EnvironmentStatus{
 			ID:           name,
 			Phase:        v1.EnvironmentReady,
-			Driver:       h.Controller.Driver(),
+			Driver:       h.Controller.DriverName(),
 			Isolation:    h.Controller.Isolation(),
 			Capabilities: h.Controller.Capabilities(),
 		},

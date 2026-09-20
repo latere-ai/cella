@@ -242,9 +242,9 @@ func (c *Controller) Close() error        { c.mu.Lock(); defer c.mu.Unlock(); re
 func (c *Controller) Environment() string { return c.environment }
 func (c *Controller) Isolation() string   { return c.driver.Isolation() }
 
-// Driver is the name of the driver serving this controller's environment,
-// which an environment's status reports.
-func (c *Controller) Driver() string { return c.driver.Name() }
+// DriverName is the name of the driver serving this controller's
+// environment, which an environment's status reports.
+func (c *Controller) DriverName() string { return c.driver.Name() }
 
 // persist records one object and the mutation that produced it: one
 // conditional write and one journal row where the store is a Durable, the
