@@ -38,6 +38,13 @@ func nameIsolationCapabilities(t tb, open func() runtime.Driver, _ Options) {
 	case !d.Capabilities().Attach && attacher:
 		t.Errorf("the driver implements runtime.Attacher and does not declare Attach")
 	}
+	_, store := d.(runtime.FileStore)
+	switch {
+	case d.Capabilities().Files && !store:
+		t.Errorf("the driver declares Files and does not implement runtime.FileStore")
+	case !d.Capabilities().Files && store:
+		t.Errorf("the driver implements runtime.FileStore and does not declare Files")
+	}
 }
 
 func preflightAndReady(t tb, open func() runtime.Driver, opts Options) {

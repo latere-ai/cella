@@ -67,6 +67,13 @@ var cases = []caseDef{
 	{"AttachCloseEndsTheStream", attachCloseEndsTheStream},
 	{"LogsFollow", logsFollow},
 	{"TarOutAndIn", tarOutAndIn},
+	{"FilesRoundTrip", filesRoundTrip},
+	{"FilesListOrder", filesListOrder},
+	{"FilesMutate", filesMutate},
+	{"FilesContainment", filesContainment},
+	{"FilesWriteBound", filesWriteBound},
+	{"FilesExactNames", filesExactNames},
+	{"FilesWhileStopped", filesWhileStopped},
 	{"TouchStampsActivity", touchStampsActivity},
 	{"DetachRecovers", detachRecovers},
 }

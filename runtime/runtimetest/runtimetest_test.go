@@ -186,6 +186,32 @@ func (d filesLiar) isStopped(ctx context.Context, id string) bool {
 	return err == nil && s.Phase == runtime.Stopped
 }
 
+// fileStoreLiar declares Files without the per-file interface. It embeds the
+// Driver interface, so the native driver's FileStore methods are not promoted
+// and the declaration promises what no method answers.
+type fileStoreLiar struct{ runtime.Driver }
+
+func (fileStoreLiar) Capabilities() runtime.Capabilities {
+	return runtime.Capabilities{Files: true}
+}
+
+// unstagedWriter writes where the contract stages: it drops the previous file
+// before reading the body and truncates at the bound instead of refusing. A
+// suite that reported it as conforming would let an upload cut short destroy
+// the file it was replacing.
+type unstagedWriter struct{ *native.Driver }
+
+func (d unstagedWriter) Write(ctx context.Context, id string, req runtime.WriteRequest) (int64, error) {
+	if err := d.Driver.Remove(ctx, id, req.Path); err != nil {
+		return 0, err
+	}
+	body := req.Body
+	if req.MaxBytes > 0 {
+		body = io.LimitReader(body, req.MaxBytes)
+	}
+	return d.Driver.Write(ctx, id, runtime.WriteRequest{Path: req.Path, Mode: req.Mode, Body: body})
+}
+
 // isolationLiar reports a class outside the four the contract defines.
 type isolationLiar struct{ *native.Driver }
 
@@ -235,6 +261,24 @@ func TestConformanceCatchesAFalseCapability(t *testing.T) {
 			kase:  "TarOutAndIn",
 			wrap:  func(d *native.Driver) runtime.Driver { return filesLiar{d} },
 			wants: "ImportTar while Stopped under Files",
+		},
+		{
+			name:  "FilesDeclaredWithoutTheInterface",
+			kase:  "NameIsolationCapabilities",
+			wrap:  func(d *native.Driver) runtime.Driver { return fileStoreLiar{d} },
+			wants: "does not implement runtime.FileStore",
+		},
+		{
+			name:  "FileStoreWithoutTheDeclaration",
+			kase:  "NameIsolationCapabilities",
+			wrap:  func(d *native.Driver) runtime.Driver { return noCapabilities{d} },
+			wants: "does not declare Files",
+		},
+		{
+			name:  "AWriteThatDoesNotStage",
+			kase:  "FilesWriteBound",
+			wrap:  func(d *native.Driver) runtime.Driver { return unstagedWriter{d} },
+			wants: "a refused write left",
 		},
 		{
 			name:  "IsolationOutsideTheFourClasses",
