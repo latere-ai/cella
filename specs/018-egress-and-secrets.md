@@ -1,6 +1,6 @@
 ---
 title: "Egress and secrets: the Secret kind, placeholders, the gateway as a data plane component, sync and telemetry, the boundary a workload cannot widen"
-status: validated
+status: in-progress
 track: core
 depends_on:
   - specs/003-manifest-contract.md

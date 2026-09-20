@@ -1,6 +1,6 @@
 ---
 title: "Test stubs and tiers: the stubs, the bootstrap of make run, the driver tiers, the kind overlay, CI jobs"
-status: validated
+status: in-progress
 track: core
 depends_on:
   - specs/002-repository-scaffold.md

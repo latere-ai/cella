@@ -1,6 +1,6 @@
 ---
 title: "Scheduling and sets: environment modes, capacity, the queue, preemption, pools, the SandboxSet kind for rollouts"
-status: validated
+status: in-progress
 track: core
 depends_on:
   - specs/003-manifest-contract.md

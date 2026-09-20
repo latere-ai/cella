@@ -1,6 +1,6 @@
 ---
 title: "Computer use operations: the desktop, screenshot, screen, input, ports and the proxy, browser-ready sandboxes"
-status: validated
+status: in-progress
 track: core
 depends_on:
   - specs/003-manifest-contract.md

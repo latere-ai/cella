@@ -1,6 +1,6 @@
 ---
 title: "Agent client: the cella command, its client package, exit codes, output, the skill"
-status: validated
+status: in-progress
 track: core
 depends_on:
   - specs/002-repository-scaffold.md

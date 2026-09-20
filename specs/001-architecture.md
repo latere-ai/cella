@@ -1,12 +1,12 @@
 ---
 title: "Architecture: control plane and data plane, packages, extension points, invariants"
-status: validated
+status: in-progress
 track: core
 depends_on: []
 affects: [manifest/, runtime/, controller/, egress/, internal/, cmd/cellad/, cmd/cella/, docs/]
 effort: medium
 created: 2026-09-12
-updated: 2026-09-12
+updated: 2026-09-20
 author: changkun
 ---
 
@@ -366,14 +366,14 @@ the packages ([[016-building-a-plane]]).
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| `manifest`, `runtime`, `controller`, and `egress` import nothing under `internal/`, no HTTP client, no database driver, and no identity library; each driver subpackage reaches only its own substrate's client | `TestRootPackagesDialNothing` over `go list -deps`, one allow list per package | passing for `manifest`, `manifest/v1`, `runtime`, `runtime/native`, `controller`; `egress` joins with its slice, [[032-runtime-conformance-suite]] |
+| `manifest`, `runtime`, `controller`, and `egress` import nothing under `internal/`, no HTTP client, no database driver, and no identity library; each driver subpackage reaches only its own substrate's client | `TestRootPackagesDialNothing` over `go list -deps`, one allow list per package | passing for `manifest`, `manifest/v1`, `runtime`, `runtime/display`, `runtime/native`, `runtime/podman`, `controller` and `egress` ([[032-runtime-conformance-suite]], [[035-podman-driver]], [[039-egress-gateway]]); `runtime/k8s` carries no allow list yet, so its build list is unchecked |
 | Each role package's and each binary's build list matches its `depcheck` allow list | the `depcheck` gate | passing for the scaffold's list |
-| No released artifact, deploy manifest, inherited default, or documentation page names a Latere hostname or namespace outside an example or the API group | `TestNoLatereCoordinatesInReleasedArtifacts` over `deploy/`, `docs/`, the workflows' image references, and every default in `internal/config`; [[014-release-and-installation]]'s `TestReleasePublishesUnderTheOwnersNamespace` | not built |
+| No released artifact, deploy manifest, inherited default, or documentation page names a Latere hostname or namespace outside an example or the API group | `TestNoLatereCoordinatesInReleasedArtifacts` over `deploy/`, `docs/`, the workflows' image references, and every default in `internal/config`; [[014-release-and-installation]]'s `TestReleasePublishesUnderTheOwnersNamespace` | built ([[048-release-and-check]]): both tests read `deploy/`, `docs/`, `.github/`, `internal/config`, `tools/` and `skills/`, and the walk fails where a tree went unread |
 | A manifest applied through the API and one handed to `manifest.Resolve` by an importer with the same options produce byte-identical resolved manifests | `TestAPIAndImporterResolveAgree`, comparing the `PUT` response body with `Resolve`'s output | not built |
 | A sandbox created on a directly driven environment and one on a worker's environment are indistinguishable through the API except by `status.environment`, `status.driver`, and `status.isolation` | conformance case `case001Indistinguishable` | not built, [[021-data-plane-workers]] |
 | The control plane opens no connection toward a worker's host during the whole e2e tier | [[021-data-plane-workers]]'s `TestNoInboundToTheDataPlane` | not built |
-| `cellad` refuses to start with no issuer configured | `TestServeRefusesToStartWithoutAnIssuer` | not built, [[006-identity]] |
-| With the authorizer URL set and the endpoint down, every request is refused with `authorizer_unavailable` | conformance case `case006AuthorizerUnavailable` | not built, [[006-identity]] |
+| `cellad` refuses to start with no issuer configured | `TestServeRefusesToStartWithoutAnIssuer` | built as `TestServeRefusesToStartWithoutIdentity`, whose first case is an empty `CELLA_OIDC_ISSUERS` ([[006-identity]]) |
+| With the authorizer URL set and the endpoint down, every request is refused with `authorizer_unavailable` | conformance case `case006AuthorizerUnavailable` | built at the guard as `TestAuthorizerFailsClosed` over six failure modes ([[006-identity]]); the case over the served routes waits on [[015-conformance-suite]] |
 | After `cellad` restarts with Postgres and the data plane has lost one of three sandboxes, `GET /v1/sandboxes` lists three and the lost one returns to `Running` with its volume | e2e tier of [[012-test-stubs-and-tiers]] | not built, [[010-state]] |
-| A canary secret value appears in no sandbox environment, file, event, or log across the e2e tier | `TestSecretValuesNeverEnterASandbox` | not built, [[018-egress-and-secrets]] |
-| A child spawned with one more allowed host than its parent is refused with `boundary_exceeded` | [[022-mesh-and-spawn]]'s `TestSpawnBoundary` | not built |
+| A canary secret value appears in no sandbox environment, file, event, or log across the e2e tier | `TestSecretValuesNeverEnterASandbox` | built ([[046-secret-kind]]): the canary is followed through the sandbox's environment and files, the control plane's data directory, the delivered events, the connection records and both processes' logs |
+| A child spawned with one more allowed host than its parent is refused with `boundary_exceeded` | [[022-mesh-and-spawn]]'s `TestSpawnBoundary` | built ([[040-mesh-and-spawn]]) as `TestBoundaryCheck`'s host case, refusing at `spec.network.egress.allowedHosts`, and over the API as `TestSpawnBoundaryOverTheAPI` |
