@@ -1,6 +1,6 @@
 ---
 title: "Events: the record, the journal's delivery half, and the signed POST to the operator's sink"
-status: in-progress
+status: complete
 track: core
 depends_on:
   - specs/009-events.md
@@ -116,23 +116,30 @@ shape leaves room for the rest of the reference without a wire break.
 | `sandbox.deleted` | `controller.forget` | `{phase}` | `Request`, `AutoDelete`, `Expired`, `Lost` |
 | `sandbox.failed` | `controller.Create` on a driver failure, recovery exhaustion | `{phase}` | `CreateFailed`, `RecoveryExhausted` |
 | `sandbox.lost` | the lost rule of [[037-lifecycle-enforcement]] | `{phase}` | `Lost` |
-| `sandbox.recovering` | a recreation beginning | `{phase, attempt}` | `Lost` |
-| `sandbox.recovered` | a recreation that succeeded | `{phase, attempt}` | none |
+| `sandbox.recovering` | a recreation beginning | `{phase}` | `Lost` |
+| `sandbox.recovered` | a recreation that succeeded | `{phase}` | none |
 | `sandbox.updated` | an update applied | `{paths}` | none |
 | `sandbox.exec` | `internal/api` exec | `{exitCode, durationMs}` | none |
 | `sandbox.files` | `internal/api` files | `{direction, paths, bytes}` | none |
 
 `sandbox.recovering` and `sandbox.recovered` are already named by
 [[009-events]]; `sandbox.failed` and `sandbox.lost` are its terminal
-transitions. The `attempt` field of the two recovery types is added to
-[[009-events]]'s table by this slice, because the lost rule counts
-recreations and a reader of the feed cannot otherwise tell the first
-from the fifth.
+transitions. Each carries the phase it reached, which is the shape every
+transition shares. [[009-events]] gives `sandbox.recovered` a
+`{workspace, volumes}` data instead; neither fact exists until volumes
+land ([[019-volumes]]), so the phase is what this slice carries and the
+row is filled by the slice that has the rest.
 
 `sandbox.updated` is in the vocabulary and has no caller: no route
-applies an update to a `Sandbox` yet ([[008-api]]). The builder and its
-`{paths}` data are here so the route emits without another slice
-touching this package.
+applies an update to a `Sandbox` yet ([[008-api]]). Its `{paths}` data
+arrives with that route, because the paths an apply changed are the
+route's to name and nothing else in this slice knows them.
+
+A driver names failures the enum does not have: the native backend
+writes `ProcessUnrecoverable` and `LogWriteFailed`. The enum is closed,
+so a reason outside it becomes `DriverFailed` on a terminal transition
+and is dropped on one that is not, and the sandbox's own status keeps
+the driver's word for it.
 
 No `sandbox.logs` type exists. Reading a process's output is a read, and
 [[009-events]] lists no type for it, so `internal/api` emits none.
@@ -353,4 +360,42 @@ delivery and exports the counts on its own type until that spec lands.
 
 ## Outcome
 
-Pending.
+Built. `internal/events` holds the record, the actor on the context, the
+signature and the delivery loop; `internal/store` holds the journal's
+delivery half and builds a mutation's record inside the mutation's own
+transaction; `internal/api` emits the three operations; `cellad` wires
+the journal, the emitter and the loop.
+
+Coverage: `internal/events` 96.6%, `internal/store` 90.7%,
+`internal/api` 92.9%, `internal/config` 98.8%, `controller` 96.3%,
+`cmd/cellad` 92.3%. `go test -race` passes over each. Every gate of
+`go tool lateregate` passes, the hermetic and tempdir gates included.
+
+The end-to-end run is `TestEventsEndToEnd` in `cmd/cellad`: `cellad
+serve` on the native driver against a stub sink that verifies every
+signature with a second implementation of the formula and refuses an
+unsigned, stale or bearer-carrying delivery. The run creates a sandbox,
+imports an archive, execs, exports, stops and deletes; the sink's first
+two answers are 500, and all six records still arrive once, in sequence
+order, with the labels the sink files them under, the request id, and
+`Request` on the two transitions a person asked for.
+`TestNoContentInEvents` drives the same session with a canary command, a
+canary file body and a value shaped like a secret, and holds the bytes
+the sink received: none of the three appears in any record.
+
+Departures from [[009-events]], each amended there: the exec record
+carries no command; a 401 defers instead of dropping; `Object.Labels`
+and `Seq` are on every record; `Workload` is `{id}` until the tokens of
+slice 045; `CELLA_EVENTS_RETRY_WINDOW` names the drop bound; a secret
+without a URL is a start-up failure.
+
+Left open, each with the slice that closes it. The routes `GET
+/v1/events` and `GET /v1/sandboxes/{id}/events` ([[008-api]]): the
+journal reads back per object and the envelope and the follow stream are
+that spec's. The cross-spec test that reads every spec for its emission
+points, and the types of [[018-egress-and-secrets]] through
+[[023-computer-use-operations]]: each waits on the slice that emits it.
+`CELLA_JOURNAL_CAP` on the memory journal, which [[010-state]] names and
+no adapter enforces. The metric names of [[017-observability]]: the
+deliverer counts delivered, dropped and deferred on its own type and
+exports none yet.
