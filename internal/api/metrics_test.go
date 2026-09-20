@@ -265,17 +265,12 @@ func TestRequestSpans(t *testing.T) {
 // subject, the sandbox the route names and the request id, and none per
 // frame of a stream.
 func TestOneLogLinePerRequest(t *testing.T) {
-	var buf bytes.Buffer
-	f := setupLogging(t, &buf)
+	f, sink := setupLogging(t)
 	obj := f.sandbox("logged")
-	buf.Reset()
+	sink.clear()
 	f.request(http.MethodGet, "/v1/sandboxes/"+obj.Status.ID, f.alice, "", http.StatusOK)
 
-	lines := logLines(t, &buf)
-	if len(lines) != 1 {
-		t.Fatalf("one request wrote %d lines: %s", len(lines), buf.String())
-	}
-	line := lines[0]
+	line := logLines(t, sink, 1)[0]
 	for key, want := range map[string]any{
 		"msg":     "request",
 		"level":   "INFO",
@@ -302,37 +297,84 @@ func TestOneLogLinePerRequest(t *testing.T) {
 // TestOneLogLinePerStreamAndNonePerFrame is the other half of the volume
 // rule: a stream that carried many frames is still one line.
 func TestOneLogLinePerStreamAndNonePerFrame(t *testing.T) {
-	var buf bytes.Buffer
-	f := setupLogging(t, &buf)
+	f, sink := setupLogging(t)
 	obj := f.sandbox("streamed")
-	buf.Reset()
+	sink.clear()
 	_, r := f.attachTo("/v1/sandboxes/"+obj.Status.ID+"/exec", f.alice,
 		`{"command":["sh","-c","for i in 1 2 3 4 5; do printf 'line%s\n' $i; done; exit 0"]}`)
 	if last, _ := r.ended(t); last != `{"exit":0}` {
 		t.Fatalf("the session ended %q", last)
 	}
-	lines := logLines(t, &buf)
-	if len(lines) != 1 {
-		t.Fatalf("one stream wrote %d lines: %s", len(lines), buf.String())
-	}
-	if got := lines[0]["route"]; got != "GET /v1/sandboxes/{id}/exec" {
+	if got := logLines(t, sink, 1)[0]["route"]; got != "GET /v1/sandboxes/{id}/exec" {
 		t.Errorf("the line's route is %v", got)
 	}
 }
 
-// setupLogging is the fixture with its log line written to buf.
-func setupLogging(t *testing.T, buf *bytes.Buffer) *fixture {
-	t.Helper()
-	f := setup(t, nil)
-	f.h.(*handler).log = slog.New(slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
-	return f
+// logSink is where a case reads the lines the handler wrote. The handler
+// writes from the request's own goroutine and a stream's line lands after the
+// client has seen the last frame, so the sink is synchronised and the case
+// waits for the line rather than racing it.
+type logSink struct {
+	mu    sync.Mutex
+	b     bytes.Buffer
+	reset int
 }
 
-// logLines reads the JSON lines a request wrote.
-func logLines(t *testing.T, buf *bytes.Buffer) []map[string]any {
+func (s *logSink) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *logSink) clear() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.b.Reset()
+}
+
+func (s *logSink) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
+}
+
+// setupLogging is the fixture with its log line written to a sink.
+func setupLogging(t *testing.T) (*fixture, *logSink) {
 	t.Helper()
-	var out []map[string]any
-	for l := range strings.SplitSeq(strings.TrimSpace(buf.String()), "\n") {
+	sink := &logSink{}
+	f := setup(t, nil)
+	f.h.(*handler).log = slog.New(slog.NewJSONHandler(sink, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	return f, sink
+}
+
+// logLines waits for want lines and returns them, so a case states the volume
+// rule rather than the timing of a deferred write.
+func logLines(t *testing.T, sink *logSink, want int) []map[string]any {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		out := parseLines(t, sink.String())
+		switch {
+		case len(out) == want:
+			// One more read after a pause catches a second line the
+			// handler had not written yet, which is the failure this rule
+			// is about.
+			time.Sleep(50 * time.Millisecond)
+			if extra := parseLines(t, sink.String()); len(extra) != want {
+				t.Fatalf("the handler wrote %d lines, want %d: %s", len(extra), want, sink.String())
+			}
+			return out
+		case len(out) > want, time.Now().After(deadline):
+			t.Fatalf("the handler wrote %d lines, want %d: %s", len(out), want, sink.String())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func parseLines(t *testing.T, out string) []map[string]any {
+	t.Helper()
+	var lines []map[string]any
+	for l := range strings.SplitSeq(strings.TrimSpace(out), "\n") {
 		if strings.TrimSpace(l) == "" {
 			continue
 		}
@@ -340,7 +382,7 @@ func logLines(t *testing.T, buf *bytes.Buffer) []map[string]any {
 		if err := json.Unmarshal([]byte(l), &line); err != nil {
 			t.Fatalf("a log line does not parse: %v: %s", err, l)
 		}
-		out = append(out, line)
+		lines = append(lines, line)
 	}
-	return out
+	return lines
 }
