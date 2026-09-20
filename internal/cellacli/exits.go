@@ -44,13 +44,15 @@ const (
 
 // exitFor maps one failure to its exit code. underSession says the failure
 // happened under exec or attach, where design 011's second column applies,
-// and started whether the command had written a byte by then.
-func exitFor(err error, underSession, started bool) int {
+// and cannotStart that it happened on a session socket before the command
+// inside had written a byte.
+func exitFor(err error, underSession, cannotStart bool) int {
 	if err == nil {
 		return exitOK
 	}
 	var usage usageError
-	if errors.As(err, &usage) {
+	var credential *cellaclient.NoBearer
+	if errors.As(err, &usage) || errors.As(err, &credential) {
 		return exitUsage
 	}
 	var gone *cellaclient.Unreachable
@@ -71,7 +73,7 @@ func exitFor(err error, underSession, started bool) int {
 		return exitFailed
 	}
 	if underSession {
-		if !started && refusal.Code == "capability_unsupported" {
+		if cannotStart && refusal.Code == "capability_unsupported" {
 			return exitCannotStart
 		}
 		return exitSessionFailed

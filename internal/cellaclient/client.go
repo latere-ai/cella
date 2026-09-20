@@ -165,6 +165,24 @@ func roots(caFile string) (*x509.CertPool, error) {
 	return pool, nil
 }
 
+// NoBearer reports that no token could be resolved: neither flag, neither
+// variable, and no readable file at the projection's path. It is a separate
+// type because a command invoked without a credential is a usage error and
+// not a server that refused.
+type NoBearer struct {
+	// Path is the file that was read, where one was.
+	Path string
+	Err  error
+}
+
+func (e *NoBearer) Error() string {
+	if e.Err != nil {
+		return fmt.Sprintf("no bearer: set %s, or %s to a readable file (%v)", TokenEnv, TokenFileEnv, e.Err)
+	}
+	return fmt.Sprintf("no bearer: %s holds none and %s names none", e.Path, TokenEnv)
+}
+func (e *NoBearer) Unwrap() error { return e.Err }
+
 // bearer resolves the token for one request. The file is read per request
 // and never once at start: the controller re-projects it before expiry and
 // a followed log outlives one token.
@@ -174,11 +192,11 @@ func (c *Client) bearer() (string, error) {
 	}
 	data, err := os.ReadFile(c.tokenFile)
 	if err != nil {
-		return "", fmt.Errorf("no bearer: set %s, or %s to a readable file (%v)", TokenEnv, TokenFileEnv, err)
+		return "", &NoBearer{Path: c.tokenFile, Err: err}
 	}
 	token := strings.TrimSpace(string(data))
 	if token == "" {
-		return "", fmt.Errorf("no bearer: %s is empty", c.tokenFile)
+		return "", &NoBearer{Path: c.tokenFile}
 	}
 	return token, nil
 }

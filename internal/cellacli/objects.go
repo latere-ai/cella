@@ -255,7 +255,7 @@ func get(ctx context.Context, c *invocation, args []string) error {
 
 // one reads a single object.
 func (c *invocation) one(ctx context.Context, client *cellaclient.Client, kind cellaclient.Kind, ref, output string) error {
-	now := time.Now()
+	now := c.Now()
 	switch kind {
 	case cellaclient.KindSecret:
 		obj, raw, err := client.GetSecret(ctx, ref)
@@ -288,7 +288,7 @@ func (c *invocation) one(ctx context.Context, client *cellaclient.Client, kind c
 
 // many lists a kind, following the cursor to the end.
 func (c *invocation) many(ctx context.Context, client *cellaclient.Client, kind cellaclient.Kind, output string, o cellaclient.ListOptions) error {
-	now := time.Now()
+	now := c.Now()
 	if kind == cellaclient.KindSecret {
 		items, raws, err := client.ListSecrets(ctx, o)
 		if err != nil {

@@ -12,8 +12,10 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"slices"
 	"strings"
+	"time"
 
 	"latere.ai/x/cella/internal/cellaclient"
 )
@@ -36,6 +38,8 @@ type Env struct {
 	// Identity is the line `cella version` prints for the client: the
 	// version, the commit and the build date.
 	Identity string
+	// Now is the clock the AGE column is measured against. Nil is time.Now.
+	Now func() time.Time
 }
 
 // Terminal is the caller's terminal as the streaming commands use it: the
@@ -78,6 +82,9 @@ func (e exitError) Error() string {
 func Run(ctx context.Context, e Env) int {
 	if e.Getenv == nil {
 		e.Getenv = func(string) string { return "" }
+	}
+	if e.Now == nil {
+		e.Now = time.Now
 	}
 	name, rest := subcommand(e.Args)
 	switch name {
@@ -133,9 +140,11 @@ type invocation struct {
 	// session says whether the failure being reported happened under exec,
 	// where design 011's second column applies.
 	session bool
-	// started says whether a session had written a byte when it failed,
-	// which separates a command that could not start from one that failed
-	// part way.
+	// socket says whether the failure happened on the exec or attach socket,
+	// where design 011 separates a command that could not start from one
+	// that failed part way.
+	socket bool
+	// started says whether the session had written a byte when it failed.
 	started bool
 }
 
@@ -182,7 +191,7 @@ func (c *invocation) report(err error) int {
 		return exit.code
 	}
 	c.write(err)
-	return exitFor(err, c.session, c.started)
+	return exitFor(err, c.session, c.socket && !c.started)
 }
 
 // write prints one refusal: the API's sentence as one line, and under -v the
@@ -195,7 +204,8 @@ func (c *invocation) write(err error) {
 		return
 	}
 	line := refusal.Message
-	if refusal.RetryAfter != "" {
+	// Design 011 prints Retry-After in the line of a 429 and nowhere else.
+	if refusal.Status == http.StatusTooManyRequests && refusal.RetryAfter != "" {
 		line += " Retry after " + refusal.RetryAfter + " seconds."
 	}
 	_, _ = fmt.Fprintln(c.Stderr, line)

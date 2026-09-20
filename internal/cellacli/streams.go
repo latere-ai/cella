@@ -54,7 +54,7 @@ func exec(ctx context.Context, c *invocation, args []string) error {
 	if !*stdin && !*tty {
 		return c.execWait(ctx, client, ref, req)
 	}
-	c.session = true
+	c.session, c.socket = true, true
 	if *tty {
 		req.Cols, req.Rows = c.window()
 	}
@@ -103,7 +103,7 @@ func attach(ctx context.Context, c *invocation, args []string) error {
 	if err != nil {
 		return err
 	}
-	c.session = true
+	c.session, c.socket = true, true
 	req := cellaclient.ExecRequest{Command: command}
 	req.Cols, req.Rows = c.window()
 	session, err := client.AttachSession(ctx, ref, req)
