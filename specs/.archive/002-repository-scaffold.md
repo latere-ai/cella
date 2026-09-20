@@ -187,8 +187,9 @@ deployment that sets one before its spec lands is not refused.
 | `CELLA_DEFAULT_CPU`, `CELLA_DEFAULT_MEMORY`, `CELLA_DEFAULT_DISK` | 007 | `1`, `2Gi`, `10Gi` | the resources a manifest gets when it names none |
 | `CELLA_DEFAULT_AUTOSTOP`, `CELLA_DEFAULT_TTL`, `CELLA_DEFAULT_AUTODELETE` | 007 | `15m`, `24h`, `72h` | the lifecycle a manifest gets when it names none |
 | `CELLA_MAX_CPU`, `CELLA_MAX_MEMORY`, `CELLA_MAX_DISK`, `CELLA_MAX_TTL` | 007 | unset | ceilings a resolved manifest may not exceed; unset is no ceiling |
-| `CELLA_EVENTS_URL`, `CELLA_EVENTS_SECRET` | 009 | unset | the event sink and one or two comma-separated HMAC secrets; events are off when the URL is unset; the URL without a secret, or a non-loopback `http://` URL without `CELLA_EVENTS_INSECURE_SINK=1`, is a start-up failure |
+| `CELLA_EVENTS_URL`, `CELLA_EVENTS_SECRET` | 009 | unset | the event sink and one or two comma-separated HMAC secrets; events are off when the URL is unset and the journal still holds them; the URL without a secret, a secret without the URL, or a non-loopback `http://` URL without `CELLA_EVENTS_INSECURE_SINK=1`, is a start-up failure |
 | `CELLA_EVENTS_TIMEOUT`, `CELLA_EVENTS_PORTS`, `CELLA_EVENTS_INSECURE_SINK` | 009 | `10s`, unset, unset | one delivery's deadline; `1` emits a `sandbox.port` event per proxied request; `1` admits an `http://` sink, set by the stubs only |
+| `CELLA_EVENTS_RETRY_WINDOW` | 009 | `24h` | how long a record the sink has not taken is retried before it is dropped and counted; at least `1m` |
 | `CELLA_DB_URL`, `CELLA_DB_MAX_CONNS` | 010 | unset, `8` | a Postgres URL and the pool size; the URL unset keeps every state in memory and turns recovery off |
 | `CELLA_JOURNAL_CAP` | 010 | `1000` | events kept per object in the in-memory journal |
 | `CELLA_JOURNAL_RETENTION` | 010 | `720h` | how long acknowledged or dropped events stay in the Postgres journal |

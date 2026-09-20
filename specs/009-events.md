@@ -9,7 +9,7 @@ depends_on:
 affects: [internal/events/, internal/api/, internal/config/, test/stubs/]
 effort: small
 created: 2026-09-12
-updated: 2026-09-13
+updated: 2026-09-20
 author: changkun
 ---
 
@@ -47,23 +47,32 @@ used over `data` as a second line behind the structural strip below.
 // Event is one record. Every field but Data and Sandbox is always set.
 type Event struct {
 	ID        string          `json:"id"`        // evt_ ULID
-	Seq       int64           `json:"seq"`       // per object, monotonic, from the journal
+	Seq       int64           `json:"seq"`       // per object, monotonic, from the journal, on every record including an operation
 	Type      Type            `json:"type"`      // the closed enum below
 	Time      time.Time       `json:"time"`      // when the change happened
 	Object    Object          `json:"object"`    // what the event is about
-	Sandbox   *Object         `json:"sandbox,omitempty"` // the sandbox in context, for an event about another kind (volume.attached)
+	Sandbox   *Object         `json:"sandbox,omitempty"` // the sandbox in context: an event about another kind (volume.attached), and every operation
 	Subject   string          `json:"subject"`   // 006's rendered subject; sandbox:sbx_... for a workload; "controller" for the reaper and the scheduler
-	Workload  *v1.WorkloadRef `json:"workload,omitempty"` // 006's {id, parent, root, environment, mesh, spawn} when the subject is a sandbox
+	Workload  *Workload       `json:"workload,omitempty"` // the sandbox a workload token names
 	RequestID string          `json:"requestId"` // 008's req_ id; empty for the controller's own acts
 	Reason    Reason          `json:"reason,omitempty"` // the closed enum below, on transitions
 	Data      json.RawMessage `json:"data,omitempty"`   // the per-type struct below, redacted
 }
 
 type Object struct {
-	Kind  string `json:"kind"`  // Sandbox, Secret, Volume, SandboxSet, Environment
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	Owner string `json:"owner"`
+	Kind   string            `json:"kind"`  // Sandbox, Secret, Volume, SandboxSet, Environment
+	ID     string            `json:"id"`
+	Name   string            `json:"name"`
+	Owner  string            `json:"owner"`
+	Labels map[string]string `json:"labels,omitempty"` // the labels a plane stamped on the object
+}
+
+// Workload is the sandbox whose own token made the call. 006's full
+// {id, parent, root, environment, mesh, spawn} reference arrives with the
+// tokens of slice 045; the id is the part that exists, and the object leaves
+// room for the rest without a wire break.
+type Workload struct {
+	ID string `json:"id"`
 }
 
 // Sink is what internal/events delivers to; the stub of 012 and the
@@ -72,6 +81,16 @@ type Sink interface {
 	Deliver(ctx context.Context, e Event) error
 }
 ```
+
+`Object.Labels` and the labels of the sandbox in context travel on every
+record. A plane files a record under the tenant its labels name and under
+nothing else, so a record that arrived without them would belong to no
+tenant and be read by none. `Seq` is on every record, operations included:
+the per-object feed and every fold over the stream order by it.
+
+`subject`, `workload` and `requestId` are flat fields and not an actor
+object. A sink decodes the JSON above and nothing else, so the field names
+here are the contract.
 
 ### Types and their data
 
@@ -86,7 +105,7 @@ and that every emission point a spec names is here.
 | `sandbox.started`, `.stopped`, `.deleted`, `.failed`, `.lost` | the transition completed | `{phase}`; `Reason` set | 005 |
 | `sandbox.recovered` | a lost sandbox recreated | `{workspace: "kept" or "recreated", volumes: []string}` | 005 |
 | `sandbox.spawned` | a workload created a child | `{child: sbx_..., budgetLeft}` | 022 |
-| `sandbox.exec` | a command ended | `{command: []string, exitCode, durationMs}`; never stdin or output | 008 |
+| `sandbox.exec` | a command ended | `{exitCode, durationMs}`; never the command, its input or its output | 008 |
 | `sandbox.attach`, `sandbox.dial`, `sandbox.screen` | a session ended | `{durationMs, bytesIn, bytesOut}` | 008, 023 |
 | `sandbox.files` | a transfer ended | `{direction, paths: []string, bytes}` | 008 |
 | `sandbox.input`, `sandbox.screenshot` | an operation ended | `{events: n}`; `{width, height, format}`; never text or frame bytes | 023 |
@@ -114,9 +133,13 @@ them, and an operator building an audit trail of refusals reads those.
 ### What an event never carries
 
 An environment variable's value, a secret's value, a placeholder, the
-gateway credential, a token, exec output or input, attach bytes, a
-screenshot or any frame bytes, typed input text, a query string, or a
-request or response header. The structural rule is the `data` table;
+gateway credential, a token, the command line of an exec, exec output or
+input, attach bytes, a screenshot or any frame bytes, typed input text, a
+query string, or a request or response header. The command line is here
+because it is where a secret reaches a process: a record that cannot hold
+the string needs no scan to prove it does not. The manifest's own
+`spec.command` stays in the `sandbox.created` record, because that is the
+object's declared state and a read of the sandbox already serves it. The structural rule is the `data` table;
 `audit.RedactJSON` runs over every `data` before it is stored, and the
 canary test asserts both.
 
@@ -143,17 +166,24 @@ most one event per object, and delivers up to 16 objects
 concurrently, so a slow object never holds another. A 2xx is
 `Acknowledge`. A 408, a 429, a 5xx, a connection failure, or a timeout
 of `CELLA_EVENTS_TIMEOUT` (default `10s`) is `Defer` with exponential
-backoff from 1 second to 5 minutes; after 24 hours of attempts the
-event is `Drop`ped, `cella_events_dropped_total` moves, and a log line
-names it. Any other 4xx is an immediate `Drop` with the same metric,
-because a sink that refuses the body will refuse it tomorrow. Events
+backoff from 1 second to 5 minutes; after `CELLA_EVENTS_RETRY_WINDOW`
+(default `24h`) of attempts the event is `Drop`ped, `cella_events_dropped_total` moves, and a log line
+names it. A 401 is `Defer`red with the same backoff and logged at error:
+it is the one 4xx that says nothing about the bytes, because it says the
+two ends hold different secrets, and dropping would discard every record
+emitted during a botched rotation. Any other 4xx is an immediate `Drop`
+with the same metric, because a sink that refuses the body will refuse it
+tomorrow. Events
 for one object are delivered in `seq` order: a deferred event holds
 the ones behind it for that object and no other. `cella_events_pending`
 is the journal's unacknowledged count. With Postgres a restart resumes
 where it was; without, the memory ring of `CELLA_JOURNAL_CAP` per
 object loses whatever was not yet acknowledged at process end, which
 the start-up log says. `CELLA_EVENTS_URL` without `CELLA_EVENTS_SECRET`
-is a start-up failure; a non-loopback `http://` sink is refused unless
+is a start-up failure, and so is a secret without the URL, which is a
+deployment that believes it delivers; with no URL a record is journaled
+acknowledged, so the per-object feed still reads it and retention forgets
+it on schedule rather than holding a row nothing will ever post; a non-loopback `http://` sink is refused unless
 `CELLA_EVENTS_INSECURE_SINK=1`, which the stubs set and no deployment
 does. With `CELLA_EVENTS_EGRESS=1` or `CELLA_EVENTS_PORTS=1`, those
 records share each object's memory ring and can evict lifecycle events
@@ -179,12 +209,13 @@ journal's columns ([[010-state]]); the routes' envelope ([[008-api]]).
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| Every type in the table is named as an emission point by its owning spec and every emission point in the specs is in the table | `TestEventTableMatchesTheSpecs`, reading `specs/` | not built |
-| Every type is emitted by the act in its row with the `data` named, `Object.Kind` right per kind, `Sandbox` set for attach and detach, and one `Reason` from the enum on every terminal transition | `TestEventTable`, table-driven | not built |
-| No event body contains an env value, a secret value, a placeholder, a credential, a token, exec output, frame bytes, input text, a query string, or a header | `TestEventsCarryNoSecrets` with canary strings through every emission point | not built |
-| The signature verifies with the documented formula for each of two secrets, is recomputed with a fresh `t` on a retry, and a body changed by one byte does not verify | `TestSignature`, and [[012-test-stubs-and-tiers]]'s `TestSinkVerifiesSignature` | not built |
-| A sink failing three times receives the event on the fourth try and the object's later events after it, in `seq` order; another object's events flow meanwhile; a 400 drops at once; a 24-hour-old event drops with the metric | `TestDeliveryIsOrderedPerObject`, `TestDropRules` under a fake clock | not built |
-| Delivery runs only on the lease holder, in batches with bounded concurrency | `TestDeliveryNeedsTheLease` | not built |
-| A restart with Postgres resumes delivery of an unacknowledged event; without, the ring holds the cap and unacknowledged events are gone | `TestDeliveryResumesFromTheJournal`, `TestMemoryRing` | not built |
-| A URL without a secret and a non-loopback `http://` sink are start-up failures; the escape hatch admits the stub | `TestSinkStartupRules` | not built |
-| `GET /v1/events?object=` serves each kind's events newest first, authorizes the kind's read, pages by `seq`, and follows | `TestEventsRoute` | not built |
+| Every type in the table is named as an emission point by its owning spec and every emission point in the specs is in the table | `TestEventTableMatchesTheSpecs`, reading `specs/` | not built: the types of 018 to 023 wait on the slices that emit them |
+| Every type is emitted by the act in its row with the `data` named, `Object.Kind` right per kind, `Sandbox` set for attach and detach, and one `Reason` from the enum on every terminal transition | `TestEventTable`, table-driven | built for the `Sandbox` types, as `TestRecordShapes` and `TestRecordCarriesLabelsAndSeqEverywhere` ([[042-events]]) |
+| No event body contains an env value, a secret value, a placeholder, a credential, a token, exec output, frame bytes, input text, a query string, or a header | `TestEventsCarryNoSecrets` with canary strings through every emission point | built as `TestNoContentInEvents` over a whole `cellad` session ([[042-events]]) |
+| The signature verifies with the documented formula for each of two secrets, is recomputed with a fresh `t` on a retry, and a body changed by one byte does not verify | `TestSignature`, and [[012-test-stubs-and-tiers]]'s `TestSinkVerifiesSignature` | built as `TestSignatureVerifies`, `TestSignatureRejects`, `TestSignatureIsFreshOnEveryAttempt` and `TestSignatureFormula` ([[042-events]]) |
+| A sink failing three times receives the event on the fourth try and the object's later events after it, in `seq` order; another object's events flow meanwhile; a 400 drops at once; a 401 is held; a record past the retry window drops and is counted | `TestDeliveryIsOrderedPerObject`, `TestDeliveryRetries`, `TestDropRules` under a fake clock | built ([[042-events]]) |
+| Delivery runs only on the lease holder, in batches with bounded concurrency | `TestDeliveryNeedsTheLease` | built ([[042-events]]) |
+| The record commits with the mutation it explains, and one object's records keep their order under concurrent mutations | `TestRecordCommitsWithTheMutation`, `TestOrderUnderConcurrentMutations` | built ([[042-events]]) |
+| A restart with Postgres resumes delivery of an unacknowledged event; without, the ring holds the cap and unacknowledged events are gone | `TestDeliveryResumesFromTheJournal`, `TestMemoryRing` | the Postgres row survives a restart and the delivery columns are proved over both adapters by the store suite; the memory ring's cap is not built ([[042-events]]) |
+| A URL without a secret, a secret without a URL, and a non-loopback `http://` sink are start-up failures; the escape hatch admits the stub | `TestSinkStartupRules` | built ([[042-events]]) |
+| `GET /v1/events?object=` serves each kind's events newest first, authorizes the kind's read, pages by `seq`, and follows | `TestEventsRoute` | not built: the journal reads back per object, and the route waits on [[008-api]] |
