@@ -6,6 +6,7 @@ package manifest
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -109,6 +110,29 @@ func defaultChildTTL(obj *v1.Sandbox, parent *v1.Sandbox, now time.Time, namedSt
 		return
 	}
 	obj.Spec.Lifecycle.AutoStop = v1.Duration(remaining.String())
+}
+
+// inheritEgress is the other stage 2 rule a spawned child takes: a child that
+// declares no boundary of its own takes its parent's, rather than the open
+// mode an empty manifest infers. Without it every simple child of a narrowed
+// root would be refused at rule 1 for asking to reach everything, which is a
+// boundary nobody wrote and a refusal nobody can act on.
+//
+// A child that names any egress field has declared a boundary, and a child
+// that mounts a secret infers the allowlist mode the mount asks for; both are
+// the child's own and rules 1 and 2 judge them.
+func inheritEgress(obj *v1.Sandbox, parent *v1.Sandbox) {
+	own := obj.Spec.Network.Egress
+	declared := own.Mode != "" || len(own.AllowedHosts) > 0 || len(own.DeniedHosts) > 0
+	if parent == nil || declared || len(obj.Spec.Secrets) > 0 {
+		return
+	}
+	over := parent.Spec.Network.Egress
+	obj.Spec.Network.Egress = v1.Egress{
+		Mode:         over.Mode,
+		AllowedHosts: slices.Clone(over.AllowedHosts),
+		DeniedHosts:  slices.Clone(over.DeniedHosts),
+	}
 }
 
 // boundary is stage 6: the child's resolved manifest against the parent's

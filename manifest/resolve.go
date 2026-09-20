@@ -239,6 +239,7 @@ func defaulting(ctx context.Context, obj *v1.Sandbox, o Options) (*v1.Environmen
 	if obj.Spec.Workdir == "" {
 		obj.Spec.Workdir = obj.Spec.Workspace.Path
 	}
+	inheritEgress(obj, o.Parent)
 	inferEgressMode(&obj.Spec.Network, len(obj.Spec.Secrets) > 0)
 	if err = validateSpec(obj.Spec); err != nil {
 		return nil, errors.New("manifest: this server's defaults are invalid: " + err.Error())

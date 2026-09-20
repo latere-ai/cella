@@ -485,3 +485,42 @@ func TestNoParentIsNoBoundary(t *testing.T) {
 		t.Fatalf("boundary with no parent: %v", err)
 	}
 }
+
+// TestChildInheritsTheParentsBoundary: a child that declares no boundary
+// takes its parent's rather than the open mode an empty manifest infers, so a
+// simple child of a narrowed root is not refused for a boundary nobody wrote.
+func TestChildInheritsTheParentsBoundary(t *testing.T) {
+	parent := parentSandbox()
+	obj := childSandbox()
+	obj.Spec.Network.Egress = v1.Egress{}
+	got := resolve(t, obj, spawnOptions(parent)).Sandbox
+	if got.Spec.Network.Egress.Mode != v1.EgressAllowlist {
+		t.Fatalf("the child's mode is %q, want its parent's", got.Spec.Network.Egress.Mode)
+	}
+	if !slices.Equal(got.Spec.Network.Egress.AllowedHosts, parent.Spec.Network.Egress.AllowedHosts) {
+		t.Fatalf("the child reaches %v, want its parent's list", got.Spec.Network.Egress.AllowedHosts)
+	}
+	// The inherited list is a copy: narrowing one does not narrow the other.
+	got.Spec.Network.Egress.AllowedHosts[0] = "elsewhere.example.com"
+	if parent.Spec.Network.Egress.AllowedHosts[0] == "elsewhere.example.com" {
+		t.Fatal("the child and the parent share one list")
+	}
+
+	// A child that named a boundary keeps its own.
+	own := childSandbox()
+	own.Spec.Network.Egress = v1.Egress{Mode: v1.EgressNone}
+	if got = resolve(t, own, spawnOptions(parent)).Sandbox; got.Spec.Network.Egress.Mode != v1.EgressNone {
+		t.Fatalf("the child's declared mode became %q", got.Spec.Network.Egress.Mode)
+	}
+
+	// A child that mounts a secret infers the allowlist the mount asks for
+	// rather than taking a parent that reaches everything.
+	open := parentSandbox()
+	open.Spec.Network.Egress = v1.Egress{Mode: v1.EgressOpen}
+	mounting := childSandbox()
+	mounting.Spec.Network.Egress = v1.Egress{}
+	mounting.Spec.Secrets = []v1.SecretMount{{Name: "one", Env: "ONE"}}
+	if got = resolve(t, mounting, spawnOptions(open)).Sandbox; got.Spec.Network.Egress.Mode != v1.EgressAllowlist {
+		t.Fatalf("a child mounting a secret took the mode %q", got.Spec.Network.Egress.Mode)
+	}
+}
