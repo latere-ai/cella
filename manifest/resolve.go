@@ -604,7 +604,7 @@ func ResolveNative(ctx context.Context, obj v1.Sandbox, environment string) (v1.
 // the store through the authorizer's decision; a caller with no secrets
 // passes nil and every mount is not_found.
 func NativeOptions(environment string, secrets SecretFunc) Options {
-	return DriverOptions(environment, v1.Capabilities{}, secrets)
+	return DriverOptions(environment, "native", v1.IsolationNone, v1.Capabilities{}, secrets)
 }
 
 // DriverOptions are NativeOptions with the environment declaring what the
@@ -612,8 +612,14 @@ func NativeOptions(environment string, secrets SecretFunc) Options {
 // capability is then refused at resolve, where the refusal names the field,
 // rather than at the driver, where it would name nothing; and a field the
 // driver does provide resolves with no other change.
-func DriverOptions(environment string, capabilities v1.Capabilities, secrets SecretFunc) Options {
+// The driver's name and isolation class are what the environment reports,
+// so a container driver resolves an image and a native one refuses it: the
+// rule is the environment's isolation, never the server's default.
+func DriverOptions(environment, driverName, isolation string, capabilities v1.Capabilities, secrets SecretFunc) Options {
 	env := NativeEnvironment(environment)
+	env.Spec.Isolation = isolation
+	env.Status.Driver = driverName
+	env.Status.Isolation = isolation
 	env.Status.Capabilities = capabilities
 	return Options{Lookup: WithSecrets(FixedEnvironment(env), secrets)}
 }
@@ -627,7 +633,17 @@ func ResolveNativeWith(ctx context.Context, obj v1.Sandbox, o Options) (v1.Sandb
 		return obj, nil, err
 	}
 	out := resolved.Sandbox
-	if len(out.Spec.Command) == 0 && len(out.Spec.Args) > 0 {
+	// The refusals below are the native environment's own: a container or
+	// vm environment runs the image's entrypoint and mounts the workspace
+	// where the manifest says, so they apply only where the isolation is
+	// none.
+	native := true
+	if o.Lookup != nil {
+		if env, err := o.Lookup.Environment(ctx, out.Spec.Environment); err == nil && env != nil {
+			native = env.Status.Isolation == v1.IsolationNone
+		}
+	}
+	if native && len(out.Spec.Command) == 0 && len(out.Spec.Args) > 0 {
 		return obj, nil, failAt("invalid_field", "spec.args", "Arguments need a command on a native environment.")
 	}
 	if len(out.Spec.Command) > 0 {
@@ -635,7 +651,7 @@ func ResolveNativeWith(ctx context.Context, obj v1.Sandbox, o Options) (v1.Sandb
 			return obj, nil, err
 		}
 	}
-	if out.Spec.Workspace.Path != DefaultWorkspacePath || out.Spec.Workdir != DefaultWorkspacePath {
+	if native && (out.Spec.Workspace.Path != DefaultWorkspacePath || out.Spec.Workdir != DefaultWorkspacePath) {
 		return obj, nil, failAt("capability_unsupported", "spec.workspace.path", "Native environments keep the workspace at "+DefaultWorkspacePath+" and start there.")
 	}
 	return out, resolved.Secrets, nil

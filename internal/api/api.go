@@ -187,7 +187,7 @@ func (h *handler) readBody(w http.ResponseWriter, r *http.Request) ([]byte, erro
 // endpoint and the error a caller reads name the same apply.
 func (h *handler) resolveOptions(w http.ResponseWriter, r *http.Request) (manifest.Options, error) {
 	c := caller(r)
-	o := manifest.DriverOptions(h.Controller.Environment(), h.Controller.Capabilities(), h.secretLookup(r))
+	o := manifest.DriverOptions(h.Controller.Environment(), h.Controller.DriverName(), h.Controller.Isolation(), h.Controller.Capabilities(), h.secretLookup(r))
 	o.Actor = manifestActor(r)
 	o.Claims = c.Claims
 	o.Defaults = h.Defaults

@@ -255,6 +255,7 @@ func (c *Controller) Recovers() bool      { return c.recovers }
 func (c *Controller) Close() error        { c.mu.Lock(); defer c.mu.Unlock(); return c.store.Close() }
 func (c *Controller) Environment() string { return c.environment }
 func (c *Controller) Isolation() string   { return c.driver.Isolation() }
+func (c *Controller) DriverName() string  { return c.driver.Name() }
 
 // persist records one object and the mutation that produced it: one
 // conditional write and one journal row where the store is a Durable, the

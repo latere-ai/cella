@@ -742,3 +742,31 @@ func TestCeilingsAreAFloorOnStrictness(t *testing.T) {
 		t.Fatalf("got %q at %q, want ceiling_exceeded at spec.resources.cpu", got.Code, got.Path)
 	}
 }
+
+// TestDriverOptionsCarryTheDriversIsolation pins the server's create path:
+// a manifest resolves against the environment the driver behind the server
+// provides, so a container driver runs an image and mounts the workspace
+// where the manifest says, and a native one refuses the image. The hosted
+// plane's first create on its k8s driver was refused as native before this.
+func TestDriverOptionsCarryTheDriversIsolation(t *testing.T) {
+	obj := v1.Sandbox{APIVersion: v1.APIVersion, Kind: "Sandbox", Metadata: v1.Metadata{Name: "img"},
+		Spec: v1.SandboxSpec{Image: fixtureImage, Workspace: v1.Workspace{Path: "/srv/app"}, Workdir: "/srv/app"}}
+	container := DriverOptions("default", "podman", v1.IsolationContainer, v1.Capabilities{Files: true}, nil)
+	out, _, err := ResolveNativeWith(t.Context(), obj, container)
+	if err != nil {
+		t.Fatalf("a container environment refused an image: %v", err)
+	}
+	if out.Spec.Image != fixtureImage || out.Spec.Workspace.Path != "/srv/app" {
+		t.Fatalf("resolved %+v, want the image and the workspace path kept", out.Spec)
+	}
+	env, err := container.Lookup.Environment(t.Context(), "default")
+	if err != nil || env.Status.Driver != "podman" || env.Status.Isolation != v1.IsolationContainer || !env.Status.Capabilities.Files {
+		t.Fatalf("the environment reads %+v, %v; want the driver's name, isolation and capabilities", env, err)
+	}
+	native := DriverOptions("default", "native", v1.IsolationNone, v1.Capabilities{}, nil)
+	_, _, err = ResolveNativeWith(t.Context(), obj, native)
+	var e *Error
+	if !errors.As(err, &e) || e.Code != "capability_unsupported" {
+		t.Fatalf("a native environment answered %v, want capability_unsupported for the image", err)
+	}
+}
