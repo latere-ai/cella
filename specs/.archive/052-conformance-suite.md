@@ -235,7 +235,15 @@ and what the environment declares, with `Execute` free of `testing` and
 
 Coverage of `test/conformance` is 90.5% of statements (1287 of 1422), from
 its own tests and from the run against the node; the whole bar is green, 16
-gates. `go test -race` is green; the hermetic and
+gates.
+
+The kind half is wired and unrun: what it needs from the Kubernetes driver is
+there by reading, `CELLA_TOKEN_FILE` in the rendered environment, `Start` and
+`Stop` on the claim, and the workspace at the path the manifest resolves, and
+the first pipeline run is what proves it. That stack holds no
+`CELLA_SECRET_KEY`, so the secrets group skips there with the server's own
+sentence. A run leaves its objects until the end, so a cluster carries one
+small Pod per case while it runs. `go test -race` is green; the hermetic and
 tempdir gates are clean: every run binds loopback, keeps its state under a
 temporary directory, and stops the development stack's process group.
 
