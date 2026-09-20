@@ -145,8 +145,8 @@ func Load(getenv Getenv) (Config, error) {
 	c.ReapInterval = interval(getenv, "CELLA_REAP_INTERVAL", DefaultReapInterval, &problems)
 	c.TouchInterval = interval(getenv, "CELLA_TOUCH_INTERVAL", DefaultTouchInterval, &problems)
 	c.LostGrace = interval(getenv, "CELLA_LOST_GRACE", DefaultLostGrace, &problems)
-	c.DBURL = databaseURL(getenv, "CELLA_DB_URL", &problems)
-	c.DBPoolURL = databaseURL(getenv, "CELLA_DB_POOL_URL", &problems)
+	c.DBURL = databaseURL(getenv("CELLA_DB_URL"), "CELLA_DB_URL", &problems)
+	c.DBPoolURL = databaseURL(getenv("CELLA_DB_POOL_URL"), "CELLA_DB_POOL_URL", &problems)
 	if c.DBPoolURL != "" && c.DBURL == "" {
 		problems = append(problems, "CELLA_DB_POOL_URL needs CELLA_DB_URL: migrations run over the direct endpoint")
 	}
@@ -236,8 +236,8 @@ func interval(getenv Getenv, name string, def time.Duration, problems *[]string)
 // single-process snapshot under CELLA_DATA_DIR and turns recovery off, which
 // the start-up line says; set, it must be a Postgres URL, because the scheme
 // is what selects the driver and the migrator.
-func databaseURL(getenv Getenv, name string, problems *[]string) string {
-	raw := strings.TrimSpace(getenv(name))
+func databaseURL(value, name string, problems *[]string) string {
+	raw := strings.TrimSpace(value)
 	if raw == "" {
 		return ""
 	}
