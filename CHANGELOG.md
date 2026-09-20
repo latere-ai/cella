@@ -6,6 +6,17 @@ refused before it is pushed.
 
 ## Unreleased
 
+- Every sandbox carries an identity of its own. The control plane mints a
+  workload token at create, the driver projects it read-only at
+  `/run/cella/token` and names the path in `CELLA_TOKEN_FILE`, and a process
+  inside the sandbox calls `/v1` back with it: it reads and execs the sandbox
+  it belongs to and reaches nothing else. The token expires with its sandbox
+  or a day after it was minted, whichever is sooner, and the control plane
+  re-mints and re-projects it once two thirds of that has passed, without
+  restarting the workload. A token that is replaced, and one whose sandbox is
+  deleted, is refused from that moment rather than when it expires. Any
+  service can verify one offline against `/.well-known/jwks.json`.
+
 - A sandbox's workspace answers one file at a time, not only whole archives.
   `GET /v1/sandboxes/{id}/files/content?path=` streams one file,
   `.../files/stat?path=` describes it, `.../files/list?path=` lists a

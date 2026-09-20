@@ -76,6 +76,10 @@ type Options struct {
 	// Events is design 009's emission seam, set only where the store keeps
 	// no journal of its own. See the Events interface.
 	Events Events
+	// Tokens mints and revokes the identity every sandbox carries (spec
+	// 006). It is optional: with none, no sandbox is given a token and no
+	// driver projects one.
+	Tokens Tokens
 }
 type Controller struct {
 	mu            sync.Mutex
@@ -105,6 +109,7 @@ type Controller struct {
 	egress           Egress
 	gateway          GatewayAddresses
 	events           Events
+	tokens           Tokens
 }
 
 // Open restores desired state from an operator-supplied store, or the provisional
@@ -146,7 +151,7 @@ func Open(o Options) (*Controller, error) {
 		lostGrace: o.LostGrace, recoveryAttempts: o.RecoveryAttempts,
 		lost: map[string]time.Time{}, attempts: map[string]int{}, retry: map[string]time.Time{},
 		egress: o.Egress, gateway: o.Gateway,
-		events: o.Events,
+		events: o.Events, tokens: o.Tokens,
 	}
 	// A store of design 010 takes one conditional write per object and
 	// carries the journal; one that is also durable is what lets the lost
@@ -289,12 +294,24 @@ func (c *Controller) Create(ctx context.Context, obj v1.Sandbox, owner string, m
 		return obj, errors.Join(err, c.forget(ctx, id, MutationDeleted))
 	}
 	obj.Status.Conditions = setCondition(obj.Status.Conditions, c.egressCondition(m, held, now))
-	_, err = c.driver.Create(ctx, specOf(obj, lifecycle, c.egressSpec(m)))
+	// The identity is minted after the boundary and before the driver, which
+	// is step 5 of design 005's create order: a sandbox that never starts
+	// leaves a token nobody holds, and the undo below ends it.
+	token, tokenState, err := c.mintToken(ctx, obj)
 	if err != nil {
 		obj.Status.Phase = PhaseFailed
 		obj.Status.Reason = ReasonCreateFailed
 		c.purgeEgress(ctx, id)
 		return export(obj), errors.Join(err, c.persist(ctx, obj, MutationFailed))
+	}
+	obj.Status.TokenState = tokenState
+	_, err = c.driver.Create(ctx, specOf(obj, lifecycle, c.egressSpec(m), token))
+	if err != nil {
+		obj.Status.Phase = PhaseFailed
+		obj.Status.Reason = ReasonCreateFailed
+		c.purgeEgress(ctx, id)
+		obj.Status.TokenState = nil
+		return export(obj), errors.Join(err, c.revokeToken(ctx, tokenState), c.persist(ctx, obj, MutationFailed))
 	}
 	obj, err = c.refresh(ctx, obj)
 	return export(obj), errors.Join(err, c.persist(ctx, obj, phaseMutation(obj.Status.Phase)))
@@ -320,7 +337,7 @@ func phaseMutation(phase string) string {
 // deadline set it runs under, and the boundary its gateway holds. It is the
 // one place the manifest's vocabulary meets the driver's, so a create and a
 // recovery of the same sandbox ask for the same object.
-func specOf(obj v1.Sandbox, lifecycle driver.Lifecycle, boundary driver.Egress) driver.CreateSpec {
+func specOf(obj v1.Sandbox, lifecycle driver.Lifecycle, boundary driver.Egress, token string) driver.CreateSpec {
 	return driver.CreateSpec{
 		ID: obj.Status.ID, Name: obj.Metadata.Name, Owner: obj.Status.Owner, Image: obj.Spec.Image,
 		Command: obj.Spec.Command, Args: obj.Spec.Args, Env: obj.Spec.Env,
@@ -329,6 +346,7 @@ func specOf(obj v1.Sandbox, lifecycle driver.Lifecycle, boundary driver.Egress) 
 		Workspace: driver.Workspace{Path: obj.Spec.Workspace.Path},
 		Lifecycle: lifecycle,
 		Egress:    boundary,
+		Token:     []byte(token),
 	}
 }
 
@@ -482,7 +500,11 @@ func (c *Controller) Act(ctx context.Context, id, verb string) (v1.Sandbox, erro
 			c.forgetTouch(id)
 			c.forgetLost(id)
 			c.purgeEgress(ctx, id)
-			return export(obj), c.forget(ctx, id, MutationDeleted)
+			// The token dies with the sandbox rather than with its own
+			// exp, so a deleted sandbox's identity is refused at once
+			// (spec 006).
+			revoked := c.revokeToken(ctx, obj.Status.TokenState)
+			return export(obj), errors.Join(revoked, c.forget(ctx, id, MutationDeleted))
 		}
 	default:
 		return obj, ErrPhase
@@ -516,6 +538,10 @@ func (c *Controller) Exec(ctx context.Context, id string, req driver.ExecRequest
 func export(obj v1.Sandbox) v1.Sandbox {
 	out := clone(obj)
 	out.Status.EgressState = nil
+	// The identity's record is the control plane's own, like the boundary's:
+	// a caller reads what the sandbox is, not the key by which its token is
+	// ended (spec 006).
+	out.Status.TokenState = nil
 	return out
 }
 func clone(obj v1.Sandbox) v1.Sandbox {
@@ -532,6 +558,10 @@ func clone(obj v1.Sandbox) v1.Sandbox {
 		state := *obj.Status.EgressState
 		state.Placeholders = maps.Clone(obj.Status.EgressState.Placeholders)
 		obj.Status.EgressState = &state
+	}
+	if obj.Status.TokenState != nil {
+		state := *obj.Status.TokenState
+		obj.Status.TokenState = &state
 	}
 	if obj.Status.ExitCode != nil {
 		code := *obj.Status.ExitCode

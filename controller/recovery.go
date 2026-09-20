@@ -180,16 +180,42 @@ func (c *Controller) recoverLocked(ctx context.Context, obj v1.Sandbox, now time
 		return false, fmt.Errorf("pushing the boundary: %w", err)
 	}
 	obj.Status.Conditions = setCondition(obj.Status.Conditions, c.egressCondition(m, held, now))
-	if _, err := c.driver.Create(ctx, specOf(obj, lifecycle, c.egressSpec(m))); err != nil && !errors.Is(err, driver.ErrAlreadyExists) {
+	// The recreated sandbox carries a newly minted identity and the one it
+	// held is revoked, so a copy of the lost sandbox that is still running
+	// somewhere speaks for nobody (spec 006).
+	previous := obj.Status.TokenState
+	token, state, err := c.mintToken(ctx, obj)
+	if err != nil {
 		c.retry[id] = now.Add(recoveryBackoff(attempt))
-		return false, fmt.Errorf("recreating the sandbox: %w", err)
+		return false, err
+	}
+	_, err = c.driver.Create(ctx, specOf(obj, lifecycle, c.egressSpec(m), token))
+	switch {
+	case errors.Is(err, driver.ErrAlreadyExists):
+		// The driver had the sandbox after all and adopted it, which means
+		// it is running with the token it was created with. The new one is
+		// projected into it before the old one is ended, so the workload is
+		// never left holding a revoked token.
+		if state != nil {
+			if err := c.driver.Update(ctx, id, driver.Change{Token: []byte(token)}); err != nil {
+				c.retry[id] = now.Add(recoveryBackoff(attempt))
+				return false, errors.Join(fmt.Errorf("re-projecting the token into the adopted %s: %w", id, err),
+					c.revokeToken(ctx, state))
+			}
+		}
+	case err != nil:
+		c.retry[id] = now.Add(recoveryBackoff(attempt))
+		return false, errors.Join(fmt.Errorf("recreating the sandbox: %w", err), c.revokeToken(ctx, state))
+	}
+	if state != nil {
+		obj.Status.TokenState = state
 	}
 	delete(c.retry, id)
 	delete(c.attempts, id)
 	delete(c.lost, id)
 	obj, err = c.refresh(ctx, obj)
 	c.log.InfoContext(ctx, "recovered a lost sandbox", "sandbox", id, "attempt", attempt, "phase", obj.Status.Phase)
-	return true, errors.Join(err, c.persist(ctx, obj, MutationRecovered))
+	return true, errors.Join(err, c.persist(ctx, obj, MutationRecovered), c.revokeToken(ctx, previous))
 }
 
 // forgetLost drops a deleted sandbox's lost bookkeeping, so the maps hold one

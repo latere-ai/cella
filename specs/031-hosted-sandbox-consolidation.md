@@ -153,6 +153,7 @@ the destination already or is not wanted.
 | `docs/internal`, user docs | - | platform docs where user facing; cella `docs/` where operator facing | platform 62 | - |
 | `test/cellae2e` | 0.6k | drop: [[015-conformance-suite]] is the executable contract | - | - |
 | (no source: the admission client of 007, which the platform's webhook of slice 58 answers) | - | cella `manifest` `AdmitFunc` over HTTP, `CELLA_ADMISSION_URL`, fail closed, no retry | 047 | [[007-admission]] |
+| (no source: the release pipeline of 014; the platform's deploy of slice 60 pins `ghcr.io/latere-ai/cellad:vX.Y.Z` and no tag past v0.1.0 exists) | - | the image and binary release of `cellad`, `cellad check`, the install document CI executes | 048 | [[014-release-and-installation]] |
 
 ### Slice order
 
@@ -174,6 +175,8 @@ flowchart TB
   S039 --> S046[046 secret kind]
   S043 --> S046
   S044 --> S047[047 admission client]
+  S036 --> S048[048 release and install]
+  S039 --> S048
 ```
 
 The suite comes first because every later driver port proves itself
@@ -191,7 +194,8 @@ serves today for a tenant: a manifest with resources and lifecycle
 (044), the k8s data plane (036), the reaper (037), durable desired
 state (043), the egress gateway with secrets (039, 046), events to the
 platform's sink (042), admission from the platform's webhook (047), and
-workload tokens (045). Those slices run first and in parallel where the
+workload tokens (045), and a release the platform's deploy can pin
+(048). Those slices run first and in parallel where the
 graph allows. Pools (038), mesh and spawn (040), display and input
 (041), sets, workers and the vm driver are built alongside and never
 hold the cutover.

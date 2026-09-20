@@ -195,7 +195,9 @@ func (d *Driver) transferPod(ctx context.Context, id string, spec driver.CreateS
 // claim, and a command that waits. It carries no id label, so List never reads
 // it as the sandbox's Pod.
 func (d *Driver) helperPod(id string, spec driver.CreateSpec) (*corev1.Pod, error) {
-	pod, err := d.pod(spec, d.opts.Now().UTC())
+	// It carries no identity either: a transfer reaches the claim's files
+	// and never the sandbox's token.
+	pod, err := d.pod(spec, d.opts.Now().UTC(), false)
 	if err != nil {
 		return nil, err
 	}

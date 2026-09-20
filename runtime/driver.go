@@ -29,6 +29,19 @@ const (
 	DefaultWorkdir = "/workspace"
 )
 
+// TokenPath is where a driver projects the sandbox's workload token, under
+// the control plane's own prefix, read-only and readable by the sandbox's
+// user alone (specs 004 and 006). A driver that has no mount namespace to
+// put it in projects the file somewhere it owns and names that path in
+// TokenFileEnv instead.
+const TokenPath = "/run/cella/token"
+
+// TokenFileEnv is the variable every driver sets to where it put the token,
+// which is the file the agent client of spec 011 reads per request. It is
+// set only where a token was projected: a sandbox on a control plane that
+// mints none carries neither the file nor the variable.
+const TokenFileEnv = "CELLA_TOKEN_FILE"
+
 type Capabilities = v1.Capabilities
 type Isolation = v1.Isolation
 
@@ -86,6 +99,11 @@ type CreateSpec struct {
 	Resources                       Resources
 	Workspace                       Workspace
 	Egress                          Egress
+	// Token is the workload token the driver projects at TokenPath, empty
+	// for a control plane that mints none. It is never serialized: a driver
+	// that keeps the create spec beside the sandbox keeps the shape of the
+	// sandbox and not the credential it was started with.
+	Token []byte `json:"-"`
 }
 type Ref struct {
 	ID string `json:"id"`
@@ -115,6 +133,10 @@ type Change struct {
 	Labels    *map[string]string
 	Env       *map[string]string
 	Lifecycle *Lifecycle
+	// Token re-projects the workload token before the one in the sandbox
+	// expires, without restarting the workload. Empty leaves the projection
+	// as it is.
+	Token []byte
 }
 type ExecRequest struct {
 	Command []string

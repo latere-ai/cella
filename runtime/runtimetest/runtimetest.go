@@ -75,6 +75,7 @@ var cases = []caseDef{
 	{"FilesExactNames", filesExactNames},
 	{"FilesWhileStopped", filesWhileStopped},
 	{"TouchStampsActivity", touchStampsActivity},
+	{"TokenProjection", tokenProjection},
 	{"DetachRecovers", detachRecovers},
 }
 

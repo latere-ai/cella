@@ -52,6 +52,11 @@ const (
 	annAutoDelete = prefix + "auto-delete"
 	annImage      = prefix + "image"
 	annSpec       = prefix + "spec"
+	// annToken records that a workload token was projected into this
+	// sandbox. The token itself is never written here: the claim's record
+	// is the shape of the sandbox, and a credential is not part of it. It
+	// is what a Start reads to render the mount the create rendered.
+	annToken = prefix + "token"
 )
 
 // managedSelector narrows every list to the objects this contract owns.
@@ -284,7 +289,11 @@ var keepAlive = []string{"/bin/sh", "-c", "trap 'exit 0' TERM; while :; do sleep
 // pod renders the compute half. Every field of the security baseline is set
 // here rather than inherited, so a cluster with permissive defaults grants a
 // sandbox nothing extra.
-func (d *Driver) pod(s driver.CreateSpec, now time.Time) (*corev1.Pod, error) {
+//
+// token says whether the sandbox carries an identity, which a create reads
+// off the spec it was given and a start off the claim's record, because the
+// value the create carried is not kept anywhere this call can reach.
+func (d *Driver) pod(s driver.CreateSpec, now time.Time, token bool) (*corev1.Pod, error) {
 	if err := d.validate(s); err != nil {
 		return nil, err
 	}
@@ -295,6 +304,15 @@ func (d *Driver) pod(s driver.CreateSpec, now time.Time) (*corev1.Pod, error) {
 	}
 	for _, key := range []string{annSpec, annActivityAt, annExpiresAt, annAutoStop, annAutoDelete} {
 		delete(annotations, key)
+	}
+	environment := s.Env
+	if token {
+		annotations[annToken] = "true"
+		environment = maps.Clone(s.Env)
+		if environment == nil {
+			environment = map[string]string{}
+		}
+		environment[driver.TokenFileEnv] = driver.TokenPath
 	}
 	uid, gid, err := runAs(s.User)
 	if err != nil {
@@ -344,7 +362,7 @@ func (d *Driver) pod(s driver.CreateSpec, now time.Time) (*corev1.Pod, error) {
 				Image:      s.Image,
 				Command:    slices.Clone(command),
 				Args:       slices.Clone(args),
-				Env:        env(s.Env),
+				Env:        env(environment),
 				WorkingDir: workdir,
 				Resources:  limits,
 				VolumeMounts: []corev1.VolumeMount{
@@ -359,6 +377,12 @@ func (d *Driver) pod(s driver.CreateSpec, now time.Time) (*corev1.Pod, error) {
 				{Name: "tmp", EmptyDir: &corev1.EmptyDirVolumeSource{}},
 			},
 		},
+	}
+	if token {
+		volume, mount := tokenProjection(s.ID)
+		pod.Spec.Volumes = append(pod.Spec.Volumes, volume)
+		container := &pod.Spec.Containers[0]
+		container.VolumeMounts = append(container.VolumeMounts, mount)
 	}
 	return pod, nil
 }
