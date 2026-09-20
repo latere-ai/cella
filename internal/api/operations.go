@@ -89,7 +89,8 @@ func (h *handler) files(w http.ResponseWriter, r *http.Request) {
 		}
 		w.WriteHeader(http.StatusNoContent)
 		h.emit(r, obj, events.TypeFiles, events.Files{
-			Direction: events.DirectionImport, Paths: []string{dest}, Bytes: size,
+			Operation: events.OperationImport, Direction: events.DirectionImport,
+			Paths: []string{dest}, Bytes: size,
 		})
 		return
 	}
@@ -107,7 +108,8 @@ func (h *handler) files(w http.ResponseWriter, r *http.Request) {
 	// The record is written whether the transfer finished or failed part
 	// way: the bytes that left are the fact the feed reports.
 	h.emit(r, obj, events.TypeFiles, events.Files{
-		Direction: events.DirectionExport, Paths: paths, Bytes: stream.bytes,
+		Operation: events.OperationExport, Direction: events.DirectionExport,
+		Paths: paths, Bytes: stream.bytes,
 	})
 }
 func (h *handler) logs(w http.ResponseWriter, r *http.Request) {
