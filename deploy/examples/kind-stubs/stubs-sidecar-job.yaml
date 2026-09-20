@@ -1,0 +1,55 @@
+# SPDX-FileCopyrightText: 2026 Latere AI
+# SPDX-License-Identifier: Apache-2.0
+#
+# The same stubs beside `cellad check`, because the check asks the start-up
+# path of the serve role one question at a time: the identity line reads the
+# issuer's discovery document, the authorizer line sends the reserved probe,
+# and the sink line delivers one signed record. A Job whose Pod carried none
+# of them would report an installation this cluster does not run.
+#
+# The sidecar is terminated when the Job's own container ends, which is what
+# makes a Job with a never-ending container complete. A cluster older than
+# Kubernetes 1.29 does not do that, and the Job would hang.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cellad-check
+spec:
+  template:
+    spec:
+      initContainers:
+        - name: stubs
+          image: cella-stubs
+          restartPolicy: Always
+          args:
+            - -issuer=127.0.0.1:9080
+            - -issuer-url=http://127.0.0.1:9080
+            - -issuer-audience=cella
+            - -authorizer=127.0.0.1:9081
+            - -authorizer-token=stub-authorizer-token
+            - -admission=127.0.0.1:9082
+            - -sink=127.0.0.1:9083
+            - -sink-secret=stub-events-secret
+          ports:
+            - name: issuer
+              containerPort: 9080
+            - name: sink
+              containerPort: 9083
+          startupProbe:
+            httpGet:
+              path: /.well-known/openid-configuration
+              port: issuer
+            periodSeconds: 1
+            failureThreshold: 60
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 500m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]

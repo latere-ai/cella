@@ -1,0 +1,28 @@
+# SPDX-FileCopyrightText: 2026 Latere AI
+# SPDX-License-Identifier: Apache-2.0
+
+# The test stubs image of spec 012: the issuer, the authorizer, the
+# admission endpoint and the sink of the kind stack, in one binary. It is a
+# test image. Nothing under deploy/base names it, no installation runs it,
+# and the labels below say so to anything that reads an image rather than a
+# document.
+#
+# It compiles the binary in the image, like the developer image and unlike
+# the release image: the stubs are never pinned by digest, never signed, and
+# never attested, because nothing an operator deploys depends on them.
+
+FROM golang:1.27-alpine AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -trimpath -o /out/cella-stubs ./cmd/cella-stubs
+
+FROM gcr.io/distroless/static-debian12:nonroot
+LABEL org.opencontainers.image.title="cella-stubs" \
+      org.opencontainers.image.description="Test stubs for Cella's conformance and install tiers. Not for production." \
+      ai.latere.cella.test-only="true"
+EXPOSE 9080 9081 9082 9083
+USER nonroot:nonroot
+COPY --from=build /out/cella-stubs /usr/local/bin/cella-stubs
+ENTRYPOINT ["/usr/local/bin/cella-stubs"]
