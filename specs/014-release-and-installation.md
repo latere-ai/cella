@@ -170,7 +170,10 @@ conformance job runs ([[015-conformance-suite]]).
 Slice 048 ([[048-release-and-check]]) built this spec against
 the tree of 2026-09-20, and its Outcome records which jobs run for real
 and which wait on [[012-test-stubs-and-tiers]] and
-[[015-conformance-suite]].
+[[015-conformance-suite]]. Both have since arrived: the conformance job
+brings the kind stack up from the published images and runs the suite over
+it, and nothing in the pipeline is a placeholder any more
+([[052-conformance-suite]]).
 
 ## Acceptance criteria
 
