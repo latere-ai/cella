@@ -8,7 +8,7 @@ depends_on:
 affects: [runtime/, runtime/k8s/, runtime/podman/, runtime/native/, runtime/local/, runtime/vm/, runtime/remote/, runtime/runtimetest/, internal/config/]
 effort: large
 created: 2026-09-12
-updated: 2026-09-19
+updated: 2026-09-20
 author: changkun
 ---
 
@@ -101,8 +101,9 @@ without the other:
 | `Snapshots` | `Snapshotter` | `Snapshot(ctx, volumeID) (snapshotID string, err error)` (crash-consistent), `DeleteSnapshot(ctx, snapshotID)`, `ListSnapshots(ctx, volumeID) ([]string, error)` |
 | `Display` | `DisplayDriver` | `Display(ctx, id) (Geometry, error)`, `Screenshot(ctx, id, ScreenshotRequest) (io.ReadCloser, error)`, `Screen(ctx, id, fps int, format string) (<-chan Frame, error)` |
 | `Input` | `InputDriver` | `Input(ctx, id, []InputEvent) error` |
+| `Files` | `FileStore` | `Stat(ctx, id, path) (FileInfo, error)`, `ReadDir(ctx, id, path) ([]FileInfo, error)` (sorted by name), `Open(ctx, id, path) (io.ReadCloser, FileInfo, error)`, `Write(ctx, id, WriteRequest) (int64, error)` (a body, a mode and a bound; staged and renamed, so a body that ends early or passes the bound leaves the previous file whole), `Mkdir`, `Remove`, `Move(ctx, id, from, to)` (the exact destination; onto a directory is refused) ([[033-file-operations]]) |
 | `Pool` | none | `CreateSpec.Prewarm` and adoption through `Update` are accepted |
-| `Egress`, `Mesh`, `Ingress`, `Resize`, `Files`, `Detach` | none | declarations about what the core methods enforce |
+| `Egress`, `Mesh`, `Ingress`, `Resize`, `Detach` | none | declarations about what the core methods enforce |
 
 ### Types
 
@@ -125,6 +126,8 @@ Every type is in `runtime`; the enumerations and `Capabilities` are in
 | `VolumeSpec` | `ID`, `Name`, `Owner`, `Size`, `Class`, `Access` (`single`, `shared-read`), `Source{Kind, SnapshotID, Image, ArchiveURL, AllowedHosts, MaxBytes, SHA256}` (the control plane validated the URL; the driver re-applies the hosts to redirects and the caps to the fetch) |
 | `VolumeState` | `ID`, `Phase` (`Pending`, `Available`, `Failed`, `Lost`), `Reason`, `Capacity`, `AttachedTo []string`, `Access` |
 | `Geometry`, `ScreenshotRequest`, `Frame`, `InputEvent` | declared in `runtime/display` as [[023-computer-use-operations]] defines them: `{Width, Height}`; `{Format, Scale}`; `{At, Format, Data []byte}`; `{Type, X, Y, ToX, ToY, Button, Modifiers, Key, Text, Direction, Amount, Ms}` |
+| `FileInfo` | `Name` (the base name as the filesystem holds it), `Path` (absolute, inside the workspace), `Size`, `Mode fs.FileMode`, `ModTime`, `IsDir` ([[033-file-operations]]) |
+| `WriteRequest` | `Path`, `Mode fs.FileMode` (zero is `0644`), `MaxBytes` (zero is no bound), `Body io.Reader` |
 | `NotReadyError` | `Driver`, `Condition`, `Components []string`, `Remediation`, `Alternative`; the `local` driver converts `hostsandbox.NotReadyError` into it so `runtime` imports no other package |
 
 ### Capabilities
@@ -143,7 +146,7 @@ type Capabilities struct {
 	Input      bool `json:"input"`      // keyboard and pointer events are accepted (023)
 	Resize     bool `json:"resize"`     // resources change on a running sandbox
 	Pool       bool `json:"pool"`       // Prewarm and Adopt are accepted (020)
-	Files      bool `json:"files"`      // ExportTar and ImportTar work while Stopped
+	Files      bool `json:"files"`      // the archives work while Stopped, and FileStore is implemented
 	Detach     bool `json:"detach"`     // a driver built in another process recovers a sandbox from its record alone
 }
 ```
@@ -384,6 +387,8 @@ is skipped and reported:
 | `ExecStreamsAndExits` | exit codes 0 and 3; the first stdout byte arrives before the command writes its last (the command writes, sleeps, writes); 64 MiB of output completes with the driver process's resident set growing by less than 16 MiB |
 | `LogsFollow` | lines written after `Logs` opened arrive with `Follow` |
 | `TarOutAndIn` | round trip of a tree; with `Files`, while `Stopped` |
+| `FilesRoundTrip`, `FilesListOrder`, `FilesMutate` | one file written, stat'd, listed, read back with its mode and its exact name; a listing sorted by name with every field; mkdir, remove and move, with a move onto a directory refused |
+| `FilesContainment`, `FilesExactNames`, `FilesWriteBound`, `FilesWhileStopped` | traversal, an absolute path outside and a link out of the workspace refused; a name with spaces, unicode, a percent sign, a pipe or a newline round tripped exactly; a body past the bound refused with the previous file intact; on a stopped sandbox every operation works or answers `ErrNotRunning` |
 | `TouchStampsActivity` | `last-activity-at` advances |
 | `WatchDeliversEveryTransition` | every phase change of a lifecycle arrives as an `Event`; a `relist` follows a closed channel |
 | `AttachRoundTrip`, `AttachResize`, `AttachCloseEndsTheStream` | bytes both ways and the exit code; a resize reaches the PTY; after `Close` the stream is over for its caller, whether or not the engine under the driver also ends the process |
@@ -402,8 +407,9 @@ runtime is installed; `podman`, `k8s`, and `remote` run it in the tiers
 of [[012-test-stubs-and-tiers]].
 
 The package is built ([[032-runtime-conformance-suite]]) with the cases
-that today's `Driver` has an operation for, and the `Attacher` cases came
-with that interface ([[034-terminal-attach]]). `Watch`, the remaining
+that today's `Driver` has an operation for; the `Attacher` cases came with
+that interface ([[034-terminal-attach]]) and the `Files*` cases with
+`FileStore` ([[033-file-operations]]). `Watch`, the remaining
 optional interfaces, and `PhaseTableMatchesPackageDoc` have no operation on
 it yet; a declared capability among them is reported by the suite as
 declared without a case, so a driver's run lists what it claims and the
@@ -434,10 +440,10 @@ requests ([[023-computer-use-operations]]); the microVM driver's design
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| `native` passes the whole conformance suite in the unit suite | `TestNativeConformance` | passing for the cases built, [[032-runtime-conformance-suite]], including the `Attacher` cases of [[034-terminal-attach]] |
+| `native` passes the whole conformance suite in the unit suite | `TestNativeConformance` | passing for the cases built, [[032-runtime-conformance-suite]], including the `Attacher` cases of [[034-terminal-attach]] and the `FileStore` cases of [[033-file-operations]] |
 | `local` passes it on a machine with the sandbox runtime installed, with `Attach`, `Dial`, `Mesh`, `Display`, `Input`, `Resize`, `Pool` and the `open` egress case skipped as undeclared, and is skipped whole with the remediation printed where the runtime is absent | `TestLocalConformance` | not built |
-| `podman` passes it in the podman tier; `k8s` against kind; `remote` through a worker running `native` | `TestPodmanConformance`, `TestClusterConformance`, `TestWorkerConformance` | `podman` passing against a real engine, the `Attacher` cases included, skipped where no socket answers, [[035-podman-driver]], [[034-terminal-attach]]; `TestClusterConformance` built and skipped where no cluster is configured, [[036-k8s-driver]]; `remote` not built |
-| A driver that declares a capability without its interface, implements one it does not declare, or declares one the suite finds not to hold, fails | `TestConformanceCatchesAFalseCapability` with five lying wrappers | passing, [[032-runtime-conformance-suite]], [[034-terminal-attach]] |
+| `podman` passes it in the podman tier; `k8s` against kind; `remote` through a worker running `native` | `TestPodmanConformance`, `TestClusterConformance`, `TestWorkerConformance` | `podman` passing against a real engine, the `Attacher` and `FileStore` cases included, skipped where no socket answers, [[035-podman-driver]], [[034-terminal-attach]], [[033-file-operations]]; `TestClusterConformance` built and skipped where no cluster is configured, [[036-k8s-driver]]; `remote` not built |
+| A driver that declares a capability without its interface, implements one it does not declare, or declares one the suite finds not to hold, fails | `TestConformanceCatchesAFalseCapability` with eight lying wrappers | passing, [[032-runtime-conformance-suite]], [[034-terminal-attach]], [[033-file-operations]] |
 | Every stamped label value is a legal Kubernetes label value and every key a legal key, for an owner with `@` and a user label with a `/` | `TestStampedIdentityIsLegal` | passing, [[036-k8s-driver]] |
 | A decorator that removes the token mount, sets `privileged`, adds `hostNetwork` or `shareProcessNamespace`, or mounts a service account token is refused with `decorator_violation` naming the field | `TestDecoratorCannotWeakenTheBaseline`, table-driven over the baseline | not built |
 | With `CELLA_K8S_RUNTIME_CLASS_ISOLATION=vm`, `Isolation()` is `vm` and the Pod carries the class; unset, `container` regardless of the class name | `TestK8sIsolationIsDeclared` | not built |

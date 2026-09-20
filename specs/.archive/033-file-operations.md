@@ -1,6 +1,6 @@
 ---
 title: "File operations: the FileStore interface, the granular routes, and one containment rule"
-status: in-progress
+status: complete
 track: core
 depends_on:
   - specs/004-runtime-contract.md
@@ -219,11 +219,19 @@ collection does not use.
 
 A single file cannot ride `GET .../files?path=`: that is the archive of
 one or more paths, and a route may not mean two things by the same
-request. `PUT` carries both because the content type already separates
-them, which is the rule [[008-api]] states for every body, and because
-one file is what a client that cannot write a tar has. A request that
-names `path` more than once on a single-path route is `invalid_field`, as
-is a `PUT` that names neither `path` nor `dest`.
+request. `PUT` carries both because one file is what a client that cannot
+write a tar has, and the selector tells them apart: `dest` extracts an
+archive and is `unsupported_media_type` unless the body is
+`application/x-tar`, `path` writes one file of any content type, both
+together are `exclusive_fields`, and neither is `invalid_field`. The
+selector decides and the content type is what an archive is held to, so a
+caller stores a tar file as a file by naming `path`. A request that names
+`path` more than once on a single-path route is `invalid_field`.
+
+There is no `HEAD`: `HEAD` answers the headers of the `GET` of the same
+URL, and the `GET` of the collection is an archive of several paths, not
+one entry. `stat` is its own route and answers an entry as JSON, which is
+also what a listing's items are.
 
 An entry is rendered
 `{"name", "path", "size", "mode": "0644", "modTime", "isDir"}`; the mode
@@ -256,19 +264,56 @@ other than the managed workspace ([[019-volumes]]).
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| A driver implements `FileStore` if and only if it declares `Files`, and a driver that lies about either fails | `NameIsolationCapabilities`, `TestConformanceCatchesAFalseCapability` | open |
-| One file round trips: written, stat'd, listed, read back with its mode and its exact name | `FilesRoundTrip` in `runtimetest`, per driver | open |
-| A listing is sorted by name and carries the size, the mode, the modification time and the directory bit of each entry | `FilesListOrder` | open |
-| `Mkdir` creates the missing parents, `Remove` deletes a tree, `Move` renames inside the workspace | `FilesMutate` | open |
-| Traversal, an absolute path outside the workspace, and a symbolic link out of it are refused with `ErrInvalid`, and the workspace root is not removable or movable | `FilesContainment` | open |
-| A move onto an existing directory is refused and the directory is untouched | `FilesMutate` | open |
-| A write past `MaxBytes` returns `ErrTooLarge` and the previous file is intact | `FilesWriteBound` | open |
-| A name with spaces, unicode, a percent sign, a pipe or a newline round trips exactly through write, list, stat and read | `FilesExactNames` | open |
-| While `Stopped` every operation either works or returns `ErrNotRunning` | `FilesWhileStopped` | open |
-| Each route answers its shape over real HTTP under a signed bearer, and each refusal its code | `TestFilesRoutes` in `internal/api` | open |
-| A route on an environment without `Files` is 422 before any driver call | `TestFilesCapabilityGate` | open |
-| Every call stamps activity and writes one `sandbox.files` record naming the operation and the bytes, and no record holds a body | `TestFilesRecords` | open |
+| A driver implements `FileStore` if and only if it declares `Files`, and a driver that lies about either fails | `NameIsolationCapabilities`, `TestConformanceCatchesAFalseCapability` | passing |
+| One file round trips: written, stat'd, listed, read back with its mode and its exact name | `FilesRoundTrip` in `runtimetest`, per driver | passing on `native` and on `podman` against a real engine |
+| A listing is sorted by name and carries the size, the mode, the modification time and the directory bit of each entry | `FilesListOrder` | passing |
+| `Mkdir` creates the missing parents, `Remove` deletes a tree, `Move` renames inside the workspace | `FilesMutate` | passing |
+| Traversal, an absolute path outside the workspace, and a symbolic link out of it are refused with `ErrInvalid`, and the workspace root is not removable or movable | `FilesContainment` | passing |
+| A move onto an existing directory is refused and the directory is untouched | `FilesMutate`, `TestProgramsAgainstAFilesystem` | passing |
+| A write past `MaxBytes` returns `ErrTooLarge` and the previous file is intact | `FilesWriteBound`, and `AWriteThatDoesNotStage` proves the case catches a write that commits first | passing |
+| A name with spaces, unicode, a percent sign, a pipe or a newline round trips exactly through write, list, stat and read | `FilesExactNames` | passing |
+| While `Stopped` every operation either works or returns `ErrNotRunning` | `FilesWhileStopped` | passing: `native` serves it, `podman` answers `ErrNotRunning` |
+| Each route answers its shape over real HTTP under a signed bearer, and each refusal its code | `TestFilesRoutes` in `internal/api` | passing |
+| A route on an environment without `Files` is 422 before any driver call | `TestFilesCapabilityGate` | passing |
+| Every call stamps activity and writes one `sandbox.files` record naming the operation and the bytes, and no record holds a body | `TestFilesRecords` | passing |
 
 ## Outcome
 
-Pending.
+Built. `runtime` holds `FileStore`, `FileInfo`, `WriteRequest` and
+`ErrTooLarge`; `runtime/internal/fileshell` holds the shell programs the
+two container drivers share, their exit codes and the parser of their
+records; `native` implements the store over `os.Root`, `podman` over the
+libpod exec API and `k8s` over the exec subresource with the helper Pod,
+so the k8s driver serves a stopped sandbox and the podman driver answers
+`ErrNotRunning`; `runtimetest` gains seven cases; `internal/api` serves
+the nine routes and emits one record per call.
+
+Coverage: `runtime/internal/fileshell` 100.0%, `runtime/k8s` 93.6%,
+`runtime/podman` 93.1%, `runtime/native` 91.2%, `runtime/runtimetest`
+98.1%, `internal/api` 91.8%, `internal/events` 96.6%, `controller` 95.6%.
+Every gate of `go tool lateregate` passes, the hermetic, tempdir, race
+and coordinates gates included.
+
+Two end-to-end runs. `TestFilesRoutes` in `internal/api` drives every
+route over real HTTP against a signed issuer and the native driver, one
+subtest per route and per refusal, with `TestFilesCapabilityGate`,
+`TestFilesWhileStopped` and `TestFilesRecords` beside it.
+`TestPodmanConformance` runs the whole contract, the seven file cases
+included, against a real podman engine and an Alpine image, which is
+where the shell programs meet BusyBox; `TestProgramsAgainstAFilesystem`
+runs each program against a filesystem where the utilities are GNU's.
+Both found real defects: BusyBox's `realpath` takes no `--` separator, so
+every containment check refused every path until the separator went, and
+a write cannot commit inside one program, because a body that ends early
+is indistinguishable from one that ended, so the write became a staged
+program and a commit the control plane runs only once the body is whole.
+
+Departures from what the slice was set out with, each recorded above:
+the directory listing is `ReadDir`, not `List`, because `Driver.List` is
+the substrate's own listing and one type implements both interfaces;
+there is no `HEAD`, because `HEAD` answers the headers of the `GET` of
+the same URL and that `GET` is an archive, so `stat` is its own route;
+and the two writes on the files collection are told apart by the
+selector rather than by the content type, so a caller can store a tar
+file as one file. [[009-events]] is amended with `operation` on the
+`sandbox.files` record, which is what names a call that moved no bytes.
