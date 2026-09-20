@@ -89,7 +89,8 @@ func (h *handler) files(w http.ResponseWriter, r *http.Request) {
 		}
 		w.WriteHeader(http.StatusNoContent)
 		h.emit(r, obj, events.TypeFiles, events.Files{
-			Direction: events.DirectionImport, Paths: []string{dest}, Bytes: size,
+			Operation: events.OperationImport, Direction: events.DirectionImport,
+			Paths: []string{dest}, Bytes: size,
 		})
 		return
 	}
@@ -107,7 +108,8 @@ func (h *handler) files(w http.ResponseWriter, r *http.Request) {
 	// The record is written whether the transfer finished or failed part
 	// way: the bytes that left are the fact the feed reports.
 	h.emit(r, obj, events.TypeFiles, events.Files{
-		Direction: events.DirectionExport, Paths: paths, Bytes: stream.bytes,
+		Operation: events.OperationExport, Direction: events.DirectionExport,
+		Paths: paths, Bytes: stream.bytes,
 	})
 }
 func (h *handler) logs(w http.ResponseWriter, r *http.Request) {
@@ -183,7 +185,12 @@ func (s *responseStream) Write(p []byte) (int, error) {
 }
 func (s *responseStream) fail(err error) {
 	if !s.written {
+		// A route that announced a length has not sent a byte of it, and the
+		// envelope is a different length: both headers go before it is
+		// written, or the answer is truncated to the length of the body that
+		// never came.
 		s.w.Header().Del("Trailer")
+		s.w.Header().Del("Content-Length")
 		respondError(s.w, err)
 		return
 	}

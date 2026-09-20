@@ -44,6 +44,8 @@ type fixture struct {
 	// failing arms a policy that answers one action with an error, for a
 	// route that must first have an object to read.
 	failing *atomic.Bool
+	// header is the last response's, for a route whose answer is in them.
+	header http.Header
 }
 
 func setup(t *testing.T, policy authz.Authorizer) *fixture { return setupDriver(t, policy, nil) }

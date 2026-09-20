@@ -107,7 +107,7 @@ and that every emission point a spec names is here.
 | `sandbox.spawned` | a workload created a child | `{child: sbx_..., budgetLeft}` | 022 |
 | `sandbox.exec` | a command ended | `{exitCode, durationMs}`; never the command, its input or its output | 008 |
 | `sandbox.attach`, `sandbox.dial`, `sandbox.screen` | a session ended | `{durationMs, bytesIn, bytesOut}` | 008, 023 |
-| `sandbox.files` | a transfer ended | `{direction, paths: []string, bytes}` | 008 |
+| `sandbox.files` | a transfer or a file operation ended | `{operation, direction, paths: []string, bytes}`; `operation` is `import`, `export`, `read`, `write`, `stat`, `list`, `mkdir`, `remove` or `move`, and `direction` is on a transfer only ([[033-file-operations]]) | 008 |
 | `sandbox.input`, `sandbox.screenshot` | an operation ended | `{events: n}`; `{width, height, format}`; never text or frame bytes | 023 |
 | `sandbox.port` | a proxied request ended, only with `CELLA_EVENTS_PORTS=1` | `{port, method, path, status, durationMs}`; no query string | 008 |
 | `sandbox.token` | a token minted outside the projection | `{exp}`; never the token | 006 |

@@ -68,7 +68,13 @@ func New(o Options) (http.Handler, error) {
 	}
 	h := &handler{Options: o, mux: http.NewServeMux()}
 	h.mux.HandleFunc("GET /v1/sandboxes/{id}/files", h.files)
-	h.mux.HandleFunc("PUT /v1/sandboxes/{id}/files", h.files)
+	h.mux.HandleFunc("PUT /v1/sandboxes/{id}/files", h.filesPut)
+	h.mux.HandleFunc("DELETE /v1/sandboxes/{id}/files", h.fileRemove)
+	h.mux.HandleFunc("GET /v1/sandboxes/{id}/files/content", h.fileContent)
+	h.mux.HandleFunc("GET /v1/sandboxes/{id}/files/stat", h.fileStat)
+	h.mux.HandleFunc("GET /v1/sandboxes/{id}/files/list", h.fileList)
+	h.mux.HandleFunc("POST /v1/sandboxes/{id}/files/mkdir", h.fileMkdir)
+	h.mux.HandleFunc("POST /v1/sandboxes/{id}/files/move", h.fileMove)
 	h.mux.HandleFunc("GET /v1/sandboxes/{id}/logs", h.logs)
 	h.mux.HandleFunc("GET /v1/sandboxes/{id}/egress", h.egressRecords)
 	h.mux.HandleFunc("POST /v1/sandboxes", h.create)
@@ -459,6 +465,8 @@ func errorEnvelope(err error, requestID string) (int, httpjson.Error) {
 		code = "capability_unsupported"
 	case errors.Is(err, driver.ErrInvalid):
 		code = "invalid_field"
+	case errors.Is(err, driver.ErrTooLarge):
+		code = "body_too_large"
 	}
 	switch code {
 	case "unauthenticated":
@@ -512,6 +520,9 @@ func errorEnvelope(err error, requestID string) (int, httpjson.Error) {
 	case "reserved_prefix":
 		status = 400
 		message = "That name is reserved for the control plane."
+	case "exclusive_fields":
+		status = 400
+		message = "Two fields that cannot be set together are set."
 	case "immutable_field":
 		status = 409
 		message = "This field cannot be changed after the object is created."
@@ -521,9 +532,6 @@ func errorEnvelope(err error, requestID string) (int, httpjson.Error) {
 	case "admission_refused":
 		status = 422
 		message = "The request was refused by this server's policy."
-	case "exclusive_fields":
-		status = 400
-		message = "Two fields that cannot be set together are set."
 	case "missing_field":
 		status = 400
 		message = "A required field is missing."

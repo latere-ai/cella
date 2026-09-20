@@ -42,7 +42,10 @@ var engines = map[string][]string{
 	"./manifest/v1":    nil,
 	"./runtime":        nil,
 	"./runtime/native": nil, // the native driver runs host processes: no client
-	"./runtime/podman": nil, // the podman driver speaks libpod over net/http: no client module
+	// The podman driver speaks libpod over net/http, so it needs no client
+	// module; fileshell is the file programs it shares with the other
+	// container driver.
+	"./runtime/podman": {module + "/runtime/internal/fileshell"},
 	"./controller":     nil,
 	"./egress":         nil, // the boundary compiler computes over the contract types
 }

@@ -128,10 +128,12 @@ type Exec struct {
 	DurationMS int64 `json:"durationMs"`
 }
 
-// Files is the data of sandbox.files: which way the transfer went, which
-// workspace paths it named, and how many bytes moved. No file content.
+// Files is the data of sandbox.files: which operation ran, which way a
+// transfer went, which workspace paths it named, and how many bytes moved. No
+// file content and no file body.
 type Files struct {
-	Direction string   `json:"direction"`
+	Operation string   `json:"operation,omitempty"`
+	Direction string   `json:"direction,omitempty"`
 	Paths     []string `json:"paths,omitempty"`
 	Bytes     int64    `json:"bytes"`
 }
@@ -140,6 +142,21 @@ type Files struct {
 const (
 	DirectionImport = "import"
 	DirectionExport = "export"
+)
+
+// The operations a sandbox.files record names. The two transfers carry a
+// direction as well; the per-file operations are the whole of design 033's
+// routes.
+const (
+	OperationImport = DirectionImport
+	OperationExport = DirectionExport
+	OperationRead   = "read"
+	OperationWrite  = "write"
+	OperationStat   = "stat"
+	OperationList   = "list"
+	OperationMkdir  = "mkdir"
+	OperationRemove = "remove"
+	OperationMove   = "move"
 )
 
 // Created is the data of sandbox.created: the manifest as the resolver left

@@ -262,6 +262,7 @@ The map, the order, and the rule for a slice are in 031.
 | [029-workspace-files-and-logs.md](.archive/029-workspace-files-and-logs.md) | complete | Authorized tar import/export and process log routes |
 | [030-native-main-process.md](.archive/030-native-main-process.md) | complete | Main command supervision and persisted output |
 | [032-runtime-conformance-suite.md](.archive/032-runtime-conformance-suite.md) | complete | Driver conformance suite, Nop fake, dial-nothing and coordinates tests |
+| [033-file-operations.md](.archive/033-file-operations.md) | complete | The `FileStore` capability, the granular file routes, and one containment rule across the three drivers |
 | [034-terminal-attach.md](.archive/034-terminal-attach.md) | complete | Attacher and the native pseudo-terminal, podman attach, the exec and attach WebSockets |
 | [035-podman-driver.md](.archive/035-podman-driver.md) | complete | Container isolation over the libpod socket, with the sandbox record in the engine |
 | [037-lifecycle-enforcement.md](.archive/037-lifecycle-enforcement.md) | complete | Reaper deadline rules, lease and clock seams, activity stamping |

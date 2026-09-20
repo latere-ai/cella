@@ -131,7 +131,8 @@ func TestRecordShapes(t *testing.T) {
 			name: "files names no content",
 			make: func() (Record, error) {
 				return Operation(TypeFiles, OfSandbox(obj), Files{
-					Direction: DirectionExport, Paths: []string{"/workspace/out"}, Bytes: 2048,
+					Operation: OperationExport, Direction: DirectionExport,
+					Paths: []string{"/workspace/out"}, Bytes: 2048,
 				}, person, at)
 			},
 			want: `{
@@ -141,7 +142,8 @@ func TestRecordShapes(t *testing.T) {
 				"sandbox":{"kind":"Sandbox","id":"sbx_01k5pqz5","name":"build",
 					"owner":"https://issuer.example|alice","labels":{"tenant":"acme","tier":"gold"}},
 				"subject":"https://issuer.example|alice","requestId":"req_7",
-				"data":{"direction":"export","paths":["/workspace/out"],"bytes":2048}}`,
+				"data":{"operation":"export","direction":"export",
+					"paths":["/workspace/out"],"bytes":2048}}`,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

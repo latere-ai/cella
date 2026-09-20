@@ -38,6 +38,22 @@ refused before it is pushed.
   deleted, is refused from that moment rather than when it expires. Any
   service can verify one offline against `/.well-known/jwks.json`.
 
+- A sandbox's workspace answers one file at a time, not only whole archives.
+  `GET /v1/sandboxes/{id}/files/content?path=` streams one file,
+  `.../files/stat?path=` describes it, `.../files/list?path=` lists a
+  directory sorted by name, `PUT /v1/sandboxes/{id}/files?path=[&mode=]`
+  writes one file of any content type, `DELETE .../files?path=` removes a file
+  or a tree, and `POST .../files/mkdir` and `POST .../files/move` make a
+  directory and rename one path onto another. A write is staged and renamed,
+  so a body that ends early or passes `CELLA_MAX_UPLOAD_BYTES` leaves the
+  previous file as it was, and a move takes the exact destination rather than
+  nesting the source inside an existing directory. Every path is absolute and
+  inside the workspace: one that leaves it, by traversal or through a symbolic
+  link the workload planted, is refused. Names arrive as they are, spaces,
+  unicode, percent signs, pipes and newlines included. The native, podman and
+  k8s drivers all serve the routes; the podman driver needs the sandbox
+  running and answers `phase_conflict` while it is stopped.
+
 - Every change to a sandbox and every operation on one produces a signed
   record, delivered to the endpoint `CELLA_EVENTS_URL` names. A record says
   who did what to which object, when, and why, with the object's labels and a
