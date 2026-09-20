@@ -95,6 +95,7 @@ const (
 var Types = []Type{
 	TypeCreated, TypeUpdated, TypeStarted, TypeStopped, TypeDeleted,
 	TypeFailed, TypeLost, TypeRecovering, TypeRecovered, TypeExec, TypeFiles,
+	TypeSecretCreated, TypeSecretUpdated, TypeSecretDeleted,
 }
 
 // Deliverable reports whether a journal row's type is one the sink receives.

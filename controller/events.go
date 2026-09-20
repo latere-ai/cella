@@ -23,6 +23,10 @@ type Events interface {
 	// so nothing is reported back: an emitter logs what it could not
 	// journal and the act stands.
 	Emit(ctx context.Context, a Act)
+	// EmitSecret records one act on a Secret. It is its own method because
+	// the record is about another kind and carries another shape, not
+	// because the two travel differently.
+	EmitSecret(ctx context.Context, a SecretAct)
 }
 
 // Act is one thing the controller did to one sandbox: design 009's type, and
@@ -33,10 +37,26 @@ type Act struct {
 	Object v1.Sandbox
 }
 
+// SecretAct is one thing the controller did to one Secret. The object as it
+// stands after the act; it carries no value, because the collection this
+// controller holds carries none.
+type SecretAct struct {
+	Type   string
+	Object v1.Secret
+}
+
 // emit hands one act to the emitter, where there is one.
 func (c *Controller) emit(ctx context.Context, mutation string, obj v1.Sandbox) {
 	if c.events == nil {
 		return
 	}
 	c.events.Emit(ctx, Act{Type: mutation, Object: obj})
+}
+
+// emitSecret is emit for the Secret kind.
+func (c *Controller) emitSecret(ctx context.Context, mutation string, obj v1.Secret) {
+	if c.events == nil {
+		return
+	}
+	c.events.EmitSecret(ctx, SecretAct{Type: mutation, Object: obj})
 }
