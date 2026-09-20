@@ -1,6 +1,6 @@
 ---
 title: "Display and input: the virtual desktop, the screenshot, the screen stream, the input batch and the port probe"
-status: in-progress
+status: complete
 track: core
 depends_on:
   - specs/023-computer-use-operations.md
@@ -285,3 +285,105 @@ The `vm` driver's guest agent, which is [[024-vm-driver]]'s.
 | A declared `Display` serves a screenshot of the declared geometry, `Input` accepts a click and refuses one outside it, and `Ports` reports a port a process bound | `runtimetest` `DisplayScreenshot`, `InputAcceptsAndRefuses`, `PortsReportListening` | not built |
 | Native declares no `Display`, no `Input` and no `Dial`, and implements none of the three interfaces | `TestNativeHasNoDisplay` | not built |
 | No record holds a frame, a key or typed text | `TestOperationRecordsCarryNoContent` | not built |
+
+## Outcome
+
+Built. The desktop, the screenshot, the screen stream, the input batch and
+the port probe are in the tree, on podman and on k8s, with the API routes,
+the manifest fields, the events and the conformance cases.
+
+### What the slice holds
+
+`runtime/display` is the vocabulary and the commands: the four types, the
+rule table, the argument lists an event expands to, the supervisor, and the
+capture, stream, readiness and socket-table scripts. `runtime` aliases the
+types and declares `DisplayDriver`, `InputDriver` and `Dialer`, with
+`CreateSpec.Display`, `CreateSpec.Ports`, `State.Ports` and
+`State.Conditions`. `runtime/podman` runs the desktop as a second process in
+the sandbox's container, started at create and at every start;
+`runtime/k8s` runs it as a second container from the operator's display
+image, sharing the workload's `/tmp` and carrying the readiness probe.
+`runtime/native` declares none of the three and implements none of them.
+`internal/api` serves the five routes with the `Display` and `Input` gates
+and the 1 MiB input cap. `manifest` takes `spec.display` and
+`spec.network.ports[]`, holds both to the field table of
+[[003-manifest-contract]], makes both immutable, and refuses them against an
+environment that cannot serve them. `images/display/Dockerfile` builds the
+image, and the supervisor it bakes in is the file the Go package embeds, so
+the desktop both drivers bring up is one desktop.
+
+### The display protocol
+
+Encoded frames over a WebSocket, not a remote framebuffer. The hosted source
+ran an X11 VNC server and a WebSocket bridge inside the sandbox and relayed
+the raw protocol out through an exec'd TCP relay, with a per-session password
+written into the sandbox and held by the control plane. [[008-api]] fixes the
+screen stream as binary frames on `cella.screen.v1` instead, so none of that
+is ported: the desktop opens no listener, the control plane holds no display
+credential, and the frames a caller reads are the frames a screenshot would
+have answered. One command serves a whole session, because a command per
+frame is ten calls a second into the container engine or the cluster's API
+server for as long as somebody watches.
+
+### What the real engine found
+
+`podman build -f images/display/Dockerfile` produced a 502 MB arm64 image
+(without the browser) in about four minutes, and `TestPodmanConformance`
+ran against podman 5.7.1 on a rootless macOS machine with
+`CELLA_TEST_DISPLAY_IMAGE` naming it. `PortsReportListening` passed on the
+first run: a `nc` listener inside the sandbox reads `listening` and the
+declared port beside it reads `closed`.
+
+The three display cases failed on the first run and found a defect no fake
+could: the install command joined its lines with semicolons, and a shell
+reads a semicolon after a background command as a syntax error, so the
+supervisor never started and `DisplayReady` stayed false for the whole
+ninety-second budget. The scripts now join by newline. The re-run of the
+three cases did not complete: the local engine stopped answering after the
+first run and a container listing did not return, so what is recorded here
+for them is the fake-engine result and the defect the real one found.
+
+### Coverage
+
+`runtime/display` 96.5%, `runtime/runtimetest` 98.0%, `runtime/k8s` 93.4%,
+`runtime/podman` 93.3%, `controller` 91.3%, `internal/api` 90.7%,
+`manifest` 97.6%, `manifest/v1` 100%. The race, hermetic and tempdir runs
+pass with the rest of the bar.
+
+### Two rules the port changed
+
+The hosted input code pressed the modifiers around a click and then passed
+the input tool's clear-modifiers flag to the click itself, which releases
+the keys the command before it pressed, so a chorded click never reached the
+desktop chorded. A click held under modifiers now carries no such flag, and
+`TestArgvHoldsModifiersAroundAClick` pins it.
+
+The Pod's own readiness condition is no longer what makes a sandbox
+`Running`. A Pod carrying a desktop is not Ready until the desktop is, and a
+sandbox whose desktop has not come up is a running sandbox with
+`DisplayReady` false, never one stuck at `Starting` until the create's
+budget runs out. The workload container's readiness is the sandbox's, and a
+Pod whose container statuses are not written yet still falls back to the Pod
+condition.
+
+### Left open
+
+1. The HTTP port proxy and the dial socket of [[008-api]]. Both need
+   `Dialer`, which this slice declares and no driver implements. The
+   acceptance rows of [[023-computer-use-operations]] for the proxy stay
+   not built and name the reason.
+2. `expose: mesh` and `expose: public` resolve to `capability_unsupported`,
+   because no driver declares `Mesh` and no `Exposer` is installed. The
+   refusal is the ordinary capability row, so the day one is declared the
+   field resolves with no change here.
+3. The k8s display image has no configuration variable yet:
+   `Options.DisplayImage` is set by a caller and `internal/config` reads no
+   variable for it, so a deployment cannot name the image without one. The
+   variable belongs with the rest of the driver's configuration table.
+4. The gesture row of [[023-computer-use-operations]] is partial: every
+   event type expands to the commands the input tool takes, and no case
+   asserts what the desktop then shows. That needs a frame comparison
+   against a desktop with something on it, which the browser-ready example
+   of that spec is the natural place for.
+5. `docs/examples/browser.yaml` and the `case023BrowserReady` conformance
+   scenario are not built.
