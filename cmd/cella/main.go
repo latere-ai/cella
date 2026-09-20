@@ -20,8 +20,12 @@ import (
 	"latere.ai/x/cella/internal/version"
 )
 
+// exit ends the process. It is a variable so a test drives the entry point
+// itself rather than a copy of it.
+var exit = os.Exit
+
 func main() {
-	os.Exit(run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr, os.Getenv))
+	exit(run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr, os.Getenv))
 }
 
 // run is the command as a function, so a test drives it exactly as a shell
