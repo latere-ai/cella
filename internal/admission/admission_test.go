@@ -407,6 +407,22 @@ func TestFailsClosedWithoutRetry(t *testing.T) {
 			}
 		})
 	}
+	// A redirect is a second request carrying the manifest and the bearer
+	// to an address the operator did not configure. It is handed back as
+	// the answer, so the endpoint it names is never asked.
+	elsewhere := serve(t, fixed(http.StatusOK, `{"allow":true}`))
+	redirecting := serve(t, func(w http.ResponseWriter, _ []byte) {
+		http.Redirect(w, &http.Request{}, elsewhere.URL, http.StatusTemporaryRedirect)
+	})
+	_, _, err = client(t, redirecting, Options{}).Admit(t.Context(), sandbox(), admitRequest())
+	var redirected *manifest.Error
+	if !errors.As(err, &redirected) || redirected.Code != manifest.CodeAdmissionUnavailable {
+		t.Fatalf("err = %v, want admission_unavailable", err)
+	}
+	if elsewhere.calls.Load() != 0 || redirecting.calls.Load() != 1 {
+		t.Fatalf("calls = %d here and %d there", redirecting.calls.Load(), elsewhere.calls.Load())
+	}
+
 	// A connection that is refused before a response line arrived is the
 	// case the authorizer retries and this one does not. The endpoint is
 	// closed, so nothing counts the calls but the dial itself fails.

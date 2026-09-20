@@ -106,7 +106,7 @@ func New(o Options) (*Client, error) {
 	}
 	c := &Client{url: o.URL, token: o.Token, http: o.HTTP, timeout: o.Timeout, observe: o.Observe}
 	if c.http == nil {
-		c.http = &http.Client{Transport: otel.Transport(nil)}
+		c.http = &http.Client{Transport: otel.Transport(nil), CheckRedirect: noRedirect}
 	}
 	if c.timeout == 0 {
 		c.timeout = DefaultTimeout
@@ -119,6 +119,13 @@ func New(o Options) (*Client, error) {
 
 // URL is the endpoint the client asks.
 func (c *Client) URL() string { return c.url }
+
+// noRedirect hands a 3xx back as the answer instead of following it. A
+// redirect is a second request carrying the manifest and the bearer to an
+// address the operator did not configure, which is both the retry this
+// contract forbids and a bearer where it does not belong. The redirect is
+// then no decision, like any other status that is not 200.
+func noRedirect(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 
 // Admit is the AdmitFunc stage 3 calls. It returns the object to continue
 // with and the endpoint's warnings, a manifest error carrying
