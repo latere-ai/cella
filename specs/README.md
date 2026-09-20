@@ -72,7 +72,6 @@ later.
 | [023](023-computer-use-operations.md) | Computer use operations: the desktop, screenshot, screen, input, ports and the proxy, browser-ready sandboxes | medium | validated | 003, 004, 005, 008, 009 |
 | [024](024-vm-driver.md) | VM driver: a hardware-isolated sandbox per environment; the design held open | large | vague | 004, 019 |
 | [031](031-hosted-sandbox-consolidation.md) | Hosted sandbox consolidation: every package of latere-ai/sandbox lands in cella, in the platform, or is dropped | large | in-progress | 001 |
-| [048](048-release-and-check.md) | Release and check: the tag pipeline, the deploy tree, and cellad check | medium | in-progress | 014, 031 |
 
 ## Dependency graph
 
@@ -272,3 +271,4 @@ The map, the order, and the rule for a slice are in 031.
 | [044-manifest-fields.md](.archive/044-manifest-fields.md) | complete | Resource, user, workspace and lifecycle manifest fields with the staged resolver |
 | [036-k8s-driver.md](.archive/036-k8s-driver.md) | complete | Kubernetes driver: a claim and a Pod per sandbox, the baseline, exec, logs, archives, identity on the objects |
 | [045-workload-tokens.md](.archive/045-workload-tokens.md) | complete | The workload token minted at create, projected by every driver, rotated at two thirds of its life, revoked by jti |
+| [048-release-and-check.md](.archive/048-release-and-check.md) | complete | The v* tag pipeline, the deploy tree an operator installs from, the install walk, and `cellad check` |
