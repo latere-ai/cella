@@ -98,6 +98,14 @@ type Egress struct {
 	// variables, so the workload trusts that door and nothing else.
 	CAPEM string `json:"caPem,omitempty"`
 }
+
+// IsZero reports a boundary with nothing in it, which is what a prewarmed
+// entry runs under: no rule to enforce, no door to point at, no credential.
+func (e Egress) IsZero() bool {
+	return e.Mode == "" && len(e.AllowedHosts) == 0 && len(e.DeniedHosts) == 0 &&
+		e.ProxyAddr == "" && e.ReverseAddr == "" && e.Credential == "" && e.CAPEM == ""
+}
+
 type CreateSpec struct {
 	ID, Name, Owner, Image, Workdir string
 	Command, Args                   []string
@@ -187,6 +195,22 @@ type Change struct {
 	// exclusive act. It is exclusive of every other field of this type:
 	// adoption writes the whole record and one call is one act.
 	Adopt *Adoption
+}
+
+// CheckPrewarm refuses a create spec that asks for a pool entry and for one
+// caller's sandbox at once. An entry has no owner, no name, no identity and no
+// boundary until it is adopted, and it runs the image's own entrypoint, so a
+// spec that carries any of those is a caller's create with a flag set by
+// mistake rather than a prewarm.
+func (s CreateSpec) CheckPrewarm() error {
+	if !s.Prewarm {
+		return nil
+	}
+	if s.Owner != "" || s.Name != "" || len(s.Command) > 0 || len(s.Args) > 0 ||
+		len(s.Token) > 0 || !s.Egress.IsZero() || len(s.Env) > 0 {
+		return fmt.Errorf("%w: a prewarmed entry carries no owner, name, command, identity, boundary or environment", ErrInvalid)
+	}
+	return nil
 }
 
 // Adoption returns the adoption a change carries, if any, and refuses a change
