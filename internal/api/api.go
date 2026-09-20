@@ -571,6 +571,9 @@ func errorEnvelope(err error, requestID string) (int, httpjson.Error) {
 	case "capability_unsupported":
 		status = 422
 		message = "The environment cannot provide this."
+	case "environment_mismatch":
+		status = 422
+		message = "This worker does not match the environment it registered on."
 	case "invalid_field":
 		status = 400
 		message = "A field has a value it cannot take."

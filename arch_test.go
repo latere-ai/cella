@@ -50,6 +50,12 @@ var engines = map[string][]string{
 	"./runtime/podman": {module + "/runtime/internal/fileshell"},
 	"./controller":     nil,
 	"./egress":         nil, // the boundary compiler computes over the contract types
+	// The remote driver and the worker role are the two halves of the seam
+	// of spec 021. Neither opens a connection of its own: the driver holds a
+	// transport its caller supplies, and the worker's own socket is the
+	// WebSocket the control plane's streams already admit. Neither reaches
+	// the Postgres driver, because a data plane holds no store.
+	"./runtime/remote": nil,
 }
 
 // TestRootPackagesDialNothing reads each package's whole build list, not its

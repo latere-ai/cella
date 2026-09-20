@@ -336,6 +336,9 @@ func startPlaneWith(t *testing.T, proxyAddr, reverseAddr string, extra map[strin
 		"CELLA_GATEWAY":             proxyAddr,
 		"CELLA_GATEWAY_REVERSE":     reverseAddr,
 		"CELLA_EGRESS_ACK_TIMEOUT":  "10s",
+		// The caller is an administrator, because minting an environment
+		// key is an admin's act under the owner policy of spec 006.
+		"CELLA_ADMIN_SUBJECTS": issuer.URL() + "|alice",
 	}
 	maps.Copy(e, extra)
 	var out, errOut syncBuffer
@@ -384,16 +387,26 @@ func newSigner(t *testing.T, key *rsa.PrivateKey, issuer string) *auth.Signer {
 	return signer
 }
 
-// environmentKey mints what the gateway authenticates its one stream with.
-// The keys route of the Environment kind is spec 021's; a test mints with
-// the same signer the control plane verifies against.
+// environmentKey mints what the gateway authenticates its one stream with,
+// through the route an operator uses: POST /v1/environments/{id}/keys, shown
+// once, under the environment.key action of spec 006 (spec 021).
 func (p *plane) environmentKey(t *testing.T) string {
 	t.Helper()
-	token, err := p.signer.MintEnvironmentKey("default", time.Hour)
-	if err != nil {
-		t.Fatal(err)
+	status, body := p.do(t, http.MethodPost, "/v1/environments/default/keys", nil)
+	if status != http.StatusCreated {
+		t.Fatalf("the key mint answered %d: %s", status, body)
 	}
-	return token.Value
+	var minted struct {
+		Token string `json:"token"`
+		JTI   string `json:"jti"`
+	}
+	if err := json.Unmarshal([]byte(body), &minted); err != nil {
+		t.Fatalf("the mint's answer did not decode: %v", err)
+	}
+	if minted.Token == "" || minted.JTI == "" {
+		t.Fatalf("the mint returned %s", body)
+	}
+	return minted.Token
 }
 
 // create applies a manifest whose only interesting field is its boundary and

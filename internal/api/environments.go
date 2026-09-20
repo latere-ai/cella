@@ -134,7 +134,7 @@ func (h *handler) environment(nameOrID string) (v1.Environment, error) {
 	if name != h.Controller.Environment() {
 		return v1.Environment{}, &manifest.Error{Code: "not_found", Detail: "no environment of that name"}
 	}
-	return v1.Environment{
+	obj := v1.Environment{
 		APIVersion: v1.APIVersion,
 		Kind:       v1.KindEnvironment,
 		Metadata:   v1.Metadata{Name: name},
@@ -149,7 +149,26 @@ func (h *handler) environment(nameOrID string) (v1.Environment, error) {
 			Isolation:    h.Controller.Isolation(),
 			Capabilities: h.Controller.Capabilities(),
 		},
-	}, nil
+	}
+	// The workers holding a stream open are what a self-hosted environment's
+	// phase is computed from, and what an operator reads to see that the
+	// data plane arrived. A worker that registered and dropped its stream is
+	// not counted: the environment cannot be placed on through it.
+	if h.Workers != nil {
+		for _, w := range h.Workers.Workers(environmentSubject(obj)) {
+			if !w.Connected {
+				continue
+			}
+			obj.Status.Workers++
+			if w.LastHeartbeat.After(obj.Status.LastHeartbeat) {
+				obj.Status.LastHeartbeat = w.LastHeartbeat
+			}
+		}
+	}
+	if h.Egress != nil {
+		obj.Status.Gateways = h.Egress.Connected()
+	}
+	return obj, nil
 }
 
 // environmentSubject is what an environment key names in its sub. It is the
