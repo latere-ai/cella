@@ -146,19 +146,26 @@ curl -fsS "$CELLA_INSTALL_URL/version"
 ```sh
 curl -fsS -X POST "$CELLA_INSTALL_URL/v1/sandboxes" \
   -H "Authorization: Bearer $CELLA_INSTALL_TOKEN" \
-  -H 'Content-Type: application/yaml' \
-  --data-binary @- <<'YAML' | tee sandbox.json
-apiVersion: cella.latere.ai/v1
-kind: Sandbox
-metadata:
-  name: first
-spec:
-  image: docker.io/library/alpine:3.22
-  command: ["sleep", "3600"]
-YAML
+  -H 'Content-Type: application/json' \
+  -d '{
+    "apiVersion": "cella.latere.ai/v1beta1",
+    "kind": "Sandbox",
+    "metadata": {"name": "first"},
+    "spec": {
+      "image": "docker.io/library/alpine:3.22",
+      "command": ["sleep", "3600"]
+    }
+  }' | tee sandbox.json
 ```
 
-Run something inside it, and then delete it:
+The body is JSON: `application/json` is the one media type the route
+takes today, and `apiVersion` other than `cella.latere.ai/v1beta1` is
+refused with `unsupported_version`. The response is the resolved
+manifest, with the defaults the installation applied and a `status` that
+carries the id and the phase.
+
+A sandbox is addressed by the name its owner gave it, or by the id in
+`status.id`. Run something inside it, and then delete it:
 
 ```sh
 curl -fsS -X POST "$CELLA_INSTALL_URL/v1/sandboxes/first/exec?wait=1" \
