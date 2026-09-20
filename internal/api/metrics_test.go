@@ -315,9 +315,8 @@ func TestOneLogLinePerStreamAndNonePerFrame(t *testing.T) {
 // client has seen the last frame, so the sink is synchronised and the case
 // waits for the line rather than racing it.
 type logSink struct {
-	mu    sync.Mutex
-	b     bytes.Buffer
-	reset int
+	mu sync.Mutex
+	b  bytes.Buffer
 }
 
 func (s *logSink) Write(p []byte) (int, error) {
