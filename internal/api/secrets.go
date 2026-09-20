@@ -233,9 +233,12 @@ func (h *handler) secretLookup(r *http.Request) manifest.SecretFunc {
 }
 
 // manifestActor is who is applying, as the manifest package reads it: the
-// rendered subject, and whether the bearer was a sandbox's own token.
+// rendered subject, the two halves it was rendered from, and whether the
+// bearer was a sandbox's own token. The halves are the verified claims and
+// not the rendered subject taken apart, so the admission step of spec 007
+// and the authorizer of spec 006 are handed the same identity.
 func manifestActor(r *http.Request) manifest.Actor {
 	c := caller(r)
 	_, workload := c.Sandbox()
-	return manifest.Actor{Subject: c.Subject, Workload: workload}
+	return manifest.Actor{Subject: c.Subject, Issuer: c.Issuer, Sub: c.Sub, Workload: workload}
 }

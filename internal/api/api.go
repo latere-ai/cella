@@ -50,6 +50,14 @@ type Options struct {
 	// Events is design 009's emitter. Nil journals no operation; the
 	// mutations below it are journaled by the store either way.
 	Events *events.Emitter
+	// Admit is stage 3 of a resolve, design 007's admission step. Nil is
+	// the identity: the operator configured no endpoint.
+	Admit manifest.AdmitFunc
+	// Defaults are the values an absent manifest field takes, from the
+	// operator's configuration. Only the image is read from a variable
+	// today; the six figures of design 007 reach the resolver the same
+	// way once they are loaded.
+	Defaults manifest.Defaults
 }
 type handler struct {
 	Options
@@ -152,6 +160,39 @@ func (h *handler) decide(r *http.Request, action string, res authz.Resource) (au
 func (h *handler) readBody(w http.ResponseWriter, r *http.Request) ([]byte, error) {
 	return io.ReadAll(http.MaxBytesReader(w, r.Body, h.MaxBodyBytes))
 }
+
+// resolveOptions is what one apply hands the resolver: the environment
+// this node drives, the secrets this caller may mount, the operator's
+// defaults, and the admission step of design 007 with everything that
+// step is told about the caller. The request id is the one this response
+// already carries, so a refusal at the endpoint and the error a caller
+// reads name the same apply.
+func (h *handler) resolveOptions(w http.ResponseWriter, r *http.Request) (manifest.Options, error) {
+	c := caller(r)
+	o := manifest.NativeOptions(h.Controller.Environment(), h.secretLookup(r))
+	o.Actor = manifestActor(r)
+	o.Claims = c.Claims
+	o.Defaults = h.Defaults
+	o.Admit = h.Admit
+	o.RequestID = w.Header().Get("X-Request-ID")
+	id, workload := c.Sandbox()
+	if h.Admit == nil || !workload {
+		return o, nil
+	}
+	// A sandbox applying through its own token is named as one. An
+	// admission step that will not grant a workload the authority of its
+	// owner cannot see the difference from the subject alone, so a calling
+	// sandbox this node cannot read is a refusal and not an apply the
+	// endpoint decides on as if a person had made it.
+	calling, err := h.Controller.Get(r.Context(), id, c.Subject)
+	if err != nil {
+		return o, err
+	}
+	status := calling.Status
+	o.Workload = &status
+	return o, nil
+}
+
 func (h *handler) create(w http.ResponseWriter, r *http.Request) {
 	body, err := h.readBody(w, r)
 	if err != nil {
@@ -163,8 +204,12 @@ func (h *handler) create(w http.ResponseWriter, r *http.Request) {
 		respondError(w, err)
 		return
 	}
-	obj, _, err = manifest.ResolveNativeWith(r.Context(), obj,
-		manifest.NativeOptions(h.Controller.Environment(), h.secretLookup(r)))
+	options, err := h.resolveOptions(w, r)
+	if err != nil {
+		respondError(w, err)
+		return
+	}
+	obj, _, err = manifest.ResolveNativeWith(r.Context(), obj, options)
 	if err != nil {
 		respondError(w, err)
 		return
@@ -532,6 +577,9 @@ func errorEnvelope(err error, requestID string) (int, httpjson.Error) {
 	case "admission_refused":
 		status = 422
 		message = "The request was refused by this server's policy."
+	case "admission_unavailable":
+		status = 503
+		message = "The policy service is unavailable; retry shortly."
 	case "missing_field":
 		status = 400
 		message = "A required field is missing."
