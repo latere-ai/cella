@@ -40,9 +40,13 @@ func (d *Driver) Create(ctx context.Context, s driver.CreateSpec) (driver.Ref, e
 	if err != nil {
 		return driver.Ref{}, err
 	}
-	pod, err := d.pod(s, now)
+	token := len(s.Token) > 0
+	pod, err := d.pod(s, now, token)
 	if err != nil {
 		return driver.Ref{}, err
+	}
+	if token {
+		pvc.Annotations[annToken] = "true"
 	}
 	if _, err := d.cs.CoreV1().PersistentVolumeClaims(d.opts.Namespace).Create(ctx, pvc, metav1.CreateOptions{}); err != nil {
 		return driver.Ref{}, mapErr(err, "claim create")
@@ -51,6 +55,15 @@ func (d *Driver) Create(ctx context.Context, s driver.CreateSpec) (driver.Ref, e
 	// the caller hung up, so it drops the cancellation it inherited: a
 	// cancelled context makes each cleanup a no-op and leaks both objects.
 	rollback := func() { _ = d.remove(context.WithoutCancel(ctx), s.ID) }
+	// The identity is in the cluster before the Pod that mounts it, so the
+	// workload's first read finds the token rather than an empty directory
+	// the kubelet fills a moment later (spec 006).
+	if token {
+		if err := d.putToken(ctx, s.ID, s.Token); err != nil {
+			rollback()
+			return driver.Ref{}, err
+		}
+	}
 	if _, err := d.cs.CoreV1().Pods(d.opts.Namespace).Create(ctx, pod, metav1.CreateOptions{}); err != nil {
 		rollback()
 		return driver.Ref{}, mapErr(err, "pod create")
@@ -88,7 +101,7 @@ func (d *Driver) Start(ctx context.Context, id string) error {
 		return err
 	}
 	started := d.opts.Now().UTC()
-	fresh, err := d.pod(spec, started)
+	fresh, err := d.pod(spec, started, pvc.Annotations[annToken] == "true")
 	if err != nil {
 		return err
 	}
@@ -139,6 +152,9 @@ func (d *Driver) remove(ctx context.Context, id string) error {
 	if err := d.deletePod(ctx, id); err != nil {
 		return err
 	}
+	if err := d.deleteToken(ctx, id); err != nil {
+		return err
+	}
 	claims := d.cs.CoreV1().PersistentVolumeClaims(d.opts.Namespace)
 	if err := claims.Delete(ctx, objectName(id), *d.deleteOptions()); err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("claim delete: %w", err)
@@ -178,10 +194,25 @@ func (d *Driver) Update(ctx context.Context, id string, c driver.Change) error {
 	if c.Lifecycle != nil && (c.Lifecycle.TTL < 0 || c.Lifecycle.AutoStop < 0 || c.Lifecycle.AutoDelete < 0) {
 		return fmt.Errorf("%w: a negative lifecycle duration", driver.ErrInvalid)
 	}
+	// The token is written into the Secret the Pod already projects, not
+	// into the claim's record: the kubelet re-syncs the file and the
+	// workload keeps running. A sandbox that carried none takes one here
+	// and mounts it at its next start.
+	if len(c.Token) > 0 {
+		if _, err := d.getClaim(ctx, id); err != nil {
+			return err
+		}
+		if err := d.putToken(ctx, id, c.Token); err != nil {
+			return err
+		}
+	}
 	return d.apply(ctx, id, func(pvc *corev1.PersistentVolumeClaim) (change, error) {
 		spec, err := specOf(pvc)
 		if err != nil {
 			return change{}, err
+		}
+		if len(c.Token) > 0 && pvc.Annotations[annToken] != "true" {
+			return change{set: map[string]string{annToken: "true"}}, nil
 		}
 		if c.Labels != nil {
 			spec.Labels = maps.Clone(*c.Labels)
