@@ -308,10 +308,22 @@ func (e *Env) secret(name, value string) []byte {
 }
 
 // applySecret writes one secret and records it for the run's cleanup.
+//
+// A server that answers capability_unsupported is one whose installation
+// holds no key to seal a value under, which design 018 allows: the case is
+// skipped with what the server said, and not failed. Every other refusal is
+// a disagreement.
 func (e *Env) applySecret(ctx context.Context, name, value string) (*exchange, error) {
 	x, err := e.caller.put(ctx, "/v1/secrets/"+name, e.secret(name, value), "application/json")
 	if err != nil {
 		return nil, err
+	}
+	if x.Status == http.StatusUnprocessableEntity {
+		var env envelope
+		if json.Unmarshal(x.Body, &env) == nil && env.Error.Code == "capability_unsupported" {
+			detail, _ := env.Error.Details["detail"].(string)
+			return x, skipf("this server stores no secret value: %s", cmpOr(detail, env.Error.Message))
+		}
 	}
 	if x.Status != http.StatusCreated && x.Status != http.StatusOK {
 		return x, x.disagree("201 from a secret that did not exist", fmt.Sprintf("status %d", x.Status))

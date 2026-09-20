@@ -97,6 +97,15 @@ jobs:
           set -o pipefail
           go test -tags=e2e -count=1 -v -run '^TestRunBootstrap$' ./test/run/... 2>&1 | tee run.txt
           grep -q -- '--- PASS: TestRunBootstrap' run.txt
+      # The contract of spec 015 against that same stack: every case the
+      # native environment allows, with the gaps this server declares in
+      # test/conformance/known.json read as declarations and not as passes.
+      - name: The conformance suite against the development stack
+        shell: bash
+        run: |
+          set -o pipefail
+          go test -tags=e2e -count=1 -v -timeout 20m -run '^TestRunConformance$' ./test/run/... 2>&1 | tee conformance-run.txt
+          grep -q -- '--- PASS: TestRunConformance' conformance-run.txt
       - uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2 # v1.15.0
         with:
           install_only: true
@@ -119,6 +128,18 @@ jobs:
           set -o pipefail
           go test -tags=e2e -count=1 -v -timeout 30m -run '^TestCluster' ./test/kind/... 2>&1 | tee kind.txt
           grep -q -- '--- PASS: TestClusterLifecycle' kind.txt
+      # The contract of spec 015 against the cluster: the same cases, on the
+      # Kubernetes environment, with the subjects minted at the stub issuer's
+      # node port and the capabilities that driver declares.
+      - name: The conformance suite against the kind stack
+        shell: bash
+        run: |
+          set -o pipefail
+          go test -tags=e2e -count=1 -v -timeout 30m -run '^TestContract$' ./test/conformance -args \
+            -url "${CELLA_TEST_URL}" -issuer http://localhost:30081 -sink "${CELLA_TEST_SINK}" \
+            -image docker.io/library/alpine:3.22 -capabilities files,pool \
+            -known test/conformance/known.json 2>&1 | tee conformance-kind.txt
+          grep -q -- '--- PASS: TestContract' conformance-kind.txt
       # The document is a program, and this is the run that proves it: the
       # same blocks an operator pastes, against the cluster above, with the
       # stub issuer as this installation's issuer.
