@@ -1,0 +1,126 @@
+# SPDX-FileCopyrightText: 2026 Latere AI
+# SPDX-License-Identifier: Apache-2.0
+#
+# `cellad check` as a Job: one line per requirement of this installation,
+# exit 1 on any failure (spec 014). It runs with the Deployment's own
+# configuration, in the Deployment's own namespace and under the
+# Deployment's own account, so what it answers is what the control plane
+# would meet.
+#
+# It is a Job and not an init container of the Deployment on purpose. An
+# init container would make every optional dependency mandatory for a
+# restart: a sink that is briefly down would keep the Pod from starting,
+# where `cellad serve` starts and journals. The Job is the pre-flight an
+# operator runs before the first manifest and after a change.
+#
+# A Job's pod template is immutable, so an apply that would change this
+# one, an upgrade to a new image most of all, fails until the finished Job
+# is gone. ttlSecondsAfterFinished removes it ten minutes after it ends;
+# inside that window, `kubectl delete job cellad-check` first.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cellad-check
+  labels:
+    app.kubernetes.io/name: cellad
+    app.kubernetes.io/component: check
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cellad
+        app.kubernetes.io/component: check
+    spec:
+      restartPolicy: Never
+      serviceAccountName: cellad
+      automountServiceAccountToken: true
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: cellad
+          image: cellad
+          args: ["check"]
+          env:
+            - name: CELLA_RUNTIME
+              value: "k8s"
+            - name: CELLA_K8S_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: CELLA_OIDC_AUDIENCE
+              value: "cella"
+            - name: CELLA_PUBLIC_ADDR
+              value: ":8080"
+            - name: CELLA_INTERNAL_ADDR
+              value: ":8081"
+            - name: CELLA_DATA_DIR
+              value: "/var/lib/cella"
+            - name: CELLA_TOKEN_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: cellad-token
+                  key: CELLA_TOKEN_KEY
+            - name: CELLA_AUTHORIZER_URL
+              valueFrom:
+                secretKeyRef:
+                  name: cellad-authorizer
+                  key: CELLA_AUTHORIZER_URL
+                  optional: true
+            - name: CELLA_AUTHORIZER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: cellad-authorizer
+                  key: CELLA_AUTHORIZER_TOKEN
+                  optional: true
+            - name: CELLA_EVENTS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: cellad-events
+                  key: CELLA_EVENTS_URL
+                  optional: true
+            - name: CELLA_EVENTS_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: cellad-events
+                  key: CELLA_EVENTS_SECRET
+                  optional: true
+            - name: CELLA_DB_URL
+              valueFrom:
+                secretKeyRef:
+                  name: cellad-db
+                  key: CELLA_DB_URL
+                  optional: true
+            - name: CELLA_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: cellad-db
+                  key: CELLA_SECRET_KEY
+                  optional: true
+          envFrom:
+            - configMapRef:
+                name: cellad
+          resources:
+            requests:
+              cpu: 20m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/cella
+      volumes:
+        - name: data
+          emptyDir: {}

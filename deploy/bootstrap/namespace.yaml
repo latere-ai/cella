@@ -1,0 +1,27 @@
+# SPDX-FileCopyrightText: 2026 Latere AI
+# SPDX-License-Identifier: Apache-2.0
+#
+# The namespace, applied once by hand before the overlay. It is here and
+# not in the base because a namespace outlives every apply of what is in
+# it: an overlay that owned the namespace would delete the sandboxes with
+# the control plane on a `kubectl delete -k`.
+#
+# Change `cella` to the namespace the overlay names. The two must agree:
+# the Role of the base grants in the namespace the overlay sets, and the
+# Deployment reads that namespace from the downward API and writes sandbox
+# Pods and claims there.
+#
+# The pod security level is baseline and not restricted. The control plane
+# meets restricted; a sandbox Pod does not always, because a manifest may
+# ask for a user the level refuses. An installation that keeps its
+# workloads in a namespace of their own sets restricted on the control
+# plane's and decides the workloads' level on its own.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cella
+  labels:
+    app.kubernetes.io/name: cellad
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

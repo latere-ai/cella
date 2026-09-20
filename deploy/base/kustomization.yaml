@@ -1,0 +1,32 @@
+# SPDX-FileCopyrightText: 2026 Latere AI
+# SPDX-License-Identifier: Apache-2.0
+#
+# The base of every installation (spec 014): the control plane's
+# Deployment with the hardening of spec 013, its Service, the account and
+# the Role the Kubernetes driver of spec 004 needs, the network policy
+# around cellad itself, the disruption budget, and the one-shot Job that
+# runs `cellad check`.
+#
+# It names no namespace, so an overlay names one, and no image registry:
+# the reference is the placeholder `cellad`, which an overlay or the
+# release pipeline points at the published image with an `images` entry.
+# The deploy archive of a release carries this file with that entry
+# appended and the image pinned to the tag by digest.
+#
+# Every installation value comes from the ConfigMap `cellad`, which the
+# overlay carries, and every credential from the Secrets of
+# deploy/bootstrap, which an operator applies once by hand.
+#
+# prometheusrule.yaml is beside this file and not in it: the kind is the
+# Prometheus Operator's custom resource, and a cluster without that
+# operator refuses the apply.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - serviceaccount.yaml
+  - rbac.yaml
+  - deployment.yaml
+  - service.yaml
+  - networkpolicy.yaml
+  - pdb.yaml
+  - check-job.yaml

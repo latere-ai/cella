@@ -1,0 +1,18 @@
+# SPDX-FileCopyrightText: 2026 Latere AI
+# SPDX-License-Identifier: Apache-2.0
+#
+# One replica holds the writer's lease, so the budget is written as what
+# may go rather than what must stay: minAvailable 1 over a single replica
+# refuses every node drain, which is an operator holding a cluster upgrade
+# open on a control plane that is designed to be restarted.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: cellad
+  labels:
+    app.kubernetes.io/name: cellad
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cellad

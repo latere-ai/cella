@@ -1,0 +1,42 @@
+# SPDX-FileCopyrightText: 2026 Latere AI
+# SPDX-License-Identifier: Apache-2.0
+#
+# Everything this installation chooses. The credentials are not here: they
+# are the Secrets of deploy/bootstrap, and the Deployment reads each as an
+# optional key, so a dependency is turned on by applying its Secret.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cellad
+data:
+  # The host the ingress serves, which is also the iss of every token
+  # cellad mints. It must equal what callers dial, or a token this control
+  # plane signed is refused by the service that verifies it.
+  CELLA_PUBLIC_URL: "https://cella.example.com"
+  CELLA_OIDC_ISSUERS: "https://issuer.example.com"
+  CELLA_DEFAULT_ENVIRONMENT: "default"
+  # The two doors of the egress gateway as a sandbox of this environment
+  # dials them (spec 018). The gateway is `cellad egress`, the second role
+  # of the same image, deployed beside this one; with neither set, a
+  # sandbox whose manifest declares a boundary is refused at create.
+  CELLA_GATEWAY: "cellad-egress.cella.svc.cluster.local:3128"
+  CELLA_GATEWAY_REVERSE: "cellad-egress.cella.svc.cluster.local:8080"
+  # The pool one replica opens on the database. A shared cluster has a
+  # connection ceiling, and one replica does not hold it.
+  CELLA_DB_MAX_CONNS: "8"
+  # What the Kubernetes driver gives a manifest that names no resources,
+  # and the class the workspace claim is provisioned from. Preflight reads
+  # the class at start, so a misspelling is a start-up failure and not a
+  # claim that never binds.
+  CELLA_K8S_STORAGE_CLASS: "standard"
+  CELLA_K8S_DEFAULT_CPU: "1"
+  CELLA_K8S_DEFAULT_MEMORY: "1Gi"
+  CELLA_K8S_DEFAULT_DISK: "5Gi"
+  # The request as a fraction of the limit, which is how densely idle
+  # sandboxes pack on the pool.
+  CELLA_K8S_CPU_REQUEST_RATIO: "0.1"
+  CELLA_K8S_MEMORY_REQUEST_RATIO: "1"
+  # The ceilings and the defaults a resolved manifest takes (spec 007).
+  CELLA_DEFAULT_AUTOSTOP: "15m"
+  CELLA_DEFAULT_TTL: "24h"
+  CELLA_DEFAULT_AUTODELETE: "72h"

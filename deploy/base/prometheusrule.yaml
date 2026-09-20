@@ -1,0 +1,78 @@
+# SPDX-FileCopyrightText: 2026 Latere AI
+# SPDX-License-Identifier: Apache-2.0
+#
+# The alert rules, beside the kustomization and outside it: PrometheusRule
+# is the Prometheus Operator's custom resource, and a cluster without that
+# operator refuses the apply. An installation that has the operator applies
+# this file on its own, after setting the namespace and whatever label its
+# Prometheus selects rules by.
+#
+#	kubectl -n <namespace> apply -f prometheusrule.yaml
+#
+# These are templates and not a rule set that fires today. The metric names
+# are the ones spec 017 fixes, and spec 017 is not built: nothing in this
+# tree exports them yet, so every expression below evaluates over an empty
+# series and no alert can raise. The file exists so an installation has the
+# shape to edit and so the names are decided in one place; the slice that
+# builds the registry of spec 017 replaces the thresholds with figures its
+# own dashboards justify.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: cellad
+  labels:
+    app.kubernetes.io/name: cellad
+spec:
+  groups:
+    - name: cellad.availability
+      rules:
+        # The control plane is one replica by design, so its absence is an
+        # outage rather than reduced capacity.
+        - alert: CelladDown
+          expr: up{job="cellad"} == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "cellad is not answering its metrics endpoint"
+            description: "No sandbox can be created, read or stopped while this holds."
+        - alert: CelladNotReady
+          expr: cella_ready == 0
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "cellad is up and not ready"
+            description: "One readiness check is failing; /readyz on the internal listener names which."
+    - name: cellad.dependencies
+      rules:
+        # An authorizer that does not answer refuses every request, which
+        # is the design and is still an outage of the installation.
+        - alert: CelladAuthorizerUnavailable
+          expr: rate(cella_authorizer_calls_total{result="unavailable"}[5m]) > 0
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "the authorization endpoint is not answering"
+            description: "Every request is refused while this holds. cellad check names the endpoint."
+        # A record the sink has not taken is retried for
+        # CELLA_EVENTS_RETRY_WINDOW and then dropped and counted.
+        - alert: CelladEventsUndelivered
+          expr: cella_events_pending > 0
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "records are queued for the event sink"
+            description: "The journal holds them; they are dropped when the retry window passes."
+    - name: cellad.workloads
+      rules:
+        - alert: CelladSandboxesFailing
+          expr: rate(cella_sandbox_phase_total{phase="Failed"}[15m]) > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "sandboxes are reaching the Failed phase"
+            description: "status.reason on each sandbox says why; the backend may be out of capacity."

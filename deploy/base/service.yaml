@@ -1,0 +1,20 @@
+# SPDX-FileCopyrightText: 2026 Latere AI
+# SPDX-License-Identifier: Apache-2.0
+#
+# The public listener: /v1, the key set, and the three probes an ingress
+# reaches. The internal listener is the cluster's, for the kubelet's
+# probes and for a metrics scrape, and is not routed here.
+apiVersion: v1
+kind: Service
+metadata:
+  name: cellad
+  labels:
+    app.kubernetes.io/name: cellad
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: cellad
+  ports:
+    - name: public
+      port: 8080
+      targetPort: public

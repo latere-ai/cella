@@ -1,0 +1,17 @@
+# SPDX-FileCopyrightText: 2026 Latere AI
+# SPDX-License-Identifier: Apache-2.0
+#
+# kind publishes a node port to the host, so the public listener is
+# reachable from the machine the cluster runs on without an ingress
+# controller and without a port forward.
+apiVersion: v1
+kind: Service
+metadata:
+  name: cellad
+spec:
+  type: NodePort
+  ports:
+    - name: public
+      port: 8080
+      targetPort: public
+      nodePort: 30080

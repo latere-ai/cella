@@ -1,0 +1,181 @@
+# SPDX-FileCopyrightText: 2026 Latere AI
+# SPDX-License-Identifier: Apache-2.0
+#
+# The control plane. One replica, because the store of spec 010 elects one
+# writer through its leases table: a second replica takes no lease, runs no
+# reaper, and spends connections against the ceiling the database shares.
+# Recreate rather than RollingUpdate for the same reason, and because an
+# installation with no database keeps its desired state on this Pod's own
+# disk, where two processes must never meet.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cellad
+  labels:
+    app.kubernetes.io/name: cellad
+    app.kubernetes.io/component: control-plane
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cellad
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cellad
+        app.kubernetes.io/component: control-plane
+    spec:
+      serviceAccountName: cellad
+      automountServiceAccountToken: true
+      # Spec 002's shutdown: readiness answers 503 at once, a 3 second
+      # drain delay, then 60 seconds of grace for the open streams.
+      terminationGracePeriodSeconds: 90
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: cellad
+          # The placeholder the overlay or the release pipeline points at
+          # the published image with an `images` entry. No registry is
+          # written here: a release publishes under the namespace of the
+          # account that cut the tag.
+          image: cellad
+          args: ["serve"]
+          env:
+            # The backend of the default environment, and the namespace it
+            # writes sandbox Pods and claims in. The namespace is this
+            # Pod's own, read from the downward API, so the driver writes
+            # where the Role of rbac.yaml grants and never in the driver's
+            # `cella` default. An installation that separates the control
+            # plane from the workloads sets the value directly and grants
+            # the Role in that namespace.
+            - name: CELLA_RUNTIME
+              value: "k8s"
+            - name: CELLA_K8S_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            # The audience this control plane answers to. Every token it
+            # accepts carries it, and every token it mints is addressed to
+            # it. An installation whose callers hold tokens addressed to a
+            # second name lists both, the core's own first.
+            - name: CELLA_OIDC_AUDIENCE
+              value: "cella"
+            - name: CELLA_PUBLIC_ADDR
+              value: ":8080"
+            - name: CELLA_INTERNAL_ADDR
+              value: ":8081"
+            # The root filesystem is read only, so the directory cellad
+            # keeps local state on is an emptyDir. Nothing durable lives
+            # there: desired state is the store's.
+            - name: CELLA_DATA_DIR
+              value: "/var/lib/cella"
+            # The signing key of spec 006, required in every mode: cellad
+            # signs the identity of every sandbox with it. One or two PEM
+            # blocks, so a rotation is two applies and no outage.
+            - name: CELLA_TOKEN_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: cellad-token
+                  key: CELLA_TOKEN_KEY
+            # The authorization endpoint of spec 006 and the bearer cellad
+            # sends it. Optional: with no Secret the built-in owner policy
+            # decides. A URL without its bearer is a start-up failure, so
+            # the pair lives in one Secret and rotates together.
+            - name: CELLA_AUTHORIZER_URL
+              valueFrom:
+                secretKeyRef:
+                  name: cellad-authorizer
+                  key: CELLA_AUTHORIZER_URL
+                  optional: true
+            - name: CELLA_AUTHORIZER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: cellad-authorizer
+                  key: CELLA_AUTHORIZER_TOKEN
+                  optional: true
+            # The event sink of spec 009 and the secret that signs each
+            # delivery. Optional: with no Secret the journal still holds
+            # every record and nothing is delivered.
+            - name: CELLA_EVENTS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: cellad-events
+                  key: CELLA_EVENTS_URL
+                  optional: true
+            - name: CELLA_EVENTS_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: cellad-events
+                  key: CELLA_EVENTS_SECRET
+                  optional: true
+            # The store of spec 010 and the key every secret value's data
+            # key is sealed under. Optional: with no Secret every state is
+            # in memory, one replica, and recovery is off.
+            - name: CELLA_DB_URL
+              valueFrom:
+                secretKeyRef:
+                  name: cellad-db
+                  key: CELLA_DB_URL
+                  optional: true
+            - name: CELLA_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: cellad-db
+                  key: CELLA_SECRET_KEY
+                  optional: true
+          # Everything an installation chooses: the public URL, the
+          # issuers, the environment's name, the gateway's doors, and the
+          # driver's own knobs. The overlay carries the ConfigMap; a
+          # missing one is a Pod that does not start, which is the right
+          # answer for a control plane with no issuer.
+          envFrom:
+            - configMapRef:
+                name: cellad
+          ports:
+            - name: public
+              containerPort: 8080
+            - name: internal
+              containerPort: 8081
+          # The probes of spec 002 on the internal listener. They are
+          # separate on purpose: a dependency outage takes the Pod out of
+          # rotation and must not restart it.
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: internal
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: internal
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          # The control plane's own confinement, which is not the sandbox
+          # baseline of spec 013: this container mounts a service account
+          # token and reaches the API server, and a sandbox does neither.
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/cella
+      volumes:
+        - name: data
+          emptyDir: {}
