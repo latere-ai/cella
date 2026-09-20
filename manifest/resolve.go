@@ -33,11 +33,17 @@ type Actor struct {
 // returns ErrNotFound for an object that does not exist and for one the
 // authorizer refuses, so existence does not leak, and any other error when it
 // cannot decide. The empty environment name asks for the default environment.
-// Secret and Volume join this interface with the manifest fields that name
-// them.
+// Volume joins this interface with the manifest field that names it.
 type Lookup interface {
 	Environment(ctx context.Context, name string) (*v1.Environment, error)
+	// Secret answers a mount by name among the actor's own or by sec_ id. A
+	// Secret comes back without spec.value: a read never returns one.
+	Secret(ctx context.Context, nameOrID string) (*v1.Secret, error)
 }
+
+// SecretFunc is the secret half of a Lookup, for a caller that composes one
+// out of a fixed environment and a store.
+type SecretFunc func(ctx context.Context, nameOrID string) (*v1.Secret, error)
 
 // ErrNotFound is a Lookup's answer for an object that does not exist or that
 // the actor may not use.
@@ -95,7 +101,10 @@ type Options struct {
 // Resolved is a fully defaulted manifest and what the environment could not
 // honour.
 type Resolved struct {
-	Sandbox  v1.Sandbox // spec and metadata fully resolved; status empty but warnings
+	Sandbox v1.Sandbox // spec and metadata fully resolved; status empty but warnings
+	// Secrets are the objects spec.secrets names, in the manifest's order
+	// and without their values, as the actor's own Lookup answered them.
+	Secrets  []v1.Secret
 	Warnings []string
 }
 
@@ -131,6 +140,10 @@ func Resolve(ctx context.Context, in *v1.Sandbox, o Options) (*Resolved, error) 
 	if err != nil {
 		return nil, err
 	}
+	secrets, err := references(ctx, &obj, o)
+	if err != nil {
+		return nil, err
+	}
 	if err = semantic(&obj, o); err != nil {
 		return nil, err
 	}
@@ -140,7 +153,7 @@ func Resolve(ctx context.Context, in *v1.Sandbox, o Options) (*Resolved, error) 
 	}
 	warnings = append(warnings, admitted...)
 	obj.Status.Warnings = warnings
-	return &Resolved{Sandbox: obj, Warnings: slices.Clone(warnings)}, nil
+	return &Resolved{Sandbox: obj, Secrets: secrets, Warnings: slices.Clone(warnings)}, nil
 }
 
 // defaulting fills every absent field that has a default and resolves the
@@ -176,7 +189,7 @@ func defaulting(ctx context.Context, obj *v1.Sandbox, o Options) (*v1.Environmen
 	if obj.Spec.Workdir == "" {
 		obj.Spec.Workdir = obj.Spec.Workspace.Path
 	}
-	inferEgressMode(&obj.Spec.Network)
+	inferEgressMode(&obj.Spec.Network, len(obj.Spec.Secrets) > 0)
 	if err = validateSpec(obj.Spec); err != nil {
 		return nil, errors.New("manifest: this server's defaults are invalid: " + err.Error())
 	}
@@ -418,8 +431,26 @@ func lookupEnvironment(ctx context.Context, lookup Lookup, name string) (*v1.Env
 
 // FixedEnvironment answers one environment, by its name and by the empty name,
 // which asks for the default environment. A server that serves the Environment
-// kind answers from its store instead.
-func FixedEnvironment(env v1.Environment) Lookup { return fixedEnvironment{env} }
+// kind answers from its store instead. It knows no secret; WithSecrets gives
+// it the half that reads them.
+func FixedEnvironment(env v1.Environment) Lookup { return fixedEnvironment{env: env} }
+
+// WithSecrets is the lookup l with its secret half answered by f. A server
+// composes its own per-request lookup this way: the environment is fixed and
+// the secrets come from the store through the authorizer's mount decision.
+func WithSecrets(l Lookup, f SecretFunc) Lookup { return secretLookup{Lookup: l, secrets: f} }
+
+type secretLookup struct {
+	Lookup
+	secrets SecretFunc
+}
+
+func (s secretLookup) Secret(ctx context.Context, nameOrID string) (*v1.Secret, error) {
+	if s.secrets == nil {
+		return nil, ErrNotFound
+	}
+	return s.secrets(ctx, nameOrID)
+}
 
 type fixedEnvironment struct{ env v1.Environment }
 
@@ -429,6 +460,12 @@ func (f fixedEnvironment) Environment(_ context.Context, name string) (*v1.Envir
 	}
 	env := f.env
 	return &env, nil
+}
+
+// Secret answers nothing: a fixed environment is the whole of what this
+// lookup knows, so a manifest that mounts a secret against it is not_found.
+func (f fixedEnvironment) Secret(context.Context, string) (*v1.Secret, error) {
+	return nil, ErrNotFound
 }
 
 // NativeEnvironment describes the in-process environment the native driver
@@ -448,26 +485,42 @@ func NativeEnvironment(name string) v1.Environment {
 // no operator defaults and no ceilings, and adds the refusals that environment
 // owns: it runs no image and owns the workspace directory.
 func ResolveNative(ctx context.Context, obj v1.Sandbox, environment string) (v1.Sandbox, error) {
-	resolved, err := Resolve(ctx, &obj, Options{Lookup: FixedEnvironment(NativeEnvironment(environment))})
+	out, _, err := ResolveNativeWith(ctx, obj, NativeOptions(environment, nil))
+	return out, err
+}
+
+// NativeOptions are ResolveNative's options, with the secret half of the
+// lookup supplied by the caller. A server passes its own, so a mount reaches
+// the store through the authorizer's decision; a caller with no secrets
+// passes nil and every mount is not_found.
+func NativeOptions(environment string, secrets SecretFunc) Options {
+	return Options{Lookup: WithSecrets(FixedEnvironment(NativeEnvironment(environment)), secrets)}
+}
+
+// ResolveNativeWith is ResolveNative over caller-supplied options. It returns
+// the secrets the manifest mounts beside the resolved manifest, so the
+// controller binds to the objects the resolver already decided on.
+func ResolveNativeWith(ctx context.Context, obj v1.Sandbox, o Options) (v1.Sandbox, []v1.Secret, error) {
+	resolved, err := Resolve(ctx, &obj, o)
 	if err != nil {
-		return obj, err
+		return obj, nil, err
 	}
 	out := resolved.Sandbox
 	if out.Spec.Image != "" {
-		return obj, failAt("capability_unsupported", "spec.image", "Native environments do not run images.")
+		return obj, nil, failAt("capability_unsupported", "spec.image", "Native environments do not run images.")
 	}
 	if len(out.Spec.Command) == 0 && len(out.Spec.Args) > 0 {
-		return obj, failAt("invalid_field", "spec.args", "Arguments need a command on a native environment.")
+		return obj, nil, failAt("invalid_field", "spec.args", "Arguments need a command on a native environment.")
 	}
 	if len(out.Spec.Command) > 0 {
 		if err = ValidateExec(append(slices.Clone(out.Spec.Command), out.Spec.Args...), nil, ""); err != nil {
-			return obj, err
+			return obj, nil, err
 		}
 	}
 	if out.Spec.Workspace.Path != DefaultWorkspacePath || out.Spec.Workdir != DefaultWorkspacePath {
-		return obj, failAt("capability_unsupported", "spec.workspace.path", "Native environments keep the workspace at "+DefaultWorkspacePath+" and start there.")
+		return obj, nil, failAt("capability_unsupported", "spec.workspace.path", "Native environments keep the workspace at "+DefaultWorkspacePath+" and start there.")
 	}
-	return out, nil
+	return out, resolved.Secrets, nil
 }
 
 func clone(obj *v1.Sandbox) v1.Sandbox {
