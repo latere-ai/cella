@@ -274,15 +274,17 @@ worker tier.
 | The binary serves the four roles on the addresses it was given, logs one line per request, and stops on an interrupt | `TestEveryRoleListensAndIsLogged`, `TestARoleWithNoAddressIsNotStarted`, `TestStartRefusesWhatItCannotServe`, `TestTheBinaryServesEveryRoleAndStops`, `TestTheBinaryRefusesWhatItCannotRun` | passing |
 | `make run` needs no `CELLA_OIDC_ISSUERS`, brings both processes up, and a token minted at the stub issuer creates a sandbox | `TestRunBootstrap` behind the `e2e` tag | passing; run here and in the `install` job |
 | The kind overlay renders, and its Deployment and check Job carry the stubs beside `cellad` | `TestOverlaysRender`, `TestTheStubsRunBesideTheControlPlane` | passing |
-| The kind stack runs the lifecycle through the API with a token from the stub issuer, and the check Job is green | `TestClusterLifecycle`, and the document's own `kubectl wait` over the Job in the walk | built; it runs in the `install` job and in the release pipeline. On this machine the cluster did not come up: see below |
+| The kind stack runs the lifecycle through the API with a token from the stub issuer, and the check Job is green | `TestClusterLifecycle`, and the document's own `kubectl wait` over the Job in the walk | built; it runs in the `install` job and in the release pipeline, which is its first execution: see "What was tried on the machine that built this" |
 | The install job walks `docs/install.md` against kind with the stubs on every push | the `install` job of `verify.yml`, and `TestTheInstallJobWalksTheDocument` over it | passing |
 | The release pipeline builds the stubs image, runs the kind stack in `conformance`, and walks the document in `install-release` with no gate variable | `TestTheReleaseRunsTheStubsAndTheStack` | passing |
 | Nothing under `deploy/` or the workflows names a Latere coordinate, and the stubs image is nowhere under `deploy/base` | `TestNoLatereCoordinatesInReleasedArtifacts`, `TestTheStubsImageIsNoInstallation` | passing |
 
 ## Outcome
 
-Built on 2026-09-20 in eleven commits. Coverage: `internal/stubs` 94.9%,
-`cmd/cella-stubs` 97.8%.
+Built on 2026-09-20 in sixteen commits. `go tool lateregate`: 16 gates,
+3 skipped by configuration, `go test -race ./...` included. Coverage:
+`internal/stubs` 94.9%, `cmd/cella-stubs` 97.8%, every measured package above
+90%.
 
 ### What runs, and where
 
@@ -300,6 +302,29 @@ Built on 2026-09-20 in eleven commits. Coverage: `internal/stubs` 94.9%,
 installation applies its own overlay and the walk applies the one with the
 stubs, and its image step no longer reaches for a registry when the image
 is already on the machine.
+
+### What was tried on the machine that built this
+
+The bootstrap tier ran: `TestRunBootstrap` completes in ten seconds with no
+issuer of the developer's own.
+
+The kind stack did not run end to end here, and the two jobs are its first
+execution. What was tried, and what it showed: a cluster from this
+overlay's `kind.yaml` comes up under the podman provider on a laptop, with
+the control plane ready in eighteen seconds. Building the two images in
+that machine's virtual machine, which holds two gigabytes, did not finish:
+the Go compilation inside the image ran for twenty minutes beside the
+cluster and the container engine stopped answering, so the engine was
+stopped and started once to recover it and the cluster was deleted. A
+runner has Docker and the memory for both, which is why the overlay's
+`up.sh` builds from the checkout and the pipeline's jobs pull instead.
+
+Two defects the reading found before either job ran. The document's last
+block deletes the cluster, because that is how an operator removes the
+installation, so the tier runs before the walk and not after it. The base's
+network policy admits ingress on the public port alone, so the overlay
+admits the two stub ports the host reads as well, which a cluster whose
+plugin enforces policy would otherwise drop.
 
 ### Decisions this slice made
 
