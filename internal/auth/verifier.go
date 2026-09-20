@@ -20,6 +20,8 @@ import (
 	"latere.ai/x/pkg/authz"
 	"latere.ai/x/pkg/bearer"
 	"latere.ai/x/pkg/otel"
+
+	v1 "latere.ai/x/cella/manifest/v1"
 )
 
 // The reserved prefixes of spec 006: the sub of a token cellad minted
@@ -46,6 +48,20 @@ type Caller struct {
 	// Minted reports that cellad signed this token: a sandbox's identity
 	// or an environment's key, rather than a person from a listed issuer.
 	Minted bool
+	// sandbox is the calling sandbox as the store holds it, set by the
+	// endpoint that read it. It is the source of the workload member's
+	// tree position and budget, which spec 006 fixes as the store's and
+	// never the token's.
+	sandbox *v1.SandboxStatus
+}
+
+// WithSandbox is the caller with the calling sandbox the control plane
+// read for it. The envelope's workload member carries that status, so an
+// authorizer decides on the tree position and the budget the store holds
+// rather than on a claim the token could have been minted with.
+func (c Caller) WithSandbox(status v1.SandboxStatus) Caller {
+	c.sandbox = &status
+	return c
 }
 
 // Sandbox is the sandbox id a workload token names, and false for every
@@ -55,6 +71,40 @@ func (c Caller) Sandbox() (string, bool) { return c.reserved(SandboxPrefix) }
 // Environment is the environment id an environment key names, and false
 // for every other caller.
 func (c Caller) Environment() (string, bool) { return c.reserved(EnvironmentPrefix) }
+
+// Spawn is the budget a workload token was minted with: the grant at
+// mint and never the balance. It carries no used count, is not re-minted
+// on a spawn, and the control plane gates every spawn on the ledger
+// rather than on this (spec 022). A caller reads it to learn what it was
+// granted without a round trip; nothing here decides on it.
+func (c Caller) Spawn() (Spawn, bool) {
+	if !c.Minted {
+		return Spawn{}, false
+	}
+	claim, held := c.Claims["spawn"].(map[string]any)
+	if !held {
+		return Spawn{}, false
+	}
+	out := Spawn{Mesh: claimString(claim["mesh"])}
+	out.Budget, out.Depth = claimInt(claim["budget"]), claimInt(claim["depth"])
+	return out, true
+}
+
+// claimInt reads a JSON number off a claim. A value of another shape is
+// zero, because a claim the control plane never trusts is not worth an
+// error path of its own.
+func claimInt(value any) int {
+	n, ok := value.(float64)
+	if !ok {
+		return 0
+	}
+	return int(n)
+}
+
+func claimString(value any) string {
+	s, _ := value.(string)
+	return s
+}
 
 func (c Caller) reserved(prefix string) (string, bool) {
 	if !c.Minted {
