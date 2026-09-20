@@ -76,6 +76,10 @@ var cases = []caseDef{
 	{"FilesWhileStopped", filesWhileStopped},
 	{"TouchStampsActivity", touchStampsActivity},
 	{"TokenProjection", tokenProjection},
+	{"PrewarmIsNotOwned", prewarmIsNotOwned},
+	{"AdoptRewritesTheRecord", adoptRewritesTheRecord},
+	{"PrewarmAndAdoptIsExclusive", prewarmAndAdoptIsExclusive},
+	{"AdoptRefusals", adoptRefusals},
 	{"DetachRecovers", detachRecovers},
 }
 
@@ -110,7 +114,7 @@ func declaredWithoutCase(c runtime.Capabilities) []string {
 	for _, f := range []struct {
 		name string
 		on   bool
-	}{{"Egress", len(c.Egress) > 0}, {"Mesh", c.Mesh}, {"Ingress", c.Ingress}, {"Volumes", c.Volumes}, {"Snapshots", c.Snapshots}, {"Dial", c.Dial}, {"Display", c.Display}, {"Input", c.Input}, {"Resize", c.Resize}, {"Pool", c.Pool}} {
+	}{{"Egress", len(c.Egress) > 0}, {"Mesh", c.Mesh}, {"Ingress", c.Ingress}, {"Volumes", c.Volumes}, {"Snapshots", c.Snapshots}, {"Dial", c.Dial}, {"Display", c.Display}, {"Input", c.Input}, {"Resize", c.Resize}} {
 		if f.on {
 			out = append(out, f.name)
 		}
