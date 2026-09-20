@@ -49,7 +49,37 @@ type SandboxSpec struct {
 	Env         map[string]string `json:"env,omitempty"`
 	Secrets     []SecretMount     `json:"secrets,omitempty"`
 	Network     Network           `json:"network,omitzero"`
+	Mesh        Mesh              `json:"mesh,omitzero"`
 	Lifecycle   Lifecycle         `json:"lifecycle,omitzero"`
+}
+
+// Mesh is what the sandbox composes with: the peers it reaches and the
+// sandboxes it may create. The two are apart because spawn rights do not need
+// a mesh and a mesh does not grant them.
+type Mesh struct {
+	// Enabled joins a mesh. It is a root's declaration: a spawned child
+	// inherits its parent's mesh and may not set this field.
+	Enabled bool `json:"enabled,omitempty"`
+	// Spawn is what this sandbox may create through its own workload token.
+	Spawn Spawn `json:"spawn,omitzero"`
+}
+
+// Spawn is the two-axis right to create sandboxes: how many in total, and how
+// many generations below this one. A child's values are at most the parent's
+// remainder minus one on each axis, so the tree is bounded by what the root
+// declared.
+type Spawn struct {
+	Budget int `json:"budget,omitempty"`
+	Depth  int `json:"depth,omitempty"`
+}
+
+// SpawnStatus is the sandbox's position on both axes: the budget it was
+// resolved with, how much of it the ledger has recorded as used, and the
+// generations still open below it.
+type SpawnStatus struct {
+	Budget int `json:"budget"`
+	Used   int `json:"used"`
+	Depth  int `json:"depth"`
 }
 
 // Resources is the compute the sandbox asks for. Disk sizes the workspace.
@@ -76,13 +106,25 @@ type Lifecycle struct {
 	AutoDelete Duration `json:"autoDelete,omitempty"`
 }
 type SandboxStatus struct {
-	ID          string      `json:"id"`
-	Owner       string      `json:"owner"`
-	Environment string      `json:"environment"`
-	Driver      string      `json:"driver"`
-	Isolation   string      `json:"isolation"`
-	Phase       string      `json:"phase"`
-	Conditions  []Condition `json:"conditions,omitempty"`
+	ID          string `json:"id"`
+	Owner       string `json:"owner"`
+	Environment string `json:"environment"`
+	Driver      string `json:"driver"`
+	Isolation   string `json:"isolation"`
+	Phase       string `json:"phase"`
+	// Parent is the spawning sandbox's id and Root the id of the sandbox at
+	// the top of the tree, which is the sandbox's own when a subject applied
+	// it. Both are written at create and never change.
+	Parent string `json:"parent,omitempty"`
+	Root   string `json:"root,omitempty"`
+	// Mesh is the msh_ id this sandbox is a member of, minted at the create
+	// of a root that enabled one and inherited by every descendant. Empty is
+	// a sandbox that reaches no peer.
+	Mesh string `json:"mesh,omitempty"`
+	// Spawn is the budget as the ledger and the resolved manifest report it
+	// together.
+	Spawn      SpawnStatus `json:"spawn,omitzero"`
+	Conditions []Condition `json:"conditions,omitempty"`
 	// Secrets is which placeholders are in the sandbox's environment and
 	// which of them the gateway will not substitute.
 	Secrets        SecretsStatus `json:"secrets,omitzero"`

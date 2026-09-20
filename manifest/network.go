@@ -167,10 +167,13 @@ func narrowing(existing, obj *v1.Sandbox) error {
 	if narrowingSecrets(existing, obj) {
 		paths = append(paths, pathSecrets)
 	}
+	// The spawn budget is reach of another kind: a sandbox that raised its
+	// own would create more children than its owner granted it.
+	paths = append(paths, meshNarrowing(existing, obj)...)
 	if len(paths) == 0 {
 		return nil
 	}
-	return failPaths("boundary_widened", "A sandbox cannot widen its own network boundary: "+strings.Join(paths, ", ")+".", paths)
+	return failPaths("boundary_widened", "A sandbox cannot widen its own boundary: "+strings.Join(paths, ", ")+".", paths)
 }
 
 // egressCapability is the boundary's row of stage 7. An environment declares

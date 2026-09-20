@@ -120,6 +120,11 @@ type Options struct {
 	Workload  *v1.SandboxStatus
 	RequestID string
 	Existing  *v1.Sandbox // the current object on update; nil on create
+	// Parent is the spawning sandbox, its desired spec and its current
+	// status, and is nil unless this apply is a spawn. It turns on stage 6,
+	// the boundary check of spec 022: a child's resolved manifest is a
+	// subset of its parent's on every boundary field.
+	Parent *v1.Sandbox
 	// Now is the clock a stage that computes a deadline reads. The spawn
 	// boundary check is its first reader.
 	Now     func() time.Time
@@ -178,6 +183,9 @@ func Resolve(ctx context.Context, in *v1.Sandbox, o Options) (*Resolved, error) 
 	if err = semantic(&obj, o); err != nil {
 		return nil, err
 	}
+	if err = boundary(&obj, o.Parent, resolveNow(o)); err != nil {
+		return nil, err
+	}
 	admitted, err := capabilities(&obj, env, o)
 	if err != nil {
 		return nil, err
@@ -206,10 +214,14 @@ func defaulting(ctx context.Context, obj *v1.Sandbox, o Options) (*v1.Environmen
 			*field.value = defaultQuantity(field.path, o.Defaults)
 		}
 	}
+	namedTTL, namedStop := obj.Spec.Lifecycle.TTL != "", obj.Spec.Lifecycle.AutoStop != ""
 	for _, field := range lifecycleFields(&obj.Spec.Lifecycle) {
 		if *field.value == "" {
 			*field.value = defaultDuration(field.path, o.Defaults)
 		}
+	}
+	if !namedTTL {
+		defaultChildTTL(obj, o.Parent, resolveNow(o), namedStop)
 	}
 	// The image default is the operator's fallback for an installation with
 	// no admission step, and it is read only where the environment runs an
@@ -423,6 +435,7 @@ func immutable(existing, obj *v1.Sandbox) error {
 		{"spec.workspace.path", existing.Spec.Workspace.Path != obj.Spec.Workspace.Path},
 		{"spec.workspace.source", existing.Spec.Workspace.Source != obj.Spec.Workspace.Source},
 		{"spec.env", !maps.Equal(existing.Spec.Env, obj.Spec.Env)},
+		{pathMeshEnabled, existing.Spec.Mesh.Enabled != obj.Spec.Mesh.Enabled},
 	} {
 		if f.changed {
 			paths = append(paths, f.path)
@@ -465,6 +478,9 @@ func capabilities(obj *v1.Sandbox, env *v1.Environment, o Options) ([]string, er
 	}
 	if o.Existing != nil && obj.Spec.Resources != o.Existing.Spec.Resources && !env.Status.Capabilities.Resize {
 		return nil, failAt("capability_unsupported", "spec.resources", "This environment cannot change the resources of a sandbox that exists.")
+	}
+	if err := meshCapability(obj, env); err != nil {
+		return nil, err
 	}
 	warnings, err := egressCapability(obj, env)
 	if err != nil {
@@ -591,6 +607,16 @@ func ResolveNativeWith(ctx context.Context, obj v1.Sandbox, o Options) (v1.Sandb
 		return obj, nil, failAt("capability_unsupported", "spec.workspace.path", "Native environments keep the workspace at "+DefaultWorkspacePath+" and start there.")
 	}
 	return out, resolved.Secrets, nil
+}
+
+// resolveNow is the clock the stages that compute a deadline read. A caller
+// that named none reads the wall clock, so a boundary rule is never skipped
+// for want of an option.
+func resolveNow(o Options) time.Time {
+	if o.Now == nil {
+		return time.Now().UTC()
+	}
+	return o.Now().UTC()
 }
 
 func clone(obj *v1.Sandbox) v1.Sandbox {

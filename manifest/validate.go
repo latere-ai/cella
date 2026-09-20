@@ -130,6 +130,9 @@ func validateSpec(s v1.SandboxSpec) error {
 	if err := validateNetwork(s.Network); err != nil {
 		return err
 	}
+	if err := validateMesh(s.Mesh); err != nil {
+		return err
+	}
 	return validateEnv(s.Env)
 }
 
