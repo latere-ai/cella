@@ -143,6 +143,15 @@ func TestOpenRefusesAURLThatIsNotPostgres(t *testing.T) {
 	}
 }
 
+// TestOpenRefusesAPooledURLThatIsNotPostgres: the serving path opens the
+// pooled endpoint where one is named, so a bad one fails at start-up too.
+func TestOpenRefusesAPooledURLThatIsNotPostgres(t *testing.T) {
+	_, err := postgres.Open(t.Context(), postgres.Options{URL: "postgres://localhost/cella", PoolURL: "mysql://pooler/cella"})
+	if err == nil || !strings.Contains(err.Error(), "CELLA_DB_POOL_URL") {
+		t.Fatalf("Open = %v, want the pooled URL refused by name", err)
+	}
+}
+
 // TestOpenRefusesAKeyOfTheWrongLength: a short key fails at start-up rather
 // than on the first secret.
 func TestOpenRefusesAKeyOfTheWrongLength(t *testing.T) {

@@ -451,7 +451,7 @@ func openStore(ctx context.Context, cfg config.Config) (controller.Store, contro
 		}
 		return local, controller.LocalLease{}, nil, nil, nil
 	}
-	durable, err := postgres.Open(ctx, postgres.Options{URL: cfg.DBURL, MaxConns: cfg.DBMaxConns, Key: cfg.SecretKey})
+	durable, err := postgres.Open(ctx, postgres.Options{URL: cfg.DBURL, PoolURL: cfg.DBPoolURL, MaxConns: cfg.DBMaxConns, Key: cfg.SecretKey})
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}

@@ -58,8 +58,13 @@ var ErrClosed = errors.New("store: the postgres store is closed")
 type Options struct {
 	// URL is CELLA_DB_URL: a postgres:// URL on a direct endpoint or a
 	// session-mode pooler. A migration holds a session-scoped lock across its
-	// statements, which a transaction-mode pooler loses between transactions.
+	// statements, which a transaction-mode pooler loses between transactions,
+	// so migrations run over it whatever PoolURL says.
 	URL string
+	// PoolURL is CELLA_DB_POOL_URL: the pooled endpoint the serving path
+	// opens where the fleet's database sits behind a pooler. Empty, the
+	// serving path opens URL.
+	PoolURL string
 	// MaxConns is CELLA_DB_MAX_CONNS. Zero takes DefaultMaxConns.
 	MaxConns int32
 	// Key is the 32 byte key secret values are sealed under. Without one the
@@ -91,9 +96,16 @@ func Open(ctx context.Context, o Options) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	cfg, err := pgxpool.ParseConfig(o.URL)
-	if err != nil {
+	if _, err := pgxpool.ParseConfig(o.URL); err != nil {
 		return nil, fmt.Errorf("store: CELLA_DB_URL is not a Postgres URL: %w", err)
+	}
+	serving, name := o.URL, "CELLA_DB_URL"
+	if o.PoolURL != "" {
+		serving, name = o.PoolURL, "CELLA_DB_POOL_URL"
+	}
+	cfg, err := pgxpool.ParseConfig(serving)
+	if err != nil {
+		return nil, fmt.Errorf("store: %s is not a Postgres URL: %w", name, err)
 	}
 	cfg.MaxConns = bound(o.MaxConns)
 	cfg.MinConns = minConns

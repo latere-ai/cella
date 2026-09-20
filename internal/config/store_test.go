@@ -86,3 +86,25 @@ func TestStoreConfiguration(t *testing.T) {
 		})
 	}
 }
+
+// TestPooledEndpointNeedsTheDirectOne: migrations hold a session lock, which
+// a transaction-mode pooler drops, so the pooled name never stands alone.
+func TestPooledEndpointNeedsTheDirectOne(t *testing.T) {
+	_, err := Load(env(identity(t, map[string]string{"CELLA_DB_POOL_URL": "postgres://cella@pooler.example:6432/cella"})))
+	if err == nil || !strings.Contains(err.Error(), "CELLA_DB_POOL_URL needs CELLA_DB_URL") {
+		t.Fatalf("Load = %v, want the pooled endpoint refused without the direct one", err)
+	}
+	cfg, err := Load(env(identity(t, map[string]string{
+		"CELLA_DB_URL":      "postgres://cella@db.example:5432/cella",
+		"CELLA_DB_POOL_URL": "postgres://cella@pooler.example:6432/cella",
+	})))
+	if err != nil || cfg.DBPoolURL != "postgres://cella@pooler.example:6432/cella" {
+		t.Fatalf("Load = %+v, %v, want both endpoints accepted together", cfg.DBPoolURL, err)
+	}
+	if _, err := Load(env(identity(t, map[string]string{
+		"CELLA_DB_URL":      "postgres://cella@db.example:5432/cella",
+		"CELLA_DB_POOL_URL": "mysql://pooler.example/cella",
+	}))); err == nil || !strings.Contains(err.Error(), "CELLA_DB_POOL_URL must be a postgres:// URL") {
+		t.Fatalf("Load = %v, want a pooled endpoint of another engine refused by name", err)
+	}
+}

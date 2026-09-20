@@ -6,6 +6,11 @@ refused before it is pushed.
 
 ## Unreleased
 
+- `CELLA_DB_POOL_URL` names a pooled Postgres endpoint for the serving path,
+  which falls back to `CELLA_DB_URL`; migrations keep the direct endpoint,
+  because they hold a session-scoped lock a transaction-mode pooler drops.
+  The pooled name without the direct one is a start-up failure.
+
 - An agent that uses a computer gets one. A manifest asks for a virtual
   desktop with `spec.display: {width, height}`, and the environment runs an X
   server, a window manager and the capture and input tools beside the

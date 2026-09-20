@@ -248,7 +248,12 @@ depcheck:
 # a direct migration DSN, belongs to the plane that deploys this binary and
 # not to the open core it deploys.
 postgres:
-  role: direct
+  # The serving path opens CELLA_DB_POOL_URL where an installation names a
+  # pooled endpoint and falls back to CELLA_DB_URL; migrations always take
+  # the direct one, because they hold a session-scoped lock.
+  role: pooled
+  direct_env: CELLA_DB_URL
+  pool_env: CELLA_DB_POOL_URL
 
 license:
   spdx: Apache-2.0

@@ -209,7 +209,7 @@ operator's own second check over whatever the endpoint returned.
 | `CELLA_EVENTS_URL`, `CELLA_EVENTS_SECRET` | 009 | unset | the event sink and one or two comma-separated HMAC secrets; events are off when the URL is unset and the journal still holds them; the URL without a secret, a secret without the URL, or a non-loopback `http://` URL without `CELLA_EVENTS_INSECURE_SINK=1`, is a start-up failure |
 | `CELLA_EVENTS_TIMEOUT`, `CELLA_EVENTS_PORTS`, `CELLA_EVENTS_INSECURE_SINK` | 009 | `10s`, unset, unset | one delivery's deadline; `1` emits a `sandbox.port` event per proxied request; `1` admits an `http://` sink, set by the stubs only |
 | `CELLA_EVENTS_RETRY_WINDOW` | 009 | `24h` | how long a record the sink has not taken is retried before it is dropped and counted; at least `1m` |
-| `CELLA_DB_URL`, `CELLA_DB_MAX_CONNS` | 010 | unset, `4` | a Postgres URL and the pool size; the URL unset keeps desired state in the single-process snapshot of 026 and turns recovery off |
+| `CELLA_DB_URL`, `CELLA_DB_POOL_URL`, `CELLA_DB_MAX_CONNS` | 010 | unset, unset, `4` | the direct Postgres URL migrations run over, the pooled endpoint the serving path opens where one is named (falling back to the direct one), and the pool size; the direct URL unset keeps desired state in the single-process snapshot of 026 and turns recovery off; the pooled one without the direct one is a start-up failure |
 | `CELLA_JOURNAL_CAP` | 010 | `1000` | events kept per object in the in-memory journal |
 | `CELLA_JOURNAL_RETENTION` | 010 | `720h` | how long acknowledged or dropped events stay in the Postgres journal |
 | `CELLA_REQUESTS_PER_MINUTE` | 008 | `600` | requests one subject may send in a minute; `0` turns the limit off |

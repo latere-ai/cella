@@ -95,9 +95,14 @@ type Config struct {
 	// LostGrace is how long a sandbox the data plane lost is held before it
 	// is deleted, where the store cannot recover it (spec 005).
 	LostGrace time.Duration
-	// DBURL is spec 010's store: a postgres:// URL, or empty for the
-	// single-process snapshot under DataDir. DBMaxConns bounds the pool.
+	// DBURL is spec 010's store: a postgres:// URL on a direct endpoint or
+	// a session-mode pooler, or empty for the single-process snapshot under
+	// DataDir. Migrations always run over it. DBPoolURL is the pooled
+	// endpoint the serving path opens where a fleet's database sits behind
+	// a pooler; empty, the serving path uses DBURL. DBMaxConns bounds the
+	// pool.
 	DBURL      string
+	DBPoolURL  string
 	DBMaxConns int32
 	// SecretKey wraps every secret value's data key (specs 010 and 018).
 	// It is read where it is set and required once a Secret exists.
@@ -140,7 +145,11 @@ func Load(getenv Getenv) (Config, error) {
 	c.ReapInterval = interval(getenv, "CELLA_REAP_INTERVAL", DefaultReapInterval, &problems)
 	c.TouchInterval = interval(getenv, "CELLA_TOUCH_INTERVAL", DefaultTouchInterval, &problems)
 	c.LostGrace = interval(getenv, "CELLA_LOST_GRACE", DefaultLostGrace, &problems)
-	c.DBURL = databaseURL(getenv, &problems)
+	c.DBURL = databaseURL(getenv, "CELLA_DB_URL", &problems)
+	c.DBPoolURL = databaseURL(getenv, "CELLA_DB_POOL_URL", &problems)
+	if c.DBPoolURL != "" && c.DBURL == "" {
+		problems = append(problems, "CELLA_DB_POOL_URL needs CELLA_DB_URL: migrations run over the direct endpoint")
+	}
 	c.DBMaxConns = connections(getenv, &problems)
 	c.SecretKey = secretKey(getenv, &problems)
 	c.loadEvents(getenv, &problems)
@@ -227,15 +236,15 @@ func interval(getenv Getenv, name string, def time.Duration, problems *[]string)
 // single-process snapshot under CELLA_DATA_DIR and turns recovery off, which
 // the start-up line says; set, it must be a Postgres URL, because the scheme
 // is what selects the driver and the migrator.
-func databaseURL(getenv Getenv, problems *[]string) string {
-	raw := strings.TrimSpace(getenv("CELLA_DB_URL"))
+func databaseURL(getenv Getenv, name string, problems *[]string) string {
+	raw := strings.TrimSpace(getenv(name))
 	if raw == "" {
 		return ""
 	}
 	parsed, err := url.Parse(raw)
 	switch {
 	case err != nil, !strings.HasPrefix(parsed.Scheme, "postgres"), parsed.Host == "":
-		*problems = append(*problems, "CELLA_DB_URL must be a postgres:// URL naming a host")
+		*problems = append(*problems, name+" must be a postgres:// URL naming a host")
 		return ""
 	}
 	return raw
