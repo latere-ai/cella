@@ -61,6 +61,7 @@ var cases = []struct {
 	{"Delivery", delivery},
 	{"Leases", leases},
 	{"Values", values},
+	{"Rewrap", rewrap},
 	{"Ready", ready},
 }
 
@@ -669,6 +670,58 @@ func values(t TB, open Opener) {
 	keyless := opened(t, open, nil)
 	fails(t, keyless, store.ErrNoSecretKey, "a store with no key", func(tx store.Tx) error {
 		_, err := tx.Values().Put(ctx, "sec_a", secret)
+		return err
+	})
+}
+
+// NextKey is the key the rotation case moves to, as fixed as Key is.
+var NextKey = []byte("fedcba9876543210fedcba9876543210")
+
+// rewrap: a rotation rewrites every wrapped data key, touches no value's own
+// ciphertext, and leaves the store reading under the new key.
+func rewrap(t TB, open Opener) {
+	s := opened(t, open, Key)
+	ctx := context.Background()
+	values := map[string][]byte{"sec_a": []byte("first-value"), "sec_b": []byte("second-value")}
+	with(t, s, func(tx store.Tx) error {
+		for id, plaintext := range values {
+			if _, err := tx.Values().Put(ctx, id, plaintext); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	with(t, s, func(tx store.Tx) error {
+		n, err := tx.Values().Rewrap(ctx, Key, NextKey)
+		if err != nil {
+			return err
+		}
+		if n != len(values) {
+			t.Errorf("the rotation moved %d rows, want %d", n, len(values))
+		}
+		return nil
+	})
+	// Every value still reads, at the version it held: a rotation is about
+	// the key the data key is wrapped under and about nothing else.
+	with(t, s, func(tx store.Tx) error {
+		for id, want := range values {
+			plaintext, version, err := tx.Values().Open(ctx, id)
+			if err != nil {
+				return err
+			}
+			if !bytes.Equal(plaintext, want) || version != 1 {
+				t.Errorf("%s reads back %q at version %d after the rotation", id, plaintext, version)
+			}
+		}
+		return nil
+	})
+	// The old key no longer opens a row, which is what a rotation means.
+	fails(t, s, store.ErrNoSecretKey, "a rotation with no new key", func(tx store.Tx) error {
+		_, err := tx.Values().Rewrap(ctx, Key, nil)
+		return err
+	})
+	refuses(t, s, "a rotation from a key the rows were not sealed under", func(tx store.Tx) error {
+		_, err := tx.Values().Rewrap(ctx, Key, NextKey)
 		return err
 	})
 }

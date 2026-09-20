@@ -296,4 +296,5 @@ var (
 	_ controller.Store   = (*Controlled)(nil)
 	_ controller.Durable = (*Controlled)(nil)
 	_ controller.Lease   = (*Controlled)(nil)
+	_ controller.Secrets = (*Controlled)(nil)
 )

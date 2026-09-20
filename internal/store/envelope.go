@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"sync"
 )
 
 // KeySize is the length of the key CELLA_SECRET_KEY carries and of every
@@ -22,7 +23,17 @@ const KeySize = 32
 // The two ciphertexts are stored in two columns, so rotating the store's key
 // rewrites the wrapped data keys and leaves every value's ciphertext byte
 // untouched. The zero Envelope has no key and seals nothing.
+//
+// The key sits behind a pointer every copy of one Envelope shares, so Adopt
+// reaches the copies a store handed to its transactions: a rotation that
+// rewrote every row must be the key the next Open reads with, or the process
+// would serve nothing until it restarted.
 type Envelope struct {
+	keys *envelopeKeys
+}
+
+type envelopeKeys struct {
+	mu  sync.RWMutex
 	kek cipher.AEAD
 }
 
@@ -63,16 +74,63 @@ func NewEnvelope(key []byte) (Envelope, error) {
 	if err != nil {
 		return Envelope{}, err
 	}
-	return Envelope{kek: aead}, nil
+	return Envelope{keys: &envelopeKeys{kek: aead}}, nil
 }
 
 // Ready reports whether this envelope can seal.
-func (e Envelope) Ready() bool { return e.kek != nil }
+func (e Envelope) Ready() bool { return e.kek() != nil }
+
+// kek is the key this envelope holds now, which Adopt may have replaced.
+func (e Envelope) kek() cipher.AEAD {
+	if e.keys == nil {
+		return nil
+	}
+	e.keys.mu.RLock()
+	defer e.keys.mu.RUnlock()
+	return e.keys.kek
+}
+
+// Adopt takes another envelope's key as this one's, for every copy that
+// shares this envelope's state. It is the last step of a rotation: the rows
+// have been rewritten under next, so the store reads under next from here on.
+func (e Envelope) Adopt(next Envelope) {
+	if e.keys == nil || next.keys == nil {
+		return
+	}
+	adopted := next.kek()
+	e.keys.mu.Lock()
+	defer e.keys.mu.Unlock()
+	e.keys.kek = adopted
+}
+
+// Wrap seals one data key under this envelope's key, and Unwrap opens one.
+// The pair is what a rotation runs over: the value's own ciphertext is never
+// read, so no plaintext exists at any point of one.
+func (e Envelope) Wrap(dataKey []byte) ([]byte, error) {
+	kek := e.kek()
+	if kek == nil {
+		return nil, ErrNoSecretKey
+	}
+	return box(kek, dataKey)
+}
+
+func (e Envelope) Unwrap(wrapped []byte) ([]byte, error) {
+	kek := e.kek()
+	if kek == nil {
+		return nil, ErrNoSecretKey
+	}
+	dataKey, err := unbox(kek, wrapped)
+	if err != nil {
+		return nil, fmt.Errorf("store: unwrapping the data key: %w", err)
+	}
+	return dataKey, nil
+}
 
 // Seal returns the wrapped data key and the sealed value. Each is its nonce
 // followed by the ciphertext, so one column holds one self-contained box.
 func (e Envelope) Seal(plaintext []byte) (wrapped, sealed []byte, err error) {
-	if e.kek == nil {
+	kek := e.kek()
+	if kek == nil {
 		return nil, nil, ErrNoSecretKey
 	}
 	dataKey := make([]byte, KeySize)
@@ -87,7 +145,7 @@ func (e Envelope) Seal(plaintext []byte) (wrapped, sealed []byte, err error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	wrapped, err = box(e.kek, dataKey)
+	wrapped, err = box(kek, dataKey)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -97,12 +155,9 @@ func (e Envelope) Seal(plaintext []byte) (wrapped, sealed []byte, err error) {
 // Open unwraps the data key and returns the value. A key that did not seal
 // this row fails here, which is what a wrong CELLA_SECRET_KEY looks like.
 func (e Envelope) Open(wrapped, sealed []byte) ([]byte, error) {
-	if e.kek == nil {
-		return nil, ErrNoSecretKey
-	}
-	dataKey, err := unbox(e.kek, wrapped)
+	dataKey, err := e.Unwrap(wrapped)
 	if err != nil {
-		return nil, fmt.Errorf("store: unwrapping the data key: %w", err)
+		return nil, err
 	}
 	value, err := newAEAD(dataKey)
 	if err != nil {
@@ -143,4 +198,32 @@ func unbox(aead cipher.AEAD, sealed []byte) ([]byte, error) {
 		return nil, errors.New("the sealed value is shorter than its nonce")
 	}
 	return aead.Open(nil, sealed[:n], sealed[n:], nil)
+}
+
+// RewrapKeys validates the two keys a rotation runs between. The old key must
+// be the one the rows were sealed under, which is proved by the first unwrap
+// rather than by comparing bytes; both are held to the length an AES-256 key
+// has before a single row is read.
+func RewrapKeys(oldKEK, newKEK []byte) (old, next Envelope, err error) {
+	if old, err = NewEnvelope(oldKEK); err != nil {
+		return Envelope{}, Envelope{}, err
+	}
+	if next, err = NewEnvelope(newKEK); err != nil {
+		return Envelope{}, Envelope{}, err
+	}
+	if !old.Ready() || !next.Ready() {
+		return Envelope{}, Envelope{}, ErrNoSecretKey
+	}
+	return old, next, nil
+}
+
+// RewrapKey moves one row's wrapped data key from one envelope to the other.
+// The value's own ciphertext is not a parameter, because a rotation never
+// touches it.
+func RewrapKey(old, next Envelope, wrapped []byte) ([]byte, error) {
+	dataKey, err := old.Unwrap(wrapped)
+	if err != nil {
+		return nil, err
+	}
+	return next.Wrap(dataKey)
 }

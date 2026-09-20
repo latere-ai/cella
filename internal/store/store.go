@@ -19,10 +19,11 @@ import (
 	driver "latere.ai/x/cella/runtime"
 )
 
-// Kinds of design 003 the store holds. Sandbox is the only kind written
-// today; the column is there so a later kind needs no migration.
+// Kinds of design 003 the store holds. The kind is a column, so a later kind
+// needs no migration.
 const (
 	KindSandbox = "Sandbox"
+	KindSecret  = "Secret"
 )
 
 // PhaseDeleting is the one phase the count ceiling of design 007 excludes: a
@@ -244,11 +245,17 @@ type Journal interface {
 // Values holds secret values under the envelope of design 018: a data key
 // per secret, the value sealed under it, the data key sealed under the
 // store's key. Open is the only method that returns a plaintext and design
-// 018 gives it one caller; this slice has none.
+// 018 gives it one caller, Controlled.OpenValue, which TestValuesAreConfined
+// holds to being the only one.
 type Values interface {
 	Put(ctx context.Context, secretID string, plaintext []byte) (version int, err error)
 	Open(ctx context.Context, secretID string) (plaintext []byte, version int, err error)
 	Delete(ctx context.Context, secretID string) error
+	// Rewrap rewrites every wrapped data key from oldKEK to newKEK and
+	// reports how many rows moved. No value's ciphertext is read or
+	// rewritten, so no plaintext exists at any point of a rotation, and the
+	// store reads under newKEK once it returns.
+	Rewrap(ctx context.Context, oldKEK, newKEK []byte) (n int, err error)
 }
 
 // Leases are the single-writer seam of design 005: the loops that act on an

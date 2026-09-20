@@ -466,6 +466,49 @@ func (x values) Delete(ctx context.Context, secretID string) error {
 	return nil
 }
 
+// Rewrap reads every row's wrapped data key, moves it to the new key, and
+// writes the one column back. The ciphertext column is neither read nor
+// written, so a rotation moves no value and produces no plaintext beyond the
+// data key it is rewrapping.
+func (x values) Rewrap(ctx context.Context, oldKEK, newKEK []byte) (int, error) {
+	old, next, err := store.RewrapKeys(oldKEK, newKEK)
+	if err != nil {
+		return 0, err
+	}
+	rows, err := x.q.Query(ctx, `select secret_id, wrapped_key from secret_values order by secret_id`)
+	if err != nil {
+		return 0, fmt.Errorf("store: reading the secret values to rewrap: %w", err)
+	}
+	type rewrapped struct {
+		id      string
+		wrapped []byte
+	}
+	var out []rewrapped
+	for rows.Next() {
+		var row rewrapped
+		if err = rows.Scan(&row.id, &row.wrapped); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		if row.wrapped, err = store.RewrapKey(old, next, row.wrapped); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		out = append(out, row)
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return 0, err
+	}
+	for _, row := range out {
+		if _, err = x.q.Exec(ctx, `update secret_values set wrapped_key = $2 where secret_id = $1`, row.id, row.wrapped); err != nil {
+			return 0, fmt.Errorf("store: rewrapping the secret value: %w", err)
+		}
+	}
+	x.env.Adopt(next)
+	return len(out), nil
+}
+
 // The lease statements, which the renewal loop runs as well as this method
 // set, so the conditional upsert has one statement in one place.
 const (

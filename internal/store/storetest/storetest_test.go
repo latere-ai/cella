@@ -187,6 +187,9 @@ func (stubValues) Open(context.Context, string) ([]byte, int, error) {
 	return []byte("wrong"), 1, nil
 }
 func (stubValues) Delete(context.Context, string) error { return nil }
+func (stubValues) Rewrap(context.Context, []byte, []byte) (int, error) {
+	return 0, nil
+}
 
 type stubLeases struct{}
 
