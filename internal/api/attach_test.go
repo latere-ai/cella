@@ -483,7 +483,16 @@ func TestAttachStampsActivity(t *testing.T) {
 	})
 	obj := f.sandbox("busy")
 	conn, r := f.attachTo("/v1/sandboxes/"+obj.Status.ID+"/attach", f.alice, `{"command":["sh"],"cols":80,"rows":24}`)
-	if got := stamps.stamped(); len(got) != 1 || got[0] != obj.Status.ID {
+	// The handshake finishes for the client before the handler that stamps
+	// has run, so the first stamp is waited for rather than read at once.
+	opened := time.Now().Add(10 * time.Second)
+	for len(stamps.stamped()) == 0 {
+		if time.Now().After(opened) {
+			t.Fatal("opening a session stamped nothing")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if got := stamps.stamped(); got[0] != obj.Status.ID {
 		t.Fatalf("opening a session stamped %v", got)
 	}
 	typeIn(t, conn, `printf 'TYP%s\n' ED`)
