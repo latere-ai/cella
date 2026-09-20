@@ -223,3 +223,91 @@ func TestAnIncompleteRecordIsRefused(t *testing.T) {
 		t.Fatal("a record with no id, type or object was journaled")
 	}
 }
+
+// TestJournalDeliveryOutcomes: the three a delivery can end in, over the
+// journal the deliverer holds rather than the store contract underneath.
+func TestJournalDeliveryOutcomes(t *testing.T) {
+	_, s := bound(t)
+	ctx := t.Context()
+	journal := store.EventJournal(s, store.Delivered)
+	for _, kind := range []events.Type{events.TypeCreated, events.TypeStarted} {
+		record, err := events.Mutation(kind, "", events.Object{
+			Kind: events.KindSandbox, ID: "sbx_a", Name: "build", Owner: "alice",
+		}, events.Phase{Phase: "Running"}, events.Actor{}, time.Now().UTC())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := journal.Append(ctx, record); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now := time.Now().UTC()
+	head, err := journal.Pending(ctx, 10, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(head) != 1 || head[0].Record.Seq != 1 || head[0].Attempts != 0 {
+		t.Fatalf("the queue reads %+v", head)
+	}
+	// Deferred, the head is not due and its successor does not overtake it.
+	if err := journal.Defer(ctx, head[0].Record.ID, now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if due, err := journal.Pending(ctx, 10, now); err != nil || len(due) != 0 {
+		t.Fatalf("a deferred head is due: %+v %v", due, err)
+	}
+	later, err := journal.Pending(ctx, 10, now.Add(2*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(later) != 1 || later[0].Attempts != 1 {
+		t.Fatalf("the deferred head reads %+v", later)
+	}
+	// Dropped, it leaves the queue and its successor becomes the head.
+	if err := journal.Drop(ctx, head[0].Record.ID, now); err != nil {
+		t.Fatal(err)
+	}
+	next, err := journal.Pending(ctx, 10, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(next) != 1 || next[0].Record.Seq != 2 {
+		t.Fatalf("after the drop the queue reads %+v", next)
+	}
+	if err := journal.Acknowledge(ctx, next[0].Record.ID, now); err != nil {
+		t.Fatal(err)
+	}
+	if empty, err := journal.Pending(ctx, 10, now); err != nil || len(empty) != 0 {
+		t.Fatalf("an acknowledged queue reads %+v %v", empty, err)
+	}
+}
+
+// TestAMutationWithNoObjectIsRefused: a write whose record the sink could not
+// store fails at the write, so the state and the journal stay in step.
+func TestAMutationWithNoObjectIsRefused(t *testing.T) {
+	c, _ := bound(t)
+	nameless := labelled("", driver.Pending, "")
+	nameless.Status.ID = ""
+	if err := c.Write(t.Context(), nameless, controller.MutationCreated); err == nil {
+		t.Fatal("a sandbox with no id was written")
+	}
+	if err := c.Remove(t.Context(), "", controller.MutationDeleted); err == nil {
+		t.Fatal("a removal with no id was written")
+	}
+}
+
+// TestAMutationOutsideTheEnumIsRefused: an act naming a reason design 009
+// does not have fails rather than reaching a sink that would refuse it.
+func TestAMutationOutsideTheEnumIsRefused(t *testing.T) {
+	_, s := bound(t)
+	journal := store.EventJournal(s, store.Delivered)
+	if err := journal.Acknowledge(t.Context(), "evt_nothing", time.Now().UTC()); err == nil {
+		t.Error("acknowledging an event no row holds passed")
+	}
+	if err := journal.Defer(t.Context(), "evt_nothing", time.Now().UTC()); err == nil {
+		t.Error("deferring an event no row holds passed")
+	}
+	if err := journal.Drop(t.Context(), "evt_nothing", time.Now().UTC()); err == nil {
+		t.Error("dropping an event no row holds passed")
+	}
+}

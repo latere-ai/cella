@@ -85,7 +85,7 @@ func (s *sink) types() []string {
 	defer s.mu.Unlock()
 	out := make([]string, 0, len(s.got))
 	for _, r := range s.got {
-		out = append(out, string(r.Object.ID)+"/"+string(r.Type)+"#"+itoa(r.Seq))
+		out = append(out, r.Object.ID+"/"+string(r.Type)+"#"+itoa(r.Seq))
 	}
 	return out
 }
