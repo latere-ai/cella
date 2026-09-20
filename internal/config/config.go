@@ -117,6 +117,9 @@ type Config struct {
 	// calls, and the image default an installation without one falls back
 	// on.
 	Admission Admission
+	// Scheduling is spec 020's half: the default environment's mode and the
+	// pool it keeps prewarmed.
+	Scheduling Scheduling
 	// Identity is spec 006's half: the issuers, the audience, the signing
 	// keys, the authorizer, and the owner policy's admins.
 	Identity
@@ -150,6 +153,7 @@ func Load(getenv Getenv) (Config, error) {
 		c.AllowUnsafeNative = value
 	}
 	c.Gateway = loadEgressGateway(getenv, &problems)
+	c.Scheduling = loadScheduling(getenv, &problems)
 	c.PodmanSocket = strings.TrimSpace(getenv("CELLA_PODMAN_SOCKET"))
 	if c.PodmanSocket != "" && !filepath.IsAbs(c.PodmanSocket) {
 		problems = append(problems, "CELLA_PODMAN_SOCKET must be an absolute path to a unix socket")

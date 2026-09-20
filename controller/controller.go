@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
+	"fmt"
 	"log/slog"
 	"maps"
 	"math/big"
@@ -80,6 +81,19 @@ type Options struct {
 	// 006). It is optional: with none, no sandbox is given a token and no
 	// driver projects one.
 	Tokens Tokens
+	// Pool is the environment's prewarmed set: how many entries to keep and
+	// what shape they are (spec 020). Size zero runs no pool, which is
+	// every environment until an operator asks for one. A size above zero
+	// needs a driver that declares the Pool capability.
+	Pool v1.PoolSpec
+	// Capacity is the ceiling on sandboxes of this environment, which pool
+	// entries count against. Zero is no ceiling.
+	Capacity int
+	// PoolInFlight is how many entries one refill tick prewarms and
+	// PoolGrace how long an entry is left alone before the deletion rules
+	// read it. Zero takes the defaults.
+	PoolInFlight int
+	PoolGrace    time.Duration
 }
 type Controller struct {
 	mu            sync.Mutex
@@ -115,6 +129,12 @@ type Controller struct {
 	// read returns, and a plaintext is read per compile through the seam.
 	secrets       Secrets
 	secretObjects map[string]v1.Secret
+	// The environment's pool: its shape and size, the ceiling entries count
+	// against, and the two bounds of the refill loop (spec 020).
+	pool         v1.PoolSpec
+	capacity     int
+	poolInFlight int
+	poolGrace    time.Duration
 }
 
 // Open restores desired state from an operator-supplied store, or the provisional
@@ -158,6 +178,8 @@ func Open(o Options) (*Controller, error) {
 		egress: o.Egress, gateway: o.Gateway,
 		events: o.Events, tokens: o.Tokens,
 		secretObjects: map[string]v1.Secret{},
+		pool:          o.Pool, capacity: o.Capacity,
+		poolInFlight: o.PoolInFlight, poolGrace: o.PoolGrace,
 	}
 	// A store of design 010 takes one conditional write per object and
 	// carries the journal; one that is also durable is what lets the lost
@@ -195,6 +217,19 @@ func Open(o Options) (*Controller, error) {
 	}
 	if c.recoveryAttempts <= 0 {
 		c.recoveryAttempts = DefaultRecoveryAttempts
+	}
+	if c.poolInFlight <= 0 {
+		c.poolInFlight = DefaultPoolInFlight
+	}
+	if c.poolGrace <= 0 {
+		c.poolGrace = DefaultPoolGrace
+	}
+	// A pool on a driver that cannot hold one is a deployment that would
+	// never accelerate a create and never say why, so it is refused here
+	// rather than logged once a tick.
+	if c.pool.Size > 0 && !c.driver.Capabilities().Pool {
+		_ = store.Close()
+		return nil, fmt.Errorf("the %s driver declares no Pool capability, so this environment keeps no prewarmed entries", c.driver.Name())
 	}
 	return c, nil
 }
@@ -261,6 +296,13 @@ func (c *Controller) forget(ctx context.Context, id, mutation string) error {
 }
 
 // Create atomically reserves the owner's name and quota before calling runtime.
+//
+// Where the environment keeps a pool and one of its entries can carry this
+// manifest, the create adopts it: every step of design 005's order is the
+// same act on the same id, and only the driver call at the end differs
+// ([[020-scheduling-and-sets]]). An entry another adopter took between the
+// match and the adoption leaves nothing behind, and the create runs again on
+// the slow path.
 func (c *Controller) Create(ctx context.Context, obj v1.Sandbox, owner string, max int) (v1.Sandbox, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -274,9 +316,35 @@ func (c *Controller) Create(ctx context.Context, obj v1.Sandbox, owner string, m
 	if err != nil {
 		return obj, err
 	}
-	id, err := newID()
-	if err != nil {
-		return obj, err
+	entries := c.poolEntries(ctx)
+	entry := c.matchEntry(entries, obj)
+	out, err := c.createLocked(ctx, obj, owner, max, warnings, lifecycle, entries, entry)
+	if entry != nil && err != nil && adoptionLost(err) {
+		c.log.InfoContext(ctx, "the pool entry could not be adopted; this create takes the slow path",
+			"entry", entry.ID, "err", err)
+		return c.createLocked(ctx, obj, owner, max, warnings, lifecycle, without(entries, entry.ID), nil)
+	}
+	return out, err
+}
+
+// createLocked is design 005's create order over one placement: an entry to
+// adopt, or nothing and a driver create. It runs under the controller's lock
+// and is called at most twice per create, the second time with no entry.
+func (c *Controller) createLocked(ctx context.Context, obj v1.Sandbox, owner string, max int,
+	warnings []string, lifecycle driver.Lifecycle, entries []driver.State, entry *driver.State,
+) (v1.Sandbox, error) {
+	// An adopted sandbox takes the entry's id. The id is the object's name
+	// on a container driver, which cannot be renamed, so carrying it forward
+	// is what makes the boundary's principal, the token's subject and the
+	// driver's stamped identity name one thing.
+	var id string
+	if entry != nil {
+		id = entry.ID
+	} else {
+		var err error
+		if id, err = newID(); err != nil {
+			return obj, err
+		}
 	}
 	if obj.Metadata.Name == "" {
 		obj.Metadata.Name = "sandbox-" + id[len(id)-10:]
@@ -295,9 +363,17 @@ func (c *Controller) Create(ctx context.Context, obj v1.Sandbox, owner string, m
 	if max > 0 && count >= max {
 		return obj, ErrQuota
 	}
+	// An adoption always fits: it turns one entry into one sandbox and moves
+	// nothing. A real create may not, and where entries hold the ceiling the
+	// oldest give it up.
+	if entry == nil {
+		if err := c.makeRoom(ctx, entries); err != nil {
+			return obj, err
+		}
+	}
 	now := time.Now().UTC()
 	obj.Status = v1.SandboxStatus{ID: id, Owner: owner, Environment: c.environment, Driver: c.driver.Name(), Isolation: c.driver.Isolation(), Phase: driver.Pending, CreatedAt: now, Warnings: warnings}
-	if err = c.persist(ctx, obj, MutationCreated); err != nil {
+	if err := c.persist(ctx, obj, MutationCreated); err != nil {
 		return obj, err
 	}
 	// The boundary is put in a gateway before the driver is called, so a
@@ -324,14 +400,28 @@ func (c *Controller) Create(ctx context.Context, obj v1.Sandbox, owner string, m
 		return export(obj), errors.Join(err, c.persist(ctx, obj, MutationFailed))
 	}
 	obj.Status.TokenState = tokenState
-	_, err = c.driver.Create(ctx, specOf(obj, lifecycle, c.egressSpec(boundary.Map), boundary.Env, token))
+	if entry != nil {
+		adoption := adoptionOf(obj, lifecycle, c.egressSpec(boundary.Map), boundary.Env, token)
+		err = c.driver.Update(ctx, id, driver.Change{Adopt: &adoption})
+	} else {
+		_, err = c.driver.Create(ctx, specOf(obj, lifecycle, c.egressSpec(boundary.Map), boundary.Env, token))
+	}
 	if err != nil {
+		c.purgeEgress(ctx, id)
+		revoked := c.revokeToken(ctx, tokenState)
+		obj.Status.TokenState = nil
+		if entry != nil && adoptionLost(err) {
+			// The entry is another caller's now, or it cannot carry this
+			// manifest. Nothing of this attempt survives: no map, no
+			// identity and no row, so the create that follows is an
+			// ordinary first create under an id of its own.
+			return obj, errors.Join(err, revoked, c.forget(ctx, id, MutationDeleted))
+		}
 		obj.Status.Phase = PhaseFailed
 		obj.Status.Reason = ReasonCreateFailed
-		c.purgeEgress(ctx, id)
-		obj.Status.TokenState = nil
-		return export(obj), errors.Join(err, c.revokeToken(ctx, tokenState), c.persist(ctx, obj, MutationFailed))
+		return export(obj), errors.Join(err, revoked, c.persist(ctx, obj, MutationFailed))
 	}
+	obj.Status.Conditions = setCondition(obj.Status.Conditions, scheduledCondition(entry != nil, c.clock.Now()))
 	obj, err = c.refresh(ctx, obj)
 	return export(obj), errors.Join(err, c.persist(ctx, obj, phaseMutation(obj.Status.Phase)))
 }

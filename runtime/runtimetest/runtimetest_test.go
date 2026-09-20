@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"maps"
 	"reflect"
 	gort "runtime"
 	"slices"
@@ -358,7 +359,7 @@ func TestUndeclaredCapabilitiesAreSkippedNotAsserted(t *testing.T) {
 // equal to the capabilities today's Driver has no operation for. A capability
 // that gains an operation is removed here and gains a case.
 func TestDeclaredWithoutCaseNamesEveryUncheckedCapability(t *testing.T) {
-	if got := declaredWithoutCase(runtime.Capabilities{Files: true, Attach: true, Detach: true}); len(got) != 0 {
+	if got := declaredWithoutCase(runtime.Capabilities{Files: true, Attach: true, Detach: true, Pool: true}); len(got) != 0 {
 		t.Errorf("the capabilities with cases are reported as unchecked: %v", got)
 	}
 	all := runtime.Capabilities{
@@ -366,7 +367,7 @@ func TestDeclaredWithoutCaseNamesEveryUncheckedCapability(t *testing.T) {
 		Volumes: true, Snapshots: true, Attach: true, Dial: true, Display: true,
 		Input: true, Resize: true, Pool: true, Files: true, Detach: true,
 	}
-	want := []string{"Egress", "Mesh", "Ingress", "Volumes", "Snapshots", "Dial", "Display", "Input", "Resize", "Pool"}
+	want := []string{"Egress", "Mesh", "Ingress", "Volumes", "Snapshots", "Dial", "Display", "Input", "Resize"}
 	if got := declaredWithoutCase(all); !slices.Equal(got, want) {
 		t.Errorf("declaredWithoutCase reports %v, want %v", got, want)
 	}
@@ -468,5 +469,60 @@ func TestNopEmbedOverride(t *testing.T) {
 	}
 	if d.Name() != "nop" {
 		t.Errorf("the inherited Name is %q", d.Name())
+	}
+}
+
+// poolLiar declares Pool and lets every adopter win: the record is rewritten
+// with no check that the sandbox is still an entry. A suite that reported it
+// as conforming would let two callers hold one sandbox, each believing the
+// files, the identity and the boundary are its own.
+type poolLiar struct{ *native.Driver }
+
+func (poolLiar) Capabilities() runtime.Capabilities {
+	return runtime.Capabilities{Files: true, Pool: true}
+}
+
+func (d poolLiar) Update(ctx context.Context, id string, c runtime.Change) error {
+	if c.Adopt == nil {
+		return d.Driver.Update(ctx, id, c)
+	}
+	labels := maps.Clone(c.Adopt.Labels)
+	return d.Driver.Update(ctx, id, runtime.Change{Labels: &labels, Lifecycle: &c.Adopt.Lifecycle})
+}
+
+// poolDenier declares no Pool and answers a prewarm and an adoption with
+// something other than the sentinel the contract names, which is what a
+// controller falling back to a real create reads.
+type poolDenier struct{ *native.Driver }
+
+func (poolDenier) Capabilities() runtime.Capabilities { return runtime.Capabilities{Files: true} }
+
+func (poolDenier) Create(context.Context, runtime.CreateSpec) (runtime.Ref, error) {
+	return runtime.Ref{}, nil
+}
+
+func (poolDenier) Update(context.Context, string, runtime.Change) error { return nil }
+
+// TestPoolCasesCatchABrokenDriver drives the pool cases against drivers that
+// break the contract in the two ways that matter: an adoption that is not
+// exclusive, and a capability that is not declared and not refused.
+func TestPoolCasesCatchABrokenDriver(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		open   func() runtime.Driver
+		caseID string
+		want   string
+	}{
+		{"exclusive", opener(poolLiar{openNative(t)}), "PrewarmAndAdoptIsExclusive", "both adoptions"},
+		{"owned", opener(poolLiar{openNative(t)}), "PrewarmIsNotOwned", "owner filter"},
+		{"prewarmUnsupported", opener(poolDenier{openNative(t)}), "PrewarmIsNotOwned", "Create with Prewarm"},
+		{"adoptUnsupported", opener(poolDenier{openNative(t)}), "AdoptRefusals", "Adopt on a driver"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			r := drive(caseNamed(t, c.caseID), c.open, Options{})
+			if !r.failed() || !strings.Contains(r.report(), c.want) {
+				t.Errorf("%s on a broken driver: failures %v log %s", c.caseID, r.failures(), r.report())
+			}
+		})
 	}
 }

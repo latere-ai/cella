@@ -210,10 +210,12 @@ func (d *Driver) Name() string      { return "k8s" }
 func (d *Driver) Isolation() string { return "container" }
 
 // Capabilities declares only what this driver enforces today. Egress, mesh,
-// attach, dial, display, input, resize, pool, volumes and snapshots each land
-// with the slice that builds them.
+// attach, dial, display, input, resize, volumes and snapshots each land with
+// the slice that builds them. Pool, because the claim's label is the cluster's
+// own mutex: the guarded patch of an adoption tests it, so of two adopters one
+// writes and the other is told the entry is gone.
 func (d *Driver) Capabilities() driver.Capabilities {
-	return driver.Capabilities{Files: true}
+	return driver.Capabilities{Files: true, Pool: true}
 }
 
 // verbs are the accesses the driver uses, checked one review each so a missing

@@ -37,6 +37,10 @@ const (
 	labelID        = prefix + "id"
 	labelName      = prefix + "name"
 	managedValue   = "cella"
+	// labelPool marks a prewarmed entry. It is a label rather than an
+	// annotation because it is what the pool's own list selects on, and
+	// because the guarded patch of an adoption tests it (spec 020).
+	labelPool = driver.PoolLabel
 )
 
 // The annotation half: what is read back rather than selected on. Each instant
@@ -223,6 +227,9 @@ func (d *Driver) identity(s driver.CreateSpec, createdAt time.Time) (labels, ann
 	labels = map[string]string{labelManagedBy: managedValue, labelID: s.ID}
 	if labelValue.MatchString(s.Name) {
 		labels[labelName] = s.Name
+	}
+	if s.Prewarm {
+		labels[labelPool] = "true"
 	}
 	encoded, err := json.Marshal(s)
 	if err != nil {

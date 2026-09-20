@@ -14,15 +14,17 @@ import (
 // egressEnv is the sandbox's own environment with the boundary's added: the
 // two doors, the credential that authenticates it at them, and the trust
 // store that holds the gateway's authority. A create that carries no gateway
-// adds nothing, so a sandbox on an installation with none is unchanged.
-func egressEnv(s driver.CreateSpec) map[string]string {
-	env := maps.Clone(s.Env)
+// adds nothing, so a sandbox on an installation with none is unchanged. It
+// takes the environment and the boundary rather than the create spec, because
+// an adoption writes the same pair over an entry prewarmed without either.
+func egressEnv(own map[string]string, boundary driver.Egress) map[string]string {
+	env := maps.Clone(own)
 	projection := egress.Projection{
-		ProxyAddr:   s.Egress.ProxyAddr,
-		ReverseAddr: s.Egress.ReverseAddr,
-		Credential:  s.Egress.Credential,
+		ProxyAddr:   boundary.ProxyAddr,
+		ReverseAddr: boundary.ReverseAddr,
+		Credential:  boundary.Credential,
 	}
-	if s.Egress.CAPEM != "" {
+	if boundary.CAPEM != "" {
 		projection.CAPath = egress.CAPath
 	}
 	added := projection.Env()

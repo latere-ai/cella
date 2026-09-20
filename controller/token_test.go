@@ -91,6 +91,10 @@ func (f *fakeTokens) fail(mint, revoke error) {
 // methods come from the Nop, whose Update accepts everything and keeps
 // nothing, which no token case could read back.
 func (d *fakeDriver) Update(_ context.Context, id string, c driver.Change) error {
+	adoption, err := c.Adoption()
+	if err != nil {
+		return err
+	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.updateErr != nil {
@@ -99,6 +103,9 @@ func (d *fakeDriver) Update(_ context.Context, id string, c driver.Change) error
 	s, ok := d.states[id]
 	if !ok {
 		return driver.ErrNotFound
+	}
+	if adoption != nil {
+		return d.adoptLocked(id, s, *adoption)
 	}
 	if c.Labels != nil {
 		s.Labels = maps.Clone(*c.Labels)

@@ -142,7 +142,9 @@ running workload:
    and CA, the token, the mesh id, the parent, and the volume ids. The
    derivation has a table test per field of [[003-manifest-contract]]
    and is the one place the manifest's vocabulary meets the driver's.
-7. `Driver.Create`, or `Update` with `Adopt` for a pool entry. The
+7. `Driver.Create`, or `Update` with `Adopt` for a pool entry, which is
+   built and takes the entry's id as the sandbox's own
+   ([[038-environment-pools]]). The
    driver applies the network rule before it starts the workload
    ([[004-runtime-contract]]). Undo: `Delete` the object if it exists.
 
@@ -191,6 +193,12 @@ a value of `never` disables its rule.
 | autoStop | `Running` and `now >= lastActivityAt + autoStop` | Stop, reason `AutoStop` |
 | lost | `Lost` | when desired state is durable, `Recovering`; otherwise, after `LostGrace`, `Deleting` with reason `Lost` |
 | token | a live sandbox whose token has passed two thirds of its lifetime | `Tokens.Mint`, `Driver.Update` with `Change.Token`, `Tokens.Revoke` of the previous `jti`, in one act ([[006-identity]]) |
+
+A pool entry is asked of no rule at all. It carries no owner and no
+deadline, so none of them could fire on it, and its lifecycle belongs to the
+refill loop that made it ([[020-scheduling-and-sets]],
+[[038-environment-pools]]); the observed index is rebuilt without entries,
+because an entry has no desired row to be compared against.
 
 For an environment that is not `Ready`, nothing is rebuilt and no rule
 runs: its sandboxes hold whatever phase they had, `Lost` included, and
@@ -266,7 +274,7 @@ store behind `Store` ([[010-state]]); the token's shape
 | A spawn debits the budget in the same transaction as the desired write; two concurrent spawns against a budget of one yield one child and one `spawn_budget_exhausted` | `TestSpawnDebitIsAtomic` | not built |
 | A narrowing update and an owner's widening update each keep the effective boundary within both manifests at every instant, observed through fake gateway and driver | `TestUpdateNeverWidensMidChange` | not built |
 | `Change.Volumes` is sent only while `Stopped`; a secret update re-pushes; a secret delete re-pushes and writes `notInjectable` | `TestUpdatePaths` | not built |
-| Each reaper rule fires at its second and not one before under a fake clock; `never` disables it; a sandbox matching two rules gets the first | `TestReaperRules`, one case per rule and one per tie | built for expired, autoDelete and autoStop ([[037-lifecycle-enforcement]]), for lost ([[043-postgres-store]]) and for token ([[045-workload-tokens]]), whose rule is asked only of a sandbox no deadline rule claimed |
+| Each reaper rule fires at its second and not one before under a fake clock; `never` disables it; a sandbox matching two rules gets the first | `TestReaperRules`, one case per rule and one per tie | built for expired, autoDelete and autoStop ([[037-lifecycle-enforcement]]), for lost ([[043-postgres-store]]) and for token ([[045-workload-tokens]]), whose rule is asked only of a sandbox no deadline rule claimed; a pool entry is asked of none of them, with `TestReaperLeavesPoolEntries` driving one that carries a deadline ([[038-environment-pools]]) |
 | The reaper does not run on a replica without the lease | `TestReaperNeedsTheLease` | built ([[037-lifecycle-enforcement]]) |
 | For an environment that is `Offline`, nothing is rebuilt, no rule runs, and `Lost` does not count the grace; when it returns, lost sandboxes recover | `TestOfflineEnvironmentHoldsState` | not built |
 | An errored `List` rebuilds nothing | `TestListErrorIsNotEmpty` | built, with the observed rebuild and the lost rule it holds ([[043-postgres-store]]) |

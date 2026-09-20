@@ -299,3 +299,21 @@ func TestLifecycleWaitsForReap(t *testing.T) {
 		})
 	}
 }
+
+// TestListSkipsADirectoryWithoutARecord pins the race the pool's end-to-end
+// test exposed: a second driver instance over the same root lists while the
+// first is between making a sandbox's directory and writing its record. That
+// directory is not a sandbox yet, so the list omits it rather than failing.
+func TestListSkipsADirectoryWithoutARecord(t *testing.T) {
+	d, root := fresh(t)
+	if err := os.MkdirAll(filepath.Join(root, "sbx_01j0000000000000000000000z"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	states, err := d.List(t.Context(), driver.Filter{})
+	if err != nil {
+		t.Fatalf("List = %v, want the half-made entry skipped", err)
+	}
+	if len(states) != 0 {
+		t.Fatalf("List = %d states, want none", len(states))
+	}
+}

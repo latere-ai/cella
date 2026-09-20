@@ -12,7 +12,7 @@ depends_on:
 affects: [controller/, manifest/v1/, internal/api/, internal/config/]
 effort: large
 created: 2026-09-12
-updated: 2026-09-13
+updated: 2026-09-20
 author: changkun
 ---
 
@@ -284,9 +284,10 @@ which [[010-state]] owns.
 | A `direct` environment fails at once without capacity; a `queued` one waits and starts when capacity frees; `startDeadline` fails it with the reason; a `scheduling` field on a `direct` environment is `capability_unsupported`; an unknown queue is `invalid_field` | `TestModes` under a fake clock | not built |
 | The loop runs only on the lease holder, on the tick and on `Release`, and resumes a dequeued sandbox at create step 3 | `TestSchedulerLoop` | not built |
 | The scheduler admits in priority, then smallest CPU sum per subject, then arrival, with three subjects and mixed priorities | `TestSchedulerHonoursQueueOrder` | not built |
-| Capacity in use follows the two derivations, `Lost` frees, `Recovering` re-takes or queues, a pool entry counts, `auto` keeps the headroom, and a restart does not double count | `TestCapacityAccounting` | not built |
+| Capacity in use follows the two derivations, `Lost` frees, `Recovering` re-takes or queues, a pool entry counts, `auto` keeps the headroom, and a restart does not double count | `TestCapacityAccounting` | the count form is built, with a pool entry counting and the oldest entries giving up their slots ([[038-environment-pools]]); the resource form waits on drivers reporting granted resources |
 | Victims are chosen lowest priority, largest CPU, newest; a victim is `Stopped`, requeued with its `enqueued_at`, and after the cap is no longer a victim | `TestPreemption`, `TestPreemptionIsBounded` | not built |
-| Two concurrent creates matching one pool entry yield one adoption and one slow path; the adopted sandbox has its own credential, map, token, and `createdAt`; a create with a `command` or `ports` does not adopt; oldest entries are deleted when a create does not fit | `TestPoolAdoption`, `TestPoolYieldsCapacity` | not built |
+| Two concurrent creates matching one pool entry yield one adoption and one slow path; the adopted sandbox has its own credential, map, token, and `createdAt`; a create with a `command` or `ports` does not adopt; oldest entries are deleted when a create does not fit | `TestPoolAdoption`, `TestPoolYieldsCapacity` | built ([[038-environment-pools]]), with `PrewarmAndAdoptIsExclusive` proving the race in the driver on `native`, on `podman` against a real engine and on `k8s`; the `ports` half of the match rule lands with the field |
+| The refill loop keeps `spec.pool.size` entries of the environment's shape under the `pool:<environment>` lease, deletes what the pool no longer wants, and `direct` starts a sandbox now or fails it | `TestPoolRefill`, `TestPoolDrift`, `TestPoolRefillHoldsTheLease` | built ([[038-environment-pools]]) |
 | A pool never serves a create the authorizer refused | `TestPoolIsBehindTheAuthorizer` | not built |
 | Every field rule in the set table has a refusing case; `parallelism` and `onFailure` change mid-run and nothing else does | `TestSetFieldRules`, `TestSetUpdate` | not built |
 | A set of 64 with parallelism 8 runs at most 8 at once, collects every replica's paths under its index, deletes replicas after collection, and ends `Succeeded` with the counts | `TestSetRunsToCompletion` on the native driver | not built |

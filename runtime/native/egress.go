@@ -20,17 +20,19 @@ const caFile = "egress-ca.pem"
 
 // projectEgress writes the gateway's authority beside the sandbox and returns
 // the environment the boundary adds to the workload's own. A create that
-// carries no gateway writes nothing and adds nothing.
-func projectEgress(dir string, s driver.CreateSpec) (map[string]string, error) {
-	env := maps.Clone(s.Env)
+// carries no gateway writes nothing and adds nothing. It takes the boundary
+// and the environment rather than the create spec, because an adoption writes
+// the same projection over an entry that was prewarmed without one.
+func projectEgress(dir string, own map[string]string, boundary driver.Egress) (map[string]string, error) {
+	env := maps.Clone(own)
 	projection := egress.Projection{
-		ProxyAddr:   s.Egress.ProxyAddr,
-		ReverseAddr: s.Egress.ReverseAddr,
-		Credential:  s.Egress.Credential,
+		ProxyAddr:   boundary.ProxyAddr,
+		ReverseAddr: boundary.ReverseAddr,
+		Credential:  boundary.Credential,
 	}
-	if s.Egress.CAPEM != "" {
+	if boundary.CAPEM != "" {
 		path := filepath.Join(dir, caFile)
-		if err := os.WriteFile(path, []byte(s.Egress.CAPEM), 0o400); err != nil {
+		if err := os.WriteFile(path, []byte(boundary.CAPEM), 0o400); err != nil {
 			return nil, err
 		}
 		projection.CAPath = path
