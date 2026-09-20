@@ -64,6 +64,14 @@ func (c Caller) reserved(prefix string) (string, bool) {
 	return id, ok && id != ""
 }
 
+// Revocations is the list of every jti cellad revoked, which the
+// verifier asks about the tokens cellad itself signed (spec 006). A
+// listed issuer's token is its issuer's to revoke and is never asked
+// about here.
+type Revocations interface {
+	Revoked(ctx context.Context, jti string) (bool, error)
+}
+
 // VerifierOptions configures a Verifier. Issuers and Audience are
 // CELLA_OIDC_ISSUERS and CELLA_OIDC_AUDIENCE; LocalIssuer and LocalKeys
 // are CELLA_PUBLIC_URL and the public halves of CELLA_TOKEN_KEY, which
@@ -79,6 +87,10 @@ type VerifierOptions struct {
 	CacheTTL    time.Duration
 	// FetchTimeout bounds one discovery or key-set read at start.
 	FetchTimeout time.Duration
+	// Revocations is the list a token cellad minted is checked against.
+	// Without one nothing is revoked, which is what a deployment with no
+	// store has: every token lives until its exp.
+	Revocations Revocations
 }
 
 // DefaultFetchTimeout bounds one start-up read of an issuer.
@@ -96,6 +108,7 @@ type Verifier struct {
 	validator   *jwt.Validator
 	localIssuer string
 	local       *jwt.Validator
+	revocations Revocations
 }
 
 // NewVerifier reads every issuer's discovery document and key set and
@@ -132,7 +145,7 @@ func NewVerifier(ctx context.Context, o VerifierOptions) (*Verifier, error) {
 	if timeout <= 0 {
 		timeout = DefaultFetchTimeout
 	}
-	v := &Verifier{audience: o.Audience, localIssuer: strings.TrimRight(o.LocalIssuer, "/")}
+	v := &Verifier{audience: o.Audience, localIssuer: strings.TrimRight(o.LocalIssuer, "/"), revocations: o.Revocations}
 	for _, raw := range o.Issuers {
 		iss := strings.TrimRight(raw, "/")
 		if slices.Contains(v.issuers, iss) {
@@ -232,7 +245,7 @@ func (v *Verifier) Authenticate(r *http.Request) (Caller, error) {
 	if !ok || raw == "" {
 		return Caller{}, refuse(CodeUnauthenticated, "the request carries no bearer token")
 	}
-	return v.Verify(raw)
+	return v.VerifyContext(r.Context(), raw)
 }
 
 // Verify verifies one bearer. The token's own iss selects the key set it
@@ -243,6 +256,14 @@ func (v *Verifier) Authenticate(r *http.Request) (Caller, error) {
 // A listed issuer's token whose sub carries a reserved prefix is
 // refused: no issuer mints a sandbox's or an environment's identity.
 func (v *Verifier) Verify(raw string) (Caller, error) {
+	return v.VerifyContext(context.Background(), raw)
+}
+
+// VerifyContext is Verify under the caller's own context, which is what
+// bounds the one read the revocation list costs for a token cellad
+// minted. Every request path takes this one; Verify is for a caller with
+// no request of its own.
+func (v *Verifier) VerifyContext(ctx context.Context, raw string) (Caller, error) {
 	var claims map[string]any
 	if err := jwt.DecodePayload(raw, &claims); err != nil {
 		return Caller{}, refuse(CodeUnauthenticated, "the bearer is not a JWS any issuer could have signed: %v", err)
@@ -250,7 +271,7 @@ func (v *Verifier) Verify(raw string) (Caller, error) {
 	iss, _ := claims["iss"].(string)
 	iss = strings.TrimRight(iss, "/")
 	if v.localIssuer != "" && iss == v.localIssuer {
-		return v.verifyMinted(raw, claims)
+		return v.verifyMinted(ctx, raw, claims)
 	}
 	if !slices.Contains(v.issuers, iss) {
 		return Caller{}, refuse(CodeUnauthenticated, "the token names the issuer %s, which CELLA_OIDC_ISSUERS does not list", strconv.Quote(iss))
@@ -273,13 +294,32 @@ func (v *Verifier) Verify(raw string) (Caller, error) {
 // signed by the predecessor verifies until the operator removes its
 // block, and a kid the set does not hold is refused rather than tried
 // against every key the node holds.
-func (v *Verifier) verifyMinted(raw string, claims map[string]any) (Caller, error) {
+func (v *Verifier) verifyMinted(ctx context.Context, raw string, claims map[string]any) (Caller, error) {
 	if v.local == nil {
 		return Caller{}, refuse(CodeUnauthenticated, "the token names cellad as its issuer, and CELLA_TOKEN_KEY holds no key to check it against")
 	}
 	c, err := v.local.Validate(raw)
 	if err != nil {
 		return Caller{}, refuse(CodeUnauthenticated, "cellad's own token: %s: %v", jwt.ReasonOf(err), err)
+	}
+	// Every token cellad signs carries a jti, and the jti is how it is
+	// ended before its exp: the controller revokes the one it replaces at
+	// a rotation, at a recovery and at a delete (spec 006). A token
+	// without one could not be ended at all, so it is not one of ours.
+	jti, _ := claims["jti"].(string)
+	if jti == "" {
+		return Caller{}, refuse(CodeUnauthenticated, "cellad's own token carries no jti, and a credential that cannot be revoked is not one cellad issued")
+	}
+	if v.revocations != nil {
+		revoked, err := v.revocations.Revoked(ctx, jti)
+		if err != nil {
+			// A list that cannot answer leaves the token unproven, and an
+			// unproven token is not an accepted one.
+			return Caller{}, refuse(CodeAuthorizerUnavailable, "the revocation list did not answer for %s: %v", jti, err)
+		}
+		if revoked {
+			return Caller{}, refuse(CodeUnauthenticated, "the token %s was revoked", jti)
+		}
 	}
 	return Caller{Subject: c.Sub, Issuer: v.localIssuer, Sub: c.Sub, Claims: claims, Minted: true}, nil
 }
