@@ -74,6 +74,13 @@ const (
 	labelAutoDelete = prefix + "auto-delete"
 	labelEnv        = prefix + "env"
 	labelUser       = prefix + "label."
+	// The pool's three keys, on the record volume rather than the workspace
+	// one: podman fixes a volume's labels at create, and an adoption
+	// rewrites all three (spec 020).
+	labelPool      = driver.PoolLabel
+	labelAdopted   = prefix + "adopted-at"
+	labelAdoptedBy = prefix + "adopted-by"
+	labelAdoptedAs = prefix + "adopted-as"
 )
 
 // The kinds the id label's three objects distinguish themselves by.
@@ -150,8 +157,10 @@ func (d *Driver) Isolation() string { return v1.IsolationContainer }
 // because the driver keeps nothing in this process and a second instance over
 // the same engine reads every sandbox back. Attach, because the engine runs an
 // exec session with a TTY over a connection it speaks bytes both ways on.
+// Pool, because a generation of the record is written once: the engine refuses
+// a second volume of one name, which is the compare-and-swap adoption needs.
 func (d *Driver) Capabilities() driver.Capabilities {
-	return driver.Capabilities{Files: true, Detach: true, Attach: true}
+	return driver.Capabilities{Files: true, Detach: true, Attach: true, Pool: true}
 }
 
 // Socket is the socket the driver last found answering, for the start-up line.
@@ -332,6 +341,14 @@ type record struct {
 	stopped                   bool
 	lastActivityAt            time.Time
 	ttl, autoStop, autoDelete time.Duration
+	// pool marks a prewarmed entry, and the three below are what an
+	// adoption writes that the workspace volume's fixed labels cannot
+	// carry: who owns the sandbox now, what it is called, and when it
+	// began, which for an adopted sandbox is the adoption and not the
+	// prewarm (spec 020).
+	pool        bool
+	owner, name string
+	adoptedAt   time.Time
 }
 
 func (r record) volumeLabels(id string) map[string]string {
@@ -342,6 +359,14 @@ func (r record) volumeLabels(id string) map[string]string {
 	}
 	if r.stopped {
 		l[labelStopped] = "true"
+	}
+	if r.pool {
+		l[labelPool] = "true"
+	}
+	if !r.adoptedAt.IsZero() {
+		l[labelAdopted] = r.adoptedAt.Format(time.RFC3339Nano)
+		l[labelAdoptedBy] = r.owner
+		l[labelAdoptedAs] = r.name
 	}
 	for key, d := range map[string]time.Duration{labelTTL: r.ttl, labelAutoStop: r.autoStop, labelAutoDelete: r.autoDelete} {
 		if d > 0 {
@@ -360,7 +385,11 @@ func (r record) volumeLabels(id string) map[string]string {
 }
 
 func recordOf(l map[string]string) record {
-	r := record{stopped: l[labelStopped] == "true"}
+	r := record{stopped: l[labelStopped] == "true", pool: l[labelPool] == "true",
+		owner: l[labelAdoptedBy], name: l[labelAdoptedAs]}
+	if t, err := time.Parse(time.RFC3339Nano, l[labelAdopted]); err == nil {
+		r.adoptedAt = t.UTC()
+	}
 	r.generation, _ = strconv.ParseUint(l[labelGeneration], 10, 64)
 	if t, err := time.Parse(time.RFC3339Nano, l[labelActivity]); err == nil {
 		r.lastActivityAt = t.UTC()
@@ -600,6 +629,9 @@ func (d *Driver) Create(ctx context.Context, s driver.CreateSpec) (driver.Ref, e
 	if !validID.MatchString(s.ID) || s.Lifecycle.TTL < 0 || s.Lifecycle.AutoStop < 0 || s.Lifecycle.AutoDelete < 0 {
 		return driver.Ref{}, driver.ErrInvalid
 	}
+	if err := s.CheckPrewarm(); err != nil {
+		return driver.Ref{}, err
+	}
 	if s.Image == "" {
 		return driver.Ref{}, fmt.Errorf("%w: podman needs an image", driver.ErrInvalid)
 	}
@@ -645,9 +677,10 @@ func (d *Driver) Create(ctx context.Context, s driver.CreateSpec) (driver.Ref, e
 		_ = d.removeVolume(clean, recordVolume(s.ID, 1))
 		_ = d.removeVolume(clean, workspaceVolume(s.ID))
 	}
-	env := tokenEnv(s, egressEnv(s))
+	env := tokenEnv(s.Token, egressEnv(s.Env, s.Egress))
 	rec := record{labels: maps.Clone(s.Labels), env: maps.Clone(env), lastActivityAt: time.Now().UTC(),
-		ttl: s.Lifecycle.TTL, autoStop: s.Lifecycle.AutoStop, autoDelete: s.Lifecycle.AutoDelete}
+		ttl: s.Lifecycle.TTL, autoStop: s.Lifecycle.AutoStop, autoDelete: s.Lifecycle.AutoDelete,
+		pool: s.Prewarm}
 	if err := d.writeRecord(ctx, s.ID, 0, rec); err != nil {
 		undo()
 		return driver.Ref{}, err
@@ -757,6 +790,12 @@ func (d *Driver) Delete(ctx context.Context, id string) error {
 	}
 	unlock := d.lock(id)
 	defer unlock()
+	return d.deleteLocked(ctx, id)
+}
+
+// deleteLocked is Delete with this sandbox's lock already held, for the
+// adoption that discards an entry it could not finish projecting into.
+func (d *Driver) deleteLocked(ctx context.Context, id string) error {
 	if err := d.removeContainer(ctx, id); err != nil {
 		return err
 	}
@@ -776,6 +815,13 @@ func (d *Driver) Delete(ctx context.Context, id string) error {
 // environment at create, so neither is rewritten: the labels are read from the
 // record, and the environment reaches the sandbox through Exec.
 func (d *Driver) Update(ctx context.Context, id string, c driver.Change) error {
+	adoption, err := c.Adoption()
+	if err != nil {
+		return err
+	}
+	if adoption != nil {
+		return d.adopt(ctx, id, *adoption)
+	}
 	if c.Lifecycle != nil && (c.Lifecycle.TTL < 0 || c.Lifecycle.AutoStop < 0 || c.Lifecycle.AutoDelete < 0) {
 		return driver.ErrInvalid
 	}
@@ -877,11 +923,9 @@ func (d *Driver) List(ctx context.Context, f driver.Filter) ([]driver.State, err
 	}
 	out := []driver.State{}
 	for id, ident := range identities {
-		s := stateOf(ident, records[id], containers[id])
-		if f.Owner != "" && s.Owner != f.Owner || f.Phase != "" && s.Phase != f.Phase || len(f.IDs) > 0 && !slices.Contains(f.IDs, id) {
-			continue
+		if s := stateOf(ident, records[id], containers[id]); f.Selects(s) {
+			out = append(out, s)
 		}
-		out = append(out, s)
 	}
 	slices.SortFunc(out, func(a, b driver.State) int { return strings.Compare(a.ID, b.ID) })
 	return out, nil
@@ -893,10 +937,17 @@ func stateOf(i identity, r record, st status) driver.State {
 	s := driver.State{
 		ID: i.id, Name: i.name, Owner: i.owner, Isolation: v1.IsolationContainer,
 		Labels: maps.Clone(r.labels), CreatedAt: i.createdAt, LastActivityAt: r.lastActivityAt,
-		AutoStop: r.autoStop, AutoDelete: r.autoDelete,
+		AutoStop: r.autoStop, AutoDelete: r.autoDelete, Pool: r.pool,
+	}
+	// An adopted sandbox reads its owner, its name and its beginning from
+	// the record, which is the half a mutation may rewrite. Nothing else
+	// writes those three, so a sandbox that was created rather than adopted
+	// reads the workspace volume's fixed labels as before.
+	if !r.adoptedAt.IsZero() {
+		s.Owner, s.Name, s.CreatedAt = r.owner, r.name, r.adoptedAt
 	}
 	if r.ttl > 0 {
-		s.ExpiresAt = i.createdAt.Add(r.ttl)
+		s.ExpiresAt = s.CreatedAt.Add(r.ttl)
 	}
 	s.Phase, s.ExitCode = phaseOf(st, r.stopped)
 	if st.present {

@@ -21,8 +21,8 @@ import (
 // tokenEnv names the projected token for the agent client of spec 011. A
 // create that carries none adds nothing, so a sandbox on a control plane that
 // mints no identity does not claim to hold one.
-func tokenEnv(s driver.CreateSpec, env map[string]string) map[string]string {
-	if len(s.Token) == 0 {
+func tokenEnv(token []byte, env map[string]string) map[string]string {
+	if len(token) == 0 {
 		return env
 	}
 	out := maps.Clone(env)
