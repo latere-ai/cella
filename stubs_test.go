@@ -155,7 +155,7 @@ func TestMakeRunNeedsNoIssuerOfYourOwn(t *testing.T) {
 	if strings.Contains(string(script), "CELLA_ADMISSION_URL=") {
 		t.Error("the bootstrap exports an admission variable, and nothing in this tree reads one")
 	}
-	for _, target := range []string{"test:", "test-podman:", "test-kind:"} {
+	for _, target := range []string{"test:", "tier-podman:", "tier-kind:"} {
 		if !strings.Contains(string(makefile), target) {
 			t.Errorf("the Makefile has no %s target, and spec 012 names the tier", strings.TrimSuffix(target, ":"))
 		}

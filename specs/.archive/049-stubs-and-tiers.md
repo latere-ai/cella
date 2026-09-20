@@ -145,8 +145,8 @@ variable no binary reads is not exported as though it were configuration.
 | Tier | Command | Needs | Runs |
 |---|---|---|---|
 | unit | `make test` | Go | the gate, every push |
-| podman | `make test-podman` | a rootless Podman socket | every push on `ubuntu-latest`, and in the release pipeline's conformance job |
-| kind | `make test-kind` | kind, kubectl, a container runtime | on demand, and in the two jobs below |
+| podman | `make tier-podman` | a rootless Podman socket | every push on `ubuntu-latest`, and in the release pipeline's conformance job |
+| kind | `make tier-kind` | kind, kubectl, a container runtime | on demand, and in the two jobs below |
 
 The kind tier is one Go test behind the `e2e` build tag, so the gate's
 untagged suite never reaches `kind`, `kubectl` or a cluster. It reads two
@@ -292,7 +292,7 @@ Built on 2026-09-20 in seventeen commits. `go tool lateregate`: 16 gates,
 |---|---|
 | `cella-stubs` | the four roles on four loopback listeners in one process, each one line of log per request, no state across a restart. The issuer is `pkg/authkit/issuertest` and the authorizer is `pkg/authz/stub`, each behind a listener of `internal/stubs`; the admission endpoint and the sink are written against specs 007 and 009 there |
 | `make run` | `tools/run/up.sh`: both binaries built, the signing key and the sink's secret generated once under `out/run/`, the stubs started and waited for, `cellad serve` wired to the issuer, the authorizer and the sink, and the mint command and the first `curl` printed. Proved by `TestRunBootstrap`, which ran here in 10 seconds: no `CELLA_OIDC_ISSUERS`, a token minted at the stub issuer, one sandbox created and deleted |
-| `make test`, `make test-podman`, `make test-kind` | the three tiers this slice carries. The podman target runs the driver's own suite, which skips where no engine answers |
+| `make test`, `make tier-podman`, `make tier-kind` | the three tiers this slice carries. The podman target runs the driver's own suite, which skips where no engine answers |
 | `deploy/examples/kind-stubs` | the kind overlay: the stubs as an init container with `restartPolicy: Always` in the `cellad` Deployment and in the check Job, a startup probe over the issuer's discovery document, the two Secrets the base reads as optional keys, a ConfigMap naming the loopback issuer, and a NodePort publishing the mint route and the sink's feed to the host. `up.sh` and `down.sh` bring the cluster up and take it down |
 | `test/kind` | `TestClusterLifecycle`, behind the `e2e` tag: create, wait for `Ready`, exec, delete, and the records of spec 009 read back from the sink. It brings the stack up with `CELLA_TEST_KIND=1` and runs against a standing one with `CELLA_TEST_URL` |
 | `verify.yml` | the `install` job renders the deploy tree, runs the bootstrap tier, builds both images, brings the stack up with `up.sh`, walks `docs/install.md` against it, and then runs the kind tier against the same cluster: one cluster per run |

@@ -22,13 +22,13 @@ spec:
           image: cella-stubs
           restartPolicy: Always
           args:
-            - -issuer=127.0.0.1:9080
+            - -issuer=:9080
             - -issuer-url=http://127.0.0.1:9080
             - -issuer-audience=cella
             - -authorizer=127.0.0.1:9081
             - -authorizer-token=stub-authorizer-token
             - -admission=127.0.0.1:9082
-            - -sink=127.0.0.1:9083
+            - -sink=:9083
             - -sink-secret=stub-events-secret
           ports:
             - name: issuer

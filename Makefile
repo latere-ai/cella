@@ -3,7 +3,7 @@
 
 GO ?= go
 
-.PHONY: build check clean fmt hooks run test test-podman test-kind
+.PHONY: build check clean fmt hooks run test tier-podman tier-kind
 
 # The whole bar. Every gate lives in latere.ai/x/ci-gate, pinned as a tool
 # in go.mod and configured in .lateregate.yaml, so this target is a name for
@@ -49,20 +49,21 @@ run:
 # The tiers of spec 012. The unit tier is the gate's own suite; the other
 # two need a substrate beside them and say what they need when it is not
 # there.
+# The test gate alone; `make check` runs the whole bar.
 test:
-	$(GO) test ./...
+	@$(GO) tool lateregate test
 
 # The container driver's suite against a rootless engine. It skips where no
 # socket answers, which is why the release pipeline reads the log for the
 # pass rather than the exit code.
-test-podman:
+tier-podman:
 	$(GO) test -count=1 -v -run '^TestPodman' ./runtime/podman/...
 
 # The kind stack: the overlay with the stubs beside cellad, the lifecycle
 # through the API, and the check Job. It brings the cluster up and takes it
 # down; against a cluster somebody else brought up, set CELLA_TEST_URL and
 # CELLA_TEST_TOKEN instead.
-test-kind:
+tier-kind:
 	CELLA_TEST_KIND=1 $(GO) test -tags=e2e -count=1 -v -timeout 30m -run '^TestCluster' ./test/kind/...
 
 fmt:

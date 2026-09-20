@@ -128,8 +128,8 @@ the isolated backend to develop against on a laptop: point
 rootless socket is in its usual place. The larger manifest and client
 commands above describe the planned contract.
 
-The tiers: `make test` is the unit suite, `make test-podman` runs the
-container driver's suite against a rootless engine, and `make test-kind`
+The tiers: `make test` is the unit suite, `make tier-podman` runs the
+container driver's suite against a rootless engine, and `make tier-kind`
 brings up a kind cluster with the stubs beside `cellad` and runs the
 lifecycle through the API against it.
 

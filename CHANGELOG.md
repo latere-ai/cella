@@ -37,7 +37,7 @@ refused before it is pushed.
   binary that serves an OpenID Connect issuer, an authorization endpoint, an
   admission endpoint and an event sink on loopback, then starts `cellad serve`
   wired to them, and prints the one command that mints a token to call it
-  with. `make test`, `make test-podman` and `make test-kind` are the tiers,
+  with. `make test`, `make tier-podman` and `make tier-kind` are the tiers,
   and `deploy/examples/kind-stubs` runs the same stubs beside the control
   plane in a kind cluster, which is what lets
   [`docs/install.md`](docs/install.md) walk green on every push and on every
