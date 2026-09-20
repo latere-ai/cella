@@ -72,6 +72,7 @@ later.
 | [023](023-computer-use-operations.md) | Computer use operations: the desktop, screenshot, screen, input, ports and the proxy, browser-ready sandboxes | medium | validated | 003, 004, 005, 008, 009 |
 | [024](024-vm-driver.md) | VM driver: a hardware-isolated sandbox per environment; the design held open | large | vague | 004, 019 |
 | [031](031-hosted-sandbox-consolidation.md) | Hosted sandbox consolidation: every package of latere-ai/sandbox lands in cella, in the platform, or is dropped | large | in-progress | 001 |
+| [050](.archive/050-cella-command.md) | Cella command: the agent client over /v1, its client package, exit codes and the skill | medium | complete | 008, 011, 031, 048 |
 
 ## Dependency graph
 
@@ -278,3 +279,4 @@ The map, the order, and the rule for a slice are in 031.
 | [038-environment-pools.md](.archive/038-environment-pools.md) | complete | The environment's prewarmed pool, the match rule, adoption as one exclusive driver act, the refill loop |
 | [049-stubs-and-tiers.md](.archive/049-stubs-and-tiers.md) | complete | `cella-stubs`, `make run` with no issuer of your own, the unit, podman and kind tiers, the kind overlay, and the install walk on every push and every tag |
 | [041-display-and-input.md](.archive/041-display-and-input.md) | complete | The virtual desktop, the screenshot, the screen stream, the input batch, the port probe |
+| [050-cella-command.md](.archive/050-cella-command.md) | complete | The `cella` command, the typed client and its own WebSocket, the exit scheme, the columns and `--json`, the skill, and the client's four release archives |

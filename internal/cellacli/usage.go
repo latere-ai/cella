@@ -1,0 +1,53 @@
+// SPDX-FileCopyrightText: 2026 Latere AI
+// SPDX-License-Identifier: Apache-2.0
+
+package cellacli
+
+// usage is what `cella help` writes. It is the command table of design 011
+// for the routes this API serves, and docs/cli.md carries it word for word,
+// which a test holds.
+const usage = `cella speaks the /v1 API of a Cella control plane.
+
+usage: cella <command> [flags] [arguments]
+
+Commands:
+  apply    -f <file> [-w]                          apply a Sandbox or a Secret manifest
+  get      <kind> [<ref>] [-o json|wide|name]      read one object or list a kind
+  delete   <kind> <ref>                            delete one object
+  start    <ref>                                   start a stopped sandbox
+  stop     <ref>                                   stop a running sandbox
+  exec     <ref> [-i] [-t] -- <command>            run a command inside a sandbox
+  attach   <ref> [-- <command>]                    open a terminal inside a sandbox
+  logs     <ref> [-f] [--since t] [--tail n]       write the main process output
+  cp       <ref>:<src> <dest>                      copy a tree out of a sandbox
+  cp       <src> <ref>:<dest>                      copy a tree into a sandbox
+  files    ls|stat|get|put|mkdir|rm|mv             one file operation inside a sandbox
+  egress   <ref> [--limit n]                       the connections the gateway recorded
+  version                                          the client's identity, and the server's
+
+Kinds: sandbox, secret, singular or plural.
+
+Flags on every command:
+  --url <address>      the control plane, else CELLA_URL
+  --token <token>      the bearer, else CELLA_TOKEN
+  --token-file <path>  a file holding the bearer, else CELLA_TOKEN_FILE, else
+                       /run/cella/token, which is where a sandbox holds its own
+  --ca <path>          a certificate authority to trust beside the system roots
+  --json               write the API's own JSON instead of columns
+  -v                   print the code, the paths and the request id of a refusal
+
+Exit codes:
+  0   success, or the command inside exited 0
+  1   the server failed, or a stream ended before its end
+  2   a flag, a reference or a document this command could not read
+  3   the server refused the request
+  4   there is no such object
+  5   the object is in a state that does not allow this
+  7   the server could not be reached
+  Under exec and attach the command inside sets the exit code, and 125, 126
+  and 127 say that it failed, could not start, or that the server was not
+  reachable.
+
+A manifest is JSON. Inside a sandbox the address is already in the
+environment and the token is at /run/cella/token, so no flag is needed.
+`

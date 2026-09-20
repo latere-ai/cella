@@ -1,0 +1,2 @@
+NAME  PHASE    READY  IMAGE            AGE  OWNER
+dev   Running  True   example/image:1  1h   https://login.example.com|alice

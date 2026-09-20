@@ -24,7 +24,9 @@ From the release page of the version you are installing:
 - the image reference, `ghcr.io/<owner>/cellad:<tag>`, where `<owner>` is
   the account the release was published under;
 - optionally `cellad_<tag>_<os>_<arch>.tar.gz`, the binary, if you want to
-  run the control plane outside a cluster.
+  run the control plane outside a cluster;
+- optionally `cella_<tag>_<os>_<arch>.tar.gz`, the client that speaks the
+  API from a shell and from inside a sandbox ([the cella command](cli.md)).
 
 Every release is signed and carries a bill of materials and a provenance
 attestation. [SECURITY.md](../SECURITY.md) says how to verify one before

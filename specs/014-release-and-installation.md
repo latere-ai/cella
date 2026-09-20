@@ -176,7 +176,7 @@ and which wait on [[012-test-stubs-and-tiers]] and
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| Every artifact in the table is attached to the release of a tag | the `release-verify` job | built; proven on the first tag |
+| Every artifact in the table is attached to the release of a tag | the `release-verify` job | built for the two binaries of [[001-architecture]]: `tools/release/build.sh` writes the four `cellad_*` and the four `cella_*` archives from one checkout, `release-verify` asserts all eight by name and counts nine checksum lines with the deploy archive, and `install-release` runs `./cella version` from the published archive ([[050-cella-command]]). The stub and display images wait on their specs |
 | The workflow and the archive fix no image namespace | `TestReleasePublishesUnderTheOwnersNamespace` | passing |
 | `Dockerfile` and `Dockerfile.ci` share the runtime stage byte for byte | `TestRuntimeStagesMatch` | passing |
 | Every overlay renders and the base carries every Pod security field | `TestOverlaysRender`, `TestBaseIsConfined` | passing |

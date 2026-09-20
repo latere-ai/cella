@@ -1,0 +1,1 @@
+{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox","metadata":{"name":"dev","labels":{"team":"core"}},"spec":{"image":"example/image:1"},"status":{"id":"sbx_1","owner":"https://login.example.com|alice","environment":"default","driver":"native","phase":"Deleting","conditions":[{"type":"Ready","status":"True"}],"createdAt":"2026-09-20T09:00:00Z"}}
