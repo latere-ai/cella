@@ -246,6 +246,7 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		Lease: lease, ReapInterval: cfg.ReapInterval, TouchInterval: cfg.TouchInterval,
 		LostGrace: cfg.LostGrace, Events: controllerEvents, Tokens: tokens,
 		Egress: hub, Gateway: controller.GatewayAddresses{Proxy: cfg.Gateway.ProxyAddr, Reverse: cfg.Gateway.ReverseAddr},
+		Pool: cfg.Scheduling.Pool, PoolInFlight: cfg.Scheduling.PoolInFlight, PoolGrace: cfg.Scheduling.PoolGrace,
 	})
 	if err != nil {
 		return fail(stderr, fmt.Errorf("controller: %w", err))
@@ -256,12 +257,20 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	hub.Seed(control.EgressMaps(ctx))
 	// The reaper is this process's clock: one tick applies the lifecycle
 	// rules to the environment cellad drives (spec 005). One cellad is the
-	// only writer of its environment, so it holds its own lease.
-	reaperCtx, cancelReaper := context.WithCancel(ctx)
-	reaperDone := make(chan struct{})
-	go func() { defer close(reaperDone); control.RunReaper(reaperCtx) }()
-	stopReaper := sync.OnceFunc(func() { cancelReaper(); <-reaperDone })
-	defer stopReaper()
+	// only writer of its environment, so it holds its own lease. The refill
+	// loop ticks beside it under a lease of its own, keeping the
+	// environment's pool at the size an operator asked for (spec 020).
+	loopCtx, cancelLoops := context.WithCancel(ctx)
+	loopsDone := make(chan struct{})
+	go func() {
+		defer close(loopsDone)
+		var loops sync.WaitGroup
+		loops.Go(func() { control.RunReaper(loopCtx) })
+		loops.Go(func() { control.RunPool(loopCtx) })
+		loops.Wait()
+	}()
+	stopLoops := sync.OnceFunc(func() { cancelLoops(); <-loopsDone })
+	defer stopLoops()
 	handler, err := api.New(api.Options{Controller: control, Verifier: identity.Verifier, Authorizer: identity.Authorizer, MaxBodyBytes: cfg.MaxBodyBytes, MaxUploadBytes: cfg.MaxUploadBytes, Egress: hub, Events: emitter})
 	if err != nil {
 		return fail(stderr, fmt.Errorf("API: %w", err))
@@ -360,9 +369,9 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	for _, s := range servers {
 		_ = s.Shutdown(shutdownCtx)
 	}
-	// The reaper drives the runtime, so it ends before the runtime does, and
-	// delivery ends with it: what it had not posted stays on the journal.
-	stopReaper()
+	// The loops drive the runtime, so they end before it does, and delivery
+	// ends with them: what it had not posted stays on the journal.
+	stopLoops()
 	stopDelivery()
 	if err := closeRuntime(); err != nil {
 		return fail(stderr, fmt.Errorf("runtime shutdown: %w", err))
