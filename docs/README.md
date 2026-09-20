@@ -28,6 +28,7 @@ the stub issuer that makes `make run` self-contained is the
 | Manifest reference | the schema in the [manifest contract spec](../specs/003-manifest-contract.md) |
 | API | the endpoints and error codes in the [API spec](../specs/008-api.md), and the webhooks an operator writes in the [identity](../specs/006-identity.md) and [admission](../specs/007-admission.md) specs |
 | The packages | the [architecture spec](../specs/001-architecture.md) names the exported packages and what each promises |
+| [Conformance](conformance.md) | The suite that checks a server against the API: what to give it, what the report says, and how to declare what you do not serve yet |
 
 ## Changing it
 
