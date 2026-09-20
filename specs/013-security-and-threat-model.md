@@ -1,6 +1,6 @@
 ---
 title: "Security and threat model: assets, adversaries, every control with its test, what is out of scope"
-status: validated
+status: in-progress
 track: core
 depends_on:
   - specs/001-architecture.md
@@ -20,7 +20,7 @@ depends_on:
 affects: [internal/auth/, internal/api/, internal/egressd/, internal/worker/, internal/store/, runtime/, egress/, controller/, manifest/, deploy/, test/e2e/, SECURITY.md]
 effort: medium
 created: 2026-09-12
-updated: 2026-09-13
+updated: 2026-09-20
 author: changkun
 ---
 
@@ -169,7 +169,7 @@ their specs own.
 | Every commitment in `SECURITY.md` maps to a control row | `TestSecurityPolicyMatchesTheModel`, reading both files | not built |
 | A Pod the k8s driver creates has every field of the baseline, `shareProcessNamespace: false` included | `TestPodSecurityFields`, `TestClusterPodIsConfined` running `id`, `cat /proc/1/status`, and a mount attempt | not built |
 | A sandbox cannot reach another sandbox's IP or the Pod network except a mesh peer's `mesh` port | `TestClusterNoLateralMovement` | not built |
-| A canary secret value and a canary token appear in no sandbox environment, file system, event, record, log, or API response across the e2e tier, and the value reaches the upstream only in the declared header | `TestSecretValuesNeverEnterASandbox` | not built |
+| A canary secret value and a canary token appear in no sandbox environment, file system, event, record, log, or API response across the e2e tier, and the value reaches the upstream only in the declared header | `TestSecretValuesNeverEnterASandbox` | built in part ([[046-secret-kind]]): the secret value is followed through the sandbox's environment and files, the control plane's data directory, the delivered events, the connection records, both processes' logs and every API answer, and is read back at the upstream in the header its owner named; no canary token is followed |
 | A workload token that tries to add a host, mount a secret, spawn past its budget, or narrow its parent below itself is refused with the code named | `TestWorkloadCannotWiden` | not built |
 | A non-loopback `http://` `CELLA_URL` is refused by the worker, the gateway, and the client unless the escape hatch is set | `TestControlPlaneURLRule` | not built |
 | A worker host with inbound refused runs the whole tier | [[012-test-stubs-and-tiers]]'s `TestWorkerNoInbound`, `TestClusterWorkerNoInbound` | not built |

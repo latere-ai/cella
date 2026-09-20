@@ -1,6 +1,6 @@
 ---
 title: "Release and installation: images, binaries, attestations, the deploy manifests, cellad check, upgrades"
-status: validated
+status: in-progress
 track: core
 depends_on:
   - specs/002-repository-scaffold.md

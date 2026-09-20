@@ -1,6 +1,6 @@
 ---
 title: "Conformance suite: the API contract as executable cases against any server, with a report"
-status: validated
+status: in-progress
 track: core
 depends_on:
   - specs/003-manifest-contract.md

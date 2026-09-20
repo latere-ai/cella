@@ -1,6 +1,6 @@
 ---
 title: "Observability: one metric table across three roles, traces across the seam, redacted logs, alert rules"
-status: validated
+status: in-progress
 track: core
 depends_on:
   - specs/002-repository-scaffold.md

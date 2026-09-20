@@ -1,6 +1,6 @@
 ---
 title: "Events: one signed record per mutation and operation, typed, ordered per object, to the operator's sink"
-status: validated
+status: in-progress
 track: core
 depends_on:
   - specs/005-lifecycle-controller.md

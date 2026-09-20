@@ -1,6 +1,6 @@
 ---
 title: "Data plane workers: the Environment kind, the default environment, registration, the worker stream and its operations, self-hosted sandboxes"
-status: validated
+status: in-progress
 track: core
 depends_on:
   - specs/004-runtime-contract.md
