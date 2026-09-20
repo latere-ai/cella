@@ -97,6 +97,26 @@ type SandboxStatus struct {
 	// and it lives here only because it must survive a restart with the
 	// object it belongs to.
 	EgressState *EgressState `json:"egressState,omitempty"`
+	// TokenState is the control plane's own record of the workload token
+	// the sandbox holds: what a revocation is keyed by, when it was minted
+	// and when it stops verifying. The token itself is never here; it is
+	// inside the sandbox and nowhere else. Like EgressState it is desired
+	// state rather than something a caller reads, so the API strips it from
+	// every response, and it lives here so that a control plane that
+	// restarted can still end the token a running sandbox holds.
+	TokenState *TokenState `json:"tokenState,omitempty"`
+}
+
+// TokenState is one sandbox's identity as the control plane tracks it. The
+// two instants are what the re-mint of spec 005 is measured against: a token
+// is replaced once two thirds of the span between them has passed.
+type TokenState struct {
+	// JTI is the key of the revocation that ends this token.
+	JTI string `json:"jti"`
+	// IssuedAt is the mint and ExpiresAt is when the token stops verifying
+	// anywhere, which is the sandbox's own expiry where that is sooner.
+	IssuedAt  time.Time `json:"issuedAt"`
+	ExpiresAt time.Time `json:"expiresAt"`
 }
 
 // EgressState is what the control plane keeps per sandbox so that a gateway
