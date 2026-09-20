@@ -211,15 +211,15 @@ func boundary(obj *v1.Sandbox, parent *v1.Sandbox, now time.Time) error {
 		add(pathTTL)
 	}
 
-	// 7: the two spawn axes, and the gate that a parent with no generations
-	// left creates nothing at all.
+	// 7: the two spawn axes. A parent with no generations left creates
+	// nothing at all, which is this rule; a parent with no budget left is
+	// the ledger's refusal at the debit and not a manifest that exceeds
+	// anything, so the containment is read only where a unit remains.
 	remaining := parent.Status.Spawn.Budget - parent.Status.Spawn.Used
-	if parent.Status.Spawn.Depth <= 0 {
-		add(pathSpawnDepth)
-	} else if obj.Spec.Mesh.Spawn.Depth > parent.Status.Spawn.Depth-1 {
+	if parent.Status.Spawn.Depth <= 0 || obj.Spec.Mesh.Spawn.Depth > parent.Status.Spawn.Depth-1 {
 		add(pathSpawnDepth)
 	}
-	if obj.Spec.Mesh.Spawn.Budget > remaining-1 {
+	if remaining > 0 && obj.Spec.Mesh.Spawn.Budget > remaining-1 {
 		add(pathSpawnBudget)
 	}
 

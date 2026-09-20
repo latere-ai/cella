@@ -301,6 +301,28 @@ func TestSpawnFieldsAndDepth(t *testing.T) {
 	}
 }
 
+// TestASpentBudgetIsTheLedgersRefusal: a parent that has spent its budget
+// resolves its child and is refused at the debit, because an exhausted budget
+// is a count and not a manifest that exceeds a boundary. The two answers are
+// apart: spawn_budget_exhausted names a race a caller retries and
+// boundary_exceeded names a manifest a caller rewrites.
+func TestASpentBudgetIsTheLedgersRefusal(t *testing.T) {
+	spent := parentSandbox()
+	spent.Status.Spawn.Used = spent.Status.Spawn.Budget
+	obj := childSandbox()
+	got := resolve(t, obj, spawnOptions(spent)).Sandbox
+	if got.Spec.Mesh.Spawn != (v1.Spawn{}) {
+		t.Fatalf("spawn = %+v", got.Spec.Mesh.Spawn)
+	}
+	// The containment on the axis still holds where a unit remains.
+	almost := parentSandbox()
+	almost.Status.Spawn.Used = almost.Status.Spawn.Budget - 1
+	obj.Spec.Mesh.Spawn.Budget = 1
+	if refused := refusal(t, obj, spawnOptions(almost)); !slices.Contains(refused.Paths, pathSpawnBudget) {
+		t.Fatalf("paths = %v, want %s among them", refused.Paths, pathSpawnBudget)
+	}
+}
+
 // TestSpawnBudgetIsNeverNegative is the structural rule: a manifest cannot
 // ask for a negative number of children.
 func TestSpawnBudgetIsNeverNegative(t *testing.T) {
