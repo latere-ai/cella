@@ -330,7 +330,7 @@ func TestTheCredentialIsDesiredStateAndNotAnAnswer(t *testing.T) {
 	// running sandbox holds in its own environment.
 	second := open()
 	defer func() { _ = second.Close() }()
-	maps := second.EgressMaps()
+	maps := second.EgressMaps(t.Context())
 	if len(maps) != 1 || maps[0].Credential != credential {
 		t.Fatalf("maps after a restart = %+v, want the same credential %q", maps, credential)
 	}
@@ -348,15 +348,15 @@ func TestEgressMapsLeavesOutWhatIsGoing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(c.EgressMaps()) != 1 {
-		t.Fatalf("maps = %+v, want the live sandbox", c.EgressMaps())
+	if len(c.EgressMaps(t.Context())) != 1 {
+		t.Fatalf("maps = %+v, want the live sandbox", c.EgressMaps(t.Context()))
 	}
 	c.mu.Lock()
 	stored := c.objects[obj.Status.ID]
 	stored.Status.Phase = "Deleting"
 	c.objects[obj.Status.ID] = stored
 	c.mu.Unlock()
-	if maps := c.EgressMaps(); len(maps) != 0 {
+	if maps := c.EgressMaps(t.Context()); len(maps) != 0 {
 		t.Fatalf("maps = %+v, want none for a sandbox that is going", maps)
 	}
 	// An object whose stored boundary does not compile is left out rather
@@ -366,7 +366,7 @@ func TestEgressMapsLeavesOutWhatIsGoing(t *testing.T) {
 	stored.Spec.Network.Egress.Mode = ""
 	c.objects[obj.Status.ID] = stored
 	c.mu.Unlock()
-	if maps := c.EgressMaps(); len(maps) != 0 {
+	if maps := c.EgressMaps(t.Context()); len(maps) != 0 {
 		t.Fatalf("maps = %+v, want none for a boundary that does not compile", maps)
 	}
 }

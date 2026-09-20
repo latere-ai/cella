@@ -239,7 +239,7 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	// A gateway that connects to a control plane that has just restarted
 	// receives every live sandbox's map, with the credential that sandbox
 	// already holds, rather than an empty world.
-	hub.Seed(control.EgressMaps())
+	hub.Seed(control.EgressMaps(ctx))
 	// The reaper is this process's clock: one tick applies the lifecycle
 	// rules to the environment cellad drives (spec 005). One cellad is the
 	// only writer of its environment, so it holds its own lease.
