@@ -281,10 +281,10 @@ worker tier.
 
 ## Outcome
 
-Built on 2026-09-20 in sixteen commits. `go tool lateregate`: 16 gates,
+Built on 2026-09-20 in seventeen commits. `go tool lateregate`: 16 gates,
 3 skipped by configuration, `go test -race ./...` included. Coverage:
-`internal/stubs` 94.9%, `cmd/cella-stubs` 97.8%, every measured package above
-90%.
+`internal/stubs` 95.0% (339 of 357 statements), `cmd/cella-stubs` 97.8%
+(222 of 227), and every one of the 25 measured packages above 90%.
 
 ### What runs, and where
 
