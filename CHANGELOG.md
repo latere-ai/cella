@@ -6,8 +6,6 @@ refused before it is pushed.
 
 ## Unreleased
 
-## v0.2.1 - 2026-09-20
-
 - A mesh works on a rootless Podman engine. A sandbox in a mesh is created in
   the bridge network namespace, which is the only one the engine attaches a
   network to; a rootless engine's default of slirp4netns or pasta refused the
