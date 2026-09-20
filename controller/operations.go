@@ -30,3 +30,14 @@ func (c *Controller) Attach(ctx context.Context, id string, req runtime.AttachRe
 	}
 	return a.Attach(ctx, id, req)
 }
+
+// Files returns the driver's per-file half. A driver that declares no Files
+// has no FileStore, which the API reports as the capability the environment
+// lacks.
+func (c *Controller) Files() (runtime.FileStore, error) {
+	store, ok := c.driver.(runtime.FileStore)
+	if !ok {
+		return nil, runtime.ErrUnsupported
+	}
+	return store, nil
+}
