@@ -101,8 +101,10 @@ when [[021-data-plane-workers]] lands.
 
 An entry is a sandbox object the control plane made for nobody. The
 driver receives `CreateSpec.Prewarm` and makes it with no owner, no
-name, no token, no boundary, no user labels, the image's own entrypoint,
-and an empty workspace, and stamps `cella.latere.ai/pool: "true"` on the
+name, no token, no boundary, no user labels, an empty workspace, and
+whatever it runs for a sandbox that names no command, which is the image's
+entrypoint on a driver that starts one and an idle process on the two that
+hold a container open for `Exec`. It stamps `cella.latere.ai/pool: "true"` on the
 object it holds for that sandbox. `Inspect` and `List` report
 `State.Pool` from that stamp, and `Filter.Pool` selects on it.
 
@@ -168,7 +170,7 @@ the entry cannot carry:
 | `image` | equals `spec.pool.image` | the container is already running that image |
 | `resources` | equal `spec.pool.resources`, field by field, as written | the cgroup is already set |
 | `display` | equals `spec.pool.display` | the desktop is already up or not |
-| `command`, `args` | unset | the entry runs the image's entrypoint and a process cannot be replaced |
+| `command`, `args` | unset | the entry is already running what the driver runs for a sandbox with no command, and a process cannot be replaced under a container that is up |
 | `workspace.source` | unset or `empty` | the entry's workspace is empty |
 | `workspace.path` | unset, or the entry's path | the files are provisioned there |
 | `user` | unset | the container is already running as its user |
@@ -236,9 +238,9 @@ The environment a workload reads is the environment the entry started
 with, and the manifest's own reaches it through `Exec`, which is the
 rule both container drivers already follow for `Change.Env`: podman and
 k8s fix a process's environment at create. This is why the match rule
-refuses a `command`. A sandbox with no command runs the entrypoint the
-image chose and the caller's work arrives through `Exec`, which carries
-the adopted record.
+refuses a `command`. A sandbox with no command runs what its driver starts
+for one, and the caller's work arrives through `Exec`, which carries the
+adopted record.
 
 ### Capacity
 
