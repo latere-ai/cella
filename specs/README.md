@@ -276,3 +276,4 @@ The map, the order, and the rule for a slice are in 031.
 | [048-release-and-check.md](.archive/048-release-and-check.md) | complete | The v* tag pipeline, the deploy tree an operator installs from, the install walk, and `cellad check` |
 | [047-admission-client.md](.archive/047-admission-client.md) | complete | The admission webhook client over `CELLA_ADMISSION_URL`, the image rule that closes stage 3, and the count ceiling's one definition |
 | [038-environment-pools.md](.archive/038-environment-pools.md) | complete | The environment's prewarmed pool, the match rule, adoption as one exclusive driver act, the refill loop |
+| [040-mesh-and-spawn.md](040-mesh-and-spawn.md) | in-progress | The spawn tree and its propagated budget, the mesh a child inherits, the boundary as a subset check at resolve |
