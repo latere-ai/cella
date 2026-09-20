@@ -38,6 +38,9 @@ type Controlled struct {
 	// delivery says whether a record this bridge journals is waiting for a
 	// sink; see Delivery.
 	delivery Delivery
+
+	// metrics is design 017's recorder, never nil.
+	metrics Metrics
 }
 
 // ForController wraps a store for one environment's controller. d says
@@ -45,8 +48,17 @@ type Controlled struct {
 func ForController(s Store, environment string, d Delivery) *Controlled {
 	return &Controlled{
 		store: s, environment: environment, holder: Holder(),
-		versions: map[string]int64{}, delivery: d,
+		versions: map[string]int64{}, delivery: d, metrics: nopMetrics{},
 	}
+}
+
+// Measure attaches design 017's recorder and returns the store, so the wiring
+// reads as one expression. A store built without it measures nothing.
+func (c *Controlled) Measure(m Metrics) *Controlled {
+	if m != nil {
+		c.metrics = m
+	}
+	return c
 }
 
 // Store reports the store underneath, for a caller that needs the contract
@@ -70,6 +82,7 @@ func (c *Controlled) Close() error { return c.store.Close() }
 // version, so the first write of each object is conditional on the row it was
 // read from.
 func (c *Controlled) Load() (map[string]v1.Sandbox, error) {
+	defer c.observe(OpLoad, time.Now())
 	ctx := context.Background()
 	objects := map[string]v1.Sandbox{}
 	versions := map[string]int64{}
@@ -111,6 +124,7 @@ func (c *Controlled) Load() (map[string]v1.Sandbox, error) {
 // controller that found a Durable takes Write and Remove per object instead,
 // so this runs only for a caller that holds the store as a plain Store.
 func (c *Controlled) Save(objects map[string]v1.Sandbox) error {
+	defer c.observe(OpSave, time.Now())
 	ctx := context.Background()
 	for id, obj := range objects {
 		if err := c.Write(ctx, obj, controller.MutationSaved); err != nil {
@@ -137,6 +151,7 @@ func (c *Controlled) Save(objects map[string]v1.Sandbox) error {
 // one journal row, so a journal that misses a write is not reachable from
 // here.
 func (c *Controlled) Write(ctx context.Context, obj v1.Sandbox, mutation string) error {
+	defer c.observe(OpWrite, time.Now())
 	row, err := encode(obj)
 	if err != nil {
 		return err
@@ -176,6 +191,7 @@ func (c *Controlled) Write(ctx context.Context, obj v1.Sandbox, mutation string)
 // row another replica already deleted is not an error: the intent is gone
 // either way, and the journal still records that this replica ended it.
 func (c *Controlled) Remove(ctx context.Context, id, mutation string) error {
+	defer c.observe(OpRemove, time.Now())
 	err := c.store.Tx(ctx, func(tx Tx) error {
 		// The row is read before it goes, so the record carries the labels,
 		// name, owner and reason of an object that no longer exists once the
@@ -226,6 +242,7 @@ func (c *Controlled) record(ctx context.Context, mutation string, obj v1.Sandbox
 // Rebuild replaces the observed rows of one environment with what its driver
 // last listed.
 func (c *Controlled) Rebuild(ctx context.Context, environment string, states []driver.State) error {
+	defer c.observe(OpRebuild, time.Now())
 	return c.store.Tx(ctx, func(tx Tx) error {
 		return tx.Observed().Rebuild(ctx, environment, states)
 	})
@@ -234,6 +251,7 @@ func (c *Controlled) Rebuild(ctx context.Context, environment string, states []d
 // Events reads one object's journal, newest first. It is what a test and an
 // operator read to see the order a sandbox went through.
 func (c *Controlled) Events(ctx context.Context, id string, limit int) ([]Event, error) {
+	defer c.observe(OpEvents, time.Now())
 	var events []Event
 	err := c.store.Tx(ctx, func(tx Tx) error {
 		var err error
@@ -246,6 +264,7 @@ func (c *Controlled) Events(ctx context.Context, id string, limit int) ([]Event,
 // Acquire is the controller's lease seam: this process takes or renews the
 // named lease, and the store renews it underneath until it is released.
 func (c *Controlled) Acquire(ctx context.Context, name string, ttl time.Duration) (bool, error) {
+	defer c.observe(OpAcquire, time.Now())
 	var held bool
 	err := c.store.Tx(ctx, func(tx Tx) error {
 		var err error
