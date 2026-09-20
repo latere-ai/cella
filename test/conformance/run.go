@@ -5,11 +5,15 @@ package conformance
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"slices"
+	"strings"
 	"testing"
+	"time"
 )
 
 // Run executes the suite and mirrors every result onto a subtest named
@@ -40,6 +44,43 @@ func Run(t *testing.T, cfg Config) Report {
 		t.Errorf("%s is declared as a gap and passed; the declaration has outlived the gap and is removed", name)
 	}
 	return report
+}
+
+// Minter takes a subject's token from an issuer with a mint route, which is
+// what a tier points the suite's Token at: POST <issuer>/mint with the
+// subject, and the token in the answer.
+func Minter(issuer string) func(context.Context, string) (string, error) {
+	issuer = strings.TrimSuffix(issuer, "/")
+	client := &http.Client{Transport: &http.Transport{}, Timeout: 30 * time.Second}
+	return func(ctx context.Context, subject string) (string, error) {
+		body, err := json.Marshal(map[string]string{"sub": subject})
+		if err != nil {
+			return "", err
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, issuer+"/mint", bytes.NewReader(body))
+		if err != nil {
+			return "", err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := client.Do(req)
+		if err != nil {
+			return "", fmt.Errorf("minting a token for %s: %w", subject, err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+			return "", fmt.Errorf("the issuer answered %d minting a token for %s", resp.StatusCode, subject)
+		}
+		var minted struct {
+			Token string `json:"token"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&minted); err != nil {
+			return "", fmt.Errorf("the issuer's answer for %s is no token: %w", subject, err)
+		}
+		if minted.Token == "" {
+			return "", fmt.Errorf("the issuer minted nothing for %s", subject)
+		}
+		return minted.Token, nil
+	}
 }
 
 // Declaration is a server's statement of which cases it fails and why. It is
