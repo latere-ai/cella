@@ -65,16 +65,23 @@ type fakeDriver struct {
 	states                                            map[string]driver.State
 	order                                             []string
 	listErr, inspectErr, stopErr, deleteErr, touchErr error
+	createErr, updateErr                              error
 	stops, deletes, touches                           []string
 	onList                                            func()
+	// projected is what the driver holds inside each sandbox: the token the
+	// create carried, replaced by every re-projection an update makes.
+	projected map[string]string
 }
 
 func newDriver(clock *fakeClock) *fakeDriver {
-	return &fakeDriver{clock: clock, states: map[string]driver.State{}}
+	return &fakeDriver{clock: clock, states: map[string]driver.State{}, projected: map[string]string{}}
 }
 func (d *fakeDriver) Create(_ context.Context, s driver.CreateSpec) (driver.Ref, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if d.createErr != nil {
+		return driver.Ref{}, d.createErr
+	}
 	now := d.clock.Now()
 	state := driver.State{ID: s.ID, Name: s.Name, Owner: s.Owner, Phase: driver.Running, Isolation: driver.IsolationNone,
 		Labels: maps.Clone(s.Labels), CreatedAt: now, StartedAt: now, LastActivityAt: now,
@@ -84,6 +91,9 @@ func (d *fakeDriver) Create(_ context.Context, s driver.CreateSpec) (driver.Ref,
 	}
 	d.states[s.ID] = state
 	d.order = append(d.order, s.ID)
+	if len(s.Token) > 0 {
+		d.projected[s.ID] = string(s.Token)
+	}
 	return driver.Ref{ID: s.ID}, nil
 }
 func (d *fakeDriver) List(context.Context, driver.Filter) ([]driver.State, error) {
@@ -139,6 +149,7 @@ func (d *fakeDriver) Delete(_ context.Context, id string) error {
 		return d.deleteErr
 	}
 	delete(d.states, id)
+	delete(d.projected, id)
 	d.deletes = append(d.deletes, id)
 	return nil
 }

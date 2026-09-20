@@ -23,6 +23,11 @@ const (
 	ReasonRecoveryExhausted = "RecoveryExhausted"
 )
 
+// ruleToken names design 005's fifth rule in a log line. It writes no reason
+// on the sandbox, because a re-minted identity ends nothing: the four rules
+// above end a sandbox and this one keeps it reachable.
+const ruleToken = "token"
+
 // ReaperLease is the lease name design 010 gives the reaper and LeaseTTL its
 // term. The loop acquires it once per tick instead of holding a handle, so a
 // lease that moves to another writer stops this one at its next tick.
@@ -164,6 +169,17 @@ func (c *Controller) Reap(ctx context.Context) (int, error) {
 	for _, s := range states {
 		rule := reapRule(s, now)
 		if rule == "" {
+			// The token rule is last in design 005's table and first match
+			// wins, so it is asked only of a sandbox no deadline rule
+			// claimed: a sandbox about to be deleted is not one whose
+			// identity is worth renewing.
+			done, err := c.enforceToken(ctx, s, now)
+			if err != nil {
+				failed = errors.Join(failed, fmt.Errorf("reaper: %s on %s: %w", ruleToken, s.ID, err))
+			}
+			if done {
+				acted++
+			}
 			continue
 		}
 		done, err := c.enforce(ctx, s.ID, rule, now)
@@ -175,6 +191,11 @@ func (c *Controller) Reap(ctx context.Context) (int, error) {
 			c.log.InfoContext(ctx, "reaper ended a sandbox", "sandbox", s.ID, "reason", rule)
 			acted++
 		}
+	}
+	// The revocation list is swept on the same tick: a row outlives the token
+	// it ends and nothing more (spec 010).
+	if err := c.sweepRevocations(ctx, now); err != nil {
+		failed = errors.Join(failed, fmt.Errorf("reaper: %w", err))
 	}
 	if !rebuilt {
 		return acted, failed
@@ -190,6 +211,38 @@ func (c *Controller) Reap(ctx context.Context) (int, error) {
 		}
 	}
 	return acted, failed
+}
+
+// enforceToken is design 005's token rule: a live sandbox whose token has
+// passed two thirds of its lifetime is re-minted, re-projected and the token
+// it held revoked, in one act.
+//
+// A sandbox on its way out is left alone. Deleting is this control plane's
+// own act in flight, Failed never runs again, and a Lost sandbox has no
+// driver object to project into; recovery mints for that one.
+func (c *Controller) enforceToken(ctx context.Context, state driver.State, now time.Time) (bool, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	obj, tracked := c.objects[state.ID]
+	if !tracked || !rotatable(obj.Status.Phase) {
+		return false, nil
+	}
+	if !dueForRotation(obj.Status.TokenState, state.ExpiresAt, now) {
+		return false, nil
+	}
+	return true, c.rotateLocked(ctx, obj)
+}
+
+// rotatable reports whether a sandbox in this phase is one whose identity is
+// renewed. A stopped sandbox is: its files and its record are intact, it
+// starts again with what it holds, and a token that expired while it was
+// stopped would leave it unable to call back.
+func rotatable(phase string) bool {
+	switch phase {
+	case PhaseDeleting, PhaseFailed, PhaseLost, PhaseRecovering:
+		return false
+	}
+	return true
 }
 
 // enforce re-reads the candidate under the controller's lock and acts only
@@ -254,7 +307,9 @@ func (c *Controller) deleteLocked(ctx context.Context, id, reason string) error 
 	if !tracked {
 		return nil
 	}
-	return c.forget(ctx, id, MutationDeleted)
+	// The identity ends with the sandbox rather than with its own exp, so a
+	// token the workload still holds is refused from this moment (spec 006).
+	return errors.Join(c.revokeToken(ctx, obj.Status.TokenState), c.forget(ctx, id, MutationDeleted))
 }
 
 // Touch stamps activity on a sandbox, coalesced per sandbox: the first call
