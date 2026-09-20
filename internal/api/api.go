@@ -521,7 +521,7 @@ func errorEnvelope(err error, requestID string) (int, httpjson.Error) {
 		message = "The request was refused by this server's policy."
 	case "exclusive_fields":
 		status = 400
-		message = "These fields cannot be set together."
+		message = "Two fields that cannot be set together are set."
 	case "missing_field":
 		status = 400
 		message = "A required field is missing."
@@ -532,7 +532,7 @@ func errorEnvelope(err error, requestID string) (int, httpjson.Error) {
 		status = 422
 		message = "The secret does not cover the host it is used for."
 	case "boundary_widened":
-		status = 403
+		status = 409
 		message = "A sandbox cannot widen its own boundary."
 	}
 	details := map[string]any{"request_id": requestID, "detail": fmt.Sprint(err)}

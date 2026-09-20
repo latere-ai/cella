@@ -141,7 +141,7 @@ func (h *handler) readSecret(w http.ResponseWriter, r *http.Request, existing *v
 	return *resolved, true
 }
 
-// readSecretItem is GET and DELETE of one Secret.
+// secretItem is GET and DELETE of one Secret.
 func (h *handler) secretItem(w http.ResponseWriter, r *http.Request) {
 	action := authorizer.ActionSecretRead
 	if r.Method == http.MethodDelete {

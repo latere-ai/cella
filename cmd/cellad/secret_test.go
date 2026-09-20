@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -152,19 +153,29 @@ func TestSecretValuesNeverEnterASandbox(t *testing.T) {
 	})
 
 	t.Run("theValueIsInNoEvent", func(t *testing.T) {
-		deadline := time.Now().Add(20 * time.Second)
+		// The two records this run must produce: the secret's own create and
+		// the sandbox that mounts it. Waiting for both is what makes the
+		// check below an assertion rather than a race the sink can win by
+		// delivering nothing.
+		want := map[string]bool{"secret.created": false, "sandbox.created": false}
+		deadline := time.Now().Add(30 * time.Second)
 		for {
-			got := sink.records()
-			if len(got) > 0 {
-				for _, record := range got {
-					if bytes.Contains(record.Raw, []byte(theCanary)) || bytes.Contains(record.Raw, []byte("cph_")) {
-						t.Fatalf("an event carries a value or a placeholder: %s", record.Raw)
-					}
+			for _, record := range sink.records() {
+				if bytes.Contains(record.Raw, []byte(theCanary)) || bytes.Contains(record.Raw, []byte("cph_")) {
+					t.Fatalf("an event carries a value or a placeholder: %s", record.Raw)
 				}
+				if _, named := want[record.Type]; named {
+					want[record.Type] = true
+				}
+				if record.Type == "sandbox.created" && !bytes.Contains(record.Raw, []byte(`"mounts":["vendor"]`)) {
+					t.Fatalf("the created record does not name the mounted secret: %s", record.Raw)
+				}
+			}
+			if want["secret.created"] && want["sandbox.created"] {
 				return
 			}
 			if time.Now().After(deadline) {
-				t.Fatal("no event reached the sink")
+				t.Fatalf("the sink received %v", want)
 			}
 			time.Sleep(50 * time.Millisecond)
 		}
@@ -196,12 +207,17 @@ func grepTree(t *testing.T, root, needle string) []string {
 	t.Helper()
 	var found []string
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
+		switch {
+		case err != nil:
+			// A file the walk cannot open is a file this check did not read,
+			// which is a gap in the check and not a pass.
+			return fmt.Errorf("walking %s: %w", path, err)
+		case d.IsDir():
 			return nil
 		}
 		body, err := os.ReadFile(path)
 		if err != nil {
-			return nil
+			return fmt.Errorf("reading %s: %w", path, err)
 		}
 		if bytes.Contains(body, []byte(needle)) {
 			found = append(found, path)

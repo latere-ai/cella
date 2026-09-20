@@ -486,3 +486,18 @@ func lastMap(t *testing.T, gw *gateway, id string) egress.Map {
 	t.Fatalf("the gateway holds no map for %s", id)
 	return egress.Map{}
 }
+
+// TestAMapIsRebuiltFromASandboxWithNoBoundaryYet is the row a crash between
+// the two writes of a create leaves behind: desired state holds the sandbox
+// and not its boundary. A control plane that read one and stopped would hand
+// no gateway anything.
+func TestAMapIsRebuiltFromASandboxWithNoBoundaryYet(t *testing.T) {
+	c, _, _ := sealedController(t)
+	obj := workspace()
+	obj.Status = v1.SandboxStatus{ID: "sbx_halfway", Owner: "alice", Environment: "default", Phase: "Pending"}
+	c.objects[obj.Status.ID] = obj
+	got := c.EgressMaps(t.Context())
+	if len(got) != 1 || got[0].Principal != egress.Principal("sbx_halfway") {
+		t.Fatalf("the rebuild produced %+v", got)
+	}
+}

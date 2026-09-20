@@ -26,7 +26,7 @@ import (
 // what goes into the request is a token the resolver mints, so this returns
 // nothing for one and the entry takes a resolver instead.
 func valueOf(e egress.Entry) []byte {
-	if e.Kind == v1SecretOAuthClientCredentials || e.Value == "" {
+	if e.Kind == v1.SecretOAuthClientCredentials || e.Value == "" {
 		return nil
 	}
 	if e.Scheme != egress.SchemeBasic {
@@ -38,12 +38,6 @@ func valueOf(e egress.Entry) []byte {
 	user, password, _ := strings.Cut(e.Value, ":")
 	return []byte(base64.StdEncoding.EncodeToString([]byte(user + ":" + password)))
 }
-
-// v1SecretOAuthClientCredentials is the kind whose value is a grant rather
-// than a credential. It is spelled here rather than imported, because this
-// role reaches the substitution engine and the boundary types and nothing of
-// the manifest contract.
-const v1SecretOAuthClientCredentials = "oauth_client_credentials"
 
 // resolver is one entry's minted credential and the inputs it was built from.
 // The fingerprint is what decides whether a map at a higher version may keep

@@ -39,10 +39,6 @@ type harness struct {
 	// upstream is where every admitted dial actually lands, so a test needs
 	// no name resolution and reaches nothing but loopback.
 	upstream string
-	// caPEM is the authority the gate's own engine signs a terminated
-	// connection's leaf with, which a workload in a test must trust the way
-	// a sandbox trusts the file the driver projects.
-	caPEM []byte
 
 	mu      sync.Mutex
 	records []egress.Record
@@ -60,11 +56,10 @@ func newHarness(t *testing.T, upstream, controlPlane string, trust *x509.CertPoo
 	t.Helper()
 	h := &harness{store: newStore(nil), upstream: upstream}
 	tlsConfig := &tls.Config{RootCAs: trust, MinVersion: tls.VersionTLS12}
-	ca, caPEM, _, err := pkgegress.GenerateCA(CACommonName)
+	ca, _, _, err := pkgegress.GenerateCA(CACommonName)
 	if err != nil {
 		t.Fatal(err)
 	}
-	h.caPEM = caPEM
 	var dialer net.Dialer
 	dial := func(ctx context.Context, network, _ string) (net.Conn, error) {
 		h.dialed.Add(1)

@@ -103,6 +103,13 @@ func (c *Controller) compileEgress(ctx context.Context, obj *v1.Sandbox) (bounda
 // kept even for a mount whose secret is gone, because the placeholder is in
 // the workload's environment and must not change under it.
 func (c *Controller) secretViews(ctx context.Context, obj *v1.Sandbox) ([]egress.SecretView, v1.SecretsStatus, map[string]string, error) {
+	if obj.Status.EgressState == nil {
+		// A sandbox written before its boundary was compiled, which is what
+		// a crash between the two writes of a create leaves behind. It is
+		// read here rather than refused, so one such row does not stop a
+		// control plane from handing every other sandbox its map.
+		obj.Status.EgressState = &v1.EgressState{}
+	}
 	mounts := obj.Spec.Secrets
 	state := obj.Status.EgressState
 	if len(mounts) == 0 {

@@ -352,17 +352,6 @@ func TestASecretGoesWithItsPrincipal(t *testing.T) {
 	}
 }
 
-// workloadTrust is what a sandbox trusts: the gateway's own authority, for a
-// destination the gateway terminates, and the upstream's, for one it tunnels.
-func workloadTrust(t *testing.T, h *harness, upstream *x509.CertPool) *x509.CertPool {
-	t.Helper()
-	pool := upstream.Clone()
-	if !pool.AppendCertsFromPEM(h.caPEM) {
-		t.Fatal("the gateway's authority did not parse")
-	}
-	return pool
-}
-
 // outbound is one request as the engine receives it on a terminated
 // connection: the workload's own, rebuilt toward the destination.
 func outbound(t *testing.T, target string, headers map[string]string) *http.Request {

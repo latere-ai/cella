@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"time"
 
 	"latere.ai/x/cella/controller"
@@ -51,9 +52,7 @@ func (c *Controlled) LoadSecrets() (map[string]v1.Secret, error) {
 		cursor = next
 	}
 	c.mu.Lock()
-	for id, version := range versions {
-		c.versions[id] = version
-	}
+	maps.Copy(c.versions, versions)
 	c.mu.Unlock()
 	return secrets, nil
 }

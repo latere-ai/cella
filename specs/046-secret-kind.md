@@ -311,7 +311,7 @@ content type.
 | `manifest` | `DecodeSecret`, `ResolveSecret`, `Lookup.Secret`, stage 4 for `secrets[]`, the companion-name rules, the secrets row of the mode inference and of `narrowing` |
 | `egress` | `SecretView.Kind/Value/OAuth`, `Entry.Kind/Value/OAuth` |
 | `internal/store` | the `Secret` collection, `WriteSecret`, `RemoveSecret`, `LoadSecrets`, `OpenValue`, `Values.Rewrap` in both adapters |
-| `internal/events` | `secret.created`, `.updated`, `.deleted`, `OfSecret`, the `{version, hosts}` data, and `Created.Secrets` as names |
+| `internal/events` | `secret.created`, `.updated`, `.deleted`, `OfSecret`, the `{version, hosts}` data, and the mounted names on `sandbox.created` |
 | `controller` | `Secrets` seam, the kind's create, get, list, update and delete, the snapshot store's secrets, `secretViews`, the placeholder projection in `specOf` |
 | `internal/egressd` | `valueOf`, the scheme encodings, the oauth resolvers, placement on the reverse door |
 | `internal/api` | `/v1/secrets`, `sandbox.secrets` in the status, the new rows of the error table |
