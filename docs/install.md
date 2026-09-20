@@ -52,6 +52,10 @@ ones without a default before you start.
 # archive, a path relative to this directory.
 export CELLA_INSTALL_IMAGE="${CELLA_INSTALL_IMAGE:?set CELLA_INSTALL_IMAGE to the release's image, ghcr.io/<owner>/cellad:<tag>}"
 export CELLA_INSTALL_MANIFESTS="${CELLA_INSTALL_MANIFESTS:-deploy}"
+# The overlay to apply, a directory under the deploy tree. The default is
+# the laptop cluster this walk describes; an installation that keeps an
+# overlay of its own names that one instead.
+export CELLA_INSTALL_OVERLAY="${CELLA_INSTALL_OVERLAY:-examples/kind}"
 # Your issuer, and a token from it with the audience cella. The subject
 # that token renders to, <issuer>|<sub>, is the administrator of this
 # installation under the built-in owner policy.
@@ -72,7 +76,7 @@ where the public listener lands. If you already have a cluster named
 
 ```sh
 kind get clusters | grep -qx cella || \
-  kind create cluster --name cella --config "$CELLA_INSTALL_MANIFESTS/examples/kind/kind.yaml"
+  kind create cluster --name cella --config "$CELLA_INSTALL_MANIFESTS/$CELLA_INSTALL_OVERLAY/kind.yaml"
 kubectl cluster-info --context kind-cella
 ```
 
@@ -80,9 +84,12 @@ Pull the image once and load it into the cluster, so the Pod does not wait
 on a registry:
 
 ```sh
-docker pull "$CELLA_INSTALL_IMAGE"
+docker image inspect "$CELLA_INSTALL_IMAGE" > /dev/null 2>&1 || docker pull "$CELLA_INSTALL_IMAGE"
 kind load docker-image --name cella "$CELLA_INSTALL_IMAGE"
 ```
+
+An image you built yourself is already on this machine, which is what the
+first line checks before it reaches for a registry.
 
 ## The namespace
 
@@ -120,7 +127,7 @@ policy with every state in memory.
 Point the overlay at your issuer and your administrator, and apply it.
 
 ```sh
-cd "$CELLA_INSTALL_MANIFESTS/examples/kind"
+cd "$CELLA_INSTALL_MANIFESTS/$CELLA_INSTALL_OVERLAY"
 kubectl kustomize . | \
   sed -e "s#https://issuer.example.com|you#${CELLA_INSTALL_ADMIN}#" \
       -e "s#https://issuer.example.com#${CELLA_INSTALL_ISSUER}#" \
