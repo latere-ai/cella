@@ -50,11 +50,16 @@ func case006Unauthenticated(ctx context.Context, e *Env) error {
 
 // case006Forbidden: a deny on the caller's own action is 403, and it is the
 // action that is refused and not the object that is hidden.
+//
+// The object is created and not read before the deny is in force: an allow
+// for one object and one action may be held for the time the permission
+// service granted it, so a case that read the object first would be reading
+// that grant and not the deny.
 func case006Forbidden(ctx context.Context, e *Env) error {
 	if e.cfg.AuthorizerControl == "" {
 		return skipf("no authorizer control URL: set AuthorizerControl to drive a deny")
 	}
-	obj, err := e.sandbox(ctx, e.caller)
+	obj, err := e.create(ctx, e.caller, e.manifest(e.name()))
 	if err != nil {
 		return err
 	}
@@ -69,38 +74,53 @@ func case006Forbidden(ctx context.Context, e *Env) error {
 	return x.refusal("forbidden")
 }
 
-// case006NotFound: an object that is not there and an object of another
-// subject are both 404, so a caller learns nothing about what it may not
-// reach.
+// case006NotFound: an id nothing holds and a name none of the caller's
+// objects holds are both 404, on a read and on a verb, so a caller learns
+// nothing from the shape of a refusal.
+//
+// Whether one subject reads another's object is the permission service's
+// answer and not the API's, so no case asserts it: a server behind an
+// endpoint that allows it is conformant and one behind an endpoint that
+// refuses it is too.
 func case006NotFound(ctx context.Context, e *Env) error {
-	x, err := e.caller.get(ctx, "/v1/sandboxes/"+missingID)
-	if err != nil {
-		return err
+	calls := []struct {
+		method, path string
+	}{
+		{http.MethodGet, "/v1/sandboxes/" + missingID},
+		{http.MethodGet, "/v1/sandboxes/conformance-" + e.run + "-nothing"},
+		{http.MethodPost, "/v1/sandboxes/" + missingID + "/stop"},
+		{http.MethodDelete, "/v1/sandboxes/" + missingID},
 	}
-	if err := x.refusal("not_found"); err != nil {
-		return fmt.Errorf("reading an id nothing holds: %w", err)
+	for _, call := range calls {
+		x, err := e.caller.send(ctx, call.method, call.path, request{})
+		if err != nil {
+			return err
+		}
+		if err := x.refusal("not_found"); err != nil {
+			return err
+		}
 	}
+	// A name resolves among the objects whose owner is the caller's, so a
+	// name another subject holds is a name this caller has no object for.
+	// That is the API's own rule and not a decision it asks for.
 	other, err := e.second()
 	if err != nil {
 		return err
 	}
-	mine, err := e.create(ctx, e.caller, e.manifest(e.name()))
+	name := e.name()
+	if _, err := e.create(ctx, other, e.manifest(name)); err != nil {
+		return err
+	}
+	x, err := e.caller.get(ctx, "/v1/sandboxes/"+name)
 	if err != nil {
 		return err
 	}
-	x, err = other.get(ctx, "/v1/sandboxes/"+mine.Status.ID)
-	if err != nil {
-		return err
-	}
-	if err := x.refusal("not_found"); err != nil {
-		return fmt.Errorf("reading another subject's object: %w", err)
-	}
-	return nil
+	return x.refusal("not_found")
 }
 
 // case006WorkloadTokenScope: the token a driver projects inside a sandbox
-// authenticates for that sandbox, carries none of the control plane's own
-// record of it, and reaches no other subject's object.
+// authenticates for that sandbox and carries none of the control plane's own
+// record of it.
 func case006WorkloadTokenScope(ctx context.Context, e *Env) error {
 	obj, err := e.sandbox(ctx, e.caller)
 	if err != nil {
@@ -129,15 +149,10 @@ func case006WorkloadTokenScope(ctx context.Context, e *Env) error {
 	if strings.Contains(string(read.Body), "tokenState") {
 		return read.disagree("no record of the token in the answer", "status.tokenState in the body")
 	}
-	other, err := e.second()
-	if err != nil {
-		return err
-	}
-	theirs, err := e.create(ctx, other, e.manifest(e.name()))
-	if err != nil {
-		return err
-	}
-	refused, err := workload.get(ctx, "/v1/sandboxes/"+theirs.Status.ID)
+	// The token names one sandbox, so an object it does not name is an
+	// object it does not reach. What the permission service says about a
+	// sibling is that service's answer; an id nothing holds is the API's.
+	refused, err := workload.get(ctx, "/v1/sandboxes/"+missingID)
 	if err != nil {
 		return err
 	}
