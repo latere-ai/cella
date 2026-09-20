@@ -6,6 +6,28 @@ refused before it is pushed.
 
 ## Unreleased
 
+- Your own policy decides every create. Point `CELLA_ADMISSION_URL` at an
+  endpoint you write, give it the bearer in `CELLA_ADMISSION_TOKEN`, and
+  `cellad` sends it the defaulted manifest, the verified caller and the
+  environment on every apply; it answers with the manifest to run or with
+  a refusal. That is where an image catalogue pins an alias to a digest,
+  where a plan fills in resources and lifetimes and refuses what exceeds
+  them, and where a boundary is narrowed before anything starts. What the
+  endpoint returns is what the caller reads back and what the sandbox
+  runs, and it is validated the same way a caller's manifest is, so an
+  endpoint cannot write a field the schema does not have. A refusal is a
+  422 carrying your endpoint's own reason; an endpoint that times out,
+  answers anything else, or cannot be reached fails the create with a 503
+  and never lets one through, and nothing is ever resent. Leave the URL
+  unset and the step is the identity, as before.
+
+- `spec.image` is now required after your admission endpoint has run
+  rather than before, so a catalogue can supply it, and
+  `CELLA_DEFAULT_IMAGE` fills it in on an installation with no endpoint.
+  A manifest that names no image after both is refused with
+  `missing_field`. An environment that runs no image, such as the native
+  one, still refuses an image whoever named it.
+
 - A sandbox reaches the services it needs and holds none of their
   credentials. The new `Secret` kind at `/v1/secrets` takes a value, the hosts
   that value may be sent to, and where in a request it goes: a header, a query
