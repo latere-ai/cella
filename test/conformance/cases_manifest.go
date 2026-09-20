@@ -120,17 +120,11 @@ func case003UnsupportedKind(ctx context.Context, e *Env) error {
 // case003UnknownField: a field the schema does not know is refused wherever
 // it sits, and the refusal is not a silent drop.
 func case003UnknownField(ctx context.Context, e *Env) error {
-	var body map[string]any
-	if err := json.Unmarshal(e.manifest(e.name()), &body); err != nil {
-		return err
-	}
-	metadata, _ := body["metadata"].(map[string]any)
-	metadata["nonesuch"] = "a field no schema knows"
-	raw, err := json.Marshal(body)
-	if err != nil {
-		return err
-	}
-	return e.refuseApply(ctx, request{Body: raw, ContentType: "application/json"}, "unknown_field")
+	body := e.manifest(e.name(), func(body map[string]any) {
+		metadata, _ := body["metadata"].(map[string]any)
+		metadata["nonesuch"] = "a field no schema knows"
+	})
+	return e.refuseApply(ctx, request{Body: body, ContentType: "application/json"}, "unknown_field")
 }
 
 // case003DefaultsAreReturned: an apply answers the resolved manifest with
@@ -179,16 +173,8 @@ func case003DefaultsAreReturned(ctx context.Context, e *Env) error {
 
 // case008GeneratedName: an apply without a name gets one.
 func case008GeneratedName(ctx context.Context, e *Env) error {
-	var body map[string]any
-	if err := json.Unmarshal(e.manifest("placeholder"), &body); err != nil {
-		return err
-	}
-	delete(body, "metadata")
-	raw, err := json.Marshal(body)
-	if err != nil {
-		return err
-	}
-	x, err := e.caller.post(ctx, "/v1/sandboxes", raw)
+	body := e.manifest("placeholder", func(body map[string]any) { delete(body, "metadata") })
+	x, err := e.caller.post(ctx, "/v1/sandboxes", body)
 	if err != nil {
 		return err
 	}

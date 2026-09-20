@@ -59,10 +59,7 @@ func case008ExecWait(ctx context.Context, e *Env) error {
 	if result.Truncated {
 		return x.disagree("truncated false for a short output", "truncated true")
 	}
-	body, err := json.Marshal(map[string]any{"command": []string{"/bin/sh", "-c", "sleep 30"}, "timeout": "1s"})
-	if err != nil {
-		return err
-	}
+	body := mustJSON(map[string]any{"command": []string{"/bin/sh", "-c", "sleep 30"}, "timeout": "1s"})
 	x, err = e.caller.post(ctx, "/v1/sandboxes/"+obj.Status.ID+"/exec?wait=1", body)
 	if err != nil {
 		return err
@@ -88,10 +85,7 @@ func case008ExecStream(ctx context.Context, e *Env) error {
 	if err != nil {
 		return err
 	}
-	body, err := json.Marshal(map[string]any{"command": []string{"/bin/sh", "-c", "printf out; printf err >&2; exit 5"}})
-	if err != nil {
-		return err
-	}
+	body := mustJSON(map[string]any{"command": []string{"/bin/sh", "-c", "printf out; printf err >&2; exit 5"}})
 	resp, err := e.caller.open(ctx, http.MethodPost, "/v1/sandboxes/"+obj.Status.ID+"/exec", request{
 		Body: body, ContentType: "application/json",
 	})
@@ -239,10 +233,7 @@ func case008FilesTar(ctx context.Context, e *Env) error {
 		return err
 	}
 	content := "the conformance suite wrote this"
-	archive, err := tarOf("suite.txt", content)
-	if err != nil {
-		return err
-	}
+	archive := tarOf("suite.txt", content)
 	base := "/v1/sandboxes/" + obj.Status.ID + "/files"
 	x, err := e.caller.put(ctx, base+"?dest=/workspace", archive, "application/x-tar")
 	if err != nil {
@@ -283,11 +274,7 @@ func case008FileRoutes(ctx context.Context, e *Env) error {
 	}
 	base := "/v1/sandboxes/" + obj.Status.ID + "/files"
 	dir := "/workspace/suite"
-	mkdir, err := json.Marshal(map[string]string{"path": dir})
-	if err != nil {
-		return err
-	}
-	x, err := e.caller.post(ctx, base+"/mkdir", mkdir)
+	x, err := e.caller.post(ctx, base+"/mkdir", mustJSON(map[string]string{"path": dir}))
 	if err != nil {
 		return err
 	}
@@ -357,11 +344,7 @@ func case008FileRoutes(ctx context.Context, e *Env) error {
 		return x.disagree("the bytes that were written", fmt.Sprintf("%q", x.Body))
 	}
 	moved := dir + "/two.txt"
-	move, err := json.Marshal(map[string]string{"from": file, "to": moved})
-	if err != nil {
-		return err
-	}
-	x, err = e.caller.post(ctx, base+"/move", move)
+	x, err = e.caller.post(ctx, base+"/move", mustJSON(map[string]string{"from": file, "to": moved}))
 	if err != nil {
 		return err
 	}
@@ -485,20 +468,22 @@ func (e *Env) socketClient() (*cellaclient.Client, error) {
 	return cellaclient.New(cellaclient.Config{URL: e.caller.base, Token: e.caller.token, UserAgent: "cella-conformance"})
 }
 
-// tarOf is one file as an archive.
-func tarOf(name, content string) ([]byte, error) {
+// tarOf is one file as an archive. It writes into memory, where a write does
+// not fail, so a failure here is a defect in the suite and not an answer.
+func tarOf(name, content string) []byte {
 	var buf bytes.Buffer
 	w := tar.NewWriter(&buf)
-	if err := w.WriteHeader(&tar.Header{Name: name, Mode: 0o644, Size: int64(len(content))}); err != nil {
-		return nil, err
+	header := &tar.Header{Name: name, Mode: 0o644, Size: int64(len(content))}
+	if err := w.WriteHeader(header); err != nil {
+		panic("the suite built an archive it cannot write: " + err.Error())
 	}
 	if _, err := io.WriteString(w, content); err != nil {
-		return nil, err
+		panic("the suite built an archive it cannot write: " + err.Error())
 	}
 	if err := w.Close(); err != nil {
-		return nil, err
+		panic("the suite built an archive it cannot write: " + err.Error())
 	}
-	return buf.Bytes(), nil
+	return buf.Bytes()
 }
 
 // tarEntry reads one file out of an archive.

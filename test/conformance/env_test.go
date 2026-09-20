@@ -6,6 +6,7 @@ package conformance
 import (
 	"context"
 	"net/http"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -125,7 +126,7 @@ func TestEveryStepOfEveryCaseIsReportedFailed(t *testing.T) {
 		}
 		for _, mode := range []string{"gone", "garbage"} {
 			noticed := false
-			for after := range 12 {
+			for after := range 18 {
 				f := newFake(t)
 				f.breakMode, f.breakAfter = mode, after
 				cfg := f.full()
@@ -164,6 +165,58 @@ func TestEveryStepOfEveryCaseIsReportedFailed(t *testing.T) {
 				t.Errorf("%s never made %s fail, so the case reads no answer it acts on", mode, name)
 			}
 		}
+	}
+}
+
+// TestAServerThatAnswersTheWrongValueIsReportedFailed: a server whose
+// answers have the shape the design states and values it does not fails the
+// cases that read those values. A case that only read a status code would
+// pass here, which is what this proves it does not do.
+func TestAServerThatAnswersTheWrongValueIsReportedFailed(t *testing.T) {
+	f := newFake(t)
+	f.wrongValues = true
+	cfg := f.full()
+	cfg.Cella = ""
+	report, err := Execute(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{
+		"case003DefaultsAreReturned", "case008ExecWait", "case008ExecStream",
+		"case008FilesTar", "case008FileRoutes", "case008Logs", "case008ListSelectors",
+		"case018SecretWriteOnly", "case018CanarySecret", "case009ObjectFeed",
+		"case009DeliveredInOrder", "case023BrowserReady", "case008PublicDocuments",
+	} {
+		if !slices.Contains(report.Failed, name) {
+			t.Errorf("%s did not fail against a server that answers the wrong value", name)
+		}
+	}
+}
+
+// TestTheAgentCaseRunsTheBinary: the one case that reaches a command rather
+// than a server, over a command that answers every call and one that answers
+// none.
+func TestTheAgentCaseRunsTheBinary(t *testing.T) {
+	f := newFake(t)
+	cfg := f.config()
+	e, err := newEnv(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := case011AgentScenario(t.Context(), e); err == nil {
+		t.Error("the case ran with no binary configured")
+	}
+	e.cfg.Cella = "/bin/echo"
+	if err := case011AgentScenario(t.Context(), e); err != nil {
+		t.Errorf("a command that answers every call failed the case: %v", err)
+	}
+	e.cfg.Cella = "/usr/bin/false"
+	if err := case011AgentScenario(t.Context(), e); err == nil {
+		t.Error("a command that refuses every call passed the case")
+	}
+	e.cfg.Cella = filepath.Join(t.TempDir(), "nothing")
+	if err := case011AgentScenario(t.Context(), e); err == nil {
+		t.Error("a command that is not there passed the case")
 	}
 }
 

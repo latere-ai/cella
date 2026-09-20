@@ -53,15 +53,12 @@ func case019VolumeLifecycle(ctx context.Context, e *Env) error {
 		return err
 	}
 	name := e.name()
-	body, err := json.Marshal(map[string]any{
+	body := mustJSON(map[string]any{
 		"apiVersion": APIVersion,
 		"kind":       "Volume",
 		"metadata":   map[string]any{"name": name},
 		"spec":       map[string]any{"size": "1Gi"},
 	})
-	if err != nil {
-		return err
-	}
 	x, err := e.caller.put(ctx, "/v1/volumes/"+name, body, "application/json")
 	if err != nil {
 		return err
@@ -88,7 +85,7 @@ func case020SetRunsToCompletion(ctx context.Context, e *Env) error {
 		return skipf("no queued environment: set QueuedEnvironment to run the sets group")
 	}
 	name := e.name()
-	body, err := json.Marshal(map[string]any{
+	body := mustJSON(map[string]any{
 		"apiVersion": APIVersion,
 		"kind":       "SandboxSet",
 		"metadata":   map[string]any{"name": name},
@@ -98,9 +95,6 @@ func case020SetRunsToCompletion(ctx context.Context, e *Env) error {
 			"template":    map[string]any{"spec": map[string]any{"environment": e.cfg.QueuedEnvironment, "command": []string{"/bin/sh", "-c", "true"}}},
 		},
 	})
-	if err != nil {
-		return err
-	}
 	x, err := e.caller.put(ctx, "/v1/sandboxsets/"+name, body, "application/json")
 	if err != nil {
 		return err

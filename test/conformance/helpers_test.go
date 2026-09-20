@@ -15,10 +15,7 @@ import (
 // TestTheArchiveHelpers: one file in and out, and an archive that holds
 // neither the entry a case asked for nor a readable header.
 func TestTheArchiveHelpers(t *testing.T) {
-	archive, err := tarOf("suite.txt", "the bytes")
-	if err != nil {
-		t.Fatal(err)
-	}
+	archive := tarOf("suite.txt", "the bytes")
 	got, err := tarEntry(archive, "suite.txt")
 	if err != nil || got != "the bytes" {
 		t.Fatalf("the entry is %q, %v", got, err)

@@ -40,8 +40,13 @@ type fake struct {
 	counter int
 	seq     int64
 
-	// wrongMessage answers a refusal with a sentence outside the table.
+	// wrongMessage answers a refusal with a sentence outside the table, and
+	// wrongValues answers every call with the shape the design states and a
+	// value it does not: the exit code of another command, a mode that is not
+	// the one written, a geometry nobody asked for, a secret's own value. It
+	// is what proves a case reads the answer and not only its status.
 	wrongMessage bool
+	wrongValues  bool
 	// breakMode is how this server breaks: empty never, "gone" for a
 	// connection that goes away, "garbage" for an answer that is no answer.
 	// breakAfter is how many calls it answers before it breaks, so a sweep
@@ -71,10 +76,18 @@ func newFake(t *testing.T) *fake {
 	})
 	mux.HandleFunc("GET /openapi.yaml", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/yaml")
+		if f.wrongValues {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
 		_, _ = io.WriteString(w, "openapi: 3.1.0\n")
 	})
 	mux.HandleFunc("GET /.well-known/jwks.json", func(w http.ResponseWriter, _ *http.Request) {
-		f.write(w, http.StatusOK, map[string]any{"keys": []any{map[string]any{"kty": "RSA", "kid": "fake"}}})
+		keys := []any{map[string]any{"kty": "RSA", "kid": "fake"}}
+		if f.wrongValues {
+			keys = nil
+		}
+		f.write(w, http.StatusOK, map[string]any{"keys": keys})
 	})
 	// The control contract of the suite and the sink's own records.
 	mux.HandleFunc("POST /fail", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
@@ -300,6 +313,14 @@ func (f *fake) store(body map[string]any, name string) map[string]any {
 		"id": id, "owner": "fake", "environment": "default",
 		"driver": "fake", "isolation": "none", "phase": "Running",
 	}
+	if f.wrongValues {
+		// A status that leaves out what every answer carries, and a
+		// specification the server rewrote behind the caller's back.
+		delete(body["status"].(map[string]any), "driver")
+		if spec, ok := body["spec"].(map[string]any); ok {
+			spec["command"] = []any{"another", "command"}
+		}
+	}
 	f.objects[id], f.names[name] = body, id
 	f.files[id] = map[string]string{}
 	f.record(id, "sandbox.created")
@@ -397,9 +418,15 @@ func (f *fake) exec(w http.ResponseWriter, r *http.Request) {
 	case strings.Contains(command, "exit 5"):
 		stdout, stderr, code = "out", "err", 5
 	}
+	f.mu.Lock()
+	wrong := f.wrongValues
+	f.mu.Unlock()
+	if wrong {
+		stdout, stderr, code = "another command's output", "", 0
+	}
 	if r.URL.Query().Get("wait") == "1" {
 		f.write(w, http.StatusOK, map[string]any{
-			"exitCode": code, "stdout": stdout, "stderr": stderr, "truncated": false, "durationMs": 1,
+			"exitCode": code, "stdout": stdout, "stderr": stderr, "truncated": wrong, "durationMs": 1,
 		})
 		return
 	}
@@ -424,6 +451,13 @@ func (f *fake) logs(w http.ResponseWriter, r *http.Request) {
 		f.refuse(w, "not_found")
 		return
 	}
+	f.mu.Lock()
+	wrong := f.wrongValues
+	f.mu.Unlock()
+	if wrong {
+		f.write(w, http.StatusOK, map[string]any{"lines": []string{"another sandbox's output"}})
+		return
+	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = io.WriteString(w, "conformance-line\n")
@@ -434,6 +468,13 @@ func (f *fake) egress(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (f *fake) display(w http.ResponseWriter, _ *http.Request) {
+	f.mu.Lock()
+	wrong := f.wrongValues
+	f.mu.Unlock()
+	if wrong {
+		f.write(w, http.StatusOK, map[string]any{"width": 640, "height": 480, "ready": false})
+		return
+	}
 	f.write(w, http.StatusOK, map[string]any{"width": 1280, "height": 800, "ready": true})
 }
 
@@ -442,8 +483,15 @@ func (f *fake) display(w http.ResponseWriter, _ *http.Request) {
 var pngHeader = []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a}
 
 func (f *fake) screenshot(w http.ResponseWriter, _ *http.Request) {
+	f.mu.Lock()
+	wrong := f.wrongValues
+	f.mu.Unlock()
 	w.Header().Set("Content-Type", "image/png")
 	w.WriteHeader(http.StatusOK)
+	if wrong {
+		_, _ = io.WriteString(w, "no frame")
+		return
+	}
 	_, _ = w.Write(pngHeader)
 }
 
@@ -470,12 +518,12 @@ func (f *fake) exportTar(w http.ResponseWriter, r *http.Request) {
 			name, content = path.Base(p), stored
 		}
 	}
-	archive, err := tarOf(name, content)
-	if err != nil {
-		f.refuse(w, "bad_request")
-		return
+	archive := tarOf(name, content)
+	if f.wrongValues {
+		w.Header().Set("Content-Type", "application/json")
+	} else {
+		w.Header().Set("Content-Type", "application/x-tar")
 	}
-	w.Header().Set("Content-Type", "application/x-tar")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(archive)
 }
@@ -567,12 +615,12 @@ func (f *fake) readFile(w http.ResponseWriter, r *http.Request) {
 			f.refuse(w, "not_found")
 			return
 		}
-		f.write(w, http.StatusOK, entryOf(target, content))
+		f.write(w, http.StatusOK, f.entryOf(target, content))
 	case "list":
 		items := []any{}
 		for p, content := range f.files[id] {
 			if path.Dir(p) == target {
-				items = append(items, entryOf(p, content))
+				items = append(items, f.entryOf(p, content))
 			}
 		}
 		f.write(w, http.StatusOK, map[string]any{"items": items, "next": ""})
@@ -581,6 +629,9 @@ func (f *fake) readFile(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			f.refuse(w, "not_found")
 			return
+		}
+		if f.wrongValues {
+			content = "another file's bytes"
 		}
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Header().Set("Content-Length", strconv.Itoa(len(content)))
@@ -639,7 +690,9 @@ func (f *fake) objectFeed(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	records := slices.Clone(f.events[r.URL.Query().Get("object")])
-	slices.Reverse(records)
+	if !f.wrongValues {
+		slices.Reverse(records)
+	}
 	items := make([]any, 0, len(records))
 	for _, item := range records {
 		items = append(items, item)
@@ -651,8 +704,12 @@ func (f *fake) objectFeed(w http.ResponseWriter, r *http.Request) {
 func (f *fake) sinkRecords(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	records := slices.Clone(f.events[r.URL.Query().Get("object")])
+	if f.wrongValues {
+		slices.Reverse(records)
+	}
 	items := []any{}
-	for _, record := range f.events[r.URL.Query().Get("object")] {
+	for _, record := range records {
 		items = append(items, record)
 	}
 	f.write(w, http.StatusOK, items)
@@ -675,7 +732,7 @@ func (f *fake) list(w http.ResponseWriter, r *http.Request) {
 	items, next := []any{}, ""
 	for _, id := range ids {
 		obj := f.objects[id]
-		if id <= q.Get("cursor") || !selected(obj, q) {
+		if id <= q.Get("cursor") || (!f.wrongValues && !selected(obj, q)) {
 			continue
 		}
 		if len(items) == limit {
@@ -730,7 +787,7 @@ func (f *fake) applySecret(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	spec, _ := body["spec"].(map[string]any)
-	if spec != nil {
+	if spec != nil && !f.wrongValues {
 		delete(spec, "value")
 	}
 	metadata, _ := body["metadata"].(map[string]any)
@@ -926,10 +983,14 @@ func contained(p string) bool {
 }
 
 // entryOf is one file entry as design 008 renders it.
-func entryOf(p, content string) map[string]any {
+func (f *fake) entryOf(p, content string) map[string]any {
+	name, size, mode, dir := path.Base(p), len(content), "0644", false
+	if f.wrongValues {
+		name, size, mode, dir = "another.txt", 0, "0600", true
+	}
 	return map[string]any{
-		"name": path.Base(p), "path": p, "size": len(content),
-		"mode": "0644", "modTime": time.Now().UTC().Format(time.RFC3339), "isDir": false,
+		"name": name, "path": p, "size": size,
+		"mode": mode, "modTime": time.Now().UTC().Format(time.RFC3339), "isDir": dir,
 	}
 }
 

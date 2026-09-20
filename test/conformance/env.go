@@ -376,11 +376,7 @@ func (e *Env) manifest(name string, mutate ...func(body map[string]any)) []byte 
 	for _, m := range mutate {
 		m(body)
 	}
-	out, err := json.Marshal(body)
-	if err != nil {
-		panic("the suite built a manifest it cannot encode: " + err.Error())
-	}
-	return out
+	return mustJSON(body)
 }
 
 // refuseApply posts one manifest that must be refused with the code named.
@@ -396,6 +392,17 @@ func (e *Env) refuseApply(ctx context.Context, req request, code string) error {
 		e.record(e.caller, "/v1/sandboxes", obj.Status.ID)
 	}
 	return x.refusal(code)
+}
+
+// mustJSON encodes a body the suite itself built. A value this package
+// writes and cannot encode is a defect in the suite and not an answer from a
+// server, so it is not an error a case returns.
+func mustJSON(v any) []byte {
+	out, err := json.Marshal(v)
+	if err != nil {
+		panic("the suite built a body it cannot encode: " + err.Error())
+	}
+	return out
 }
 
 // create applies one manifest and records the object. It returns the created
@@ -469,11 +476,7 @@ type execResult struct {
 }
 
 func (e *Env) exec(ctx context.Context, c *client, id string, command ...string) (execResult, *exchange, error) {
-	body, err := json.Marshal(map[string]any{"command": command})
-	if err != nil {
-		return execResult{}, nil, err
-	}
-	x, err := c.post(ctx, "/v1/sandboxes/"+id+"/exec?wait=1", body)
+	x, err := c.post(ctx, "/v1/sandboxes/"+id+"/exec?wait=1", mustJSON(map[string]any{"command": command}))
 	if err != nil {
 		return execResult{}, nil, err
 	}
@@ -509,10 +512,7 @@ func (e *Env) second() (*client, error) {
 // The contract is one route, POST <control>/fail with {"mode": "..."}, which
 // the tier that owns the stub serves.
 func (e *Env) control(ctx context.Context, base, mode string) error {
-	body, err := json.Marshal(map[string]string{"mode": mode})
-	if err != nil {
-		return err
-	}
+	body := mustJSON(map[string]string{"mode": mode})
 	c := newClient(strings.TrimSuffix(base, "/"), "")
 	x, err := c.send(ctx, http.MethodPost, "/fail", request{Body: body, ContentType: "application/json", NoBearer: true})
 	if err != nil {
