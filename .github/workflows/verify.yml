@@ -110,6 +110,15 @@ jobs:
         run: |
           bash deploy/examples/kind-stubs/up.sh -name cella >> "$GITHUB_ENV"
           echo "CELLA_TEST_SINK=http://localhost:30082" >> "$GITHUB_ENV"
+      # The tier runs before the document's walk, because the document ends
+      # by deleting the cluster: its last block is how an operator removes
+      # the installation, and the walk runs every block.
+      - name: The kind tier against the stack
+        shell: bash
+        run: |
+          set -o pipefail
+          go test -tags=e2e -count=1 -v -timeout 30m -run '^TestCluster' ./test/kind/... 2>&1 | tee kind.txt
+          grep -q -- '--- PASS: TestClusterLifecycle' kind.txt
       # The document is a program, and this is the run that proves it: the
       # same blocks an operator pastes, against the cluster above, with the
       # stub issuer as this installation's issuer.
@@ -123,12 +132,6 @@ jobs:
         run: |
           export CELLA_INSTALL_TOKEN="${CELLA_TEST_TOKEN}"
           bash tools/docs/run-blocks.sh docs/install.md
-      - name: The kind tier against the cluster the walk left
-        shell: bash
-        run: |
-          set -o pipefail
-          go test -tags=e2e -count=1 -v -timeout 30m -run '^TestCluster' ./test/kind/... 2>&1 | tee kind.txt
-          grep -q -- '--- PASS: TestClusterLifecycle' kind.txt
       - name: The cluster's state, for a failed run
         if: failure()
         run: |
