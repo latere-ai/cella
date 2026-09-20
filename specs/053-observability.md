@@ -23,7 +23,7 @@ the redaction every log line passes through, and the alerts an
 installation starts with. Nothing of it is built: the scrape surface
 does not exist, `pkg/otel` is reached only by the outbound clients of
 [[006-identity]] and [[007-admission]], and
-`deploy/base/prometheusrule.yaml` carries [[.archive/048-release-and-check]]'s
+`deploy/base/prometheusrule.yaml` carries [[048-release-and-check]]'s
 placeholders over metric names no binary emits.
 
 This slice builds the registry, the seams that feed it, the handler that
@@ -46,7 +46,7 @@ pattern and needs no taxonomy of its own.
 | Piece | State |
 |---|---|
 | `internal/metrics` | does not exist |
-| `/metrics` on the internal listener | not served; the listener answers the probes of [[.archive/002-repository-scaffold]] alone |
+| `/metrics` on the internal listener | not served; the listener answers the probes of [[002-repository-scaffold]] alone |
 | `pkg/otel.Bootstrap` | never called; `cellad` logs through the default `slog` handler and exports nothing |
 | spans | the outbound transports of `internal/auth` and `internal/admission` draw client spans; no server span exists to parent them |
 | redaction | none |

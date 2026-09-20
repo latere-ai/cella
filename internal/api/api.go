@@ -120,7 +120,6 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	rw := &observed{ResponseWriter: w}
 	defer h.observe(slot, rw, time.Now())
 	w = rw
-	r = r.WithContext(context.WithValue(r.Context(), slotKey{}, slot))
 	w.Header().Set("X-Request-ID", rand.Text())
 	token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 	if !ok || strings.TrimSpace(token) == "" {
@@ -154,6 +153,10 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	stampSpan(r.Context(), caller.Subject, w.Header().Get("X-Request-ID"))
 	ctx := context.WithValue(r.Context(), callerKey{}, caller)
+	// The slot rides the context from here, so the wrapper behind the mux
+	// can tell this handler which route the request reached. A request
+	// refused above never chose an endpoint and carries none.
+	ctx = context.WithValue(ctx, slotKey{}, slot)
 	// The actor rides the context from here: a mutation several calls below
 	// this handler records who asked for it and under which request id, and
 	// a controller loop that runs under no request records neither.

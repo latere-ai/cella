@@ -424,22 +424,6 @@ func TestPhaseCountsFolds(t *testing.T) {
 	}
 }
 
-// awaitLine waits for the first line of out carrying prefix.
-func awaitLine(t *testing.T, out *bytes.Buffer, prefix string) string {
-	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		for l := range strings.SplitSeq(out.String(), "\n") {
-			if strings.HasPrefix(l, prefix) {
-				return l
-			}
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("no line with %q: %q", prefix, out.String())
-	return ""
-}
-
 // execOnce runs one command over the exec socket and holds the last frame to
 // what the session should have answered.
 func execOnce(t *testing.T, base, id, token, command, want string) {

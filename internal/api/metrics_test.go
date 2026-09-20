@@ -186,7 +186,7 @@ func TestEgressRecordsAreCounted(t *testing.T) {
 // TestNoRecorderCountsNothing is the default: an API built with no recorder
 // answers exactly as it did before design 017.
 func TestNoRecorderCountsNothing(t *testing.T) {
-	h := &handler{mux: http.NewServeMux(), metrics: nopMetrics{}}
+	h := &handler{metrics: nopMetrics{}}
 	h.metrics.Request("/v1/sandboxes", "2xx", "")
 	h.metrics.RequestDuration("/v1/sandboxes", time.Second)
 	h.metrics.Exec(metrics.ExitZero)

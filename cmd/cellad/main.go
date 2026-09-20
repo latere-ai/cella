@@ -203,7 +203,7 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	var control *controller.Controller
 	registry := metrics.New(metrics.Options{
 		Environment: cfg.DefaultEnvironment,
-		Driver:      string(cfg.Runtime),
+		Driver:      cfg.Runtime,
 		Sandboxes: func() map[string]int {
 			if control == nil {
 				return nil

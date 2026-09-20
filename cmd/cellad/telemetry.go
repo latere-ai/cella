@@ -56,7 +56,7 @@ func startTelemetry(ctx context.Context, role string, stderr io.Writer) telemetr
 	if err != nil {
 		// The log bridge is degraded and the local path is not, so the
 		// process serves and says so rather than refusing to start.
-		redacting.Warn("the OTLP log bridge is degraded; logging stays local", "err", err)
+		redacting.WarnContext(ctx, "the OTLP log bridge is degraded; logging stays local", "err", err)
 	}
 	return telemetry{
 		log:  redacting,
@@ -65,7 +65,7 @@ func startTelemetry(ctx context.Context, role string, stderr io.Writer) telemetr
 			stop, cancel := context.WithTimeout(context.WithoutCancel(ctx), telemetryTimeout)
 			defer cancel()
 			if err := shutdown(stop); err != nil {
-				redacting.Warn("telemetry did not flush", "err", err)
+				redacting.WarnContext(stop, "telemetry did not flush", "err", err)
 			}
 		},
 	}
