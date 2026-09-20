@@ -55,13 +55,17 @@ type fake struct {
 }
 
 type fakeContainer struct {
-	labels     map[string]string
-	command    []string
-	env        map[string]string
-	workdir    string
-	user       string
-	volumes    []namedVolume
-	limits     *resourceLimits
+	labels  map[string]string
+	command []string
+	env     map[string]string
+	workdir string
+	user    string
+	volumes []namedVolume
+	limits  *resourceLimits
+	// netns is the network namespace mode the container was created with;
+	// empty is the engine's default, which the fake treats as a rootless
+	// engine's slirp4netns and refuses to connect a network to.
+	netns      string
 	state      string
 	exitCode   int
 	startedAt  time.Time
@@ -383,7 +387,7 @@ func (f *fake) createContainer(w http.ResponseWriter, r *http.Request) {
 	f.containers[sg.Name] = &fakeContainer{
 		labels: maps.Clone(sg.Labels), command: sg.Command, env: maps.Clone(sg.Env),
 		workdir: sg.WorkDir, user: sg.User, volumes: sg.Volumes, limits: sg.ResourceLimits,
-		state: "created", files: map[string]fakeFile{}, released: make(chan struct{}),
+		netns: netnsOf(sg.Netns), state: "created", files: map[string]fakeFile{}, released: make(chan struct{}),
 	}
 	writeJSON(w, map[string]string{"Id": sg.Name})
 }
@@ -851,6 +855,13 @@ func (f *fake) oneNetwork(w http.ResponseWriter, r *http.Request, rest string) {
 			refuse(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		// A rootless libpod attaches a network only to a container on a
+		// bridge; its default namespace is slirp4netns, and the connect of
+		// such a container is refused with this exact sentence.
+		if c, ok := f.containers[body.Container]; ok && c.netns != bridgeNetns {
+			refuse(w, http.StatusInternalServerError, `"slirp4netns" is not supported: invalid network mode`)
+			return
+		}
 		var aliases []string
 		if body.EndpointConfig != nil {
 			aliases = body.EndpointConfig.Aliases
@@ -863,6 +874,15 @@ func (f *fake) oneNetwork(w http.ResponseWriter, r *http.Request, rest string) {
 	default:
 		refuse(w, http.StatusNotFound, "no route for the network "+name)
 	}
+}
+
+// netnsOf is the namespace mode a create spec asked for, or empty for the
+// engine's default.
+func netnsOf(ns *namespace) string {
+	if ns == nil {
+		return ""
+	}
+	return ns.Mode
 }
 
 // network reports one network's members and their aliases, or false where the

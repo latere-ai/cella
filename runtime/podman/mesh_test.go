@@ -63,6 +63,26 @@ func TestMeshNetwork(t *testing.T) {
 	}
 }
 
+// TestMeshMemberIsCreatedOnABridge: a mesh member is created in the bridge
+// network namespace, because that is the only namespace libpod connects a
+// network to. A rootless engine's default is slirp4netns or pasta, and the
+// connect of a container created there is refused, which the fake reproduces
+// in the connect handler; a sandbox outside any mesh keeps the engine's
+// default.
+func TestMeshMemberIsCreatedOnABridge(t *testing.T) {
+	f := newFake(t)
+	d := f.driver(t)
+
+	create(t, d, driver.CreateSpec{ID: "sbx_one", Name: "planner", Mesh: driver.Mesh{ID: testMesh}})
+	if got := f.container(t, "sbx_one").netns; got != bridgeNetns {
+		t.Fatalf("the mesh member's network namespace is %q, want %q", got, bridgeNetns)
+	}
+	create(t, d, driver.CreateSpec{ID: "sbx_alone"})
+	if got := f.container(t, "sbx_alone").netns; got != "" {
+		t.Fatalf("a sandbox in no mesh asked for the namespace %q, want the engine's default", got)
+	}
+}
+
 // TestMeshlessSandboxTouchesNoNetwork: a sandbox in no mesh asks the engine
 // for no network at all, so the driver's one network per mesh is one network
 // per mesh and not one per sandbox.

@@ -235,7 +235,19 @@ type specGenerator struct {
 	StopTimeout    *uint             `json:"stop_timeout,omitempty"`
 	Volumes        []namedVolume     `json:"volumes,omitempty"`
 	ResourceLimits *resourceLimits   `json:"resource_limits,omitempty"`
+	Netns          *namespace        `json:"netns,omitempty"`
 }
+
+// namespace is libpod's choice of one namespace for a container. The driver
+// sets the network namespace of a mesh member to bridge: libpod attaches
+// networks only to a container on a bridge, and a rootless engine's default
+// is slirp4netns or pasta, which refuses the connect the mesh needs.
+type namespace struct {
+	Mode string `json:"nsmode"`
+}
+
+// bridgeNetns is the network namespace a mesh member is created with.
+const bridgeNetns = "bridge"
 
 type namedVolume struct {
 	Name    string   `json:"Name"`
@@ -725,6 +737,9 @@ func (d *Driver) Create(ctx context.Context, s driver.CreateSpec) (driver.Ref, e
 		User: s.User, RestartPolicy: "no", StopTimeout: &grace,
 		Volumes:        []namedVolume{{Name: workspaceVolume(s.ID), Dest: root, Options: []string{"rw"}}},
 		ResourceLimits: limits,
+	}
+	if s.Mesh.ID != "" {
+		sg.Netns = &namespace{Mode: bridgeNetns}
 	}
 	if err := d.client().json(ctx, http.MethodPost, "/containers/create", sg, nil); err != nil {
 		undo()
