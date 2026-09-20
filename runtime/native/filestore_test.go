@@ -28,7 +28,7 @@ func TestFileStoreRefusesWhatTheContractDoesNot(t *testing.T) {
 		for name, err := range map[string]error{
 			"Stat":    errOf(d.Stat(ctx, "absent", "/workspace/f")),
 			"ReadDir": errOf(d.ReadDir(ctx, "absent", "/workspace")),
-			"Open":    openErr(d, "absent", "/workspace/f"),
+			"Open":    openErr(ctx, d, "absent", "/workspace/f"),
 			"Write":   errOf(d.Write(ctx, "absent", driver.WriteRequest{Path: "/workspace/f"})),
 			"Mkdir":   d.Mkdir(ctx, "absent", "/workspace/f"),
 			"Remove":  d.Remove(ctx, "absent", "/workspace/f"),
@@ -67,7 +67,7 @@ func TestFileStoreRefusesWhatTheContractDoesNot(t *testing.T) {
 	})
 
 	t.Run("ADirectoryIsNotAStream", func(t *testing.T) {
-		if err := openErr(d, "one", "/workspace"); !errors.Is(err, driver.ErrInvalid) {
+		if err := openErr(ctx, d, "one", "/workspace"); !errors.Is(err, driver.ErrInvalid) {
 			t.Errorf("Open of a directory: %v", err)
 		}
 	})
@@ -124,8 +124,8 @@ func TestContainRefusesAWorkspaceThatIsGone(t *testing.T) {
 
 func errOf[T any](_ T, err error) error { return err }
 
-func openErr(d *Driver, id, path string) error {
-	body, _, err := d.Open(context.Background(), id, path)
+func openErr(ctx context.Context, d *Driver, id, path string) error {
+	body, _, err := d.Open(ctx, id, path)
 	if body != nil {
 		_ = body.Close()
 	}

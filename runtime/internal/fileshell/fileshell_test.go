@@ -258,7 +258,7 @@ func TestProgramsAgainstAFilesystem(t *testing.T) {
 	t.Run("WriteStagesAndCommits", func(t *testing.T) {
 		p := write("bounded.txt", "before")
 		staged := Staged(p, "TOKEN")
-		out, code := shell(t, WriteBody(root, staged, 4), "12345")
+		_, code := shell(t, WriteBody(root, staged, 4), "12345")
 		if code != ExitTooLarge {
 			t.Fatalf("a body past the bound exited %d, want %d", code, ExitTooLarge)
 		}
@@ -268,7 +268,7 @@ func TestProgramsAgainstAFilesystem(t *testing.T) {
 		if body, _ := os.ReadFile(p); string(body) != "before" {
 			t.Fatalf("a refused write left %q", body)
 		}
-		out, code = shell(t, WriteBody(root, staged, 4), "1234")
+		out, code := shell(t, WriteBody(root, staged, 4), "1234")
 		if code != 0 {
 			t.Fatalf("a body at the bound exited %d", code)
 		}

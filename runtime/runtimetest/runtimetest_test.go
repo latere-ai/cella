@@ -202,7 +202,7 @@ func (fileStoreLiar) Capabilities() runtime.Capabilities {
 type unstagedWriter struct{ *native.Driver }
 
 func (d unstagedWriter) Write(ctx context.Context, id string, req runtime.WriteRequest) (int64, error) {
-	if err := d.Driver.Remove(ctx, id, req.Path); err != nil {
+	if err := d.Remove(ctx, id, req.Path); err != nil {
 		return 0, err
 	}
 	body := req.Body

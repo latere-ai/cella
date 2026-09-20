@@ -360,7 +360,7 @@ func TestFileStoreNeedsACluster(t *testing.T) {
 	h := newHarness(t)
 	const id = "sbx_nostream"
 	h.created(t, spec(id))
-	h.Driver.stream = nil
+	h.stream = nil
 	if _, err := h.Stat(t.Context(), id, workspace); !errors.Is(err, driver.ErrUnsupported) {
 		t.Fatalf("a driver without a cluster connection answered %v", err)
 	}
