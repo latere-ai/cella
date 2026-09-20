@@ -4,8 +4,10 @@
 package cella_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -69,6 +71,20 @@ func TestTheStubsRunBesideTheControlPlane(t *testing.T) {
 					t.Errorf("%s names %s as %q, and the endpoint is in this Pod at %q", o.name(), key, got, want)
 				}
 			}
+		}
+	}
+	// A cluster that enforces policy would drop what the base does not
+	// admit, and the base admits the public listener alone.
+	policy := find(t, objects, "NetworkPolicy", "cellad")
+	var admitted []string
+	for _, rule := range list(dig(policy, "spec", "ingress")) {
+		for _, p := range list(dig(rule, "ports")) {
+			admitted = append(admitted, fmt.Sprint(dig(p, "port")))
+		}
+	}
+	for _, port := range []string{"8080", "9080", "9083"} {
+		if !slices.Contains(admitted, port) {
+			t.Errorf("the policy admits %v and the host reaches the control plane on 8080, the mint route on 9080 and the sink's feed on 9083", admitted)
 		}
 	}
 	// The host reaches the issuer's mint route and the sink's feed, and

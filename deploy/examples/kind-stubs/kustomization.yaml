@@ -45,6 +45,10 @@ patches:
     target:
       kind: ConfigMap
       name: cellad
+  - path: networkpolicy.yaml
+    target:
+      kind: NetworkPolicy
+      name: cellad
 images:
   - name: cellad
     newTag: dev
