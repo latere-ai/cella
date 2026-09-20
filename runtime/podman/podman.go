@@ -150,8 +150,10 @@ func (d *Driver) Isolation() string { return v1.IsolationContainer }
 // because the driver keeps nothing in this process and a second instance over
 // the same engine reads every sandbox back. Attach, because the engine runs an
 // exec session with a TTY over a connection it speaks bytes both ways on.
+// Display and Input, because the desktop runs as a second process in the
+// sandbox's own container and every operation on it is one exec session.
 func (d *Driver) Capabilities() driver.Capabilities {
-	return driver.Capabilities{Files: true, Detach: true, Attach: true}
+	return driver.Capabilities{Files: true, Detach: true, Attach: true, Display: true, Input: true}
 }
 
 // Socket is the socket the driver last found answering, for the start-up line.
@@ -294,6 +296,11 @@ type identity struct {
 	workspacePath   string
 	disk            string
 	createdAt       time.Time
+	// display is the desktop the sandbox was created with, nil for one that
+	// asked for none, and ports are what it declared runs inside it. Both are
+	// immutable by spec 003, which is why they live here and not in record.
+	display *driver.Geometry
+	ports   []driver.Port
 }
 
 func (i identity) labels() map[string]string {
@@ -308,6 +315,12 @@ func (i identity) labels() map[string]string {
 	if i.disk != "" {
 		l[labelDisk] = i.disk
 	}
+	if g := geometryLabel(i.display); g != "" {
+		l[labelDisplay] = g
+	}
+	if p := portsLabel(i.ports); p != "" {
+		l[labelPorts] = p
+	}
 	return l
 }
 
@@ -320,6 +333,7 @@ func identityOf(l map[string]string) identity {
 	return identity{
 		id: l[labelID], name: l[labelName], owner: l[labelOwner], image: l[labelImage],
 		digest: l[labelDigest], workspacePath: p, disk: l[labelDisk], createdAt: created.UTC(),
+		display: geometryOf(l[labelDisplay]), ports: portsOf(l[labelPorts]),
 	}
 }
 
@@ -632,7 +646,8 @@ func (d *Driver) Create(ctx context.Context, s driver.CreateSpec) (driver.Ref, e
 	// sandbox was created does not read as started before it.
 	now := time.Now().UTC().Truncate(time.Second)
 	ident := identity{id: s.ID, name: s.Name, owner: s.Owner, image: s.Image, digest: digest,
-		workspacePath: root, disk: s.Resources.Disk, createdAt: now}
+		workspacePath: root, disk: s.Resources.Disk, createdAt: now,
+		display: s.Display, ports: s.Ports}
 	if err := d.createVolume(ctx, workspaceVolume(s.ID), ident.labels()); err != nil {
 		if conflict(err) {
 			return driver.Ref{}, driver.ErrAlreadyExists
@@ -645,7 +660,7 @@ func (d *Driver) Create(ctx context.Context, s driver.CreateSpec) (driver.Ref, e
 		_ = d.removeVolume(clean, recordVolume(s.ID, 1))
 		_ = d.removeVolume(clean, workspaceVolume(s.ID))
 	}
-	env := tokenEnv(s, egressEnv(s))
+	env := displayEnv(s, tokenEnv(s, egressEnv(s)))
 	rec := record{labels: maps.Clone(s.Labels), env: maps.Clone(env), lastActivityAt: time.Now().UTC(),
 		ttl: s.Lifecycle.TTL, autoStop: s.Lifecycle.AutoStop, autoDelete: s.Lifecycle.AutoDelete}
 	if err := d.writeRecord(ctx, s.ID, 0, rec); err != nil {
@@ -689,6 +704,7 @@ func (d *Driver) Create(ctx context.Context, s driver.CreateSpec) (driver.Ref, e
 		undo()
 		return driver.Ref{}, fmt.Errorf("podman: starting the container: %w", err)
 	}
+	d.startDesktop(ctx, s.ID, s.Display)
 	return driver.Ref{ID: s.ID}, nil
 }
 
@@ -713,6 +729,11 @@ func (d *Driver) Start(ctx context.Context, id string) error {
 	}
 	if err := d.client().json(ctx, http.MethodPost, "/containers/"+containerName(id)+"/start", nil, nil); err != nil {
 		return fmt.Errorf("podman: starting %s: %w", id, err)
+	}
+	// The desktop lives in the process tree the stop ended, so a start builds
+	// it again; spec 023 states the rebuild and the supervisor is idempotent.
+	if vi, err := d.inspectVolume(ctx, workspaceVolume(id)); err == nil {
+		d.startDesktop(ctx, id, geometryOf(vi.Labels[labelDisplay]))
 	}
 	return d.edit(ctx, id, func(r *record) bool {
 		if !r.stopped {
@@ -841,7 +862,10 @@ func (d *Driver) Inspect(ctx context.Context, id string) (driver.State, error) {
 	if err != nil {
 		return driver.State{}, err
 	}
-	return stateOf(identityOf(vi.Labels), rec, st), nil
+	ident := identityOf(vi.Labels)
+	state := stateOf(ident, rec, st)
+	state.Conditions, state.Ports = d.observe(ctx, id, ident.display, ident.ports, state.Phase == driver.Running)
+	return state, nil
 }
 
 // List reads every sandbox with two calls, one over the volumes and one over

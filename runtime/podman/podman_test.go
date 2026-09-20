@@ -46,14 +46,14 @@ func TestDeclarations(t *testing.T) {
 	if d.Name() != "podman" || d.Isolation() != v1.IsolationContainer {
 		t.Fatalf("declarations: %q %q", d.Name(), d.Isolation())
 	}
-	want := driver.Capabilities{Files: true, Detach: true, Attach: true}
+	want := driver.Capabilities{Files: true, Detach: true, Attach: true, Display: true, Input: true}
 	if got := d.Capabilities(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("Capabilities = %+v, want %+v", got, want)
 	}
-	// The forbidden half of the table: this slice advertises none of it.
+	// The forbidden half of the table: this driver advertises none of it.
 	c := d.Capabilities()
-	if c.Display || c.Input || c.Pool || c.Mesh || c.Dial || c.Volumes || c.Snapshots || c.Ingress || c.Resize || len(c.Egress) > 0 {
-		t.Fatalf("a capability this slice does not implement is declared: %+v", c)
+	if c.Pool || c.Mesh || c.Dial || c.Volumes || c.Snapshots || c.Ingress || c.Resize || len(c.Egress) > 0 {
+		t.Fatalf("a capability this driver does not implement is declared: %+v", c)
 	}
 }
 
@@ -758,9 +758,16 @@ func TestExportNames(t *testing.T) {
 func TestLabelRoundTrip(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Nanosecond)
 	i := identity{id: "sbx_a", name: "n", owner: "o", image: "img", digest: "d",
-		workspacePath: "/space", disk: "1Gi", createdAt: now}
-	if got := identityOf(i.labels()); got != i {
+		workspacePath: "/space", disk: "1Gi", createdAt: now,
+		display: &driver.Geometry{Width: 1280, Height: 800},
+		ports:   []driver.Port{{Name: "web", Port: 8080, Expose: driver.ExposeNone}}}
+	if got := identityOf(i.labels()); !reflect.DeepEqual(got, i) {
 		t.Fatalf("identity round trip = %+v, want %+v", got, i)
+	}
+	// A sandbox that asked for neither reads neither back.
+	plain := identity{id: "sbx_b", workspacePath: "/space", createdAt: now}
+	if got := identityOf(plain.labels()); !reflect.DeepEqual(got, plain) {
+		t.Fatalf("a sandbox with no desktop round trips to %+v", got)
 	}
 	// A workspace volume written before the path was stamped reads the default.
 	bare := identityOf(map[string]string{labelID: "sbx_a"})
