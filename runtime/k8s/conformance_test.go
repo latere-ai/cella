@@ -96,4 +96,13 @@ func sweep(t *testing.T, d *Driver) {
 			t.Logf("cleaning up the pod %s: %v", pod.Name, err)
 		}
 	}
+	secrets, err := d.cs.CoreV1().Secrets(d.opts.Namespace).List(ctx, metav1.ListOptions{LabelSelector: managedSelector})
+	if err != nil {
+		return
+	}
+	for _, secret := range secrets.Items {
+		if err := d.cs.CoreV1().Secrets(d.opts.Namespace).Delete(ctx, secret.Name, metav1.DeleteOptions{}); err != nil {
+			t.Logf("cleaning up the secret %s: %v", secret.Name, err)
+		}
+	}
 }

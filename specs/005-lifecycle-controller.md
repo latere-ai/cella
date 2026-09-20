@@ -8,7 +8,7 @@ depends_on:
 affects: [controller/, internal/config/]
 effort: large
 created: 2026-09-12
-updated: 2026-09-19
+updated: 2026-09-20
 author: changkun
 ---
 
@@ -32,7 +32,7 @@ since it imports nothing under `internal/` ([[001-architecture]]).
 
 ## Current state
 
-[[026-direct-control-plane]] implements synchronous native create, inspect, list, start, stop, and delete with durable intent. [[037-lifecycle-enforcement]] implements the reaper's deadline rules, the `Lease` and `Clock` seams, and `Touch`. [[043-postgres-store]] implements the `lost` rule, `Recovering`, the recreation from desired state and the grace without a durable store, over the store and the observed index of [[010-state]]; recovery re-pushes no egress map, mints no token and reattaches no volume. Reconciliation of an update, the cascade, and the `token` rule, which waits for the mint of [[006-identity]], remain to build.
+[[026-direct-control-plane]] implements synchronous native create, inspect, list, start, stop, and delete with durable intent. [[037-lifecycle-enforcement]] implements the reaper's deadline rules, the `Lease` and `Clock` seams, and `Touch`. [[043-postgres-store]] implements the `lost` rule, `Recovering`, the recreation from desired state and the grace without a durable store, over the store and the observed index of [[010-state]]; recovery reattaches no volume. [[045-workload-tokens]] implements the `token` rule over the `Tokens` seam, the mint at step 5 of the create order with its undo, the re-mint at recovery with the previous `jti` revoked, and the revocation a delete writes. Reconciliation of an update and the cascade remain to build.
 
 Design provenance: The reaper's rules come from the hosted platform, where
 they have run for months; the phase machine, the ordered create with
@@ -266,13 +266,13 @@ store behind `Store` ([[010-state]]); the token's shape
 | A spawn debits the budget in the same transaction as the desired write; two concurrent spawns against a budget of one yield one child and one `spawn_budget_exhausted` | `TestSpawnDebitIsAtomic` | not built |
 | A narrowing update and an owner's widening update each keep the effective boundary within both manifests at every instant, observed through fake gateway and driver | `TestUpdateNeverWidensMidChange` | not built |
 | `Change.Volumes` is sent only while `Stopped`; a secret update re-pushes; a secret delete re-pushes and writes `notInjectable` | `TestUpdatePaths` | not built |
-| Each reaper rule fires at its second and not one before under a fake clock; `never` disables it; a sandbox matching two rules gets the first | `TestReaperRules`, one case per rule and one per tie | built for expired, autoDelete and autoStop ([[037-lifecycle-enforcement]]) and for lost ([[043-postgres-store]]); token not built |
+| Each reaper rule fires at its second and not one before under a fake clock; `never` disables it; a sandbox matching two rules gets the first | `TestReaperRules`, one case per rule and one per tie | built for expired, autoDelete and autoStop ([[037-lifecycle-enforcement]]), for lost ([[043-postgres-store]]) and for token ([[045-workload-tokens]]), whose rule is asked only of a sandbox no deadline rule claimed |
 | The reaper does not run on a replica without the lease | `TestReaperNeedsTheLease` | built ([[037-lifecycle-enforcement]]) |
 | For an environment that is `Offline`, nothing is rebuilt, no rule runs, and `Lost` does not count the grace; when it returns, lost sandboxes recover | `TestOfflineEnvironmentHoldsState` | not built |
 | An errored `List` rebuilds nothing | `TestListErrorIsNotEmpty` | built, with the observed rebuild and the lost rule it holds ([[043-postgres-store]]) |
-| A token past two thirds of its life is re-minted, re-projected, and the old `jti` revoked in one act | `TestTokenReprojection` under a fake clock | not built |
+| A token past two thirds of its life is re-minted, re-projected, and the old `jti` revoked in one act | `TestTokenReprojection` under a fake clock | built ([[045-workload-tokens]]); a token whose expiry is already its sandbox's is not rotated, because a re-mint cannot extend it |
 | `Touch` reaches the driver at most once per interval per sandbox | `TestTouchCoalesces` | built ([[037-lifecycle-enforcement]]) |
-| A `Lost` sandbox with Postgres recovers with the same id, a new token, the old `jti` revoked, and its volumes' files; a managed workspace the driver lost is `Recreated`; a missing volume is `Failed VolumeMissing`; exhausted attempts are `Failed RecoveryExhausted` with the stated backoff | `TestRecovery`, four cases | built for the id, name, labels, annotations and lifecycle, and for the exhausted attempts with their backoff ([[043-postgres-store]]); the token, the workspace and the volumes wait for slices 045 and [[019-volumes]] |
+| A `Lost` sandbox with Postgres recovers with the same id, a new token, the old `jti` revoked, and its volumes' files; a managed workspace the driver lost is `Recreated`; a missing volume is `Failed VolumeMissing`; exhausted attempts are `Failed RecoveryExhausted` with the stated backoff | `TestRecovery`, four cases | built for the id, name, labels, annotations and lifecycle, and for the exhausted attempts with their backoff ([[043-postgres-store]]), and for the new token with the previous `jti` revoked ([[045-workload-tokens]]); the workspace and the volumes wait for [[019-volumes]] |
 | Without a durable store a lost sandbox is `Deleting` after the grace with reason `Lost` | `TestLostGraceReaps` | built ([[043-postgres-store]]) |
 | Deleting a root deletes descendants deepest first with reason `Parent`, then the root; volumes are detached, `retain: false` volumes with no other attachment deleted, `retain: true` kept; the map is purged and the `jti` revoked | `TestCascade` | not built |
 | Each `Event` type has its phase effect; `relist` and a closed channel rebuild the environment's observed state and resume | `TestWatchEvents`, `TestWatchResumesAfterRelist` | not built |

@@ -29,7 +29,7 @@ func TestRenderPodAndClaim(t *testing.T) {
 		Resources: driver.Resources{CPU: "2", Memory: "512Mi", Disk: "20Gi"},
 		Workspace: driver.Workspace{Path: "/data"},
 	}
-	pod, err := h.pod(s, h.clock.now())
+	pod, err := h.pod(s, h.clock.now(), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestRenderPodAndClaim(t *testing.T) {
 
 func TestRenderDefaults(t *testing.T) {
 	h := newHarness(t)
-	pod, err := h.pod(spec("sbx_defaults"), h.clock.now())
+	pod, err := h.pod(spec("sbx_defaults"), h.clock.now(), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +117,7 @@ func TestRenderDefaults(t *testing.T) {
 
 func TestPodCarriesTheBaseline(t *testing.T) {
 	h := newHarness(t)
-	pod, err := h.pod(spec("sbx_baseline"), h.clock.now())
+	pod, err := h.pod(spec("sbx_baseline"), h.clock.now(), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +169,7 @@ func TestSchedulingOptionsReachThePod(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pod, err := d.pod(spec("sbx_sched"), time.Now())
+	pod, err := d.pod(spec("sbx_sched"), time.Now(), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,11 +199,11 @@ func TestResourcesAreConsistent(t *testing.T) {
 	h := newHarness(t)
 	s := spec("sbx_consistent")
 	s.Resources = driver.Resources{CPU: "1500m", Memory: "3Gi"}
-	first, err := h.pod(s, h.clock.at)
+	first, err := h.pod(s, h.clock.at, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := h.pod(s, h.clock.at)
+	second, err := h.pod(s, h.clock.at, false)
 	if err != nil {
 		t.Fatal(err)
 	}

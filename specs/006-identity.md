@@ -8,7 +8,7 @@ depends_on:
 affects: [authorizer/, internal/auth/, internal/config/, internal/api/, test/stubs/]
 effort: medium
 created: 2026-09-12
-updated: 2026-09-17
+updated: 2026-09-20
 author: changkun
 ---
 
@@ -171,11 +171,19 @@ stub of `authz/stub` and the owner policy served through
 endpoint, which is what a release run sets. Those two names are the
 tiers' and belong in [[012-test-stubs-and-tiers]]'s table.
 
+Completed on 2026-09-20 by [[045-workload-tokens]]: the controller mints
+a workload token at create and at recovery, every driver projects it,
+the reaper re-mints and re-projects it at two thirds of its lifetime,
+and the revocation list of [[010-state]] is written at a rotation, a
+recovery and a delete and read by the verifier on every token `cellad`
+signed. The sandbox phase is not read on that path and needs no read: a
+delete revokes, so a deleted sandbox's token is refused at once by the
+list. A token `cellad` minted that carries no `jti` is refused, because
+a credential that cannot be revoked is not one this control plane
+issued.
+
 What is left of this spec waits on other specs rather than on a
-decision, and the acceptance table says which per row: the revocation
-list and the sandbox phase a workload token is checked against
-([[010-state]]), the re-mint and the projection at two thirds of a
-lifetime ([[005-lifecycle-controller]], [[004-runtime-contract]]), the
+decision, and the acceptance table says which per row: the
 routes an environment key authorizes ([[008-api]],
 [[021-data-plane-workers]]), the ceilings an allow overrides
 ([[007-admission]], [[008-api]], [[003-manifest-contract]]), the
@@ -458,8 +466,8 @@ the HTTP envelope of 401 and 403 ([[008-api]]); the revocation store
 | `cellad` refuses to start with no issuer or with a `CELLA_TOKEN_KEY` holding no RSA key | `TestServeRefusesToStartWithoutIdentity` | built |
 | A workload token verifies with a generic JWT library against `/.well-known/jwks.json`; its `kid` is the RFC 7638 thumbprint | `TestWorkloadTokenIsVerifiable` | built |
 | With two PEM blocks, tokens signed by the second still verify; after the block is removed they do not; the first block signs | `TestKeyRotationByConfiguration` | built |
-| A workload token is refused by `cellad` after its sandbox is deleted and after its `jti` is revoked; a recovered sandbox's new token verifies and the old `jti` is revoked | `TestWorkloadTokenLifecycle` | not built: the phase check and the revocation list are the store's ([[010-state]]) and the recovery is the controller's ([[005-lifecycle-controller]]); the verifier and the signer wait for them |
-| A token is re-minted and re-projected at two thirds of its lifetime | `TestTokenReprojection` under a fake clock | not built: the re-mint is the controller's ([[005-lifecycle-controller]]) and the projection the driver's ([[004-runtime-contract]]) |
+| A workload token is refused by `cellad` after its sandbox is deleted and after its `jti` is revoked; a recovered sandbox's new token verifies and the old `jti` is revoked | `TestRevokedTokenIsRefused`, `TestRecoveryMintsAndRevokes`, `TestDeleteRevokes`, and the `cellad` run of `TestWorkloadTokenEndToEnd` | built ([[045-workload-tokens]]): the delete revokes, so a deleted sandbox's token is refused by the list and no phase is read |
+| A token is re-minted and re-projected at two thirds of its lifetime | `TestTokenReprojection` under a fake clock; the `TokenProjection` case of the conformance suite | built ([[045-workload-tokens]]) |
 | An environment key registers and claims for its environment, is refused on every other route, and is refused at once after `DELETE .../keys/{jti}`; two keys on one environment work independently | `TestEnvironmentKeys` | built in part: a key is minted, verified, and read back as its environment's, and two on one environment are two jtis; the routes are [[008-api]]'s and [[021-data-plane-workers]]'s and the revocation list is [[010-state]]'s |
 | Every failure mode in the rules list is `authorizer_unavailable` and never an allow, and unavailability fails the request without flipping readiness; a connection failure before a response line is retried once and nothing else is | `TestAuthorizerFailsClosed`, table-driven over six modes; `TestAuthorizerRetriesOnlyBeforeAResponseLine` | built: the six modes, the one retry and the readiness rule hold; the 503 they render as is [[008-api]]'s |
 | Every action in the table reaches the authorizer with the resource shape in its row, `workload` set for a sandbox caller, `issuer` and `sub` apart, and every claim of the token in `claims` verbatim | `TestAuthorizerRequestShapes` against the stub | built in part: every row's shape holds and `workload` carries the caller's sandbox id; its `parent`, `root`, `mesh` and `spawn` are the store's ([[010-state]], [[022-mesh-and-spawn]]) |
@@ -468,4 +476,4 @@ the HTTP envelope of 401 and 403 ([[008-api]]); the revocation store
 | The probe id is denied by the stub authorizer and by the owner policy for every subject and action, and `cellad check` reports an authorizer that allows it | `TestProbeIdIsAlwaysDenied` | built in part: the stub and the owner policy deny it for every subject and action, and the client reads an allow as a misconfiguration; the `cellad check` subcommand is [[014-release-and-installation]]'s |
 | `limits` override the rate limit, the count ceiling, and the priority cap; `filter` narrows a list | `TestLimitsAndFilter` | not built: the three figures and the filter are decoded and carried, and there is no rate limit ([[008-api]]), no count ceiling ([[007-admission]]) and no `Resolve` ([[003-manifest-contract]]) to override yet |
 | The owner policy's rules hold for every kind and action, including that only an admin creates an environment and only the default environment is usable by a non-admin | `TestOwnerPolicy`, table-driven | built |
-| A sandbox's token reads and execs itself, reads its descendants, cannot read a sibling or delete itself, and cannot mount a secret its parent did not | `TestWorkloadIsLeastPrivileged` | built |
+| A sandbox's token reads and execs itself, reads its descendants, cannot read a sibling or delete itself, and cannot mount a secret its parent did not | `TestWorkloadIsLeastPrivileged`; `TestWorkloadReachesItsOwnSandbox` over the served routes | built, and held over the API as well as over the policy ([[045-workload-tokens]]) |

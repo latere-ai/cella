@@ -258,6 +258,9 @@ type containerInspect struct {
 		StartedAt  time.Time `json:"StartedAt"`
 		FinishedAt time.Time `json:"FinishedAt"`
 	} `json:"State"`
+	Config struct {
+		User string `json:"User"`
+	} `json:"Config"`
 }
 
 type containerListItem struct {
@@ -269,13 +272,16 @@ type containerListItem struct {
 	Exited    bool              `json:"Exited"`
 }
 
-// status is the part of a container Inspect and List agree on.
+// status is the part of a container Inspect and List agree on, plus the user
+// it runs as, which only an Inspect reports and which a re-projected file
+// takes as its owner.
 type status struct {
 	present    bool
 	state      string
 	exitCode   int
 	startedAt  time.Time
 	finishedAt time.Time
+	user       string
 }
 
 // ---- identity and record ----
@@ -421,7 +427,8 @@ func (d *Driver) inspectContainer(ctx context.Context, id string) (status, error
 		return status{}, err
 	}
 	return status{present: true, state: ci.State.Status, exitCode: ci.State.ExitCode,
-		startedAt: engineInstant(ci.State.StartedAt), finishedAt: engineInstant(ci.State.FinishedAt)}, nil
+		startedAt: engineInstant(ci.State.StartedAt), finishedAt: engineInstant(ci.State.FinishedAt),
+		user: ci.Config.User}, nil
 }
 
 // engineInstant is one resolution for every instant a container reports. The
@@ -638,7 +645,7 @@ func (d *Driver) Create(ctx context.Context, s driver.CreateSpec) (driver.Ref, e
 		_ = d.removeVolume(clean, recordVolume(s.ID, 1))
 		_ = d.removeVolume(clean, workspaceVolume(s.ID))
 	}
-	env := egressEnv(s)
+	env := tokenEnv(s, egressEnv(s))
 	rec := record{labels: maps.Clone(s.Labels), env: maps.Clone(env), lastActivityAt: time.Now().UTC(),
 		ttl: s.Lifecycle.TTL, autoStop: s.Lifecycle.AutoStop, autoDelete: s.Lifecycle.AutoDelete}
 	if err := d.writeRecord(ctx, s.ID, 0, rec); err != nil {
@@ -666,6 +673,14 @@ func (d *Driver) Create(ctx context.Context, s driver.CreateSpec) (driver.Ref, e
 	// door its environment points at (spec 018).
 	if s.Egress.CAPEM != "" {
 		if err := d.putEgressCA(ctx, s.ID, s.Egress.CAPEM); err != nil {
+			undo()
+			return driver.Ref{}, err
+		}
+	}
+	// The identity of spec 006 is projected in the same window, so the
+	// workload's first call to the control plane carries it.
+	if len(s.Token) > 0 {
+		if err := d.putToken(ctx, s.ID, s.User, s.Token); err != nil {
 			undo()
 			return driver.Ref{}, err
 		}
@@ -763,6 +778,22 @@ func (d *Driver) Delete(ctx context.Context, id string) error {
 func (d *Driver) Update(ctx context.Context, id string, c driver.Change) error {
 	if c.Lifecycle != nil && (c.Lifecycle.TTL < 0 || c.Lifecycle.AutoStop < 0 || c.Lifecycle.AutoDelete < 0) {
 		return driver.ErrInvalid
+	}
+	// The token is written into the container rather than into the record,
+	// because the container's file system is where the workload reads it.
+	// It goes in before the record so a re-projection that fails leaves the
+	// record naming the file the container still holds.
+	if len(c.Token) > 0 {
+		running, err := d.inspectContainer(ctx, id)
+		if err != nil {
+			return err
+		}
+		if !running.present {
+			return driver.ErrNotFound
+		}
+		if err := d.putToken(ctx, id, running.user, c.Token); err != nil {
+			return err
+		}
 	}
 	return d.edit(ctx, id, func(r *record) bool {
 		if c.Labels != nil {

@@ -486,6 +486,10 @@ func clone(obj *v1.Sandbox) v1.Sandbox {
 		state.Placeholders = maps.Clone(obj.Status.EgressState.Placeholders)
 		out.Status.EgressState = &state
 	}
+	if obj.Status.TokenState != nil {
+		state := *obj.Status.TokenState
+		out.Status.TokenState = &state
+	}
 	if obj.Status.ExitCode != nil {
 		code := *obj.Status.ExitCode
 		out.Status.ExitCode = &code
