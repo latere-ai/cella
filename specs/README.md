@@ -72,6 +72,7 @@ later.
 | [023](023-computer-use-operations.md) | Computer use operations: the desktop, screenshot, screen, input, ports and the proxy, browser-ready sandboxes | medium | validated | 003, 004, 005, 008, 009 |
 | [024](024-vm-driver.md) | VM driver: a hardware-isolated sandbox per environment; the design held open | large | vague | 004, 019 |
 | [031](031-hosted-sandbox-consolidation.md) | Hosted sandbox consolidation: every package of latere-ai/sandbox lands in cella, in the platform, or is dropped | large | in-progress | 001 |
+| [048](048-release-and-check.md) | Release and check: the tag pipeline, the deploy tree, and cellad check | medium | in-progress | 014, 031 |
 
 ## Dependency graph
 
