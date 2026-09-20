@@ -4,20 +4,26 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/gorilla/websocket"
 
 	"latere.ai/x/pkg/authkit/issuertest"
 	"latere.ai/x/pkg/authz"
 
 	"latere.ai/x/cella/controller"
 	"latere.ai/x/cella/internal/auth"
+	"latere.ai/x/cella/internal/events"
 	"latere.ai/x/cella/internal/store"
 	"latere.ai/x/cella/internal/store/memory"
 	v1 "latere.ai/x/cella/manifest/v1"
@@ -315,4 +321,216 @@ func (p *keyed) mintKey(t *testing.T) string {
 func (p *keyed) verify(t *testing.T, token string) (auth.Caller, error) {
 	t.Helper()
 	return p.h.(*handler).Verifier.VerifyContext(t.Context(), token)
+}
+
+// TestWorkerStreamRoute opens the stream a worker holds: the upgrade, the
+// hello that binds it to its registration, and the environment reporting it
+// as connected. The control plane dials nothing; everything here travels on
+// the connection the worker opened.
+func TestWorkerStreamRoute(t *testing.T) {
+	p := setupKeyed(t, nil)
+	key := p.mintKey(t)
+	var registered remote.Registered
+	body := `{"driver":"native","isolation":"none","capabilities":{"files":true}}`
+	if err := json.Unmarshal(p.request(http.MethodPost, "/v1/environments/self/workers", key, body, http.StatusCreated), &registered); err != nil {
+		t.Fatalf("the registration answer did not decode: %v", err)
+	}
+
+	dialer := &websocket.Dialer{Subprotocols: []string{remote.Protocol}, HandshakeTimeout: 5 * time.Second}
+	conn, res, err := dialer.DialContext(t.Context(), "ws"+strings.TrimPrefix(p.url, "http")+"/v1/environments/self/operations",
+		http.Header{"Authorization": []string{"Bearer " + key}})
+	if err != nil {
+		if res != nil {
+			_ = res.Body.Close()
+		}
+		t.Fatalf("the worker's stream did not open: %v", err)
+	}
+	if res != nil {
+		_ = res.Body.Close()
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	if conn.Subprotocol() != remote.Protocol {
+		t.Fatalf("the server negotiated %q, want %q", conn.Subprotocol(), remote.Protocol)
+	}
+	hello, err := remote.EncodeMessage(remote.NoOperation,
+		remote.Message{Type: remote.MessageHello, Worker: registered.Worker})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = conn.WriteMessage(websocket.BinaryMessage, hello); err != nil {
+		t.Fatalf("the hello was not sent: %v", err)
+	}
+
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		connected := 0
+		for _, w := range p.hub.Workers("default") {
+			if w.Connected {
+				connected++
+			}
+		}
+		if connected == 1 {
+			// The environment reports it, which is what an operator reads to
+			// see the data plane arrive.
+			var obj v1.Environment
+			if err = json.Unmarshal(p.request(http.MethodGet, "/v1/environments/default", p.alice, "", http.StatusOK), &obj); err != nil {
+				t.Fatalf("the environment did not decode: %v", err)
+			}
+			if obj.Status.Workers != 1 {
+				t.Errorf("the environment reports %d workers", obj.Status.Workers)
+			}
+			if obj.Status.LastHeartbeat.IsZero() {
+				t.Errorf("the environment reports a worker and no heartbeat")
+			}
+			// One operation down proves the other direction: the hub writes
+			// on the stream the worker opened, and the worker reads it.
+			go func() {
+				_, _ = p.hub.Transport("default").Open(t.Context(), remote.OpInspect, remote.Request{ID: "sbx_1"})
+			}()
+			_ = conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+			_, frame, readErr := conn.ReadMessage()
+			if readErr != nil {
+				t.Fatalf("the operation never reached the worker: %v", readErr)
+			}
+			_, stream, payload, decodeErr := remote.DecodeFrame(frame)
+			if decodeErr != nil {
+				t.Fatalf("the frame did not decode: %v", decodeErr)
+			}
+			if stream != remote.StreamControl {
+				t.Fatalf("the operation rode on sub-stream %d", stream)
+			}
+			message, decodeErr := remote.DecodeMessage(payload)
+			if decodeErr != nil {
+				t.Fatalf("the message did not decode: %v", decodeErr)
+			}
+			if message.Type != remote.MessageOperation || remote.OperationType(message) != remote.OpInspect {
+				t.Errorf("the worker was handed %q/%q", message.Type, remote.OperationType(message))
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("the worker's hello never bound its stream")
+}
+
+// TestWorkerStreamRefusesAnotherProtocol holds the subprotocol rule: a client
+// that does not ask for this vocabulary is refused rather than answered in
+// something it cannot read.
+func TestWorkerStreamRefusesAnotherProtocol(t *testing.T) {
+	p := setupKeyed(t, nil)
+	key := p.mintKey(t)
+	p.request(http.MethodPost, "/v1/environments/self/workers", key,
+		`{"driver":"native","isolation":"none"}`, http.StatusCreated)
+
+	dialer := &websocket.Dialer{Subprotocols: []string{"cella.worker.v0"}, HandshakeTimeout: 5 * time.Second}
+	conn, res, err := dialer.DialContext(t.Context(), "ws"+strings.TrimPrefix(p.url, "http")+"/v1/environments/self/operations",
+		http.Header{"Authorization": []string{"Bearer " + key}})
+	if res != nil {
+		_ = res.Body.Close()
+	}
+	if err == nil {
+		// Some clients complete the handshake and learn on the first read.
+		t.Cleanup(func() { _ = conn.Close() })
+		_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+		if _, _, readErr := conn.ReadMessage(); readErr == nil {
+			t.Errorf("a client asking for another vocabulary was served")
+		}
+	}
+}
+
+// TestEnvironmentKeyEventsAreJournaled holds design 009's two key records: a
+// mint and a revocation each name the jti and carry no key.
+func TestEnvironmentKeyEventsAreJournaled(t *testing.T) {
+	p := setupKeyed(t, nil)
+	journal, err := memory.Open(memory.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = journal.Close() })
+	p.h.(*handler).Events = events.NewEmitter(store.EventJournal(journal, store.Journaled), slog.New(slog.DiscardHandler))
+
+	var minted mintedKey
+	if err = json.Unmarshal(p.request(http.MethodPost, "/v1/environments/default/keys", p.alice, "", http.StatusCreated), &minted); err != nil {
+		t.Fatalf("the mint's answer did not decode: %v", err)
+	}
+	p.request(http.MethodDelete, "/v1/environments/default/keys/"+minted.JTI, p.alice, "", http.StatusNoContent)
+
+	records := environmentRecords(t, journal)
+	if len(records) != 2 {
+		t.Fatalf("the two key acts wrote %d records", len(records))
+	}
+	if records[0].Type != events.TypeEnvironmentKeyed || records[1].Type != events.TypeEnvironmentKeyRevoked {
+		t.Errorf("the records are %s and %s", records[0].Type, records[1].Type)
+	}
+	for _, r := range records {
+		if r.Object.Kind != events.KindEnvironment || r.Object.Name != "default" {
+			t.Errorf("the record is about %+v, want the default environment", r.Object)
+		}
+		if !strings.Contains(string(r.Data), minted.JTI) {
+			t.Errorf("the record does not name the jti: %s", r.Data)
+		}
+		if strings.Contains(string(r.Data), minted.Token) {
+			t.Errorf("the record carries the key itself")
+		}
+	}
+}
+
+// environmentRecords reads the journal back, oldest first, which is the
+// order the acts happened in.
+func environmentRecords(t *testing.T, s *memory.Store) []events.Record {
+	t.Helper()
+	var rows []store.Event
+	if err := s.Tx(t.Context(), func(tx store.Tx) error {
+		var err error
+		rows, _, err = tx.Journal().ByObject(t.Context(), "default", store.Page{Limit: 50})
+		return err
+	}); err != nil {
+		t.Fatalf("the journal did not answer: %v", err)
+	}
+	out := make([]events.Record, 0, len(rows))
+	for _, row := range slices.Backward(rows) {
+		record, err := events.Rebuild(row.Payload, row.ID, row.Seq, row.Type, row.At)
+		if err != nil {
+			t.Fatalf("the record %s did not rebuild: %v", row.ID, err)
+		}
+		out = append(out, record)
+	}
+	return out
+}
+
+// TestEnvironmentRoutesUnderADenyingAuthorizer holds that every environment
+// route asks the authorizer first: a subject the operator's policy refuses
+// reads nothing and mints nothing.
+func TestEnvironmentRoutesUnderADenyingAuthorizer(t *testing.T) {
+	p := setupKeyed(t, denyEverything{})
+	for _, tc := range []struct {
+		name   string
+		method string
+		path   string
+	}{
+		{"the read", http.MethodGet, "/v1/environments/default"},
+		{"the list", http.MethodGet, "/v1/environments"},
+		{"the mint", http.MethodPost, "/v1/environments/default/keys"},
+		{"the revocation", http.MethodDelete, "/v1/environments/default/keys/01JABC"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p.request(tc.method, tc.path, p.alice, "", http.StatusForbidden)
+		})
+	}
+}
+
+// TestRevocationNamesAJTI holds that a revocation without one is refused
+// rather than sweeping nothing in silence.
+func TestRevocationNamesAJTI(t *testing.T) {
+	p := setupKeyed(t, nil)
+	p.request(http.MethodDelete, "/v1/environments/default/keys/%20", p.alice, "", http.StatusBadRequest)
+}
+
+// denyEverything is an operator policy that refuses every action, which is
+// what an authorizer of a locked-down installation answers a caller with no
+// grant at all.
+type denyEverything struct{}
+
+func (denyEverything) Authorize(context.Context, authz.Request) (authz.Decision, error) {
+	return authz.Decision{Allow: false, Reason: "this installation grants nothing"}, nil
 }

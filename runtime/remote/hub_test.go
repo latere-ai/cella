@@ -4,9 +4,12 @@
 package remote_test
 
 import (
+	"archive/tar"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"maps"
 	"net"
 	"path/filepath"
@@ -19,6 +22,7 @@ import (
 	driver "latere.ai/x/cella/runtime"
 	"latere.ai/x/cella/runtime/native"
 	"latere.ai/x/cella/runtime/remote"
+	"latere.ai/x/cella/runtime/runtimetest"
 )
 
 // recordingQueue is the operations table of design 010 as the hub uses it:
@@ -300,3 +304,156 @@ func TestLinkEndsEverySubStream(t *testing.T) {
 }
 
 func contains(haystack, needle string) bool { return strings.Contains(haystack, needle) }
+
+// TestOptionalInterfacesCrossTheSeam holds what a worker whose driver
+// declares no optional interface answers: every call of that interface
+// crosses and comes back as the contract's own ErrUnsupported, which is what
+// the API reports as the capability the environment lacks.
+//
+// The remote driver embeds every optional interface unconditionally, so this
+// is the rule that keeps a caller gated on what the worker actually provides
+// rather than on what the type happens to embed.
+func TestOptionalInterfacesCrossTheSeam(t *testing.T) {
+	s := openSeam(t, runtimetest.Nop{})
+	ctx := t.Context()
+
+	if caps := s.driver.Capabilities(); caps.Files || caps.Attach {
+		t.Fatalf("a worker declaring nothing reported %+v", caps)
+	}
+	for _, tc := range []struct {
+		name string
+		call func() error
+	}{
+		{"Stat", func() error { _, err := s.driver.Stat(ctx, "sbx_1", "/workspace/a"); return err }},
+		{"ReadDir", func() error { _, err := s.driver.ReadDir(ctx, "sbx_1", "/workspace"); return err }},
+		{"Open", func() error { _, _, err := s.driver.Open(ctx, "sbx_1", "/workspace/a"); return err }},
+		{"Write", func() error {
+			_, err := s.driver.Write(ctx, "sbx_1", driver.WriteRequest{
+				Path: "/workspace/a", Body: strings.NewReader("x"),
+			})
+			return err
+		}},
+		{"Mkdir", func() error { return s.driver.Mkdir(ctx, "sbx_1", "/workspace/d") }},
+		{"Remove", func() error { return s.driver.Remove(ctx, "sbx_1", "/workspace/a") }},
+		{"Move", func() error { return s.driver.Move(ctx, "sbx_1", "/workspace/a", "/workspace/b") }},
+		{"Attach", func() error { _, err := s.driver.Attach(ctx, "sbx_1", driver.AttachRequest{}); return err }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := tc.call(); !errors.Is(err, driver.ErrUnsupported) {
+				t.Errorf("%s on a worker that declares none is %v, want ErrUnsupported", tc.name, err)
+			}
+		})
+	}
+}
+
+// TestWholeTreeTransfersCrossTheSeam holds the two archive operations of the
+// contract: the bytes travel on the operation's own sub-stream and the answer
+// says the transfer landed.
+func TestWholeTreeTransfersCrossTheSeam(t *testing.T) {
+	host, err := native.New(filepath.Join(t.TempDir(), "native"))
+	if err != nil {
+		t.Fatalf("the worker's own driver did not open: %v", err)
+	}
+	t.Cleanup(func() { _ = host.Close() })
+	s := openSeam(t, host)
+	ctx := t.Context()
+
+	ref, err := s.driver.Create(ctx, driver.CreateSpec{
+		ID: "sbx_archive", Name: "archive", Owner: "ops", Command: []string{"sleep", "30"},
+	})
+	if err != nil {
+		t.Fatalf("the create failed: %v", err)
+	}
+	t.Cleanup(func() { _ = s.driver.Delete(context.Background(), ref.ID) })
+
+	var archive bytes.Buffer
+	tw := tar.NewWriter(&archive)
+	body := []byte("what crossed the seam\n")
+	if err = tw.WriteHeader(&tar.Header{Name: "crossed.txt", Mode: 0o644, Size: int64(len(body))}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = tw.Write(body); err != nil {
+		t.Fatal(err)
+	}
+	if err = tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.driver.ImportTar(ctx, ref.ID, "/workspace", bytes.NewReader(archive.Bytes())); err != nil {
+		t.Fatalf("the import over the stream failed: %v", err)
+	}
+	var out bytes.Buffer
+	if err = s.driver.ExportTar(ctx, ref.ID, []string{"/workspace/crossed.txt"}, &out); err != nil {
+		t.Fatalf("the export over the stream failed: %v", err)
+	}
+	tr := tar.NewReader(&out)
+	header, err := tr.Next()
+	if err != nil {
+		t.Fatalf("the exported archive has no entry: %v", err)
+	}
+	got, err := io.ReadAll(tr)
+	if err != nil {
+		t.Fatalf("the exported entry did not read: %v", err)
+	}
+	if string(got) != string(body) {
+		t.Errorf("the entry %q carries %q, want %q", header.Name, got, body)
+	}
+	// An archive of a sandbox the worker does not have is the driver's own
+	// refusal, carried across the seam.
+	if err = s.driver.ExportTar(ctx, "sbx_absent", []string{"/workspace"}, io.Discard); !errors.Is(err, driver.ErrNotFound) {
+		t.Errorf("exporting an unknown sandbox is %v, want ErrNotFound", err)
+	}
+	if err = s.driver.ImportTar(ctx, "sbx_absent", "/workspace", bytes.NewReader(archive.Bytes())); !errors.Is(err, driver.ErrNotFound) {
+		t.Errorf("importing into an unknown sandbox is %v, want ErrNotFound", err)
+	}
+}
+
+// TestLogsCrossTheSeam holds the one sub-stream a follow carries, and the
+// refusal that reaches the caller of Logs rather than the caller of Read.
+func TestLogsCrossTheSeam(t *testing.T) {
+	host, err := native.New(filepath.Join(t.TempDir(), "native"))
+	if err != nil {
+		t.Fatalf("the worker's own driver did not open: %v", err)
+	}
+	t.Cleanup(func() { _ = host.Close() })
+	s := openSeam(t, host)
+	ctx := t.Context()
+
+	ref, err := s.driver.Create(ctx, driver.CreateSpec{
+		ID: "sbx_logs", Name: "logs", Owner: "ops",
+		Command: []string{"sh", "-c", "echo the main process spoke; sleep 30"},
+	})
+	if err != nil {
+		t.Fatalf("the create failed: %v", err)
+	}
+	t.Cleanup(func() { _ = s.driver.Delete(context.Background(), ref.ID) })
+
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		reader, logsErr := s.driver.Logs(ctx, ref.ID, driver.LogsRequest{})
+		if logsErr != nil {
+			t.Fatalf("the logs over the stream failed: %v", logsErr)
+		}
+		got, readErr := io.ReadAll(reader)
+		_ = reader.Close()
+		if readErr != nil {
+			t.Fatalf("the log stream did not read: %v", readErr)
+		}
+		if strings.Contains(string(got), "the main process spoke") {
+			// A follow the caller stopped wanting ends the operation rather
+			// than holding the connection.
+			follow, followErr := s.driver.Logs(ctx, ref.ID, driver.LogsRequest{Follow: true})
+			if followErr != nil {
+				t.Fatalf("the follow failed: %v", followErr)
+			}
+			if err = follow.Close(); err != nil {
+				t.Errorf("closing a follow is %v", err)
+			}
+			if _, err = s.driver.Logs(ctx, "sbx_absent", driver.LogsRequest{}); !errors.Is(err, driver.ErrNotFound) {
+				t.Errorf("the logs of an unknown sandbox are %v, want ErrNotFound", err)
+			}
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("the main process's output never crossed the seam")
+}
