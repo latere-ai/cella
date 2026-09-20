@@ -89,15 +89,20 @@ pipe into `jq` is exactly what the server sent.
 
 ```sh
 cella exec dev -- ls -la
-echo "a line" | cella exec dev -i -- cat
+printf 'a line\n' | cella exec dev -i -- sh -c 'read line; echo "got $line"'
 cella exec dev -t -- top
 cella attach dev
 ```
 
 Without `-i` and `-t` the command runs and its output arrives when it
-finishes. `-i` sends your standard input to the command; `-t` runs it under
-a terminal. `attach` is a terminal on the sandbox with your window
+finishes. `-i` sends your standard input to the command and `-t` runs it
+under a terminal; either opens a session, and a session carries your input
+either way. `attach` is a terminal on the sandbox with your window
 following it, and your terminal is restored however the session ends.
+
+The end of your input is not sent: the session has no frame that says it,
+so the command inside must end by itself. `sh -c 'read line; ...'` ends,
+`cat` waits.
 
 **The exit code of `cella exec` is the exit code of the command inside.**
 That is what makes it usable in a script:

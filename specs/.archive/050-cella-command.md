@@ -176,7 +176,8 @@ pages, the pages' `items` are concatenated into one envelope with
 every other command: `apply`, `get`, `delete`, `start` and `stop` write
 the API's body; `exec` writes `{"exitCode","stdout","stderr",
 "truncated","durationMs"}` as received; `files` and `cp` write the
-route's own shape, and a route that answers 204 writes `{}`.
+route's own shape, and a route that answers 204, which carries nothing
+to render, writes the path it acted on.
 
 ### Streams
 
