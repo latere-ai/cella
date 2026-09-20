@@ -321,7 +321,8 @@ state half of it is not. What landed:
 Coverage on the packages this slice added or extended, on
 `go test -cover`: `manifest` 97.5%, `internal/config` 91.4%,
 `internal/store` 91.6% with memory 93.8% and postgres 90.0%,
-`internal/api` 90.6%, `runtime/remote` 90.8%, `internal/worker` 90.8%.
+`internal/api` 90.6%, `runtime/remote` 90.8%, `internal/worker` 91.0%,
+`cmd/cellad` 90.5%.
 `go test -race` is clean over all of them.
 
 The end-to-end that ran is `TestWorkerEndToEnd` in `cmd/cellad`: one
