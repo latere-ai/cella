@@ -126,23 +126,43 @@ func boundary(obj *v1.Sandbox, parent *v1.Sandbox, now time.Time) error {
 	add := func(path string) { paths = append(paths, path) }
 
 	// 1 and 2: the network boundary. A child reaches at most where its
-	// parent reaches, by mode and by pattern.
+	// parent reaches, by mode and by pattern. Each list is read under the
+	// mode that owns it, because the other mode leaves it empty by the
+	// exclusive-fields rule and an empty list is not a narrow one.
 	child, over := obj.Spec.Network.Egress, parent.Spec.Network.Egress
 	if v1.EgressModeRank(child.Mode) < v1.EgressModeRank(over.Mode) {
 		add(pathEgressMode)
 	}
-	for _, pattern := range child.AllowedHosts {
-		if !v1.HostCovers(over.AllowedHosts, pattern) {
-			add(pathAllowedHosts)
-			break
+	switch {
+	case child.Mode == v1.EgressAllowlist && over.Mode == v1.EgressAllowlist:
+		// An allow list widens when it names a destination the parent's
+		// does not reach.
+		for _, pattern := range child.AllowedHosts {
+			if !v1.HostCovers(over.AllowedHosts, pattern) {
+				add(pathAllowedHosts)
+				break
+			}
+		}
+	case child.Mode == v1.EgressAllowlist && over.Mode == v1.EgressOpen:
+		// A child narrowing from open to an allow list may name any host
+		// but one its parent refuses: the parent's deny list is a boundary
+		// and narrowing the mode does not lift it.
+		for _, pattern := range child.AllowedHosts {
+			if v1.HostCovers(over.DeniedHosts, pattern) {
+				add(pathAllowedHosts)
+				break
+			}
 		}
 	}
-	// A deny list is the inverse: the child keeps every host the parent
-	// refuses and may refuse more.
-	for _, pattern := range over.DeniedHosts {
-		if !v1.HostCovers(child.DeniedHosts, pattern) {
-			add(pathDeniedHosts)
-			break
+	// A deny list is the inverse of an allow list: the child keeps every
+	// host the parent refuses and may refuse more. It is read only where
+	// both sides are open, because that is the only mode that has one.
+	if child.Mode == v1.EgressOpen && over.Mode == v1.EgressOpen {
+		for _, pattern := range over.DeniedHosts {
+			if !v1.HostCovers(child.DeniedHosts, pattern) {
+				add(pathDeniedHosts)
+				break
+			}
 		}
 	}
 

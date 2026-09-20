@@ -183,6 +183,30 @@ func TestDeniedHostsAreInheritedByTheChild(t *testing.T) {
 	resolve(t, obj, spawnOptions(parent))
 }
 
+// TestBoundaryReadsEachListUnderItsOwnMode: a child that narrows the mode is
+// not refused for the list its own mode does not carry, and a narrowed mode
+// does not lift the parent's deny list.
+func TestBoundaryReadsEachListUnderItsOwnMode(t *testing.T) {
+	parent := parentSandbox()
+	parent.Spec.Network.Egress = v1.Egress{Mode: v1.EgressOpen, DeniedHosts: []string{"bad.example.com"}}
+
+	// Narrowing from open to an allow list of a host the parent admits.
+	obj := childSandbox()
+	obj.Spec.Network.Egress = v1.Egress{Mode: v1.EgressAllowlist, AllowedHosts: []string{"a.example.com"}}
+	resolve(t, obj, spawnOptions(parent))
+
+	// Narrowing from open to none carries no list at all.
+	obj.Spec.Network.Egress = v1.Egress{Mode: v1.EgressNone}
+	resolve(t, obj, spawnOptions(parent))
+
+	// A host the parent refuses is refused however the child narrows.
+	obj.Spec.Network.Egress = v1.Egress{Mode: v1.EgressAllowlist, AllowedHosts: []string{"bad.example.com"}}
+	got := refusal(t, obj, spawnOptions(parent))
+	if got.Code != "boundary_exceeded" || !slices.Contains(got.Paths, pathAllowedHosts) {
+		t.Fatalf("got %s at %v, want boundary_exceeded at %s", got.Code, got.Paths, pathAllowedHosts)
+	}
+}
+
 // TestChildTTLIsBoundedByTheParent is the stage 2 half of rule 6: a child
 // that names no life gets the lesser of the default and its parent's
 // remainder, and one that names a longer life is refused.
