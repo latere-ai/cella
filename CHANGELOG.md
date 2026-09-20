@@ -6,6 +6,19 @@ refused before it is pushed.
 
 ## Unreleased
 
+- A terminal inside a sandbox. `GET /v1/sandboxes/{id}/attach` is a WebSocket
+  carrying a shell: the first text frame says what to run and how big the
+  window is, binary frames are bytes both ways, `{"resize":{"cols","rows"}}`
+  changes the window, and the session ends with `{"exit": n}` and a normal
+  close. `GET /v1/sandboxes/{id}/exec` is the same socket for one command: give
+  it a column and a row count for a terminal, or neither to write the command's
+  input and read its output. Both need the environment to provide a terminal
+  and answer `capability_unsupported` where it does not. The native runtime
+  opens a real pseudo-terminal on Linux and macOS, and the podman runtime runs
+  the session in the container; `POST /v1/sandboxes/{id}/exec?wait=1` is
+  unchanged. Closing the connection ends the process on the native runtime; on
+  podman the engine keeps the session until the sandbox stops.
+
 - `CELLA_RUNTIME=k8s` runs each sandbox on a Kubernetes cluster: one
   PersistentVolumeClaim and one Pod per sandbox, where a stop deletes the Pod
   and keeps the claim, and a start renders a new Pod against it. Every Pod runs

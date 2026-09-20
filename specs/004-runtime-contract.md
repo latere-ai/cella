@@ -155,7 +155,7 @@ type Capabilities struct {
 | Ingress | only when an `Exposer` decorator is installed; `false` otherwise | no | as k8s | no | no | the worker's |
 | Volumes | yes: PVCs | yes: named volumes | yes: block devices or virtiofs | yes: directories under the data dir, granted as readable or writable paths | yes: directories | the worker's |
 | Snapshots | where the cluster has the VolumeSnapshot API | by copy | yes | by copy | by copy | the worker's |
-| Attach | yes: SPDY exec with a TTY | yes: hijacked attach | yes: the guest agent | no: the sandbox runtime launches detached stages and has no PTY or stdin seam | yes | the worker's |
+| Attach | yes: SPDY exec with a TTY | yes: hijacked attach, with the engine keeping the session when the connection drops | yes: the guest agent | no: the sandbox runtime launches detached stages and has no PTY or stdin seam | yes: a pseudo-terminal from the host's own ioctls on Linux and macOS, and the process group killed on close ([[034-terminal-attach]]) | the worker's |
 | Dial | yes: port forwarding | yes | yes | no | yes: loopback | the worker's |
 | Display | yes: the `cella-display` sidecar sharing `/tmp` with the workload | yes: in-container | yes: the guest agent | no | no | the worker's |
 | Input | as Display | as Display | as Display | no | no | the worker's |
@@ -282,6 +282,12 @@ engine's port publishing on loopback. Network is a per-sandbox network
 whose only route is the gateway, and one network per mesh with the
 engine's DNS resolving peers.
 
+`Attach` is built ([[034-terminal-attach]]): an exec session with a TTY over a
+hijacked start, resized through the engine, its exit code from the session's
+inspect. The engine has no exec kill, so dropping the connection leaves the
+process running until the sandbox stops, which the driver's documentation
+states and the conformance case allows for.
+
 Podman fixes an object's labels at create, so the mutable half of the
 stamped identity is a second, unmounted volume the driver replaces with
 a generation rather than a label it edits, and the driver holds no
@@ -380,7 +386,8 @@ is skipped and reported:
 | `TarOutAndIn` | round trip of a tree; with `Files`, while `Stopped` |
 | `TouchStampsActivity` | `last-activity-at` advances |
 | `WatchDeliversEveryTransition` | every phase change of a lifecycle arrives as an `Event`; a `relist` follows a closed channel |
-| `AttachRoundTrip`, `AttachResize` | bytes both ways; a resize reaches the PTY | 
+| `AttachRoundTrip`, `AttachResize`, `AttachCloseEndsTheStream` | bytes both ways and the exit code; a resize reaches the PTY; after `Close` the stream is over for its caller, whether or not the engine under the driver also ends the process |
+| `ExecStdin`, `ExecTTY` | `Stdin` reaches a command whose two outputs stay apart; `TTY` runs one under a terminal, with `Stderr` at its end | 
 | `DialReachesAPort` | a listener inside is reachable |
 | `VolumeLifecycle`, `VolumeAttachDetachWhileStopped`, `AttachFailureIsClean` | `VolumeDriver`; a failing attach leaves no sandbox |
 | `SnapshotAndRestore` | a snapshot becomes a new volume's source |
@@ -395,11 +402,15 @@ runtime is installed; `podman`, `k8s`, and `remote` run it in the tiers
 of [[012-test-stubs-and-tiers]].
 
 The package is built ([[032-runtime-conformance-suite]]) with the cases
-that today's `Driver` has an operation for. `Watch`, the optional
-interfaces above, and `PhaseTableMatchesPackageDoc` have no operation on
+that today's `Driver` has an operation for, and the `Attacher` cases came
+with that interface ([[034-terminal-attach]]). `Watch`, the remaining
+optional interfaces, and `PhaseTableMatchesPackageDoc` have no operation on
 it yet; a declared capability among them is reported by the suite as
 declared without a case, so a driver's run lists what it claims and the
 suite cannot yet check. Each of those cases lands with its interface.
+`NameIsolationCapabilities` checks the rule both ways for every interface
+built: a declared capability without its interface fails, and an interface
+without its declaration fails.
 
 ### Selection
 
@@ -423,10 +434,10 @@ requests ([[023-computer-use-operations]]); the microVM driver's design
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| `native` passes the whole conformance suite in the unit suite | `TestNativeConformance` | passing for the cases built, [[032-runtime-conformance-suite]] |
+| `native` passes the whole conformance suite in the unit suite | `TestNativeConformance` | passing for the cases built, [[032-runtime-conformance-suite]], including the `Attacher` cases of [[034-terminal-attach]] |
 | `local` passes it on a machine with the sandbox runtime installed, with `Attach`, `Dial`, `Mesh`, `Display`, `Input`, `Resize`, `Pool` and the `open` egress case skipped as undeclared, and is skipped whole with the remediation printed where the runtime is absent | `TestLocalConformance` | not built |
-| `podman` passes it in the podman tier; `k8s` against kind; `remote` through a worker running `native` | `TestPodmanConformance`, `TestClusterConformance`, `TestWorkerConformance` | `podman` passing against a real engine, skipped where no socket answers, [[035-podman-driver]]; `TestClusterConformance` built and skipped where no cluster is configured, [[036-k8s-driver]]; `remote` not built |
-| A driver that declares a capability without its interface, or one the suite finds not to hold, fails | `TestConformanceCatchesAFalseCapability` with three lying wrappers | passing, [[032-runtime-conformance-suite]] |
+| `podman` passes it in the podman tier; `k8s` against kind; `remote` through a worker running `native` | `TestPodmanConformance`, `TestClusterConformance`, `TestWorkerConformance` | `podman` passing against a real engine, the `Attacher` cases included, skipped where no socket answers, [[035-podman-driver]], [[034-terminal-attach]]; `TestClusterConformance` built and skipped where no cluster is configured, [[036-k8s-driver]]; `remote` not built |
+| A driver that declares a capability without its interface, implements one it does not declare, or declares one the suite finds not to hold, fails | `TestConformanceCatchesAFalseCapability` with five lying wrappers | passing, [[032-runtime-conformance-suite]], [[034-terminal-attach]] |
 | Every stamped label value is a legal Kubernetes label value and every key a legal key, for an owner with `@` and a user label with a `/` | `TestStampedIdentityIsLegal` | passing, [[036-k8s-driver]] |
 | A decorator that removes the token mount, sets `privileged`, adds `hostNetwork` or `shareProcessNamespace`, or mounts a service account token is refused with `decorator_violation` naming the field | `TestDecoratorCannotWeakenTheBaseline`, table-driven over the baseline | not built |
 | With `CELLA_K8S_RUNTIME_CLASS_ISOLATION=vm`, `Isolation()` is `vm` and the Pod carries the class; unset, `container` regardless of the class name | `TestK8sIsolationIsDeclared` | not built |

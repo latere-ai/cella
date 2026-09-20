@@ -106,7 +106,12 @@ depcheck:
         sigs.k8s.io/randfill: a dependency of the Kubernetes object machinery
         sigs.k8s.io/structured-merge-diff: the apply and merge machinery of the Kubernetes client
         sigs.k8s.io/yaml: the YAML half of the Kubernetes client's decoders
-        github.com/gorilla/websocket: the Kubernetes client's exec stream
+        github.com/gorilla/websocket: >-
+          the WebSocket server and client of spec 008's streams: the exec and
+          attach sockets of spec 034, the gateway sync stream of spec 018, and the
+          Kubernetes client's exec stream.
+          The standard library has no WebSocket, and both streams need the
+          same framing, close codes and one-writer rule
         github.com/moby/spdystream: the Kubernetes client's exec stream upgrade where a cluster offers no websocket
         github.com/mxk/go-flowrate: the Kubernetes client's stream rate limiter
         github.com/spf13/pflag: a dependency of the Kubernetes client's configuration loader

@@ -96,8 +96,6 @@ func TestExecRefusals(t *testing.T) {
 		"negativeTimeout": {driver.ExecRequest{Command: []string{"true"}, Timeout: -1}, driver.ErrInvalid},
 		"relativeWorkdir": {driver.ExecRequest{Command: []string{"true"}, Workdir: "sub"}, driver.ErrInvalid},
 		"traversal":       {driver.ExecRequest{Command: []string{"true"}, Workdir: "/workspace/../etc"}, driver.ErrInvalid},
-		"stdin":           {driver.ExecRequest{Command: []string{"cat"}, Stdin: strings.NewReader("x")}, driver.ErrUnsupported},
-		"tty":             {driver.ExecRequest{Command: []string{"true"}, TTY: true}, driver.ErrUnsupported},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := d.Exec(t.Context(), "sbx_a", tc.req); !errors.Is(err, tc.want) {

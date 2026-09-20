@@ -10,11 +10,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"maps"
 	"net/http"
-	"path"
 	"slices"
-	"strings"
 	"sync"
 	"time"
 
@@ -26,12 +23,17 @@ import (
 const execPoll = 20 * time.Millisecond
 
 type execCreate struct {
+	AttachStdin  bool     `json:"AttachStdin"`
 	AttachStdout bool     `json:"AttachStdout"`
 	AttachStderr bool     `json:"AttachStderr"`
+	Tty          bool     `json:"Tty"`
 	Cmd          []string `json:"Cmd"`
 	Env          []string `json:"Env,omitempty"`
 	WorkingDir   string   `json:"WorkingDir,omitempty"`
 }
+
+// errInvalidWindow refuses a terminal window the engine cannot hold.
+var errInvalidWindow = fmt.Errorf("%w: a terminal window is positive", driver.ErrInvalid)
 
 type execStart struct {
 	Detach bool `json:"Detach"`
@@ -82,7 +84,9 @@ func (e *execution) Close() error {
 
 // Exec runs one command in the sandbox's container. The sandbox's environment
 // is what the record holds, which is what a later Update wrote, and the
-// request's own entries sit on top of it.
+// request's own entries sit on top of it. A request with a TTY or a stdin
+// travels over a hijacked connection; without either, the reply's body is the
+// whole of the stream.
 func (d *Driver) Exec(ctx context.Context, id string, req driver.ExecRequest) (driver.Exec, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -90,43 +94,14 @@ func (d *Driver) Exec(ctx context.Context, id string, req driver.ExecRequest) (d
 	if len(req.Command) == 0 || req.Timeout < 0 {
 		return nil, driver.ErrInvalid
 	}
-	if req.TTY || req.Stdin != nil {
-		return nil, driver.ErrUnsupported
+	create := execCreate{
+		AttachStdin: req.Stdin != nil, AttachStdout: true, AttachStderr: !req.TTY,
+		Tty: req.TTY, Cmd: req.Command, WorkingDir: req.Workdir,
 	}
-	if req.Workdir != "" && (!path.IsAbs(req.Workdir) || strings.Contains(req.Workdir, "..")) {
-		return nil, fmt.Errorf("%w: workdir %q", driver.ErrInvalid, req.Workdir)
-	}
-	if err := d.exists(ctx, id); err != nil {
-		return nil, err
-	}
-	st, err := d.inspectContainer(ctx, id)
+	execID, err := d.createExec(ctx, id, create, req.Env, req.Workdir)
 	if err != nil {
 		return nil, err
 	}
-	if phase, _ := phaseOf(st, false); phase != driver.Running {
-		return nil, driver.ErrNotRunning
-	}
-	rec, err := d.current(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	env := maps.Clone(rec.env)
-	if env == nil {
-		env = map[string]string{}
-	}
-	maps.Copy(env, req.Env)
-
-	var created struct {
-		ID string `json:"Id"`
-	}
-	create := execCreate{AttachStdout: true, AttachStderr: true, Cmd: req.Command, Env: envList(env), WorkingDir: req.Workdir}
-	if err := d.client().json(ctx, http.MethodPost, "/containers/"+containerName(id)+"/exec", create, &created); err != nil {
-		if notFound(err) {
-			return nil, driver.ErrNotFound
-		}
-		return nil, fmt.Errorf("podman: creating the exec session: %w", err)
-	}
-
 	runCtx, cancel := context.WithCancel(ctx)
 	if req.Timeout > 0 {
 		cancel()
@@ -135,15 +110,22 @@ func (d *Driver) Exec(ctx context.Context, id string, req driver.ExecRequest) (d
 	outR, outW := io.Pipe()
 	errR, errW := io.Pipe()
 	e := &execution{stdout: outR, stderr: errR, cancel: cancel, done: make(chan struct{})}
-	go d.runExec(runCtx, created.ID, e, outW, errW)
+	if req.TTY {
+		// A terminal carries one stream, so the second reader is at its end
+		// from the first read and a caller draining both never blocks.
+		_ = errW.Close()
+	}
+	go d.runExec(runCtx, execID, e, outW, errW, req)
 	return e, nil
 }
 
 // runExec starts the session, splits its stream into the two writers, and
 // reads the exit code back. The context ending is the one reason reported in
 // place of an exit code, so Close, a timeout and a cancelled request each
-// reach the caller as themselves.
-func (d *Driver) runExec(ctx context.Context, execID string, e *execution, outW, errW *io.PipeWriter) {
+// reach the caller as themselves. A session with a TTY or a stdin travels over
+// a connection the engine speaks both ways on, which net/http does not give
+// for a reply whose body has no framing; every other session reads the reply.
+func (d *Driver) runExec(ctx context.Context, execID string, e *execution, outW, errW *io.PipeWriter, req driver.ExecRequest) {
 	defer close(e.done)
 	fail := func(err error) {
 		if cause := ctx.Err(); cause != nil {
@@ -152,6 +134,27 @@ func (d *Driver) runExec(ctx context.Context, execID string, e *execution, outW,
 		e.err = err
 		_ = outW.CloseWithError(err)
 		_ = errW.CloseWithError(err)
+	}
+	if req.TTY || req.Stdin != nil {
+		conn, br, err := d.client().hijack(ctx, d.client().libpodPath("/exec/"+execID+"/start"), execStart{Tty: req.TTY})
+		if err != nil {
+			fail(fmt.Errorf("podman: starting the exec session: %w", err))
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		if req.Stdin != nil {
+			go func() {
+				_, _ = io.Copy(conn, req.Stdin)
+				// Half-closing tells the command its input ended. A connection
+				// that cannot be half-closed leaves the command reading, which
+				// is the gap a caller works around with a command that does not.
+				if half, ok := conn.(interface{ CloseWrite() error }); ok {
+					_ = half.CloseWrite()
+				}
+			}()
+		}
+		d.pipeExec(ctx, execID, e, outW, errW, br, req.TTY, fail)
+		return
 	}
 	resp, err := d.client().do(ctx, http.MethodPost, d.client().libpodURL("/exec/"+execID+"/start"), execStart{})
 	if err != nil {
@@ -163,8 +166,21 @@ func (d *Driver) runExec(ctx context.Context, execID string, e *execution, outW,
 		fail(fmt.Errorf("podman: starting the exec session: %w", serr))
 		return
 	}
-	if derr := demux(resp.Body, outW, errW); derr != nil {
-		fail(fmt.Errorf("podman: reading the exec stream: %w", derr))
+	d.pipeExec(ctx, execID, e, outW, errW, resp.Body, false, fail)
+}
+
+// pipeExec reads one started session's stream into the caller's writers and
+// then its exit code. Under a TTY the stream is raw and everything is stdout;
+// without one it keeps podman's framing and the demultiplexer splits it.
+func (d *Driver) pipeExec(ctx context.Context, execID string, e *execution, outW, errW *io.PipeWriter, stream io.Reader, tty bool, fail func(error)) {
+	var err error
+	if tty {
+		_, err = io.Copy(outW, stream)
+	} else {
+		err = demux(stream, outW, errW)
+	}
+	if err != nil {
+		fail(fmt.Errorf("podman: reading the exec stream: %w", err))
 		return
 	}
 	_ = outW.Close()
