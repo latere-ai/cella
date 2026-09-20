@@ -74,7 +74,14 @@ type seam struct {
 // remote driver of that environment, connected and registered.
 func openSeam(t *testing.T, host driver.Driver) *seam {
 	t.Helper()
-	hub := remote.NewHub(remote.HubOptions{Offline: time.Minute})
+	return openSeamWith(t, host, remote.HubOptions{Offline: time.Minute})
+}
+
+// openSeamWith is openSeam over hub options a test chooses, for the rows that
+// are about what the hub records rather than what the driver does.
+func openSeamWith(t *testing.T, host driver.Driver, o remote.HubOptions) *seam {
+	t.Helper()
+	hub := remote.NewHub(o)
 	registered, err := hub.Register("env_test", remote.Registration{
 		Driver: host.Name(), Isolation: host.Isolation(), Capabilities: host.Capabilities(),
 	})

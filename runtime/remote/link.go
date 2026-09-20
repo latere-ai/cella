@@ -6,6 +6,7 @@ package remote
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"sync"
 	"sync/atomic"
@@ -200,15 +201,26 @@ func (l *Link) SendFrame(operation string, stream byte, payload []byte) error {
 func (l *Link) queue(raw []byte) error {
 	select {
 	case <-l.done:
-		return l.Err()
+		return l.closedErr()
 	default:
 	}
 	select {
 	case l.out <- raw:
 		return nil
 	case <-l.done:
-		return l.Err()
+		return l.closedErr()
 	}
+}
+
+// closedErr is what a call on a link that ended reads: ErrLinkClosed, so a
+// caller tells the connection being gone from a failure of its own act, and
+// the reason the connection ended beside it.
+func (l *Link) closedErr() error {
+	err := l.Err()
+	if err == nil || errors.Is(err, ErrLinkClosed) {
+		return ErrLinkClosed
+	}
+	return fmt.Errorf("%w: %w", ErrLinkClosed, err)
 }
 
 // Shutdown ends the link and every operation on it. The first error recorded

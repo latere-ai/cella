@@ -132,9 +132,7 @@ func (s *Server) onMessage(operation string, m Message) {
 	s.mu.Lock()
 	s.running[operation] = cancel
 	s.mu.Unlock()
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
+	s.wg.Go(func() {
 		defer cancel()
 		defer func() {
 			s.mu.Lock()
@@ -164,7 +162,7 @@ func (s *Server) onMessage(operation string, m Message) {
 		if sendErr := channel.Answer(res, err); sendErr != nil && !errors.Is(sendErr, ErrLinkClosed) {
 			s.options.Log.Warn("the worker could not answer an operation", "operation", operation, "err", sendErr)
 		}
-	}()
+	})
 }
 
 // changes reports whether an operation can have altered what the driver

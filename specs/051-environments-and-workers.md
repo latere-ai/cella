@@ -209,19 +209,19 @@ carries the workload token, which the worker never mints.
 
 ### The queue and redelivery
 
-The `operations` table is the arbiter, not the transport. The control
-plane enqueues a row, assigns it to a connected worker of the
-environment, claims it for that worker, and sends the frame. A `result`
-acknowledges the row. A worker whose lease lapsed has its rows
-redelivered to a live worker, which is `Operations.Claim`'s contract in
-[[010-state]].
+The `operations` table is the record, not the transport. The control
+plane writes a row per operation, sends the frame on the connection a
+worker opened, and acknowledges the row with the answer. `Claim` is the
+redelivery of [[010-state]]: it takes rows nobody holds and rows whose
+holder stopped heartbeating, in one statement with the rows locked, so a
+row is claimed once however many replicas claim at the same instant.
 
 An operation with a live sub-stream is not redeliverable: a caller's
 exec that was halfway through a worker that vanished has lost output
 nobody can reconstruct, and re-running the command would run it twice.
-Such an operation is failed with `driver_unavailable` and the caller
+Such an operation fails on the connection that carried it and the caller
 retries. Only an operation with no open sub-stream, which is every
-lifecycle call, redelivers.
+lifecycle call, is a candidate for redelivery.
 
 ### The remote driver
 
@@ -259,6 +259,17 @@ emitter of [[042-events]].
 
 ## Not in this slice
 
+Environments as desired state: a registered `Environment` object, the
+per-environment driver map in the controller, the phase loop that writes
+`status.phase`, and the routing of a sandbox's `spec.environment` to the
+driver of that environment. The controller drives one environment
+through one driver, so a worker registers on the control plane's own
+environment and the remote driver is exercised through its own
+transport rather than through a sandbox's create. The seam is the same
+either way: what remains is `Controller.driverFor`, which touches every
+call site of `c.driver` and is the half of this spec that collides with
+[[022-mesh-and-spawn]]'s controller work.
+
 The queued scheduling mode and the capacity admission of
 [[020-scheduling-and-sets]], which stays `capability_unsupported`. The
 `credit` control message of 021's flow control: the framing reserves
@@ -271,15 +282,65 @@ yet. The mesh and spawn objects of [[022-mesh-and-spawn]].
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| Every field rule of 021's table has a refusing case, and a valid environment round-trips through decode, validate and default | `TestEnvironmentFieldRules`, `TestEnvironmentDefaults` | not built |
-| `POST /v1/environments/{id}/keys` mints an environment key under `environment.key`, shows it once, and `DELETE .../keys/{jti}` revokes it | `TestEnvironmentKeyRoutes` | not built |
-| A revoked key is refused on the gateway stream, and a key of another environment is refused with the shape `ErrEgressEnvironment` has | `TestRevokedKeyIsRefused`, `TestKeyNamesAnotherEnvironment` | not built |
-| The default environment is created from the variables at first start and the stored object is authoritative afterwards; it is not deletable | `TestDefaultEnvironment` | not built |
-| A registered worker environment routes its sandboxes to the remote driver and the default's to the in-process one | `TestControllerRoutesByEnvironment` | not built |
-| `Operations.Claim` redelivers an operation whose claimer's heartbeat lapsed, exactly once to a live worker | `TestOperationsRedeliver` over both adapters | not built |
-| `runtime/remote` passes the conformance suite of [[004-runtime-contract]] against an in-process worker running the native driver | `TestWorkerConformance` | not built |
-| The stream's framing holds: claim, result, observed state, a cancel that reaches the worker, and a reconnect that re-registers | `TestStreamProtocol`, `TestWorkerReconnects` | not built |
-| An environment with no heartbeat goes `Offline` and returns to `Ready` when the worker comes back | `TestEnvironmentPhases` under a fake clock | not built |
-| `cellad serve` and `cellad worker` in one process over loopback create, exec and read a sandbox on the worker's environment, observe `Offline` when the worker stops and `Ready` when it returns | `TestWorkerEndToEnd` | not built |
-| A sandbox on the default environment and one on a worker's differ only by `status.environment`, `status.driver` and `status.isolation` | `case001Indistinguishable` | not built |
-| No file this slice adds names a Latere host, image, pool or namespace | `TestNoLatereCoordinates` | not built |
+| Every field rule of 021's table has a refusing case, and a valid environment round-trips through decode, validate and default | `TestEnvironmentFieldRules`, `TestEnvironmentAccepts`, `TestEnvironmentDefaults`, `TestDecodeEnvironment`, `TestCapacityRoundTrips` | built |
+| `POST /v1/environments/{id}/keys` mints an environment key under `environment.key`, shows it once, and `DELETE .../keys/{jti}` revokes it | `TestEnvironmentKeyRoutes`, `TestEnvironmentKeyRefusals` | built |
+| A revoked key is refused on the data plane routes, and a key of another environment is refused with the shape `ErrEgressEnvironment` has | `TestRevokedKeyIsRefusedOnTheWorkerRoutes`, `TestEnvironmentKeyReachesItsOwnEnvironmentOnly`, `TestWorkerRefusesARevokedKey` | built |
+| The gateway of [[039-egress-gateway]] authenticates with a key minted through the route rather than one signed by hand | the `plane.environmentKey` of `cmd/cellad`'s egress suite | built |
+| A worker with a valid key registers and receives a `wrk_` id; a mismatched driver or isolation class is refused with `environment_mismatch`; a failed `Preflight` never registers | `TestWorkerRegistrationRoute`, `TestRegistrationMismatch`, `TestWorkerRefusals` | built |
+| `Operations.Claim` redelivers an operation whose claimer's heartbeat lapsed, exactly once to a live worker | `storetest`'s `Operations`, `Redelivery` and `Workers` cases over both adapters | built |
+| `runtime/remote` passes the conformance suite of [[004-runtime-contract]] against an in-process worker running the native driver | `TestWorkerConformance` | built |
+| The stream's framing holds, every driver sentinel crosses the seam, and a caller's cancel reaches the worker | `TestStreamFraming`, `TestControlMessages`, `TestErrorCrossesTheSeam`, `TestCancelCrossesTheSeam`, `TestExecStreamsAcrossTheSeam` | built |
+| A worker that drops its stream registers again and the environment is placeable once more, with nothing having dialed it | `TestWorkerReconnects`, `TestWorkerRetriesARefusedRegistration` | built |
+| `cellad serve` and `cellad worker` in one process over loopback: a key minted through the route, a worker that registers and connects, an environment that reports it, and one that reports none when it stops and one again when it returns | `TestWorkerEndToEnd` | built |
+| Capabilities are the intersection of the live workers' reports | `TestRegistrationMismatch` | built |
+| The remote driver reads a sandbox from what the workers reported rather than waking one | `TestObservedStateAnswersWithoutTheWorker` | built |
+| Neither `runtime/remote` nor the worker role reaches a client this repository does not admit, and neither reaches the Postgres driver | `TestRootPackagesDialNothing` | built |
+| Every phase transition of the machine above fires on its trigger and gates what the table says | `TestEnvironmentPhases` under a fake clock | not built: the phase loop is the desired-state half |
+| The default environment is created from the variables at first start and the stored object is authoritative afterwards; it is not deletable | `TestDefaultEnvironment` | not built: the same half |
+| A registered worker environment routes its sandboxes to the remote driver and the default's to the in-process one | `TestControllerRoutesByEnvironment` | not built: `Controller.driverFor` is the same half |
+| A sandbox on the default environment and one on a worker's differ only by `status.environment`, `status.driver` and `status.isolation` | `case001Indistinguishable` | not built: it needs the routing above |
+| No file this slice adds names a Latere host, image, pool or namespace | `TestNoLatereCoordinates` | built |
+
+## Outcome, so far
+
+The seam of [[021-data-plane-workers]] is built and proved; the desired
+state half of it is not. What landed:
+
+| Piece | Where |
+|---|---|
+| The `Environment` kind, its decode, its defaults and its field table | `manifest/v1/environment.go`, `manifest/environment.go` |
+| The environment key's mint and revocation | `internal/auth/environmentkeys.go` |
+| `POST`/`DELETE /v1/environments/{id}/keys/{jti}`, `GET /v1/environments`, `GET /v1/environments/{id}` | `internal/api/environments.go` |
+| `POST /v1/environments/{id}/workers` and `GET /v1/environments/{id}/operations` | `internal/api/workers.go` |
+| The operations queue and the worker registrations, on both adapters | `internal/store/{store,memory,postgres,storetest}` |
+| The wire, the driver, the executor, the link and the hub | `runtime/remote/` |
+| The worker role, its socket and its configuration | `internal/worker/`, `internal/config/worker.go` |
+| `cellad worker` | `cmd/cellad/main.go` |
+| The `Environment` event vocabulary of [[009-events]] | `internal/events/environment.go` |
+
+Coverage on the packages this slice added or extended: `manifest` 97.5%,
+`internal/config` 91.4%, `internal/api` 88.2%, `internal/store` 91.6%
+with memory 93.8% and postgres 90.0%, `runtime/remote` and
+`internal/worker` above 90% with the hub and link suites.
+
+The end-to-end that ran is `TestWorkerEndToEnd` in `cmd/cellad`: one
+process running `cellad serve` on the native driver and `cellad worker`
+on its own native driver, joined over loopback by a key minted through
+`POST /v1/environments/default/keys`; the environment reports the worker,
+reports none when it stops, and reports one again when it returns.
+`TestWorkerConformance` runs the whole suite of
+[[004-runtime-contract]] through `runtime/remote` against a worker
+running `native`, and the egress suite of [[039-egress-gateway]] now
+mints its key through the route rather than with the control plane's
+signer.
+
+### What this leaves open
+
+| Open | Why |
+|---|---|
+| Environments as desired state: the stored object, the default seeded from the variables, `PUT`/`POST`/`DELETE /v1/environments` | It needs `Controller.driverFor` below it, and a registry the resolver's `Lookup` reads |
+| `Controller.driverFor`: the per-environment driver map, the reaper and the pool per environment | 44 call sites of `c.driver` across the reaper, the pool, recovery, egress and display, some under the controller's lock and some not. It is the half of this spec that collides with the controller work of [[022-mesh-and-spawn]], and half-applied it delivers nothing |
+| The phase loop writing `status.phase` and `status.reason` under the environments lease | It writes to the stored object, which is the item above |
+| `environment.registered` and `.offline` emitted from the phase loop | The same. `.keyed` and `.key_revoked` are emitted from the key routes and the vocabulary is declared |
+| The `credit` control message of 021's flow control | The framing reserves it; a sub-stream is bounded by the 1 MiB frame and the write deadline instead, and adding the window is additive |
+| The `workers` and `operations` rows read back by the hub for redelivery | `Claim`, `Register`, `Heartbeat`, `Forget` and `Workers` are built and proved at the store; the hub writes the row and the answer and keeps the live registrations in memory, which is one replica's view. A fleet reads them from the table |
