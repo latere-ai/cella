@@ -4,12 +4,16 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	v1 "latere.ai/x/cella/manifest/v1"
 	"latere.ai/x/cella/runtime"
@@ -233,6 +237,60 @@ func TestFilesRoutes(t *testing.T) {
 func quoted(p string) string {
 	b, _ := json.Marshal(p)
 	return string(b)
+}
+
+// brokenOpen answers a stream that fails on its first read, which is what a
+// transfer that died between the entry and its body looks like.
+type brokenOpen struct{ runtime.Driver }
+
+func (d brokenOpen) Capabilities() runtime.Capabilities { return runtime.Capabilities{Files: true} }
+
+func (d brokenOpen) Stat(ctx context.Context, id, path string) (runtime.FileInfo, error) {
+	return runtime.FileInfo{Name: "a.txt", Path: path, Size: 5, ModTime: time.Now()}, nil
+}
+
+func (d brokenOpen) ReadDir(context.Context, string, string) ([]runtime.FileInfo, error) {
+	return nil, nil
+}
+
+func (d brokenOpen) Open(ctx context.Context, id, path string) (io.ReadCloser, runtime.FileInfo, error) {
+	info, _ := d.Stat(ctx, id, path)
+	return io.NopCloser(failingBody{}), info, nil
+}
+
+func (d brokenOpen) Write(context.Context, string, runtime.WriteRequest) (int64, error) {
+	return 0, nil
+}
+func (d brokenOpen) Mkdir(context.Context, string, string) error        { return nil }
+func (d brokenOpen) Remove(context.Context, string, string) error       { return nil }
+func (d brokenOpen) Move(context.Context, string, string, string) error { return nil }
+
+type failingBody struct{}
+
+func (failingBody) Read([]byte) (int, error) { return 0, errors.New("the transfer died") }
+
+// TestFileContentThatFailsBeforeItsFirstByte: the length the route announced
+// is not the length of the envelope that replaces it, so both the length and
+// the trailer go before the error is written.
+func TestFileContentThatFailsBeforeItsFirstByte(t *testing.T) {
+	f := setupDriver(t, nil, func(d runtime.Driver) runtime.Driver { return brokenOpen{d} })
+	var obj v1.Sandbox
+	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes", f.alice, createBody, 201), &obj); err != nil {
+		t.Fatal(err)
+	}
+	out := f.expect(503, "GET", "/v1/sandboxes/"+obj.Status.ID+"/files/content?path=/workspace/a.txt", f.alice, "", "")
+	var envelope struct {
+		Error struct{ Code, Message string } `json:"error"`
+	}
+	if err := json.Unmarshal(out, &envelope); err != nil {
+		t.Fatalf("the answer is not an envelope: %q: %v", out, err)
+	}
+	if envelope.Error.Code != "driver_unavailable" {
+		t.Fatalf("the answer is %s", out)
+	}
+	if got := f.header.Get("Content-Length"); got != "" && got != strconv.Itoa(len(out)) {
+		t.Fatalf("the envelope came under Content-Length %q, and is %d bytes", got, len(out))
+	}
 }
 
 // TestFilesWhileStopped: the native driver reaches the workspace whether or

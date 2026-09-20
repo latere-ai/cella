@@ -185,7 +185,12 @@ func (s *responseStream) Write(p []byte) (int, error) {
 }
 func (s *responseStream) fail(err error) {
 	if !s.written {
+		// A route that announced a length has not sent a byte of it, and the
+		// envelope is a different length: both headers go before it is
+		// written, or the answer is truncated to the length of the body that
+		// never came.
 		s.w.Header().Del("Trailer")
+		s.w.Header().Del("Content-Length")
 		respondError(s.w, err)
 		return
 	}
