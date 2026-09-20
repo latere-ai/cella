@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.2.0 - 2026-09-20
+
 - A sandbox can create sandboxes. Give one spawn rights with
   `spec.mesh.spawn.budget` and `spec.mesh.spawn.depth`, and a process inside
   it applies manifests to the same `POST /v1/sandboxes` with the token it
