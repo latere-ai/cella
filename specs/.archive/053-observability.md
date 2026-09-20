@@ -301,10 +301,11 @@ loops.
 ## Outcome
 
 Built on 2026-09-20. `internal/metrics` is the one registry, at 100%
-statement coverage, and every package the gate measures clears 90%: the
-packages this slice touched read `cmd/cellad` 90.7%, `internal/api`
-91.4%, `controller` 94.1%, `internal/auth` 95.3%, `internal/events`
-95.3%, `internal/store` 92.0%.
+statement coverage over 199 statements, and every package the gate
+measures clears 90%: the packages this slice touched read `cmd/cellad`
+90.9%, `internal/api` 91.5%, `controller` 94.1%, `internal/auth` 95.3%,
+`internal/admission` 95.4%, `internal/events` 95.3%, `internal/store`
+92.0%.
 
 `go tool lateregate` passes: fmt-check, modernize, cgo-free, otel-client,
 license, spec-lint, depcheck, identity, postgres, lint, vuln, test, race,
