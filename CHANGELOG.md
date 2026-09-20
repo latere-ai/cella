@@ -6,6 +6,27 @@ refused before it is pushed.
 
 ## Unreleased
 
+- A sandbox can create sandboxes. Give one spawn rights with
+  `spec.mesh.spawn.budget` and `spec.mesh.spawn.depth`, and a process inside
+  it applies manifests to the same `POST /v1/sandboxes` with the token it
+  finds at `CELLA_TOKEN_FILE`. Every child is held to the sandbox that made
+  it: its egress, its secrets, its resources and its life are a subset of its
+  parent's, checked before anything is created and refused with
+  `boundary_exceeded` naming the field. A child that declares no boundary of
+  its own runs inside its parent's. The budget counts children created in
+  total and is decremented in the same write that stores the child, so two
+  children racing for the last one yield one sandbox and one
+  `spawn_budget_exhausted`; the token carries what was granted at mint and
+  raising that claim raises nothing. `status.parent`, `status.root` and
+  `status.spawn` say where a sandbox sits in its tree, `GET
+  /v1/sandboxes?root=<id>` returns the whole tree, and deleting any sandbox
+  deletes the tree below it. With `spec.mesh.enabled` on the sandbox at the
+  top, the tree shares one private network: on podman and Kubernetes peers
+  reach each other at `<sandbox-name>.mesh`, nothing outside the tree reaches
+  those ports, and traffic to a peer never leaves the environment. The native
+  environment connects no peers, so it refuses `spec.mesh.enabled` and still
+  spawns.
+
 - An environment can keep sandboxes ready, so a create that matches one
   starts in milliseconds instead of waiting for an image pull and a container
   start. `CELLA_POOL_SIZE` with `CELLA_POOL_IMAGE`, `CELLA_POOL_CPU`,
