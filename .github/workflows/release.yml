@@ -62,7 +62,8 @@ jobs:
           done
           echo "verify did not conclude on ${GITHUB_SHA} within the hour" >&2; exit 1
 
-  # 2. Everything the release carries, built once from this checkout. The
+  # 2. Everything the release carries, built once from this checkout: the
+  # four archives of the server and the four of the client of spec 011. The
   # image is pushed by digest and under no tag, so a run that stops before
   # publish leaves one unreferenced digest and nothing an operator could
   # pull by accident.
@@ -360,10 +361,21 @@ jobs:
         run: |
           mkdir -p work && cd work
           gh release download "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" \
-            -p "deploy-${GITHUB_REF_NAME}.tar.gz" -p "cellad_${GITHUB_REF_NAME}_linux_amd64.tar.gz"
+            -p "deploy-${GITHUB_REF_NAME}.tar.gz" \
+            -p "cellad_${GITHUB_REF_NAME}_linux_amd64.tar.gz" \
+            -p "cella_${GITHUB_REF_NAME}_linux_amd64.tar.gz"
           tar -xzf "deploy-${GITHUB_REF_NAME}.tar.gz"
           tar -xzf "cellad_${GITHUB_REF_NAME}_linux_amd64.tar.gz"
+          tar -xzf "cella_${GITHUB_REF_NAME}_linux_amd64.tar.gz"
           ./cellad version
+          # The client of spec 011 reports the same tag, from the archive an
+          # agent's image would unpack.
+          got=$(./cella version)
+          echo "$got"
+          case "$got" in
+            "cella ${GITHUB_REF_NAME} ("*) ;;
+            *) echo "the client reports '$got' and the tag is ${GITHUB_REF_NAME}" >&2; exit 1 ;;
+          esac
           docker pull "${REGISTRY}/${OWNER}/${IMAGE}:${GITHUB_REF_NAME}"
       - name: Every overlay of the archive renders against the published image
         run: |
@@ -423,10 +435,12 @@ jobs:
           mkdir assets && cd assets
           gh release download "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}"
           ls -l
-          for os in linux darwin; do
-            for arch in amd64 arm64; do
-              test -f "cellad_${GITHUB_REF_NAME}_${os}_${arch}.tar.gz" \
-                || { echo "the release lacks cellad_${GITHUB_REF_NAME}_${os}_${arch}.tar.gz" >&2; exit 1; }
+          for binary in cellad cella; do
+            for os in linux darwin; do
+              for arch in amd64 arm64; do
+                test -f "${binary}_${GITHUB_REF_NAME}_${os}_${arch}.tar.gz" \
+                  || { echo "the release lacks ${binary}_${GITHUB_REF_NAME}_${os}_${arch}.tar.gz" >&2; exit 1; }
+              done
             done
           done
           for name in "deploy-${GITHUB_REF_NAME}.tar.gz" checksums.txt checksums.txt.sigstore.json \
@@ -439,8 +453,8 @@ jobs:
           cosign verify-blob --bundle checksums.txt.sigstore.json \
             --certificate-identity "${IDENTITY}" --certificate-oidc-issuer "${ISSUER}" checksums.txt
           sha256sum -c checksums.txt
-          # Four binary archives and the deploy archive.
-          [ "$(grep -c . checksums.txt)" -eq 5 ] || { echo "checksums.txt lists $(grep -c . checksums.txt) archives, want 5" >&2; exit 1; }
+          # Four archives of each binary and the deploy archive.
+          [ "$(grep -c . checksums.txt)" -eq 9 ] || { echo "checksums.txt lists $(grep -c . checksums.txt) archives, want 9" >&2; exit 1; }
       - name: The image verifies and its attestations answer
         run: |
           cosign verify --certificate-identity "${IDENTITY}" --certificate-oidc-issuer "${ISSUER}" \

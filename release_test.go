@@ -243,8 +243,13 @@ func TestTheReleaseNamesEveryArtifactItBuilds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(build), `cellad_${tag}_${os}_${arch}.tar.gz`) {
-		t.Error("build.sh does not write cellad_<tag>_<os>_<arch>.tar.gz, which is the archive name the install document names")
+	for _, binary := range []string{"cellad", "cella"} {
+		if !strings.Contains(string(build), binary+`_${tag}_${os}_${arch}.tar.gz`) {
+			t.Errorf("build.sh does not write %s_<tag>_<os>_<arch>.tar.gz, which is the archive name the install document names", binary)
+		}
+		if !strings.Contains(string(build), "./cmd/"+binary) {
+			t.Errorf("build.sh builds no ./cmd/%s; the release carries both binaries (spec 011)", binary)
+		}
 	}
 	for _, pair := range [][2]string{{"linux", "darwin"}, {"amd64", "arm64"}} {
 		for _, want := range pair {
@@ -259,6 +264,11 @@ func TestTheReleaseNamesEveryArtifactItBuilds(t *testing.T) {
 	}
 	for _, want := range []string{
 		"deploy-${GITHUB_REF_NAME}.tar.gz",
+		// The four archives of each binary and the deploy archive: the
+		// release-verify job counts them and names them.
+		"for binary in cellad cella; do",
+		`[ "$(grep -c . checksums.txt)" -eq 9 ]`,
+		"cella_${GITHUB_REF_NAME}_linux_amd64.tar.gz",
 		"checksums.txt",
 		"checksums.txt.sigstore.json",
 		"sbom-module.spdx.json",

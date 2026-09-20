@@ -14,14 +14,10 @@ import (
 	"unsafe"
 )
 
-// The ioctls that read and write a terminal's mode and window. They differ
-// per operating system and the build tag above names the two this command
-// has them for; elsewhere OSTerminal answers that there is no terminal, and
-// every command but a session works the same.
-const (
-	getAttributes = syscall.TIOCGETA
-	setAttributes = syscall.TIOCSETA
-)
+// The ioctls that read and write a terminal's mode carry different names per
+// operating system; the two files beside this one hold them, as the native
+// driver's pseudo-terminal does. Elsewhere OSTerminal answers that there is
+// no terminal and every command but a session works the same.
 
 // winsize is the window an ioctl reads. The field order is the kernel's
 // struct winsize.
