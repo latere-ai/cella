@@ -74,6 +74,7 @@ func TestPoolConfigRefusals(t *testing.T) {
 		{"a disk that is not a quantity", map[string]string{"CELLA_POOL_SIZE": "1", "CELLA_POOL_DISK": "big"}, "CELLA_POOL_DISK"},
 		{"an in-flight cap of zero", map[string]string{"CELLA_POOL_SIZE": "1", "CELLA_POOL_IN_FLIGHT": "0"}, "CELLA_POOL_IN_FLIGHT"},
 		{"a grace beyond the bound", map[string]string{"CELLA_POOL_SIZE": "1", "CELLA_POOL_GRACE": "48h"}, "CELLA_POOL_GRACE"},
+		{"a malformed bound with no pool", map[string]string{"CELLA_POOL_GRACE": "soon"}, "CELLA_POOL_GRACE"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := Load(env(identity(t, tc.vars)))

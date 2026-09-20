@@ -67,9 +67,9 @@ func loadScheduling(getenv Getenv, problems *[]string) Scheduling {
 			Disk:   quantity(getenv, "CELLA_POOL_DISK", problems),
 		},
 	}
-	if s.Pool.Size == 0 {
-		return s
-	}
+	// The loop's two bounds are read whether or not a pool is declared, so a
+	// value that is malformed is a start-up problem rather than a setting
+	// that is silently accepted until somebody raises the size.
 	s.PoolInFlight = count(getenv, "CELLA_POOL_IN_FLIGHT", controller.DefaultPoolInFlight, 1, MaxPoolInFlight, problems)
 	s.PoolGrace = interval(getenv, "CELLA_POOL_GRACE", controller.DefaultPoolGrace, problems)
 	return s
