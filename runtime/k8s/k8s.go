@@ -60,6 +60,12 @@ const (
 // container Exec, Logs and the archive transfers address.
 const Container = "main"
 
+// DisplayContainer is the name of the container the desktop of spec 023 runs
+// in, beside the workload and sharing its /tmp. Every command on the screen
+// addresses this container, because the tools live in its image and not in the
+// sandbox's.
+const DisplayContainer = "display"
+
 // Options configures one driver against one namespace. The zero value is
 // usable: every field falls back to the constants above.
 type Options struct {
@@ -97,6 +103,17 @@ type Options struct {
 	ReadyTimeout time.Duration
 	// GracePeriod is the Pod's termination grace period.
 	GracePeriod time.Duration
+	// DisplayImage is the image the desktop container runs, the cella-display
+	// image of spec 014. It has no default: an image reference names a
+	// registry, and this package fixes no coordinate of any installation.
+	// Empty means this driver declares no Display and no Input, so a manifest
+	// that asks for a desktop is refused at resolve rather than at create.
+	DisplayImage string
+	// DisplayResources are the limits the desktop container runs under,
+	// separate from the workload's because an X server sized by the sandbox's
+	// own request would take the workload's memory. Empty falls back to the
+	// driver's defaults for a sandbox that names none.
+	DisplayResources driver.Resources
 
 	// The three fields below are seams, not configuration: no variable sets
 	// them, internal/config leaves them zero, and a deployment is described
@@ -209,11 +226,15 @@ func restConfig(path string) (*rest.Config, error) {
 func (d *Driver) Name() string      { return "k8s" }
 func (d *Driver) Isolation() string { return "container" }
 
-// Capabilities declares only what this driver enforces today. Egress, mesh,
-// attach, dial, display, input, resize, pool, volumes and snapshots each land
-// with the slice that builds them.
+// Capabilities declares only what this driver enforces today. Display and
+// Input follow the display image: with none configured there is no desktop to
+// give, and declaring one would push the refusal from resolve, where it names
+// the field, to create, where it names nothing. Egress, mesh, attach, dial,
+// resize, pool, volumes and snapshots each land with the slice that builds
+// them.
 func (d *Driver) Capabilities() driver.Capabilities {
-	return driver.Capabilities{Files: true}
+	desktop := d.opts.DisplayImage != ""
+	return driver.Capabilities{Files: true, Display: desktop, Input: desktop}
 }
 
 // verbs are the accesses the driver uses, checked one review each so a missing

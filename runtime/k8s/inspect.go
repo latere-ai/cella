@@ -38,7 +38,16 @@ func (d *Driver) Inspect(ctx context.Context, id string) (driver.State, error) {
 	if err != nil {
 		return driver.State{}, err
 	}
-	return state(pvc, pod), nil
+	s := state(pvc, pod)
+	// The port probe is a command inside the sandbox, so it runs at Inspect
+	// and never at List: a sweep of every sandbox is the reaper's path, and a
+	// command per sandbox per tick is a cost it must not carry.
+	if s.Phase == driver.Running {
+		if spec, err := specOf(pvc); err == nil {
+			s.Ports = d.probePorts(ctx, id, spec.Ports)
+		}
+	}
+	return s, nil
 }
 
 // getClaim reads the claim of one id. The object name is derived, so the id
@@ -137,6 +146,11 @@ func state(pvc *corev1.PersistentVolumeClaim, pod *corev1.Pod) driver.State {
 		}
 	}
 	s.Phase, s.Reason, s.ExitCode, s.StoppedAt = phase(pvc, pod)
+	if pod != nil {
+		if condition, ok := displayReady(pod); ok {
+			s.Conditions = append(s.Conditions, condition)
+		}
+	}
 	return s
 }
 
@@ -195,7 +209,19 @@ func terminationReason(pod *corev1.Pod) string {
 	return pod.Status.Reason
 }
 
+// ready reports whether the workload is ready, which is the sandbox's own
+// readiness. The Pod's condition is not it: a Pod carrying the desktop of spec
+// 023 is not Ready until the desktop is, and a sandbox whose desktop has not
+// come up is a running sandbox with DisplayReady false, never one stuck at
+// Starting. A Pod whose container statuses are not written yet falls back to
+// the Pod condition, which is what a cluster answers before the kubelet
+// reports.
 func ready(pod *corev1.Pod) bool {
+	for _, cs := range pod.Status.ContainerStatuses {
+		if cs.Name == Container {
+			return cs.Ready
+		}
+	}
 	for _, c := range pod.Status.Conditions {
 		if c.Type == corev1.PodReady {
 			return c.Status == corev1.ConditionTrue

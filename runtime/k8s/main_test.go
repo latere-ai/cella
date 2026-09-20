@@ -6,6 +6,7 @@ package k8s
 import (
 	"context"
 	"io"
+	"slices"
 	"strconv"
 	"sync"
 	"testing"
@@ -60,6 +61,13 @@ type harness struct {
 // pass, and whose exec stream is recorded rather than dialled.
 func newHarness(t *testing.T, objects ...kruntime.Object) *harness {
 	t.Helper()
+	return newHarnessWith(t, nil, objects...)
+}
+
+// newHarnessWith is newHarness with the options a case needs changed, which is
+// how a case drives a driver an operator configured differently.
+func newHarnessWith(t *testing.T, configure func(*Options), objects ...kruntime.Object) *harness {
+	t.Helper()
 	cs := fake.NewClientset(objects...)
 	accessAllowed(cs)
 	h := &harness{
@@ -76,7 +84,11 @@ func newHarness(t *testing.T, objects ...kruntime.Object) *harness {
 		h.status(pod)
 		return false, pod, nil
 	})
-	d, err := New(Options{Namespace: namespace, Client: cs, Now: h.clock.now, ReadyTimeout: time.Second})
+	opts := Options{Namespace: namespace, Client: cs, Now: h.clock.now, ReadyTimeout: time.Second}
+	if configure != nil {
+		configure(&opts)
+	}
+	d, err := New(opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,12 +154,13 @@ type recorder struct {
 }
 
 type execCall struct {
-	pod  string
-	argv []string
+	pod       string
+	argv      []string
+	container string
 }
 
 func (r *recorder) stream(ctx context.Context, pod string, o execOpts, stdin io.Reader, stdout, stderr io.Writer) error {
-	c := execCall{pod: pod, argv: o.argv}
+	c := execCall{pod: pod, argv: o.argv, container: o.name()}
 	r.mu.Lock()
 	r.calls = append(r.calls, c)
 	handle := r.handle
@@ -171,6 +184,13 @@ func (r *recorder) count() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return len(r.calls)
+}
+
+// ran is every command recorded so far.
+func (r *recorder) ran() []execCall {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.calls)
 }
 
 // spec is the fixture every lifecycle test starts from.

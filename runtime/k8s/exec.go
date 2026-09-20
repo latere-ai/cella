@@ -22,10 +22,21 @@ import (
 	driver "latere.ai/x/cella/runtime"
 )
 
-// execOpts is one command in one container.
+// execOpts is one command in one container. An empty container is the
+// workload's, so every call that does not name one addresses the sandbox
+// itself and only the desktop's own commands reach the display container.
 type execOpts struct {
-	argv  []string
-	stdin bool
+	argv      []string
+	stdin     bool
+	container string
+}
+
+// name is the container the command runs in.
+func (o execOpts) name() string {
+	if o.container == "" {
+		return Container
+	}
+	return o.container
 }
 
 // streamer opens the exec subresource. It is an interface because the stream
@@ -48,7 +59,7 @@ func (s *spdy) stream(ctx context.Context, pod string, o execOpts, stdin io.Read
 	req := s.cs.CoreV1().RESTClient().Post().
 		Resource("pods").Name(pod).Namespace(s.namespace).SubResource("exec").
 		VersionedParams(&corev1.PodExecOptions{
-			Container: Container, Command: o.argv,
+			Container: o.name(), Command: o.argv,
 			Stdin: o.stdin, Stdout: stdout != nil, Stderr: stderr != nil,
 		}, scheme.ParameterCodec)
 	upgrade, err := remotecommand.NewSPDYExecutor(s.cfg, "POST", req.URL())
