@@ -6,6 +6,15 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.2.1 - 2026-09-20
+
+- A mesh works on a rootless Podman engine. A sandbox in a mesh is created in
+  the bridge network namespace, which is the only one the engine attaches a
+  network to; a rootless engine's default of slirp4netns or pasta refused the
+  join, so every mesh create on such an engine failed. A sandbox outside any
+  mesh keeps the engine's default. This is the first published release of
+  the v0.2 line: the v0.2.0 tag exists, but its release pipeline stopped at
+  this failure and published neither archives nor an image tag.
 - `cellad` reports what it is doing. `GET /metrics` on the internal listener
   serves the Prometheus exposition: requests and their latency by route,
   sandboxes by phase, create time by driver and whether a prewarmed entry was
