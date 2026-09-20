@@ -184,7 +184,8 @@ func screenStream(t tb, open func() runtime.Driver, opts Options) {
 	if !d.Capabilities().Display {
 		t.Skipf("the driver declares no Display")
 	}
-	screen := d.(runtime.DisplayDriver)
+	screen, ok := d.(runtime.DisplayDriver)
+	need(t, ok, "the driver declares Display and does not implement runtime.DisplayDriver")
 	const id = "sbx_cnf_screen"
 	desktop(t, d, opts, id)
 	ctx, cancel := context.WithCancel(context.Background())
