@@ -269,21 +269,34 @@ room and the next tick would make it again.
 
 One loop per environment under the lease `pool:<environment>`, acquired
 per tick the way the reaper acquires its own, ticking on the same
-interval. Each tick lists the driver, counts what it holds, and:
+interval. A list the driver refuses ends the tick without acting: a
+partial view of the environment would read as a pool that is short and
+answer with creates.
+
+What counts toward `T` is an entry that is `Running`, and one that is
+still coming up and younger than the grace. What is deleted is the rest:
 
 | Condition | Act |
 |---|---|
-| entries below `T` | prewarm one at a time, up to `T` |
-| entries above `T` | delete the oldest, down to `T` |
-| an entry whose shape stamp is not the environment's | delete it |
-| an entry that is not `Running` | delete it |
+| entries counted below `T` | prewarm, at most `CELLA_POOL_IN_FLIGHT` per tick |
+| entries counted above `T` | delete the oldest `Running` entries, down to `T` |
+| an entry whose shape stamp is not the environment's, past the grace | delete it |
+| an entry that is not `Running`, past the grace | delete it |
 | `size` zero, or the driver declares no `Pool` | delete every entry and prewarm none |
+
+The grace is `CELLA_POOL_GRACE`, counted from the entry's `createdAt`. A
+driver reports a container between its create and its first running
+status as `Pending`, and an entry deleted in that window would be made
+and unmade on alternating ticks. A create that fails ends the tick's
+prewarming, so an environment that refuses every create is asked twice
+and not fifty times.
 
 Drift and the orphan are one rule read two ways: an entry the pool no
 longer wants is deleted, whether the shape changed under it, the engine
-moved it out of `Running`, or the size fell. The loop creates one entry
-per tick per missing slot rather than all of them at once, so a pool of
-fifty does not open fifty image pulls on the first tick of a cold start.
+moved it out of `Running`, or the size fell. Nothing returns an entry to
+the pool. An adoption that fails after its claim deletes the entry, and
+the next tick makes a clean one, because an entry that carries half of
+one caller's identity is worth less than the seconds it saves.
 
 The reaper never ends an entry. An entry carries no owner and no
 lifecycle, so `expired`, `autoDelete` and `autoStop` cannot fire on it
@@ -315,6 +328,8 @@ control plane's own machinery, not an act on a caller's object.
 | `CELLA_POOL_SIZE` | `0` | `spec.pool.size`; zero runs no pool |
 | `CELLA_POOL_IMAGE` | unset | `spec.pool.image` |
 | `CELLA_POOL_CPU`, `CELLA_POOL_MEMORY`, `CELLA_POOL_DISK` | unset | `spec.pool.resources` |
+| `CELLA_POOL_IN_FLIGHT` | `2` | how many entries one tick prewarms |
+| `CELLA_POOL_GRACE` | `5m` | how long an entry is left alone before the deletion rules read it |
 
 A size above zero on a driver that declares no `Pool` is a start-up
 problem naming the driver, which is [[021-data-plane-workers]]'s
@@ -345,9 +360,10 @@ adoption, which waits on a workspace source the manifest does not have.
 | A matching create adopts: one `Update{Adopt}`, no `Create`, `Scheduled` is `FromPool`, `createdAt` is the adoption, the boundary and the token are the sandbox's own | `TestPoolAdoption` | not built |
 | An adoption lost to a race falls back to a real create under a new id, with no leaked map, token or desired row | `TestPoolAdoptionFallsBack` | not built |
 | A non-matching create never touches an entry and is `Scheduled: Placed` | `TestPoolMismatchCreatesForReal` | not built |
-| The refill loop reaches `spec.pool.size` and stops, runs only under its lease, and holds `min(size, capacity - live)` | `TestPoolRefill`, `TestPoolRefillHoldsTheLease` | not built |
+| The refill loop reaches `spec.pool.size` and stops, runs only under its lease, holds `min(size, capacity - live)`, prewarms at most the in-flight cap per tick, and acts on no tick whose list failed | `TestPoolRefill`, `TestPoolRefillHoldsTheLease`, `TestPoolRefillBounds` | not built |
+| What the loop prewarms is what the match rule accepts for a manifest that asks for the environment's own shape | `TestPoolPrewarmMatchesItsOwnShape` | not built |
 | A real create that does not fit deletes the oldest entries first, and is `ErrQuota` with none left | `TestPoolYieldsCapacity` | not built |
-| An entry whose shape stamp differs, one that left `Running`, and every entry once the size is zero are deleted | `TestPoolDrift`, `TestPoolOrphans` | not built |
+| An entry whose shape stamp differs, one that left `Running`, and every entry once the size is zero are deleted, and an entry inside the grace is left alone | `TestPoolDrift`, `TestPoolOrphans`, `TestPoolGrace` | not built |
 | The reaper ends no entry under any rule, with a deadline stamped on one | `TestReaperLeavesPoolEntries` | not built |
 | A node on the native driver with `CELLA_POOL_SIZE=2` holds two entries, adopts a matching create with `FromPool` and a fresh `createdAt`, and creates a non-matching one for real | `TestPoolEndToEnd` in `cmd/cellad` | not built |
 | `CELLA_SCHEDULING_MODE=queued` and a size above zero on a driver without `Pool` are start-up problems | `TestPoolConfig` | not built |
