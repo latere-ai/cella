@@ -318,10 +318,11 @@ state half of it is not. What landed:
 | `cellad worker` | `cmd/cellad/main.go` |
 | The `Environment` event vocabulary of [[009-events]] | `internal/events/environment.go` |
 
-Coverage on the packages this slice added or extended: `manifest` 97.5%,
-`internal/config` 91.4%, `internal/api` 88.2%, `internal/store` 91.6%
-with memory 93.8% and postgres 90.0%, `runtime/remote` and
-`internal/worker` above 90% with the hub and link suites.
+Coverage on the packages this slice added or extended, on
+`go test -cover`: `manifest` 97.5%, `internal/config` 91.4%,
+`internal/store` 91.6% with memory 93.8% and postgres 90.0%,
+`internal/api` 90.6%, `runtime/remote` 90.8%, `internal/worker` 90.8%.
+`go test -race` is clean over all of them.
 
 The end-to-end that ran is `TestWorkerEndToEnd` in `cmd/cellad`: one
 process running `cellad serve` on the native driver and `cellad worker`
