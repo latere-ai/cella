@@ -35,11 +35,14 @@ mkdir -p "$out"
 # 1. Both binaries, from this checkout.
 (cd "$root" && go build -o "$out/cellad" ./cmd/cellad && go build -o "$out/cella-stubs" ./cmd/cella-stubs)
 
-# 2. The two credentials this installation holds, generated once. The
-# signing key is what cellad signs every sandbox's identity with; the
-# secret is what the sink verifies each delivery against.
+# 2. The three credentials this installation holds, generated once. The
+# signing key is what cellad signs every sandbox's identity with; the events
+# secret is what the sink verifies each delivery against; the secret key is
+# what a stored Secret's value is wrapped under, without which this stack
+# takes no Secret at all.
 [ -s "$out/token.pem" ] || openssl genrsa -out "$out/token.pem" 2048 2>/dev/null
 [ -s "$out/events.secret" ] || openssl rand -hex 32 > "$out/events.secret"
+[ -s "$out/secret.key" ] || openssl rand -base64 32 > "$out/secret.key"
 
 pids=()
 cleanup() {
@@ -83,6 +86,7 @@ CELLA_RUNTIME=native CELLA_ALLOW_UNSAFE_NATIVE=true \
 CELLA_PUBLIC_ADDR=127.0.0.1:$port CELLA_INTERNAL_ADDR=127.0.0.1:$internal \
 CELLA_PUBLIC_URL="$url" \
 CELLA_TOKEN_KEY="$(cat "$out/token.pem")" \
+CELLA_SECRET_KEY="$(cat "$out/secret.key")" \
 CELLA_OIDC_ISSUERS="$issuer" \
 CELLA_ADMIN_SUBJECTS="$issuer|dev" \
 CELLA_AUTHORIZER_URL="$authorizer" CELLA_AUTHORIZER_TOKEN=stub-authorizer-token \

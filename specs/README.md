@@ -73,6 +73,7 @@ later.
 | [024](024-vm-driver.md) | VM driver: a hardware-isolated sandbox per environment; the design held open | large | vague | 004, 019 |
 | [031](031-hosted-sandbox-consolidation.md) | Hosted sandbox consolidation: every package of latere-ai/sandbox lands in cella, in the platform, or is dropped | large | in-progress | 001 |
 | [050](.archive/050-cella-command.md) | Cella command: the agent client over /v1, its client package, exit codes and the skill | medium | complete | 008, 011, 031, 048 |
+| [052](.archive/052-conformance-suite.md) | Conformance suite: the /v1 contract as executable cases, the report, the declared gaps, the pipeline job | large | complete | 008, 015, 031, 049, 050 |
 
 ## Dependency graph
 
@@ -282,3 +283,4 @@ The map, the order, and the rule for a slice are in 031.
 | [053-observability.md](.archive/053-observability.md) | complete | The metric registry of 017 and the scrape surface, the server span per request, the redacting log handler on both paths of the tee, and the alert rules over what is emitted |
 | [050-cella-command.md](.archive/050-cella-command.md) | complete | The `cella` command, the typed client and its own WebSocket, the exit scheme, the columns and `--json`, the skill, and the client's four release archives |
 | [040-mesh-and-spawn.md](.archive/040-mesh-and-spawn.md) | complete | The spawn tree and its propagated budget, the mesh a child inherits, the boundary as a subset check at resolve |
+| [052-conformance-suite.md](.archive/052-conformance-suite.md) | complete | The `/v1` contract as 51 executable cases with a report, the declared gaps of this server, and the suite in both pipelines |

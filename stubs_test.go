@@ -173,6 +173,9 @@ func TestTheInstallJobWalksTheDocument(t *testing.T) {
 		"Dockerfile.stubs",
 		"TestClusterLifecycle",
 		"TestRunBootstrap",
+		// The contract of spec 015, against both stacks this job brings up.
+		"TestRunConformance",
+		"TestContract",
 	} {
 		if !strings.Contains(steps, want) {
 			t.Errorf("the install job does not run %q", want)
@@ -199,7 +202,7 @@ func TestTheReleaseRunsTheStubsAndTheStack(t *testing.T) {
 		}
 	}
 	for job, wants := range map[string][]string{
-		"conformance":     {"deploy/examples/kind-stubs/up.sh", "TestClusterLifecycle"},
+		"conformance":     {"deploy/examples/kind-stubs/up.sh", "TestClusterLifecycle", "TestContract"},
 		"install-release": {"deploy/examples/kind-stubs/up.sh", "run-blocks.sh", "docs/install.md"},
 	} {
 		steps := jobSteps(t, filepath.Join(".github", "workflows", "release.yml"), job)

@@ -19,7 +19,7 @@ depends_on:
 affects: [test/conformance/, test/e2e/, internal/config/, .github/workflows/]
 effort: large
 created: 2026-09-12
-updated: 2026-09-13
+updated: 2026-09-20
 author: changkun
 ---
 
@@ -172,10 +172,10 @@ driver-level suite ([[004-runtime-contract]]).
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| Every marker in the specs has a case and every case a marker | `TestEveryCriterionHasACase` reading `specs/` and `specs/.archive/` | not built |
-| Every group in the table exists with the scope named, and skips with its reason when its input is empty | `TestGroupsAndSkips` | not built |
-| The suite passes against `cellad` on the native tier in under five minutes and against the kind tier with the declared capability set in under fifteen | the conformance tier of [[012-test-stubs-and-tiers]] | not built |
-| A run leaves nothing behind and two concurrent runs against one server touch none of each other's objects | `TestRunCleansUp`, `TestConcurrentRuns` | not built |
-| A server started with `CELLA_TEST_DRIFT_DEFAULT` fails exactly the resolve group's defaults case | `TestSuiteCatchesADriftedDefault` | not built |
-| A server declaring a capability it does not honour fails the capability group | `TestSuiteCatchesAFalseCapability` against a lying server | not built |
-| A clean checkout runs the documented command against an external URL | the `conformance-external` CI job on dispatch | not built |
+| Every marker in the specs has a case and every case a marker | `TestEveryCriterionHasACase` reading `specs/` and `specs/.archive/` | passing, [[052-conformance-suite]] |
+| Every group in the table exists with the scope named, and skips with its reason when its input is empty | `TestGroupsAndSkips` | passing for the eighteen groups, with 51 cases in them ([[052-conformance-suite]]); the groups whose kind this API does not serve hold one case each, gated on the capability or the input they need |
+| The suite passes against `cellad` on the native tier in under five minutes and against the kind tier with the declared capability set in under fifteen | the conformance tier of [[012-test-stubs-and-tiers]] | the native half passes in ten seconds, against an in-process `cellad serve` with the stubs on every push, and against the development stack in the install job ([[052-conformance-suite]]); the kind half is wired into that job and into the release pipeline and reports on the first run. The tier's command carries `-tags=e2e`, which [[015-conformance-suite]] puts `TestContract` behind |
+| A run leaves nothing behind and two concurrent runs against one server touch none of each other's objects | `TestRunCleansUp`, `TestConcurrentRuns` | passing as `TestRunCleansUp`, which asserts every created id deleted, nothing else deleted, and two runs naming their objects apart ([[052-conformance-suite]]) |
+| A server started with `CELLA_TEST_DRIFT_DEFAULT` fails exactly the resolve group's defaults case | `TestSuiteCatchesADriftedDefault` | not built: the drift default is a change to `internal/config` and [[052-conformance-suite]] changed no server package. The same property holds against a server that answers one field wrong, `TestAServerThatAnswersTheWrongValueIsReportedFailed` |
+| A server declaring a capability it does not honour fails the capability group | `TestSuiteCatchesAFalseCapability` against a lying server | passing, [[052-conformance-suite]] |
+| A clean checkout runs the documented command against an external URL | the `conformance-external` CI job on dispatch | the documented command runs against the development stack and against the kind stack in `verify.yml`'s install job and in the release pipeline ([[052-conformance-suite]]); a job that takes an address of somebody else's on dispatch is not built |
