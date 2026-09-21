@@ -230,7 +230,7 @@ suite under `TestSuiteHoldsTheMemoryAdapter` and `TestPostgresStore`, which
 nine rows of [[010-state]] named as one function each; and the command's
 tests all carry the article its author wrote them with.
 
-`SECURITY.md` carries the four commitments as a list and thirteen assets
+`SECURITY.md` carries the four commitments as a list and twelve assets
 with the control and the tests that hold it, and
 `TestSecurityPolicyMatchesTheModel` fails on a test the policy names that
 does not exist or that the threat model does not carry.
