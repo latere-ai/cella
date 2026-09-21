@@ -569,3 +569,59 @@ func TestABodyThatFailedLeavesTheFileWhole(t *testing.T) {
 type failingReader struct{}
 
 func (failingReader) Read([]byte) (int, error) { return 0, errors.New("the body was cut short") }
+
+// TestAShortWindowDoesNotOutrunTheHeartbeat holds the floor the lease puts
+// under the liveness window. A worker heartbeats every HeartbeatInterval, so
+// a window below the lease would answer that no worker holds the stream
+// between two heartbeats and refuse every operation issued there.
+func TestAShortWindowDoesNotOutrunTheHeartbeat(t *testing.T) {
+	var mu sync.Mutex
+	now := time.Now()
+	clock := func() time.Time {
+		mu.Lock()
+		defer mu.Unlock()
+		return now
+	}
+	advance := func(d time.Duration) {
+		mu.Lock()
+		defer mu.Unlock()
+		now = now.Add(d)
+	}
+	hub := remote.NewHub(remote.HubOptions{Offline: time.Second, Now: clock})
+	registered, err := hub.Register("env_a", remote.Registration{Driver: "native", Isolation: v1.IsolationNone})
+	if err != nil {
+		t.Fatal(err)
+	}
+	control, workerSide := net.Pipe()
+	t.Cleanup(func() { _ = workerSide.Close() })
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	go func() { _ = hub.Serve(ctx, "env_a", &pipeConn{conn: control}) }()
+	// The worker says hello and then holds its stream open without sending
+	// anything else, which is an idle worker between two heartbeats.
+	hello, err := remote.EncodeMessage(remote.NoOperation,
+		remote.Message{Type: remote.MessageHello, Worker: registered.Worker})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = (&pipeConn{conn: workerSide}).WriteFrame(hello); err != nil {
+		t.Fatal(err)
+	}
+	transport := hub.Transport("env_a")
+	deadline := time.Now().Add(5 * time.Second)
+	for !transport.Live() && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !transport.Live() {
+		t.Fatal("the worker never became live")
+	}
+	advance(remote.HeartbeatInterval + time.Second)
+	if !transport.Live() {
+		t.Error("a worker one heartbeat old is not live under a short window")
+	}
+	// Past the lease it is gone, whatever the window said.
+	advance(remote.HeartbeatTimeout)
+	if transport.Live() {
+		t.Error("a worker past the lease is still live")
+	}
+}
