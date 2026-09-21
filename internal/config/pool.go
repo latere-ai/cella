@@ -40,6 +40,11 @@ type Scheduling struct {
 	// long an entry is left alone before the deletion rules read it.
 	PoolInFlight int
 	PoolGrace    time.Duration
+	// Capacity is what the environment this cellad drives declares it holds,
+	// from CELLA_CAPACITY_*. An empty declaration seeds the word auto: the
+	// ceiling is the cluster's or the host's and this control plane reads
+	// neither (spec 021).
+	Capacity v1.Capacity
 }
 
 // loadScheduling reads the mode, the pool's shape and the loop's bounds.
@@ -72,6 +77,7 @@ func loadScheduling(getenv Getenv, problems *[]string) Scheduling {
 	// that is silently accepted until somebody raises the size.
 	s.PoolInFlight = count(getenv, "CELLA_POOL_IN_FLIGHT", controller.DefaultPoolInFlight, 1, MaxPoolInFlight, problems)
 	s.PoolGrace = interval(getenv, "CELLA_POOL_GRACE", controller.DefaultPoolGrace, problems)
+	s.Capacity = workerCapacity(getenv, problems)
 	return s
 }
 
