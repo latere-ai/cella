@@ -57,7 +57,6 @@ var pendingControls = []string{
 	"TestMeshReachability",                 // spec 022, two peers on the cluster tier
 	"TestNoInboundToTheDataPlane",          // spec 021, no connection toward a worker
 	"TestNoSecretLeaks",                    // spec 018, the placeholder's confinement
-	"TestPodSecurityFields",                // spec 004, the k8s Pod baseline fields
 	"TestPortProxyIsConfined",              // spec 023, the port proxy's confinement
 	"TestRateLimits",                       // spec 008, the token buckets
 	"TestReadAuthorizeAct",                 // spec 008, the handler order
@@ -149,10 +148,12 @@ func tableRows(t *testing.T, path, heading string) []row {
 		for j := range cells {
 			cells[j] = strings.TrimSpace(cells[j])
 		}
-		if strings.HasPrefix(cells[0], "---") || cells[0] == "Criterion" || cells[0] == "Threat" {
-			continue
-		}
 		rows = append(rows, row{file: path, line: i + 1, cells: cells})
+	}
+	// A markdown table opens with its header and the rule under it. Both are
+	// the table's shape and not its content.
+	if len(rows) >= 2 && strings.HasPrefix(rows[1].cells[0], "---") {
+		rows = rows[2:]
 	}
 	return rows
 }
@@ -278,4 +279,114 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "..."
+}
+
+// securityPolicy is the file a reader of this repository is pointed at.
+const securityPolicy = "SECURITY.md"
+
+// The headings of the policy this check reads.
+const (
+	policyCommitments = "## Commitments"
+	policyAssets      = "## What is protected, and what proves it"
+)
+
+// commitments pairs each promise the policy makes with a phrase of the
+// control row that carries it in the threat model. Both halves are held to
+// appear, so a commitment without a control and a control whose sentence
+// moved out from under a commitment each fail.
+var commitments = []struct{ policy, control string }{
+	{"nothing acts before the authorizer has", "reads, authorizes, then acts"},
+	{"never an allow", "fail closed on every non-200"},
+	{"only through its egress gateway", "routes every connection to the gateway"},
+	{"once that sandbox is gone", "refuses a revoked `jti`"},
+}
+
+// bullets are the items of the list under heading, one string per item with
+// its continuation lines joined.
+func bullets(t *testing.T, path, heading string) []string {
+	t.Helper()
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading %s: %v", path, err)
+	}
+	lines := strings.Split(string(body), "\n")
+	start := slices.IndexFunc(lines, func(l string) bool { return strings.TrimSpace(l) == heading })
+	if start < 0 {
+		t.Fatalf("%s has no %q heading", path, heading)
+	}
+	var items []string
+	for i := start + 1; i < len(lines); i++ {
+		text := strings.TrimSpace(lines[i])
+		switch {
+		case strings.HasPrefix(text, "## "):
+			i = len(lines)
+		case strings.HasPrefix(text, "- "):
+			items = append(items, strings.TrimPrefix(text, "- "))
+		case text == "":
+			if len(items) > 0 {
+				i = len(lines)
+			}
+		case len(items) > 0:
+			items[len(items)-1] += " " + text
+		}
+	}
+	return items
+}
+
+// TestSecurityPolicyMatchesTheModel holds the root file to the threat model.
+// Every test the policy names is a test that exists and a control the model
+// carries, so the table is evidence a reader can follow rather than a claim,
+// and every commitment maps to a control row, so the file promises nothing
+// the design does not answer.
+func TestSecurityPolicyMatchesTheModel(t *testing.T) {
+	tests := declaredTests(t)
+	controls := tableRows(t, threatModel, "### Controls")
+	named := map[string]bool{}
+	var text strings.Builder
+	for _, r := range controls {
+		if len(r.cells) < 4 {
+			continue
+		}
+		text.WriteString(r.cells[1] + "\n")
+		for _, m := range testName.FindAllStringSubmatch(r.cells[3], -1) {
+			named[m[1]] = true
+		}
+	}
+
+	assets := tableRows(t, securityPolicy, policyAssets)
+	if len(assets) < 10 {
+		t.Fatalf("the policy names %d assets, which is too few to be what Cella protects", len(assets))
+	}
+	for _, r := range assets {
+		if len(r.cells) != 3 {
+			t.Errorf("%s:%d has %d cells, want the asset, the control and the tests", r.file, r.line, len(r.cells))
+			continue
+		}
+		found := testName.FindAllStringSubmatch(r.cells[2], -1)
+		if len(found) == 0 {
+			t.Errorf("%s:%d names no test for %q", r.file, r.line, truncate(r.cells[0], 40))
+		}
+		for _, m := range found {
+			if _, exists := tests[m[1]]; !exists {
+				t.Errorf("%s:%d names %s, which no test declares", r.file, r.line, m[1])
+			}
+			if !named[m[1]] {
+				t.Errorf("%s:%d names %s, which is no control of the threat model", r.file, r.line, m[1])
+			}
+		}
+	}
+
+	promises := bullets(t, securityPolicy, policyCommitments)
+	if len(promises) != len(commitments) {
+		t.Fatalf("the policy makes %d commitments and this check holds %d; a commitment added or removed is a change to the model",
+			len(promises), len(commitments))
+	}
+	for _, pair := range commitments {
+		if !slices.ContainsFunc(promises, func(p string) bool { return strings.Contains(p, pair.policy) }) {
+			t.Errorf("no commitment of the policy carries %q", pair.policy)
+		}
+		if !strings.Contains(text.String(), pair.control) {
+			t.Errorf("no control of the threat model carries %q, so the commitment it answers stands alone", pair.control)
+		}
+	}
 }
