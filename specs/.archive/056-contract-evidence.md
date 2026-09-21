@@ -1,6 +1,6 @@
 ---
 title: "Contract evidence: the manifest corpus, the control cross-check, the security policy, the plane guide"
-status: in-progress
+status: complete
 track: core
 depends_on:
   - specs/003-manifest-contract.md
@@ -191,12 +191,70 @@ specs own. The conformance run of [[016-building-a-plane]]'s example.
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| Every manifest in `manifest/testdata/v1/valid/` resolves to its golden output and every one in `invalid/` is refused with the code and paths its golden names | `TestGoldenCorpus` | not built |
-| The corpus covers every field of the `Sandbox` spec that resolves without a parent or an update, and every refusal code the corpus names is one of the error table's | `TestCorpusCoversTheSchema` | not built |
-| The quantity parser agrees with the Kubernetes parser on every input it accepts, and each narrowing it makes is named | `FuzzQuantity` | not built |
-| Every acceptance row of every spec whose State is not `not built` names test functions that exist in the module | `TestAcceptanceCriteriaNameRealTests` | not built |
-| Every control row of [[013-security-and-threat-model]] names a test that exists or stands on an exact, non-stale pending list | `TestThreatModelControlsHaveTests` | not built |
-| A workload token appears in no event, record, log, API answer or control plane file, and is read only from its own projection | `TestWorkloadTokenNeverLeavesItsSandbox` | not built |
-| Every test `SECURITY.md` names exists and is a control of the model, and every commitment maps to a control row | `TestSecurityPolicyMatchesTheModel` | not built |
-| The example plane compiles and imports nothing under `internal/` | `TestExamplePlaneBuilds` | not built |
-| Every row of [[016-building-a-plane]]'s concerns table names a mechanism that exists in the tree | `TestConcernsTableIsGrounded` | not built |
+| Every manifest in `manifest/testdata/v1/valid/` resolves to its golden output and every one in `invalid/` is refused with the code and paths its golden names | `TestGoldenCorpus` | built |
+| The corpus covers every field of the `Sandbox` spec that resolves without a parent or an update, and every refusal code the corpus names is one of the error table's | `TestCorpusCoversTheSchema` | built |
+| The quantity parser agrees with the Kubernetes parser on every input it accepts, and each narrowing it makes is named | `FuzzQuantity` | built |
+| Every acceptance row of every spec whose State is not `not built` names test functions that exist in the module | `TestAcceptanceCriteriaNameRealTests` | built |
+| Every control row of [[013-security-and-threat-model]] names a test that exists or stands on an exact, non-stale pending list | `TestThreatModelControlsHaveTests` | built |
+| A workload token appears in no event, record, log, API answer or control plane file, and is read only from its own projection | `TestWorkloadTokenNeverLeavesItsSandbox` | built |
+| Every test `SECURITY.md` names exists and is a control of the model, and every commitment maps to a control row | `TestSecurityPolicyMatchesTheModel` | built |
+| The example plane compiles, imports nothing under `internal/`, and serves its own API with its own plan and its own admission step | `TestExamplePlaneBuilds`, `TestThePlaneServesItsOwnAPI`, `TestThePlanesOwnRulesRefuse`, `TestTheCatalogueIsTheAdmissionStep` | built |
+| Every row of [[016-building-a-plane]]'s concerns table names a mechanism that exists in the tree | `TestConcernsTableIsGrounded` | built |
+
+## Outcome
+
+Every promise this slice was opened for has a test, and the tests are in
+the tree rather than in a table.
+
+The corpus is `manifest/testdata/v1/`: four accepted manifests with their
+resolved goldens and fourteen refusals with the code and the paths each
+earns, all under one fixed set of options. `TestCorpusCoversTheSchema`
+holds it to its purpose, so a field added to the `Sandbox` schema without a
+corpus entry fails, and a golden that records a code the package does not
+emit fails with it. `FuzzQuantity` ran three million executions against
+`resource.ParseQuantity` with no divergence; the subset's two narrowings, a
+value finer than a milli-unit and a milli form past an int64, are named in
+the test and are the whole of what it refuses that Kubernetes accepts.
+
+The cross-check found about a hundred acceptance rows naming a test that
+had landed under another name, in eighteen specs, and every one of them is
+corrected to the test that runs. `TestAcceptanceCriteriaNameRealTests`
+keeps it that way for every row that claims evidence, and
+`TestThreatModelControlsHaveTests` does the same for the controls table,
+whose unbuilt controls are an exact list inside the test rather than a
+silence. The renames worth naming: the conformance suite is
+`TestTheConformanceSuiteHoldsAgainstThisServer` and not
+`TestSuiteAgainstThisServer`, which twenty rows of [[008-api]] and
+[[052-conformance-suite]] named; the store contract is the `storetest`
+suite under `TestSuiteHoldsTheMemoryAdapter` and `TestPostgresStore`, which
+nine rows of [[010-state]] named as one function each; and the command's
+tests all carry the article its author wrote them with.
+
+`SECURITY.md` carries the four commitments as a list and thirteen assets
+with the control and the tests that hold it, and
+`TestSecurityPolicyMatchesTheModel` fails on a test the policy names that
+does not exist or that the threat model does not carry.
+`TestWorkloadTokenNeverLeavesItsSandbox` follows a workload token through
+the tier the secret canary follows a value through, with the projection as
+the one file allowed to hold it.
+
+`docs/plane.md` and `examples/plane/` are the plane guide and its running
+example: a server that composes `manifest`, `runtime/native` and
+`controller` behind an API of its own, with the three places a platform
+fills marked, and its own suite over create, read, delete, the plan's
+ceilings, the catalogue and every refusal.
+
+Coverage of the packages this slice touched: `manifest` 97.5%,
+`cmd/cellad` 90.5%, `examples/plane` 91.5%. The root test package has no
+statements of its own. The e2e that ran is
+`TestWorkloadTokenNeverLeavesItsSandbox`, one `cellad serve`, one `cellad
+egress`, one sink, one upstream and one native sandbox.
+
+What is left open, and why: `TestYAMLLimits` is a decode test and waits on
+the YAML half of [[003-manifest-contract]]; running `docs/plane.md`'s code
+blocks and the conformance suite against the example needs an issuer and an
+authorizer beside them, which is the stubs tier of
+[[012-test-stubs-and-tiers]]; and the second half of
+[[013-security-and-threat-model]]'s first row, that each control's test is
+also named by the acceptance criteria of the spec the row's `Spec` cell
+names, is not built.
