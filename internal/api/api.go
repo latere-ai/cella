@@ -6,6 +6,7 @@ package api
 
 import (
 	"archive/tar"
+	"bytes"
 	"cmp"
 	"context"
 	"encoding/json"
@@ -496,24 +497,41 @@ type execResult struct {
 	DurationMS int64  `json:"durationMs"`
 }
 
+// exec is both forms of POST /v1/sandboxes/{id}/exec. The body, the command
+// rule and the timeout are read once, and the query decides which answer the
+// request gets: one JSON result under ?wait=1, or the framed stream of design
+// 008.
 func (h *handler) exec(w http.ResponseWriter, r *http.Request, obj v1.Sandbox) {
-	if r.URL.Query().Get("wait") != "1" {
-		respondError(w, &manifest.Error{Code: "capability_unsupported", Detail: "only exec?wait=1 is currently supported"})
+	bounded := r.URL.Query().Get("wait") == "1"
+	// The bounded form answers one object, so it reads Accept like every
+	// other object route. The framed form answers the route's own content
+	// type and negotiates nothing.
+	if bounded && !acceptable(w, r) {
 		return
 	}
-	// The bounded form answers one JSON result, so it negotiates like every
-	// other object route. The framed form above answers the route's own
-	// content type and negotiates nothing.
-	if !acceptable(w, r) {
+	req, timeout, ok := h.execRequest(w, r)
+	if !ok {
 		return
 	}
+	if !bounded {
+		h.execStream(w, r, obj, req, timeout)
+		return
+	}
+	h.execWait(w, r, obj, req, timeout)
+}
+
+// execRequest reads one exec body and the timeout it names. The rules are
+// design 008's and are the same for both forms: one JSON object with no field
+// the schema does not know, a command the runtime contract accepts, and a
+// timeout that is positive and at most an hour.
+func (h *handler) execRequest(w http.ResponseWriter, r *http.Request) (execRequest, time.Duration, bool) {
+	var req execRequest
 	body, err := h.readBody(w, r)
 	if err != nil {
 		respondError(w, err)
-		return
+		return req, 0, false
 	}
-	var req execRequest
-	dec := json.NewDecoder(strings.NewReader(string(body)))
+	dec := json.NewDecoder(bytes.NewReader(body))
 	dec.DisallowUnknownFields()
 	if err = dec.Decode(&req); err == nil {
 		var tail any
@@ -523,20 +541,26 @@ func (h *handler) exec(w http.ResponseWriter, r *http.Request, obj v1.Sandbox) {
 	}
 	if err != nil {
 		respondError(w, &manifest.Error{Code: "invalid_field", Detail: err.Error()})
-		return
+		return req, 0, false
 	}
 	if err = manifest.ValidateExec(req.Command, req.Env, req.Workdir); err != nil {
 		respondError(w, err)
-		return
+		return req, 0, false
 	}
 	timeout := 10 * time.Minute
 	if req.Timeout != "" {
 		timeout, err = time.ParseDuration(req.Timeout)
 		if err != nil || timeout <= 0 || timeout > time.Hour {
 			respondError(w, &manifest.Error{Code: "invalid_field", Detail: "timeout must be positive and at most 1h"})
-			return
+			return req, 0, false
 		}
 	}
+	return req, timeout, true
+}
+
+// execWait serves the bounded form: one JSON result with the exit code and
+// both output channels, each capped at a mebibyte with the head kept.
+func (h *handler) execWait(w http.ResponseWriter, r *http.Request, obj v1.Sandbox, req execRequest, timeout time.Duration) {
 	h.touch(r, obj)
 	started := time.Now()
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)

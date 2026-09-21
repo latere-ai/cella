@@ -3,7 +3,6 @@
   "cases": {
     "case003ContentTypes": "the decoder takes application/json only; a YAML body is refused with unsupported_media_type",
     "case008NameOnPathAndBody": "PUT /v1/sandboxes/{name} is not served, so apply by name and its name rule have no route",
-    "case008ExecStream": "POST .../exec without wait=1 is refused; the framed exec stream is not served",
     "case008PublicDocuments": "/openapi.yaml is not generated or served; the key set is"
   }
 }
