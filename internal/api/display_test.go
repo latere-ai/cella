@@ -567,6 +567,9 @@ func TestScreenStampsActivity(t *testing.T) {
 	d.mu.Unlock()
 	t.Cleanup(func() { close(d.hold) })
 	before := f.activityOf(id)
+	// The controller coalesces stamps inside one touch interval, so a frame
+	// that lands in the window the create stamped in is not a later stamp.
+	time.Sleep(3 * testTouchInterval)
 	conn := f.openScreen("/v1/sandboxes/"+id+"/screen", f.alice)
 	if _, _, err := conn.ReadMessage(); err != nil {
 		t.Fatalf("reading the first frame: %v", err)
