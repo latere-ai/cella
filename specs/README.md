@@ -74,6 +74,7 @@ later.
 | [031](031-hosted-sandbox-consolidation.md) | Hosted sandbox consolidation: every package of latere-ai/sandbox lands in cella, in the platform, or is dropped | large | in-progress | 001 |
 | [050](.archive/050-cella-command.md) | Cella command: the agent client over /v1, its client package, exit codes and the skill | medium | complete | 008, 011, 031, 048 |
 | [052](.archive/052-conformance-suite.md) | Conformance suite: the /v1 contract as executable cases, the report, the declared gaps, the pipeline job | large | complete | 008, 015, 031, 049, 050 |
+| [054](054-environments-desired-state.md) | Environments as desired state: the stored Environment object, the per-environment driver registry, and the phase loop | large | in-progress | 004, 005, 008, 021, 031, 051 |
 
 ## Dependency graph
 
@@ -285,3 +286,4 @@ The map, the order, and the rule for a slice are in 031.
 | [040-mesh-and-spawn.md](.archive/040-mesh-and-spawn.md) | complete | The spawn tree and its propagated budget, the mesh a child inherits, the boundary as a subset check at resolve |
 | [052-conformance-suite.md](.archive/052-conformance-suite.md) | complete | The `/v1` contract as 51 executable cases with a report, the declared gaps of this server, and the suite in both pipelines |
 | [051-environments-and-workers.md](051-environments-and-workers.md) | in-progress | The `Environment` kind and its field table, the environment key's mint and revocation, the worker registration and stream, the `remote` driver passing the conformance suite, and the `worker` role; environments as desired state and the controller's per-environment driver map are its open half |
+| [054-environments-desired-state.md](054-environments-desired-state.md) | in-progress | The stored `Environment` object with its apply, read and delete routes, the controller's per-environment driver registry, the phase loop under the environments lease, and a sandbox routed to the worker that serves its environment |
