@@ -41,9 +41,7 @@ func TestClusterLifecycle(t *testing.T) {
 	url, token := stack(t)
 	client := &http.Client{Timeout: 2 * time.Minute}
 
-	if code, body := call(t, client, http.MethodGet, url+"/livez", "", nil); code != http.StatusOK {
-		t.Fatalf("the control plane answered %d at /livez: %s", code, body)
-	}
+	awaitLive(t, client, url)
 	const name = "tier"
 	manifest := `{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox",
 		"metadata":{"name":"` + name + `"},
@@ -211,4 +209,29 @@ func waitForRecord(t *testing.T, client *http.Client, sink, id string) {
 		time.Sleep(2 * time.Second)
 	}
 	t.Errorf("the sink holds no record about %s, and every act of spec 009 is delivered", id)
+}
+
+// awaitLive waits for the control plane to answer at its liveness route. The
+// rollout is complete before the tier starts, but the NodePort the tier dials
+// is programmed by kube-proxy a moment after the Pod is Ready, and a dial in
+// that moment is reset. The wait absorbs it; a control plane that never
+// answers fails the tier with the last error.
+func awaitLive(t *testing.T, client *http.Client, url string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Minute)
+	for {
+		res, err := client.Get(url + "/livez")
+		if err == nil {
+			body, _ := io.ReadAll(res.Body)
+			_ = res.Body.Close()
+			if res.StatusCode == http.StatusOK {
+				return
+			}
+			err = fmt.Errorf("the control plane answered %d at /livez: %s", res.StatusCode, body)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the control plane did not answer at /livez: %v", err)
+		}
+		time.Sleep(2 * time.Second)
+	}
 }
