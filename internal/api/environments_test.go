@@ -27,6 +27,7 @@ import (
 	"latere.ai/x/cella/internal/store"
 	"latere.ai/x/cella/internal/store/memory"
 	v1 "latere.ai/x/cella/manifest/v1"
+	"latere.ai/x/cella/runtime"
 	"latere.ai/x/cella/runtime/native"
 	"latere.ai/x/cella/runtime/remote"
 )
@@ -73,7 +74,14 @@ func setupKeyed(t *testing.T, policy authz.Authorizer) *keyed {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = d.Close() })
-	c, err := controller.Open(controller.Options{DataDir: t.TempDir(), Driver: d, Environment: "default"})
+	hub := remote.NewHub(remote.HubOptions{Offline: time.Minute})
+	c, err := controller.Open(controller.Options{
+		DataDir: t.TempDir(), Driver: d, Environment: "default",
+		Registrations: WorkerRegistrations(hub),
+		NewDriver: func(obj v1.Environment) (runtime.Driver, error) {
+			return remote.New(remote.Options{Environment: obj.Status.ID, Transport: hub.Transport(obj.Status.ID)})
+		},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +93,6 @@ func setupKeyed(t *testing.T, policy authz.Authorizer) *keyed {
 	if policy == nil {
 		policy = &auth.OwnerPolicy{DefaultEnvironment: "default", Admins: []string{issuer.URL() + "|admin"}}
 	}
-	hub := remote.NewHub(remote.HubOptions{Offline: time.Minute})
 	h, err := New(Options{
 		Controller: c, Verifier: verifier, Authorizer: auth.NewAuthorizer(policy),
 		Keys: keys, Workers: hub,
@@ -370,8 +377,11 @@ func TestWorkerStreamRoute(t *testing.T) {
 			}
 		}
 		if connected == 1 {
-			// The environment reports it, which is what an operator reads to
-			// see the data plane arrive.
+			// The environment reports it once the phase loop has run, which
+			// is the one writer of an environment's observed half.
+			if err = p.c.Phases(t.Context()); err != nil {
+				t.Fatalf("the phase loop did not run: %v", err)
+			}
 			var obj v1.Environment
 			if err = json.Unmarshal(p.request(http.MethodGet, "/v1/environments/default", p.alice, "", http.StatusOK), &obj); err != nil {
 				t.Fatalf("the environment did not decode: %v", err)

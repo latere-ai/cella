@@ -7,12 +7,14 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	"latere.ai/x/pkg/authz"
 
 	"latere.ai/x/cella/authorizer"
+	"latere.ai/x/cella/controller"
 	"latere.ai/x/cella/internal/auth"
 	"latere.ai/x/cella/internal/events"
 	"latere.ai/x/cella/manifest"
@@ -28,21 +30,32 @@ type EnvironmentKeys interface {
 	Revoke(ctx context.Context, jti string) error
 }
 
-// environmentItem answers one environment by name or id. The control plane
-// drives one environment today and it is the default; a request for another
-// is not_found, which is the same answer a caller of an environment it may
-// not use receives.
+// environmentItem answers or deletes one environment by name. A name this
+// control plane does not hold is not_found, which is the same answer a caller
+// of an environment it may not use receives.
 func (h *handler) environmentItem(w http.ResponseWriter, r *http.Request) {
 	obj, err := h.environment(r.PathValue("id"))
 	if err != nil {
 		respondError(w, err)
 		return
 	}
-	if _, err = h.decide(r, authorizer.ActionEnvironmentRead, environmentResource(obj)); err != nil {
+	action := authorizer.ActionEnvironmentRead
+	if r.Method == http.MethodDelete {
+		action = authorizer.ActionEnvironmentDelete
+	}
+	if _, err = h.decide(r, action, environmentResource(obj)); err != nil {
 		respondError(w, err)
 		return
 	}
-	respond(w, http.StatusOK, obj)
+	if r.Method == http.MethodDelete {
+		if err = h.Controller.DeleteEnvironment(r.Context(), obj.Metadata.Name); err != nil {
+			respondError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	respondEnvironment(w, http.StatusOK, obj)
 }
 
 // environmentList answers the environments this control plane holds.
@@ -51,12 +64,160 @@ func (h *handler) environmentList(w http.ResponseWriter, r *http.Request) {
 		respondError(w, err)
 		return
 	}
-	obj, err := h.environment(h.Controller.Environment())
+	items := h.Controller.ListEnvironments()
+	respond(w, http.StatusOK, map[string]any{"items": items, "next": ""})
+}
+
+// environmentApply is PUT /v1/environments/{name}: the create of an
+// environment of that name or the update of the one that holds it, under the
+// concurrency rule of design 008. The path names the object, so a body that
+// names another is refused rather than quietly renamed.
+func (h *handler) environmentApply(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimSpace(r.PathValue("id"))
+	existing, readErr := h.Controller.GetEnvironment(name)
+	held := readErr == nil
+	obj, ok := h.readEnvironment(w, r, name, existing, held)
+	if !ok {
+		return
+	}
+	action := authorizer.ActionEnvironmentCreate
+	resource := environmentResource(obj)
+	if held {
+		action = authorizer.ActionEnvironmentUpdate
+		resource = environmentResource(existing)
+	} else {
+		obj.Status.Owner = caller(r).Subject
+	}
+	if _, err := h.decide(r, action, resource); err != nil {
+		respondError(w, err)
+		return
+	}
+	version, err := ifMatch(r)
 	if err != nil {
 		respondError(w, err)
 		return
 	}
-	respond(w, http.StatusOK, map[string]any{"items": []v1.Environment{obj}, "next": ""})
+	stored, created, err := h.Controller.ApplyEnvironment(r.Context(), obj, version)
+	if err != nil {
+		respondError(w, err)
+		return
+	}
+	status := http.StatusOK
+	if created {
+		status = http.StatusCreated
+		w.Header().Set("Location", "/v1/environments/"+stored.Metadata.Name)
+	}
+	respondEnvironment(w, status, stored)
+}
+
+// environmentCreate is POST /v1/environments: the body names the environment,
+// and a name another environment already holds is name_taken.
+func (h *handler) environmentCreate(w http.ResponseWriter, r *http.Request) {
+	body, err := h.readBody(w, r)
+	if err != nil {
+		respondError(w, err)
+		return
+	}
+	decoded, err := manifest.DecodeEnvironment(body, r.Header.Get("Content-Type"))
+	if err != nil {
+		respondError(w, err)
+		return
+	}
+	if _, err = h.Controller.GetEnvironment(decoded.Metadata.Name); err == nil && decoded.Metadata.Name != "" {
+		respondError(w, controller.ErrNameTaken)
+		return
+	}
+	obj, err := h.resolveEnvironment(r, decoded, nil)
+	if err != nil {
+		respondError(w, err)
+		return
+	}
+	obj.Status.Owner = caller(r).Subject
+	if _, err = h.decide(r, authorizer.ActionEnvironmentCreate, environmentResource(obj)); err != nil {
+		respondError(w, err)
+		return
+	}
+	stored, _, err := h.Controller.ApplyEnvironment(r.Context(), obj, 0)
+	if err != nil {
+		respondError(w, err)
+		return
+	}
+	w.Header().Set("Location", "/v1/environments/"+stored.Metadata.Name)
+	respondEnvironment(w, http.StatusCreated, stored)
+}
+
+// readEnvironment decodes and resolves the body of one apply against the
+// object the path names.
+func (h *handler) readEnvironment(w http.ResponseWriter, r *http.Request, name string,
+	existing v1.Environment, held bool,
+) (v1.Environment, bool) {
+	body, err := h.readBody(w, r)
+	if err != nil {
+		respondError(w, err)
+		return v1.Environment{}, false
+	}
+	decoded, err := manifest.DecodeEnvironment(body, r.Header.Get("Content-Type"))
+	if err != nil {
+		respondError(w, err)
+		return v1.Environment{}, false
+	}
+	if decoded.Metadata.Name == "" {
+		decoded.Metadata.Name = name
+	}
+	if decoded.Metadata.Name != name {
+		respondError(w, &manifest.Error{Code: "invalid_field", Path: "metadata.name", Detail: "the path names " + name})
+		return v1.Environment{}, false
+	}
+	var previous *v1.Environment
+	if held {
+		previous = &existing
+	}
+	obj, err := h.resolveEnvironment(r, decoded, previous)
+	if err != nil {
+		respondError(w, err)
+		return v1.Environment{}, false
+	}
+	return obj, true
+}
+
+// resolveEnvironment validates and defaults one applied environment against
+// what the driver behind it declares. An environment no worker has registered
+// on declares nothing, which is what defers the rules that read a capability
+// to the registration that brings one.
+func (h *handler) resolveEnvironment(r *http.Request, decoded v1.Environment, existing *v1.Environment) (v1.Environment, error) {
+	resolved, err := manifest.ResolveEnvironment(&decoded, manifest.EnvironmentOptions{
+		Actor:        manifestActor(r),
+		Existing:     existing,
+		Capabilities: h.Controller.CapabilitiesOf(decoded.Metadata.Name),
+		Now:          time.Now,
+	})
+	if err != nil {
+		return v1.Environment{}, err
+	}
+	return *resolved, nil
+}
+
+// ifMatch reads the version an apply is conditional on. No header is a
+// read-modify-write at the version the control plane last saw, which design
+// 008 answers with a retry rather than a refusal.
+func ifMatch(r *http.Request) (int64, error) {
+	raw := strings.TrimSpace(r.Header.Get("If-Match"))
+	if raw == "" || raw == "*" {
+		return 0, nil
+	}
+	version, err := strconv.ParseInt(strings.Trim(raw, `"`), 10, 64)
+	if err != nil || version < 0 {
+		return 0, &manifest.Error{Code: "invalid_field", Path: "If-Match",
+			Detail: "an If-Match carries the version the ETag of a read returned"}
+	}
+	return version, nil
+}
+
+// respondEnvironment writes one environment with the ETag an If-Match is
+// compared against.
+func respondEnvironment(w http.ResponseWriter, status int, obj v1.Environment) {
+	w.Header().Set("ETag", `"`+strconv.FormatInt(obj.Status.Version, 10)+`"`)
+	respond(w, status, obj)
 }
 
 // environmentKeyMint signs one environment key and returns it once. It is the
@@ -123,57 +284,16 @@ func (h *handler) environmentKeyRevoke(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// environment reads one environment by the name or id a route named. The
-// empty name asks for the default, which is what a manifest with no
-// spec.environment resolves against.
+// environment reads one environment by the name a route named. The empty name
+// asks for the default, which is what a manifest with no spec.environment
+// resolves against.
 func (h *handler) environment(nameOrID string) (v1.Environment, error) {
-	name := strings.TrimSpace(nameOrID)
-	if name == "" || name == "default" && h.Controller.Environment() == "default" {
-		name = h.Controller.Environment()
-	}
-	if name != h.Controller.Environment() {
-		return v1.Environment{}, &manifest.Error{Code: "not_found", Detail: "no environment of that name"}
-	}
-	obj := v1.Environment{
-		APIVersion: v1.APIVersion,
-		Kind:       v1.KindEnvironment,
-		Metadata:   v1.Metadata{Name: name},
-		Spec: v1.EnvironmentSpec{
-			Mode:      v1.EnvironmentInprocess,
-			Isolation: h.Controller.Isolation(),
-		},
-		Status: v1.EnvironmentStatus{
-			ID:           name,
-			Phase:        v1.EnvironmentReady,
-			Driver:       h.Controller.DriverName(),
-			Isolation:    h.Controller.Isolation(),
-			Capabilities: h.Controller.Capabilities(),
-		},
-	}
-	// The workers holding a stream open are what a self-hosted environment's
-	// phase is computed from, and what an operator reads to see that the
-	// data plane arrived. A worker that registered and dropped its stream is
-	// not counted: the environment cannot be placed on through it.
-	if h.Workers != nil {
-		for _, w := range h.Workers.Workers(environmentSubject(obj)) {
-			if !w.Connected {
-				continue
-			}
-			obj.Status.Workers++
-			if w.LastHeartbeat.After(obj.Status.LastHeartbeat) {
-				obj.Status.LastHeartbeat = w.LastHeartbeat
-			}
-		}
-	}
-	if h.Egress != nil {
-		obj.Status.Gateways = h.Egress.Connected()
-	}
-	return obj, nil
+	return h.Controller.GetEnvironment(strings.TrimSpace(nameOrID))
 }
 
-// environmentSubject is what an environment key names in its sub. It is the
-// environment's id, which is its name on a control plane that drives its own
-// environment and has minted no id for it.
+// environmentSubject is what an environment key names in its sub, which is
+// the environment's id. An environment's name is global and fixed at create,
+// so the id is the name (spec 021).
 func environmentSubject(obj v1.Environment) string {
 	if obj.Status.ID != "" {
 		return obj.Status.ID

@@ -64,6 +64,7 @@ func (g *acceptingGateway) Send(_ context.Context, m egress.Map) error {
 }
 func (g *acceptingGateway) Purge(context.Context, string) {}
 func (g *acceptingGateway) CA() string                    { return "" }
+func (g *acceptingGateway) Connected() int                { return 1 }
 
 // last is the newest map this gateway was handed for one principal.
 func (g *acceptingGateway) last(principal string) (egress.Map, bool) {
