@@ -216,7 +216,10 @@ type EnvironmentStatus struct {
 	Gateways      int       `json:"gateways,omitempty"`
 	LastHeartbeat time.Time `json:"lastHeartbeat,omitzero"`
 	// Used is what the environment's sandboxes hold of its capacity.
-	Used      Capacity  `json:"used,omitzero"`
+	Used Capacity `json:"used,omitzero"`
+	// Version is the store row's version, which design 008's ETag carries
+	// and an If-Match is compared against.
+	Version   int64     `json:"version,omitempty"`
 	CreatedAt time.Time `json:"createdAt,omitzero"`
 	UpdatedAt time.Time `json:"updatedAt,omitzero"`
 }
