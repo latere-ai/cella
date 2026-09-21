@@ -80,6 +80,44 @@ type fakeDriver struct {
 	// specs is the create spec each sandbox was made from, so a test reads
 	// back what the refill loop asked for.
 	specs map[string]driver.CreateSpec
+	// readyErr is what this driver answers its readiness probe with, which
+	// is what the phase of an in-process environment is computed from.
+	readyErr error
+}
+
+// Ready answers what a test set, so a case drives the phase machine of spec
+// 021 without an environment that really failed.
+func (d *fakeDriver) Ready(context.Context) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.readyErr
+}
+
+// failReady sets what the readiness probe answers from now on.
+func (d *fakeDriver) failReady(err error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.readyErr = err
+}
+
+// declarePool makes this driver one that can keep prewarmed entries.
+func (d *fakeDriver) declarePool() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.pool = true
+}
+
+// sandboxes is every state this driver holds that is not a pool entry.
+func (d *fakeDriver) sandboxes() []driver.State {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	var out []driver.State
+	for _, id := range d.order {
+		if s, ok := d.states[id]; ok && !s.Pool {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 func newDriver(clock *fakeClock) *fakeDriver {
