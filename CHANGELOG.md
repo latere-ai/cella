@@ -6,6 +6,22 @@ refused before it is pushed.
 
 ## Unreleased
 
+- Environments you apply, and sandboxes that run on them. An `Environment` is
+  now an object: `PUT /v1/environments/{name}` creates or updates one,
+  `GET /v1/environments` lists what a control plane holds, and `DELETE`
+  removes one nothing is placed on. Every read carries an `ETag` and every
+  apply may carry `If-Match`, so two administrators editing one environment
+  cannot silently overwrite each other. A sandbox whose `spec.environment`
+  names one of them runs there: the control plane routes every act to the
+  driver that environment declares, which is the driver `cellad` opened for
+  itself on its own environment and a `cellad worker`'s on yours. The
+  environment cellad drives itself is written once from the `CELLA_*`
+  variables that describe its driver, and your edits are what it holds
+  afterwards. Each environment reports what its data plane is doing:
+  `Ready` while a worker heartbeats, `Offline` with the reason
+  `HeartbeatLost` once it has heard nothing for `CELLA_ENVIRONMENT_OFFLINE`,
+  and `Ready` again when the worker returns. An environment below `Ready`
+  takes no new sandbox and leaves the ones it holds running.
 - The API is now an executable contract. `test/conformance` runs one case per
   rule the `/v1` API states against any server that claims to serve it, and
   prints what held, what failed with the request and the answer that
