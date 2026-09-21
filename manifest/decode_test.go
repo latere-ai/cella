@@ -233,7 +233,7 @@ func billionLaughs() string {
 	b.WriteString("apiVersion: cella.latere.ai/v1beta1\nkind: Sandbox\nmetadata:\n  name: bomb\n")
 	b.WriteString("a: &a [\"payload\",\"payload\",\"payload\",\"payload\",\"payload\",\"payload\",\"payload\",\"payload\",\"payload\"]\n")
 	for level := 'b'; level <= 'j'; level++ {
-		previous := string(rune(level - 1))
+		previous := string(level - 1)
 		b.WriteString(string(level) + ": &" + string(level) + " [")
 		for i := range 9 {
 			if i > 0 {
