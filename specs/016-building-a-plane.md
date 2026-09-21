@@ -11,7 +11,7 @@ depends_on:
 affects: [docs/plane.md, manifest/, runtime/, controller/, egress/, examples/plane/]
 effort: small
 created: 2026-09-12
-updated: 2026-09-13
+updated: 2026-09-21
 author: changkun
 ---
 
@@ -100,7 +100,7 @@ Any platform's own migration plan.
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| A twenty-line authorizer and admission endpoint from `docs/plane.md`, built on `latere.ai/x/pkg/authz` and run beside `cellad`, deny the reserved probe id and pass the conformance suite's identity and resolve groups | `TestPlaneDocEndpointsConform` running the doc's code blocks against the shared contract | not built |
-| A server built from the packages in `examples/plane/` passes the conformance suite | `TestExamplePlaneConforms` | not built |
+| A twenty-line authorizer and admission endpoint from `docs/plane.md`, built on `latere.ai/x/pkg/authz` and run beside `cellad`, deny the reserved probe id and pass the conformance suite's identity and resolve groups | `TestPlaneDocEndpointsConform` running the doc's code blocks against the shared contract | not built: `docs/plane.md` carries the authorizer, the admission endpoint and the sink ([[056-contract-evidence]]); running its code against the shared contract waits on the stubs tier |
+| A server built from the packages in `examples/plane/` passes the conformance suite | `TestExamplePlaneBuilds` over the example, and the suite against it | built in part ([[056-contract-evidence]]): `examples/plane/` composes `manifest`, `runtime/native` and `controller` behind its own API, reaches nothing under `internal/`, and is compiled by the test; the suite run needs an issuer and an authorizer beside it, which is the stubs tier of [[012-test-stubs-and-tiers]] |
 | The example plane translates a platform-specific field into a `Secret` and an annotation at its edge and the resolved manifest is what the conformance suite expects | `TestExamplePlaneTranslatesAtTheEdge` | not built |
-| Every row of the concerns table names a mechanism that exists in the tree | `TestConcernsTableIsGrounded` reading this file | not built |
+| Every row of the concerns table names a mechanism that exists in the tree | `TestConcernsTableIsGrounded` reading this file | built ([[056-contract-evidence]]): every name the table carries is a package of this module, a name it declares or a string it holds; `limits`, which the shared authorization contract owns, is the one named exception and is asserted to stay one |
