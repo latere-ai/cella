@@ -1,6 +1,6 @@
 ---
 title: "Environments as desired state: the stored Environment object, the per-environment driver registry, and the phase loop"
-status: in-progress
+status: complete
 track: core
 depends_on:
   - specs/021-data-plane-workers.md
@@ -9,6 +9,7 @@ depends_on:
   - specs/005-lifecycle-controller.md
   - specs/008-api.md
   - specs/031-hosted-sandbox-consolidation.md
+  - specs/010-state.md
 affects: [controller/, internal/api/, internal/store/, internal/config/, internal/events/, manifest/, manifest/v1/, cmd/cellad/, test/conformance/, docs/, CHANGELOG.md]
 effort: large
 created: 2026-09-21
@@ -102,7 +103,8 @@ The refusals:
 |---|---|
 | `metadata.name` differs from the path | `invalid_field` at `metadata.name` |
 | a `POST` of a name another environment holds | `name_taken` |
-| `spec.mode: inprocess` from a caller, or a delete of the default | `reserved_prefix` |
+| `spec.mode: inprocess` on a new environment, or a delete of the default | `reserved_prefix` |
+| a change of `spec.mode` or `spec.isolation` on an environment that exists | `immutable_field` |
 | a delete while a sandbox is placed on it | `phase_conflict` |
 | a stale `If-Match` | `version_conflict` |
 | every field rule of [[021-data-plane-workers]]'s table | as `manifest.ValidateEnvironmentSpec` states |
@@ -175,18 +177,28 @@ Under the `environments` lease of [[010-state]], every 5 seconds:
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Pending: applied, nothing has reported
-    Pending --> Ready: a worker heartbeats inside the window,<br/>or the in-process driver passes Ready
+    [*] --> Pending: a worker environment applied, nothing has reported
+    [*] --> Ready: the in-process environment, seeded with its driver
+    Pending --> Ready: a worker heartbeats inside the window
     Ready --> Offline: no heartbeat for CELLA_ENVIRONMENT_OFFLINE (HeartbeatLost)<br/>or the driver fails Ready for as long (DriverNotReady)
     Offline --> Ready: a worker heartbeats again, or the driver answers
 ```
 
+The environment cellad drives itself is seeded `Ready`: the object
+describes a driver this process has already opened, and a driver that
+then fails its probe reaches `Offline` through the same window every
+other environment does rather than never having been placeable at all.
+
 The loop writes `status.phase`, `status.reason`, `status.workers`,
 `status.lastHeartbeat`, `status.driver`, `status.isolation` and
 `status.capabilities`, and emits `environment.registered` on the
-transition into `Ready` with `{workers}` and `environment.offline` on the
-transition into `Offline` with `{reason}`. A phase that did not move
-writes no record.
+transition into `Ready` with `{workers}`, `environment.updated` on a
+return to `Ready` from `Offline`, and `environment.offline` on the
+transition into `Offline` with `{reason}`, which is
+[[021-data-plane-workers]]'s event table. A phase that did not move
+writes no record. `status.driver` is the driver the workers run, recorded
+from the registration; `remote` is how the control plane reaches them and
+not what the environment runs.
 
 `Ready` places. `Pending` and `Offline` refuse a create with
 `driver_unavailable` and leave running sandboxes alone: the refusal is
@@ -217,16 +229,87 @@ admission ceiling and the queued scheduling mode, which are
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| An `Environment` applied through `PUT` is stored, read back, listed and deleted, and the id is the name | `TestEnvironmentRoutes` | open |
-| `If-Match` at the version the read returned writes, a stale one is `version_conflict`, and a `PUT` without one retries | `TestEnvironmentConcurrency` | open |
-| A caller applying `mode: inprocess`, and a delete of the default, are `reserved_prefix`; a delete while a sandbox is placed is `phase_conflict` | `TestEnvironmentRefusals` | open |
-| Every environment mutation is admin-only and `environment.use` is decided on the sandbox's own environment | `TestEnvironmentAuthorization` | open |
-| The default is seeded from the variables at first start, the stored object is authoritative afterwards, and its mode and isolation are immutable | `TestDefaultEnvironment` | open |
-| A sandbox on a worker environment reaches the remote driver and one on the default reaches the in-process driver, through every call site | `TestControllerRoutesByEnvironment` | open |
-| A create on an environment that is not `Ready` is `driver_unavailable`, and the sandboxes already on it are left alone | `TestCreateOnAnOfflineEnvironment` | open |
-| The reaper and the pool run per environment, each against that environment's driver | `TestReaperPerEnvironment`, `TestPoolPerEnvironment` | open |
-| Each phase transition fires on its trigger under a fake clock and emits its record once | `TestEnvironmentPhases` | open |
-| `manifest.Lookup.Environment` resolves against the stored object, and an absent environment is `not_found` at `spec.environment` | `TestResolveAgainstTheRegistry` | open |
-| `cellad serve` and `cellad worker` over loopback: an environment applied and keyed, a sandbox created on it with `spec.environment`, an exec that runs on the worker, the environment Offline when the worker stops and Ready when it returns | `TestWorkerEnvironmentEndToEnd` | open |
-| A sandbox on the default and one on a worker's differ only by environment, driver and isolation | `case001Indistinguishable`, run from `TestTheConformanceSuiteHoldsAgainstThisServer` | open |
-| No file this slice adds names a Latere host, image, pool or namespace | `TestNoLatereCoordinates` | open |
+| An `Environment` applied through `PUT` is stored, read back, listed and deleted, and the id is the name | `TestEnvironmentRoutes` in `internal/api`, `TestDeleteEnvironment` in `controller` | built |
+| `If-Match` at the version the read returned writes, a stale one is `version_conflict`, and a `PUT` without one retries | `TestEnvironmentConcurrency`, `TestApplyEnvironmentConcurrency` | built |
+| A caller applying `mode: inprocess` on a new name, and a delete of the default, are `reserved_prefix`; the same mode on an existing environment is `immutable_field`; a delete while a sandbox is placed is `phase_conflict` | `TestEnvironmentRefusals`, `TestApplyEnvironmentRefusals`, `TestDeleteEnvironment` | built |
+| Every environment mutation is admin-only and `environment.use` is decided on the sandbox's own environment | `TestEnvironmentAuthorization` | built |
+| The default is seeded from the variables at first start, the stored object is authoritative afterwards, and its mode and isolation are immutable | `TestDefaultEnvironment`, `TestDefaultEnvironmentDeclaresAutoWithNoFigures` | built |
+| A sandbox on a worker environment reaches the remote driver and one on the default reaches the in-process driver, through every call site | `TestControllerRoutesByEnvironment`, `TestARestartKeepsSandboxesOnEveryEnvironment`, `TestASpawnRunsWhereItsParentRuns` | built |
+| A create on an environment that is not `Ready` is `driver_unavailable`, and the sandboxes already on it are left alone | `TestCreateOnAnEnvironmentBelowReady`, `TestWorkerEnvironmentEndToEnd` | built |
+| The reaper and the pool run per environment, each against that environment's driver | `TestReaperPerEnvironment`, `TestTheReaperHoldsOnAnEnvironmentBelowReady`, `TestPoolPerEnvironment` | built |
+| Each phase transition fires on its trigger under a fake clock and emits its record once | `TestEnvironmentPhases`, `TestTheInProcessEnvironmentAnswersFromItsDriver`, `TestTheLoopRunsUnderItsLease` | built |
+| `manifest.Lookup.Environment` resolves against the stored object, and an absent environment is `not_found` at `spec.environment` | `TestResolveAgainstTheRegistry`, `TestASandboxNamesAnEnvironmentThisServerDoesNotHold` | built |
+| The `Environment` kind round-trips through the store of [[010-state]] with its row version, and the phase loop's write touches the status alone | `TestBridgeWritesTheEnvironmentKind`, `TestBridgeWritesTheEnvironmentStatus`, `TestBridgeRemovesTheEnvironmentKind`, `TestBridgeLoadsEveryEnvironment` | built |
+| `cellad serve` and `cellad worker` over loopback: an environment applied and keyed, a sandbox created on it with `spec.environment`, an exec that runs on the worker, the environment Offline when the worker stops and Ready when it returns | `TestWorkerEnvironmentEndToEnd` | built |
+| A sandbox on the default and one on a worker's differ only by environment, driver and isolation | `case001Indistinguishable`, run from `TestTheConformanceSuiteHoldsAgainstThisServer` | built |
+| A window below the heartbeat lease does not declare a live worker gone | `TestAShortWindowDoesNotOutrunTheHeartbeat` | built |
+| No file this slice adds names a Latere host, image, pool or namespace | `TestNoLatereCoordinates` | built |
+
+## Outcome
+
+Complete on 2026-09-21. An environment is an object, the driver is a
+lookup, and a loop writes each environment's phase.
+
+| Piece | Where |
+|---|---|
+| The driver registry and the one seam every call reaches it through | `controller/registry.go`, and 38 converted call sites across `controller/` |
+| The stored object, the apply, the delete and the phase loop | `controller/environment.go` |
+| The `Environment` kind in the store of [[010-state]] and in the local snapshot | `internal/store/environment.go`, `controller/store.go` |
+| `PUT`, `POST`, `DELETE /v1/environments`, the `ETag` and the `If-Match` | `internal/api/environments.go` |
+| The resolver reading this control plane's registry | `Controller.Lookup`, `internal/api/api.go`'s `resolveOptions` |
+| The phase loop's wiring and the worker registrations it reads | `cmd/cellad/main.go`, `api.WorkerRegistrations` |
+
+Coverage on `go test -cover` over the packages this slice touched:
+`controller` 92.1%, `internal/api` 91.3%, `internal/store` 92.2%,
+`internal/events` 93.8%, `manifest/v1` 93.0%, `runtime/remote` 90.7%,
+`cmd/cellad` 90.6%. The whole bar is `go tool lateregate`, 16 gates.
+
+The bridge's cases run over the memory adapter. The `Desired` half the
+Environment kind uses is keyed by kind rather than written per kind, so the
+Postgres adapter serves it through the statements `storetest` already runs
+over both adapters.
+
+The end-to-end that ran is `TestWorkerEnvironmentEndToEnd` in `cmd/cellad`:
+one process running `cellad serve` on the native driver and `cellad worker`
+on its own, joined over loopback by a key minted for an environment an
+administrator applied through `PUT /v1/environments/eu-gpu`. A sandbox
+created with `spec.environment: eu-gpu` runs on the worker, an exec on it
+returns the worker's output, the environment reports `Offline` with
+`HeartbeatLost` when the worker stops and refuses a create while it is,
+leaves the sandbox it already holds running, and returns to `Ready` with a
+create that succeeds when a worker comes back.
+`case001Indistinguishable` stops skipping: the suite's own stack applies a
+second environment and runs a worker on it for the whole run.
+
+### The defect this slice found
+
+`CELLA_ENVIRONMENT_OFFLINE` was the hub's liveness window as well as the
+phase window. A worker heartbeats every 15 seconds, so any window below the
+45 second lease made every operation between two heartbeats answer that no
+worker holds the stream, and a create on a healthy environment failed. The
+lease is now the floor under the hub's window;
+`TestAShortWindowDoesNotOutrunTheHeartbeat` fails without it.
+
+A second one: `controller.Open` refused a snapshot holding a sandbox whose
+`spec.environment` was not this process's own, which every restart after
+the first placement on a worker's environment would have been.
+`TestARestartKeepsSandboxesOnEveryEnvironment` fails without the fix.
+
+### What diverges from the specs above
+
+| Divergence | Why |
+|---|---|
+| An `Environment`'s `status.id` is its `metadata.name` rather than an `env_` ULID | The name is global and fixed at create, so it is already the identity; one string is the row's key, the registry's key, the `sub` of every key, the stream path and `spec.environment` |
+| The seeded default is not run through `ValidateEnvironmentSpec` | It describes a driver this process opened and ran a preflight against; a field rule meant for a caller's manifest would refuse a start that is otherwise sound |
+| The default's capacity is seeded from `CELLA_CAPACITY_CPU`, `_MEMORY`, `_DISK` and `_SANDBOXES` rather than one `CELLA_CAPACITY` | A quantity triple and a count have no one spelling, and the four variables already exist for the worker role. [[002-repository-scaffold]]'s table is corrected |
+| A spawned child takes its parent's environment in the controller rather than in the resolver | The resolver defaults an absent `spec.environment` to this control plane's own; the parent is the controller's fact |
+
+### What this leaves open
+
+| Open | Why |
+|---|---|
+| The `Degraded` phase and its two reasons | `api.EgressHub` serves one environment, so a gateway of a worker's environment has no stream to open and `NoGateway` cannot be observed |
+| `status.used` and capacity as an admission ceiling | [[020-scheduling-and-sets]]'s derivation, which this slice does not anticipate |
+| A sandbox held `Lost` while its environment is `Offline`, and recovered when it returns | [[005-lifecycle-controller]]'s rule; the reaper now holds on such an environment, which is the half this slice proved |
+| The `credit` control message of [[021-data-plane-workers]]'s flow control | Left open by [[051-environments-and-workers]] and untouched here |
+| `ApplyEnvironment` holds the registry's write lock across the store write | One administrator's act, on a route nothing in the data path reaches; a `driverFor` racing it waits for one round trip |
