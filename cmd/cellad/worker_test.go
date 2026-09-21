@@ -289,8 +289,11 @@ func TestWorkerEnvironmentEndToEnd(t *testing.T) {
 		obj := p.environmentNamed(t, "eu-gpu")
 		return obj.Status.Phase == v1.EnvironmentReady && obj.Status.Workers == 1
 	})
-	if got := p.environmentNamed(t, "eu-gpu").Status.Driver; got != "remote" {
-		t.Errorf("the environment reports the driver %q, want remote", got)
+	// The driver an environment reports is the one its workers run, which
+	// spec 021 records from the first registration; `remote` is only how the
+	// control plane reaches them.
+	if got := p.environmentNamed(t, "eu-gpu").Status.Driver; got != "native" {
+		t.Errorf("the environment reports the driver %q, want native", got)
 	}
 
 	// A sandbox named onto that environment is created on the worker's own

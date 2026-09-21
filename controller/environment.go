@@ -74,7 +74,11 @@ type NewDriverFunc func(obj v1.Environment) (driver.Driver, error)
 // it claims under, when it was last heard from, and whether it holds a stream
 // open now. It is what an environment's phase is computed from.
 type Registration struct {
-	Worker        string
+	Worker string
+	// Driver is what this worker's own driver is called, which is the
+	// environment's recorded driver rather than the remote one the control
+	// plane reaches it through.
+	Driver        string
 	LastHeartbeat time.Time
 	Connected     bool
 }
@@ -102,6 +106,14 @@ func (c *Controller) openEnvironments(ctx context.Context, o Options) error {
 			if name == c.environment {
 				// The driver of the control plane's own environment is the
 				// one this process opened; the object only describes it.
+				c.environments[name] = obj
+				continue
+			}
+			if c.newDriver == nil {
+				// A control plane built with no seam for a worker's driver
+				// holds the object and drives nothing through it, so every
+				// act on a sandbox of that environment is ErrNoEnvironment
+				// rather than a nil driver somewhere below.
 				c.environments[name] = obj
 				continue
 			}
@@ -136,14 +148,11 @@ func (c *Controller) seedDefault(ctx context.Context, o Options) error {
 		// figures instead.
 		capacity = v1.Capacity{Auto: true}
 	}
-	// The driver is asked once here rather than left Pending until the phase
-	// loop's first tick: a control plane that opened a working driver places
-	// on it from its first request.
-	phase := v1.EnvironmentPending
-	if o.Driver.Ready(ctx) == nil {
-		phase = v1.EnvironmentReady
-		c.markAnswered(c.environment)
-	}
+	// The object is seeded Ready. It describes a driver this process has
+	// already opened, and a driver that then fails its probe reaches Offline
+	// the way every other environment does: through the offline window the
+	// phase loop counts, rather than by never having been placeable at all.
+	c.markAnswered(c.environment)
 	queue := v1.DefaultQueueName
 	obj := v1.Environment{
 		APIVersion: v1.APIVersion,
@@ -160,7 +169,7 @@ func (c *Controller) seedDefault(ctx context.Context, o Options) error {
 			Gateway: o.Gateway.Proxy,
 		},
 		Status: v1.EnvironmentStatus{
-			ID: c.environment, Owner: EnvironmentOwner, Phase: phase,
+			ID: c.environment, Owner: EnvironmentOwner, Phase: v1.EnvironmentReady,
 			Driver: o.Driver.Name(), Isolation: o.Driver.Isolation(),
 			Capabilities: o.Driver.Capabilities(), CreatedAt: c.clock.Now(), UpdatedAt: c.clock.Now(),
 		},
@@ -208,13 +217,37 @@ func (c *Controller) GetEnvironment(name string) (v1.Environment, error) {
 	return cloneEnvironment(obj), nil
 }
 
+// ApplyAttempts is how many times an apply that named no version re-reads and
+// writes again before it reports a conflict. Design 008's rule: a caller that
+// does not care about concurrency never sees one in practice.
+const ApplyAttempts = 3
+
 // ApplyEnvironment writes one resolved Environment and returns it with
-// whether it was created. ifVersion is the version an If-Match named, and
-// zero is a write at the version this process last read.
-//
-// The driver is built before the write, so an environment whose driver cannot
-// be made is refused rather than stored with nothing serving it.
+// whether it was created. ifVersion is the version an If-Match named; zero is
+// a read-modify-write, retried up to ApplyAttempts times against the version
+// the store holds.
 func (c *Controller) ApplyEnvironment(ctx context.Context, obj v1.Environment, ifVersion int64) (v1.Environment, bool, error) {
+	if ifVersion > 0 {
+		return c.applyEnvironment(ctx, obj, ifVersion)
+	}
+	var (
+		out     v1.Environment
+		created bool
+		err     error
+	)
+	for range ApplyAttempts {
+		out, created, err = c.applyEnvironment(ctx, obj, 0)
+		if !errors.Is(err, ErrVersionConflict) {
+			return out, created, err
+		}
+	}
+	return out, created, err
+}
+
+// applyEnvironment is one attempt: the driver is built before the write, so
+// an environment whose driver cannot be made is refused rather than stored
+// with nothing serving it.
+func (c *Controller) applyEnvironment(ctx context.Context, obj v1.Environment, ifVersion int64) (v1.Environment, bool, error) {
 	if c.environmentStore == nil {
 		return obj, false, ErrNoEnvironmentStore
 	}
@@ -310,6 +343,11 @@ func (c *Controller) DeleteEnvironment(ctx context.Context, name string) error {
 	}
 	delete(c.environments, name)
 	delete(c.drivers, name)
+	// The streams the environment's workers opened end with the object, so a
+	// worker of an environment that no longer exists is not left holding one.
+	if c.releaseDriver != nil {
+		c.releaseDriver(obj)
+	}
 	c.emitEnvironment(ctx, MutationEnvironmentDeleted, obj)
 	return nil
 }
@@ -394,13 +432,20 @@ func (c *Controller) phaseOf(ctx context.Context, name string) error {
 	next.Status.Driver = d.Name()
 	next.Status.Isolation = d.Isolation()
 	next.Status.Capabilities = d.Capabilities()
-	next.Status.Workers, next.Status.LastHeartbeat = c.registrationsOf(name)
+	workers, last, reported := c.registrationsOf(name)
+	next.Status.Workers, next.Status.LastHeartbeat = workers, last
+	// Spec 021 records the driver from the first registration: what an
+	// environment runs is what its workers run, and `remote` is only how the
+	// control plane reaches them.
+	if reported != "" {
+		next.Status.Driver = reported
+	}
 	// The gateways are the ones connected to this control plane's hub, which
 	// serves the environment cellad drives itself (spec 018).
 	if c.egress != nil && name == c.environment {
 		next.Status.Gateways = c.egress.Connected()
 	}
-	next.Status.Phase, next.Status.Reason = c.phase(ctx, obj, d, next.Status.Workers)
+	next.Status.Phase, next.Status.Reason = c.phase(ctx, obj, d, workers)
 	if sameObserved(obj.Status, next.Status) {
 		return nil
 	}
@@ -473,25 +518,30 @@ func (c *Controller) markAnswered(name string) {
 	c.answerMu.Unlock()
 }
 
-// registrationsOf is how many workers of one environment hold a stream open
-// and when the most recent was heard from. A worker that registered and
-// dropped its stream is not counted: nothing can be placed through it.
-func (c *Controller) registrationsOf(name string) (int, time.Time) {
+// registrationsOf is how many workers of one environment hold a stream open,
+// when the most recent was heard from, and the driver they run. A worker that
+// registered and dropped its stream is not counted: nothing can be placed
+// through it.
+func (c *Controller) registrationsOf(name string) (int, time.Time, string) {
 	if c.registrations == nil {
-		return 0, time.Time{}
+		return 0, time.Time{}, ""
 	}
 	count := 0
 	var last time.Time
+	driverName := ""
 	for _, w := range c.registrations(name) {
 		if !w.Connected {
 			continue
 		}
 		count++
+		if driverName == "" {
+			driverName = w.Driver
+		}
 		if w.LastHeartbeat.After(last) {
 			last = w.LastHeartbeat
 		}
 	}
-	return count, last
+	return count, last, driverName
 }
 
 // sameObserved reports whether the loop found nothing new, so a tick that
@@ -508,6 +558,11 @@ func transitionMutation(from, to string) string {
 	switch {
 	case from == to:
 		return ""
+	case to == v1.EnvironmentReady && from == v1.EnvironmentOffline:
+		// Spec 021's table: an environment that comes back is an update,
+		// and only a data plane arriving for the first time is a
+		// registration.
+		return MutationEnvironmentUpdated
 	case to == v1.EnvironmentReady:
 		return MutationEnvironmentRegistered
 	case to == v1.EnvironmentOffline:

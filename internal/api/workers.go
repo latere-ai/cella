@@ -37,11 +37,18 @@ var ErrWorkerEnvironment = errors.New("the key names another environment")
 // vocabularies meet here and nowhere else.
 func WorkerRegistrations(hub *remote.Hub) func(string) []controller.Registration {
 	return func(environment string) []controller.Registration {
+		// The driver is the environment's, recorded from the first
+		// registration, which is what spec 021 puts in status.driver.
+		driverName := ""
+		if r, held := hub.Transport(environment).Registration(); held {
+			driverName = r.Driver
+		}
 		states := hub.Workers(environment)
 		out := make([]controller.Registration, 0, len(states))
 		for _, w := range states {
 			out = append(out, controller.Registration{
-				Worker: w.Worker, LastHeartbeat: w.LastHeartbeat, Connected: w.Connected,
+				Worker: w.Worker, Driver: driverName,
+				LastHeartbeat: w.LastHeartbeat, Connected: w.Connected,
 			})
 		}
 		return out

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"log/slog"
 	"slices"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -216,6 +217,52 @@ func TestControllerRoutesByEnvironment(t *testing.T) {
 	}
 }
 
+// TestARestartKeepsSandboxesOnEveryEnvironment: one control plane holds every
+// environment it serves, so a restart reads back the sandboxes of all of them
+// and each is still routed to the driver of its own. Without that a cellad
+// that had placed one sandbox on a worker's environment would refuse to open
+// its own store.
+func TestARestartKeepsSandboxesOnEveryEnvironment(t *testing.T) {
+	dir := t.TempDir()
+	c, _, w, _ := twoEnvironments(t, Options{DataDir: dir})
+	applyWorker(t, c, "eu-gpu")
+	ready(t, c, w, "eu-gpu")
+	obj := workspace()
+	obj.Metadata.Name = "there"
+	obj.Spec.Environment = "eu-gpu"
+	created, err := c.Create(t.Context(), obj, "alice", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = c.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	again, here, back, _ := twoEnvironments(t, Options{DataDir: dir})
+	read, err := again.Get(t.Context(), created.Status.ID, "alice")
+	if err != nil {
+		t.Fatalf("the sandbox on the worker's environment did not survive the restart: %v", err)
+	}
+	if read.Status.Environment != "eu-gpu" {
+		t.Errorf("the sandbox came back on environment %q", read.Status.Environment)
+	}
+	// The environment came back with it, and the acts still reach its own
+	// driver rather than the one this process opened.
+	if phase(t, again, "eu-gpu") == "" {
+		t.Fatal("the environment did not come back")
+	}
+	ready(t, again, back, "eu-gpu")
+	if _, err = again.Act(t.Context(), created.Status.ID, "delete"); err != nil {
+		t.Fatalf("the delete after the restart failed: %v", err)
+	}
+	if _, deletes, _ := back.driver.acted(); len(deletes) != 1 {
+		t.Errorf("the delete went to %v on the worker's driver", deletes)
+	}
+	if _, deletes, _ := here.acted(); len(deletes) != 0 {
+		t.Errorf("the delete reached the default's driver: %v", deletes)
+	}
+}
+
 // TestCreateOnAnEnvironmentBelowReady: an environment whose data plane is not
 // there takes no sandbox and keeps the ones it has. The refusal is the
 // controller's own, because a driver with no worker reports that nothing is
@@ -336,8 +383,13 @@ func TestEnvironmentPhases(t *testing.T) {
 	if phase(t, c, "eu-gpu") != v1.EnvironmentReady {
 		t.Errorf("the environment did not return to Ready: %s", phase(t, c, "eu-gpu"))
 	}
-	if got := events.environmentsOf(MutationEnvironmentRegistered); len(got) != 2 {
-		t.Errorf("the return to Ready recorded %d times, want a second", len(got))
+	// An environment that comes back is an update, not a second
+	// registration, which is what spec 021's event table says.
+	if got := events.environmentsOf(MutationEnvironmentUpdated); len(got) != 1 {
+		t.Errorf("the return to Ready recorded %d updates, want one", len(got))
+	}
+	if got := events.environmentsOf(MutationEnvironmentRegistered); len(got) != 1 {
+		t.Errorf("the return to Ready recorded a second registration: %d", len(got))
 	}
 
 	// A worker that registered and dropped its stream is not counted: the
@@ -498,11 +550,48 @@ func TestPoolPerEnvironment(t *testing.T) {
 	}
 }
 
+// TestASpawnRunsWhereItsParentRuns: boundary rule 8 of design 022 read
+// through the environment. A child names none of its own, so a sandbox on a
+// worker's environment spawns onto that environment rather than onto the one
+// the control plane drives itself.
+func TestASpawnRunsWhereItsParentRuns(t *testing.T) {
+	c, here, w, _ := twoEnvironments(t, Options{})
+	applyWorker(t, c, "eu-gpu")
+	ready(t, c, w, "eu-gpu")
+	obj := workspace()
+	obj.Metadata.Name = "root"
+	obj.Spec.Environment = "eu-gpu"
+	obj.Spec.Mesh.Spawn = v1.Spawn{Budget: 2, Depth: 1}
+	parent, err := c.Create(t.Context(), obj, "alice", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	child := workspace()
+	child.Metadata.Name = "child"
+	child.Spec.Environment = ""
+	spawned, err := c.Spawn(t.Context(), child, parent, 0)
+	if err != nil {
+		t.Fatalf("the spawn failed: %v", err)
+	}
+	if spawned.Status.Environment != "eu-gpu" {
+		t.Errorf("the child landed on environment %q", spawned.Status.Environment)
+	}
+	if len(here.sandboxes()) != 0 {
+		t.Errorf("the child reached the default's driver: %+v", here.sandboxes())
+	}
+	if len(w.driver.sandboxes()) != 2 {
+		t.Errorf("the worker's driver holds %d sandboxes, want the parent and the child", len(w.driver.sandboxes()))
+	}
+}
+
 // TestDeleteEnvironment: an environment with nothing placed on it goes, and
 // one that holds a sandbox is refused rather than left with sandboxes nothing
 // drives.
 func TestDeleteEnvironment(t *testing.T) {
-	c, _, w, _ := twoEnvironments(t, Options{})
+	var released atomic.Bool
+	c, _, w, _ := twoEnvironments(t, Options{
+		ReleaseDriver: func(v1.Environment) { released.Store(true) },
+	})
 	applyWorker(t, c, "eu-gpu")
 	ready(t, c, w, "eu-gpu")
 	obj := workspace()
@@ -520,6 +609,9 @@ func TestDeleteEnvironment(t *testing.T) {
 	}
 	if err = c.DeleteEnvironment(t.Context(), "eu-gpu"); err != nil {
 		t.Fatalf("an empty environment was not deleted: %v", err)
+	}
+	if !released.Load() {
+		t.Errorf("the delete left the environment's workers holding their streams")
 	}
 	if _, err = c.GetEnvironment("eu-gpu"); !errors.Is(err, ErrNoEnvironment) {
 		t.Errorf("the deleted environment still reads: %v", err)

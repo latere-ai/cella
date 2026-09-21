@@ -137,7 +137,7 @@ curl -sS -H "Authorization: Bearer $ADMIN_TOKEN" \
 ```json
 {
   "phase": "Ready",
-  "driver": "remote",
+  "driver": "podman",
   "isolation": "container",
   "workers": 1,
   "lastHeartbeat": "2026-09-20T14:31:02Z"

@@ -385,6 +385,7 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 			id := obj.Status.ID
 			return remote.New(remote.Options{Environment: id, Transport: workers.Transport(id)})
 		},
+		ReleaseDriver: func(obj v1.Environment) { workers.Release(obj.Status.ID) },
 		Registrations: api.WorkerRegistrations(workers),
 		Metrics:       registry,
 	})

@@ -113,6 +113,10 @@ type Options struct {
 	// 021). It is optional: with none, a control plane serves the
 	// environment it drives itself and refuses to apply another.
 	NewDriver NewDriverFunc
+	// ReleaseDriver ends what a deleted environment's driver held, which is
+	// the streams its workers opened. It is optional and pairs with
+	// NewDriver.
+	ReleaseDriver func(obj v1.Environment)
 	// Registrations reports the workers holding one environment's stream,
 	// which is what the phase loop computes from. It is optional: with
 	// none, no environment reports a worker.
@@ -180,6 +184,7 @@ type Controller struct {
 	// serves, and registrations reports what its workers sent.
 	environmentStore Environments
 	newDriver        NewDriverFunc
+	releaseDriver    func(v1.Environment)
 	registrations    func(string) []Registration
 	// offline is how long an environment is held at its phase with nothing
 	// answering, and answered when each last answered. The instant lives in
@@ -208,7 +213,13 @@ func Open(o Options) (*Controller, error) {
 	objects, err := store.Load()
 	if err == nil {
 		for id, obj := range objects {
-			if id == "" || obj.Status.ID != id || obj.Status.Owner == "" || obj.Spec.Environment != o.Environment {
+			// The environment is not compared to this process's own: one
+			// control plane holds every environment it serves and routes
+			// each sandbox to the driver of its own. An environment the
+			// registry does not hold is ErrNoEnvironment at the act that
+			// reaches for its driver, not a snapshot this process refuses
+			// to open (spec 021).
+			if id == "" || obj.Status.ID != id || obj.Status.Owner == "" || obj.Spec.Environment == "" {
 				err = errors.New("invalid controller snapshot object")
 				break
 			}
@@ -235,7 +246,7 @@ func Open(o Options) (*Controller, error) {
 		secretObjects: map[string]v1.Secret{},
 		pool:          o.Pool, capacity: o.Capacity,
 		poolInFlight: o.PoolInFlight, poolGrace: o.PoolGrace,
-		newDriver: o.NewDriver, registrations: o.Registrations,
+		newDriver: o.NewDriver, releaseDriver: o.ReleaseDriver, registrations: o.Registrations,
 		offline: o.EnvironmentOffline, answered: map[string]time.Time{},
 	}
 	// A store of design 010 takes one conditional write per object and
@@ -402,6 +413,13 @@ func (c *Controller) create(ctx context.Context, obj v1.Sandbox, owner string, m
 	}
 	started := c.clock.Now()
 	environment := cmp.Or(obj.Spec.Environment, c.environment)
+	if parent != nil {
+		// A child runs where its parent runs. Boundary rule 8 of design 022
+		// is read through the environment as well: a sandbox cannot place
+		// its children anywhere its own boundary was not decided against.
+		environment = parent.Status.Environment
+		obj.Spec.Environment = environment
+	}
 	// An environment below Ready takes no sandbox and keeps the ones it
 	// holds, which is the gate of spec 021's phase table.
 	if err := c.admits(environment); err != nil {
