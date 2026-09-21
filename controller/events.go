@@ -27,6 +27,9 @@ type Events interface {
 	// the record is about another kind and carries another shape, not
 	// because the two travel differently.
 	EmitSecret(ctx context.Context, a SecretAct)
+	// EmitEnvironment records one act on an Environment, which is the third
+	// kind of design 009's vocabulary.
+	EmitEnvironment(ctx context.Context, a EnvironmentAct)
 }
 
 // Act is one thing the controller did to one sandbox: design 009's type, and

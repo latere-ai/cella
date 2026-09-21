@@ -96,6 +96,16 @@ type fileStore struct {
 	// the process that made it, and it commits with the objects because the
 	// file is one document.
 	ledger map[string]int
+	// environments is the Environment kind in the snapshot, one row per
+	// environment with the version an If-Match is compared against.
+	environments map[string]environmentRow
+}
+
+// environmentRow is one Environment in the snapshot: the object and the row
+// version, which is the same shape the table of design 010 holds.
+type environmentRow struct {
+	Object  v1.Environment `json:"object"`
+	Version int64          `json:"version"`
 }
 
 // secretRow is one Secret in the snapshot: the object a read returns and the
@@ -109,10 +119,11 @@ type secretRow struct {
 }
 
 type snapshot struct {
-	Version int                   `json:"version"`
-	Objects map[string]v1.Sandbox `json:"objects"`
-	Secrets map[string]secretRow  `json:"secrets,omitempty"`
-	Ledger  map[string]int        `json:"ledger,omitempty"`
+	Version      int                       `json:"version"`
+	Objects      map[string]v1.Sandbox     `json:"objects"`
+	Secrets      map[string]secretRow      `json:"secrets,omitempty"`
+	Ledger       map[string]int            `json:"ledger,omitempty"`
+	Environments map[string]environmentRow `json:"environments,omitempty"`
 }
 
 // OpenFileStore opens a provisional local desired-state snapshot, taking an
@@ -141,7 +152,7 @@ func OpenSealedFileStore(dir string, sealer Sealer) (Store, error) {
 	}
 	return &fileStore{dir: dir, lock: lock, sealer: sealer,
 		objects: map[string]v1.Sandbox{}, secrets: map[string]secretRow{},
-		ledger: map[string]int{}}, nil
+		ledger: map[string]int{}, environments: map[string]environmentRow{}}, nil
 }
 func (s *fileStore) Load() (map[string]v1.Sandbox, error) {
 	b, err := os.ReadFile(filepath.Join(s.dir, "objects.json"))
@@ -166,6 +177,10 @@ func (s *fileStore) Load() (map[string]v1.Sandbox, error) {
 	s.ledger = data.Ledger
 	if s.ledger == nil {
 		s.ledger = map[string]int{}
+	}
+	s.environments = data.Environments
+	if s.environments == nil {
+		s.environments = map[string]environmentRow{}
 	}
 	return data.Objects, nil
 }
@@ -254,7 +269,8 @@ func (s *fileStore) Save(objects map[string]v1.Sandbox) error {
 // write replaces the snapshot atomically: both collections, every time,
 // because the file is one document and a half-written one is no state at all.
 func (s *fileStore) write() error {
-	b, err := json.Marshal(snapshot{Version: 1, Objects: s.objects, Secrets: s.secrets, Ledger: s.ledger})
+	b, err := json.Marshal(snapshot{Version: 1, Objects: s.objects, Secrets: s.secrets,
+		Ledger: s.ledger, Environments: s.environments})
 	if err != nil {
 		return err
 	}
@@ -345,7 +361,80 @@ func (s *fileStore) ForgetSpawns(_ context.Context, parentID string) error {
 // The seams the snapshot store satisfies. A change to either side that breaks
 // the other is a build failure here rather than a nil store at start-up.
 var (
-	_ Store   = (*fileStore)(nil)
-	_ Secrets = (*fileStore)(nil)
-	_ Spawner = (*fileStore)(nil)
+	_ Store        = (*fileStore)(nil)
+	_ Secrets      = (*fileStore)(nil)
+	_ Spawner      = (*fileStore)(nil)
+	_ Environments = (*fileStore)(nil)
 )
+
+// LoadEnvironments is the Environment half of Load. The snapshot was read by
+// Load, which the controller calls first.
+func (s *fileStore) LoadEnvironments() (map[string]v1.Environment, error) {
+	out := make(map[string]v1.Environment, len(s.environments))
+	for name, row := range s.environments {
+		obj := row.Object
+		obj.Status.Version = row.Version
+		out[name] = obj
+	}
+	return out, nil
+}
+
+// WriteEnvironment stores one Environment at the version given and rewrites
+// the snapshot. The journal is not this store's: it keeps desired state and
+// nothing else, and the controller's emitter takes the record.
+func (s *fileStore) WriteEnvironment(_ context.Context, obj v1.Environment, ifVersion int64, _ string) (int64, error) {
+	name := obj.Metadata.Name
+	previous, held := s.environments[name]
+	if held && previous.Version != ifVersion {
+		return 0, ErrVersionConflict
+	}
+	if !held && ifVersion != 0 {
+		return 0, ErrVersionConflict
+	}
+	row := environmentRow{Object: obj, Version: previous.Version + 1}
+	row.Object.Status.Version = row.Version
+	s.environments[name] = row
+	if err := s.write(); err != nil {
+		s.restoreEnvironment(name, previous, held)
+		return 0, err
+	}
+	return row.Version, nil
+}
+
+// WriteEnvironmentStatus writes what the phase loop computed, which is a
+// write of the whole row on a store that keeps one document.
+func (s *fileStore) WriteEnvironmentStatus(_ context.Context, obj v1.Environment, _ string) error {
+	name := obj.Metadata.Name
+	previous, held := s.environments[name]
+	if !held {
+		return ErrNotFound
+	}
+	row := previous
+	row.Object.Status = obj.Status
+	row.Object.Status.Version = row.Version
+	s.environments[name] = row
+	if err := s.write(); err != nil {
+		s.restoreEnvironment(name, previous, held)
+		return err
+	}
+	return nil
+}
+
+// RemoveEnvironment drops one Environment from the snapshot.
+func (s *fileStore) RemoveEnvironment(_ context.Context, name, _ string) error {
+	previous, held := s.environments[name]
+	delete(s.environments, name)
+	if err := s.write(); err != nil {
+		s.restoreEnvironment(name, previous, held)
+		return err
+	}
+	return nil
+}
+
+func (s *fileStore) restoreEnvironment(name string, previous environmentRow, held bool) {
+	if held {
+		s.environments[name] = previous
+		return
+	}
+	delete(s.environments, name)
+}

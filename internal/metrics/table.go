@@ -63,7 +63,7 @@ var (
 	// Leases are the loops that run under one, by kind. The refill loop's
 	// lease is keyed by environment and its kind is "pool", because an
 	// environment per series would make the label unbounded.
-	Leases = []string{LeaseReaper, LeaseJournal, LeasePool}
+	Leases = []string{LeaseReaper, LeaseJournal, LeasePool, LeaseEnvironments}
 	// Doors are where a connection reached the gateway (design 018).
 	Doors = []string{DoorProxy, DoorReverse}
 	// Decisions are what the boundary did with it.
@@ -108,9 +108,10 @@ const (
 	OpEvents  = "events"
 	OpAcquire = "acquire"
 
-	LeaseReaper  = "reaper"
-	LeaseJournal = "journal"
-	LeasePool    = "pool"
+	LeaseReaper       = "reaper"
+	LeaseJournal      = "journal"
+	LeasePool         = "pool"
+	LeaseEnvironments = "environments"
 
 	DoorProxy   = "proxy"
 	DoorReverse = "reverse"

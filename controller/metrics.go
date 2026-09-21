@@ -58,12 +58,13 @@ const (
 	// the volumes of design 019.
 	MetricRecovered = "recovered"
 	MetricExhausted = "exhausted"
-	// MetricLeaseReaper and MetricLeasePool are the two leases this package's
-	// loops run under, by kind. The refill loop's lease is keyed by
-	// environment; the label is not, because an environment per series would
-	// make it unbounded.
-	MetricLeaseReaper = "reaper"
-	MetricLeasePool   = "pool"
+	// MetricLeaseReaper, MetricLeasePool and MetricLeaseEnvironments are the
+	// leases this package's loops run under, by kind. The refill loop's
+	// lease is keyed by environment; the label is not, because an
+	// environment per series would make it unbounded.
+	MetricLeaseReaper       = "reaper"
+	MetricLeasePool         = "pool"
+	MetricLeaseEnvironments = "environments"
 	// The actions the reaper takes on a rule.
 	ActionStopped = "stopped"
 	ActionDeleted = "deleted"

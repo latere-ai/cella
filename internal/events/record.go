@@ -101,6 +101,9 @@ var Types = []Type{
 	TypeFailed, TypeLost, TypeRecovering, TypeRecovered, TypeSpawned,
 	TypeExec, TypeFiles, TypeScreenshot, TypeInput, TypeScreen,
 	TypeSecretCreated, TypeSecretUpdated, TypeSecretDeleted,
+	TypeEnvironmentCreated, TypeEnvironmentUpdated, TypeEnvironmentRegistered,
+	TypeEnvironmentOffline, TypeEnvironmentKeyed, TypeEnvironmentKeyRevoked,
+	TypeEnvironmentDeleted,
 }
 
 // Deliverable reports whether a journal row's type is one the sink receives.
