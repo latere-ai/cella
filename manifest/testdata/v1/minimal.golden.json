@@ -1,0 +1,31 @@
+{
+  "apiVersion": "cella.latere.ai/v1beta1",
+  "kind": "Sandbox",
+  "metadata": {
+    "name": "dev"
+  },
+  "spec": {
+    "environment": "default",
+    "image": "registry.example/base:1",
+    "workdir": "/workspace",
+    "resources": {
+      "cpu": "1",
+      "memory": "2Gi",
+      "disk": "10Gi"
+    },
+    "workspace": {
+      "path": "/workspace",
+      "source": "empty"
+    },
+    "network": {
+      "egress": {
+        "mode": "open"
+      }
+    },
+    "lifecycle": {
+      "autoStop": "15m",
+      "ttl": "24h",
+      "autoDelete": "72h"
+    }
+  }
+}

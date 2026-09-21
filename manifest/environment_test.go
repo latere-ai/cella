@@ -334,7 +334,7 @@ func TestDecodeEnvironment(t *testing.T) {
 			`{"apiVersion":"` + v1.APIVersion + `","kind":"Environment","metadata":{"name":"d"},"spec":{"driver":"k8s"}}`,
 			"application/json", "unknown_field"},
 		{"two documents", object + object, "application/json", "multi_document"},
-		{"another media type", object, "application/yaml", "unsupported_media_type"},
+		{"another media type", object, "text/plain", "unsupported_media_type"},
 		{"another apiVersion",
 			`{"apiVersion":"v1","kind":"Environment","metadata":{"name":"d"}}`, "application/json", "unsupported_version"},
 		{"another kind",

@@ -4,11 +4,8 @@
 package manifest
 
 import (
-	"bytes"
-	"encoding/json"
-	"io"
+	"errors"
 	"maps"
-	"mime"
 	"net"
 	"slices"
 	"strconv"
@@ -41,38 +38,22 @@ const MaxEnvironmentQueues = 32
 // them.
 var Isolations = []v1.Isolation{v1.IsolationContainer, v1.IsolationVM, v1.IsolationProcess, v1.IsolationNone}
 
-// DecodeEnvironment accepts exactly one JSON Environment manifest, refuses
-// unknown fields, and discards client status. It is Decode for the kind that
-// says where sandboxes run.
+// DecodeEnvironment reads one Environment manifest, in any syntax design 003
+// admits, and discards the status a client sent. It is Decode for the kind
+// that says where sandboxes run.
 func DecodeEnvironment(body []byte, contentType string) (v1.Environment, error) {
 	var obj v1.Environment
-	media, _, err := mime.ParseMediaType(contentType)
-	if err != nil || media != "application/json" {
-		return obj, fail("unsupported_media_type", "expected application/json")
-	}
-	dec := json.NewDecoder(bytes.NewReader(body))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&obj); err != nil {
-		code := "bad_request"
-		switch {
-		case strings.Contains(err.Error(), "unknown field"):
-			code = "unknown_field"
-		case strings.Contains(err.Error(), v1.CapacityAuto):
-			return obj, failAt("invalid_field", pathEnvironmentCapacity, "A capacity is an object or the word auto.")
+	if err := decode(body, contentType, v1.KindEnvironment, &obj); err != nil {
+		// The capacity decodes itself, so a value it refuses reaches here as
+		// a shape the schema could not read. The field is named, because a
+		// caller cannot find it in a decoder's own sentence.
+		var refusal *Error
+		if errors.As(err, &refusal) && refusal.Code == "bad_request" && strings.Contains(refusal.Detail, v1.CapacityAuto) {
+			return v1.Environment{}, failAt("invalid_field", pathEnvironmentCapacity, "A capacity is an object or the word auto.")
 		}
-		return obj, fail(code, err.Error())
-	}
-	var extra any
-	if err := dec.Decode(&extra); err != io.EOF {
-		return obj, fail("multi_document", "expected exactly one JSON object")
+		return v1.Environment{}, err
 	}
 	obj.Status = v1.EnvironmentStatus{}
-	if obj.APIVersion != v1.APIVersion {
-		return obj, fail("unsupported_version", "apiVersion must be "+v1.APIVersion)
-	}
-	if obj.Kind != v1.KindEnvironment {
-		return obj, fail("unsupported_kind", "kind must be "+v1.KindEnvironment)
-	}
 	return obj, nil
 }
 

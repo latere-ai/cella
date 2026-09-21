@@ -21,6 +21,9 @@ type Duration string
 // DurationNever disables the lifecycle rule it is written on.
 const DurationNever Duration = "never"
 
+// KindSandbox is the kind a Sandbox manifest declares.
+const KindSandbox = "Sandbox"
+
 // Sandbox describes a workspace and its server-owned runtime state.
 type Sandbox struct {
 	APIVersion string        `json:"apiVersion"`

@@ -1,0 +1,22 @@
+{
+  "apiVersion": "cella.latere.ai/v1beta1",
+  "kind": "Sandbox",
+  "metadata": {
+    "name": "anchored",
+    "labels": {
+      "team": "research"
+    },
+    "annotations": {
+      "team": "research"
+    }
+  },
+  "spec": {
+    "image": "registry.example/base:1",
+    "env": {
+      "LOG_LEVEL": "debug"
+    },
+    "lifecycle": {
+      "ttl": "24h"
+    }
+  }
+}

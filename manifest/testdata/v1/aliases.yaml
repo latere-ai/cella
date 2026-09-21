@@ -1,0 +1,16 @@
+# One document that uses an anchor and an alias. YAML carries them and the
+# decoded object does not, so this row proves the two syntaxes still agree.
+apiVersion: cella.latere.ai/v1beta1
+kind: Sandbox
+metadata:
+  name: anchored
+  labels: &labels
+    team: research
+  annotations:
+    <<: *labels
+spec:
+  image: registry.example/base:1
+  env: &env
+    LOG_LEVEL: debug
+  lifecycle:
+    ttl: 24h

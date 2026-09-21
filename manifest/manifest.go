@@ -7,11 +7,7 @@
 package manifest
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
-	"io"
-	"mime"
 	"path"
 	"strings"
 
@@ -56,34 +52,15 @@ func failPaths(code, detail string, paths []string) error {
 	return &Error{Code: code, Path: paths[0], Detail: detail, Paths: paths}
 }
 
-// Decode accepts exactly one JSON manifest, refuses unknown fields, and
-// discards client status before any authorization resource is constructed.
+// Decode reads one Sandbox manifest, in any syntax design 003 admits, and
+// discards the status a client sent before any authorization resource is
+// built from it.
 func Decode(body []byte, contentType string) (v1.Sandbox, error) {
 	var obj v1.Sandbox
-	media, _, err := mime.ParseMediaType(contentType)
-	if err != nil || media != "application/json" {
-		return obj, fail("unsupported_media_type", "expected application/json")
-	}
-	dec := json.NewDecoder(bytes.NewReader(body))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&obj); err != nil {
-		code := "bad_request"
-		if strings.Contains(err.Error(), "unknown field") {
-			code = "unknown_field"
-		}
-		return obj, fail(code, err.Error())
-	}
-	var extra any
-	if err := dec.Decode(&extra); err != io.EOF {
-		return obj, fail("multi_document", "expected exactly one JSON object")
+	if err := decode(body, contentType, v1.KindSandbox, &obj); err != nil {
+		return v1.Sandbox{}, err
 	}
 	obj.Status = v1.SandboxStatus{}
-	if obj.APIVersion != v1.APIVersion {
-		return obj, fail("unsupported_version", "apiVersion must be "+v1.APIVersion)
-	}
-	if obj.Kind != "Sandbox" {
-		return obj, fail("unsupported_kind", "kind must be Sandbox")
-	}
 	return obj, nil
 }
 

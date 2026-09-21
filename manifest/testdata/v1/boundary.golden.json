@@ -1,0 +1,42 @@
+{
+  "apiVersion": "cella.latere.ai/v1beta1",
+  "kind": "Sandbox",
+  "metadata": {
+    "name": "agent"
+  },
+  "spec": {
+    "environment": "default",
+    "image": "registry.example/base:1",
+    "workdir": "/workspace",
+    "resources": {
+      "cpu": "1",
+      "memory": "2Gi",
+      "disk": "10Gi"
+    },
+    "workspace": {
+      "path": "/workspace",
+      "source": "empty"
+    },
+    "network": {
+      "egress": {
+        "mode": "allowlist",
+        "allowedHosts": [
+          "pypi.org",
+          "*.pythonhosted.org"
+        ]
+      }
+    },
+    "mesh": {
+      "enabled": true,
+      "spawn": {
+        "budget": 4,
+        "depth": 2
+      }
+    },
+    "lifecycle": {
+      "autoStop": "15m",
+      "ttl": "never",
+      "autoDelete": "72h"
+    }
+  }
+}
