@@ -191,12 +191,12 @@ specs own. The conformance run of [[016-building-a-plane]]'s example.
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| Every manifest in `manifest/testdata/v1/valid/` resolves to its golden output and every one in `invalid/` is refused with the code and paths its golden names | `TestGoldenCorpus` | built |
-| The corpus covers every field of the `Sandbox` spec that resolves without a parent or an update, and every refusal code the corpus names is one of the error table's | `TestCorpusCoversTheSchema` | built |
-| The quantity parser agrees with the Kubernetes parser on every input it accepts, and each narrowing it makes is named | `FuzzQuantity` | built |
-| Every acceptance row of every spec whose State is not `not built` names test functions that exist in the module | `TestAcceptanceCriteriaNameRealTests` | built |
-| Every control row of [[013-security-and-threat-model]] names a test that exists or stands on an exact, non-stale pending list | `TestThreatModelControlsHaveTests` | built |
-| A workload token appears in no event, record, log, API answer or control plane file, and is read only from its own projection | `TestWorkloadTokenNeverLeavesItsSandbox` | built |
-| Every test `SECURITY.md` names exists and is a control of the model, and every commitment maps to a control row | `TestSecurityPolicyMatchesTheModel` | built |
-| The example plane compiles and imports nothing under `internal/` | `TestExamplePlaneBuilds` | built |
-| Every row of [[016-building-a-plane]]'s concerns table names a mechanism that exists in the tree | `TestConcernsTableIsGrounded` | built |
+| Every manifest in `manifest/testdata/v1/valid/` resolves to its golden output and every one in `invalid/` is refused with the code and paths its golden names | `TestGoldenCorpus` | not built |
+| The corpus covers every field of the `Sandbox` spec that resolves without a parent or an update, and every refusal code the corpus names is one of the error table's | `TestCorpusCoversTheSchema` | not built |
+| The quantity parser agrees with the Kubernetes parser on every input it accepts, and each narrowing it makes is named | `FuzzQuantity` | not built |
+| Every acceptance row of every spec whose State is not `not built` names test functions that exist in the module | `TestAcceptanceCriteriaNameRealTests` | not built |
+| Every control row of [[013-security-and-threat-model]] names a test that exists or stands on an exact, non-stale pending list | `TestThreatModelControlsHaveTests` | not built |
+| A workload token appears in no event, record, log, API answer or control plane file, and is read only from its own projection | `TestWorkloadTokenNeverLeavesItsSandbox` | not built |
+| Every test `SECURITY.md` names exists and is a control of the model, and every commitment maps to a control row | `TestSecurityPolicyMatchesTheModel` | not built |
+| The example plane compiles and imports nothing under `internal/` | `TestExamplePlaneBuilds` | not built |
+| Every row of [[016-building-a-plane]]'s concerns table names a mechanism that exists in the tree | `TestConcernsTableIsGrounded` | not built |
