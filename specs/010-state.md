@@ -9,7 +9,7 @@ depends_on:
 affects: [internal/store/, internal/config/, migrations/]
 effort: large
 created: 2026-09-12
-updated: 2026-09-20
+updated: 2026-09-21
 author: changkun
 ---
 
@@ -308,18 +308,18 @@ table ([[021-data-plane-workers]]); the `v1.Object` interface
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| Both stores pass one suite over every method of every interface; the memory store is exempt only from durability across a restart and the schema check | `TestStoreSuite` over memory and Postgres in a test container | built for `Desired`, `Observed`, `Journal`, `Values` and `Leases` ([[043-postgres-store]], [[046-secret-kind]]); the seams have no accessor yet |
-| Writes inside `Tx` commit together or not at all: a desired put plus a debit, and a desired put plus a count check, under a failure injected between them | `TestTxIsAtomic` | built ([[040-mesh-and-spawn]] closed the ledger half: a spawn's debit, the child's row and its record commit together) |
-| `Put` with a stale version is `ErrVersionConflict`; with the current version it advances it | `TestOptimisticConcurrency` | built ([[043-postgres-store]]) |
-| `(kind, owner, name)` is unique among live rows and reusable after delete | `TestNamesAreUniqueAmongLiveRows` | built ([[043-postgres-store]]) |
-| `Rebuild` for one environment replaces only that environment's observed rows and touches no `objects` row; a desired sandbox with no observed counterpart is reported `Lost` and keeps its `Queued` or `Recovering` status | `TestRebuildIsScopedAndKeepsStatus` | built ([[043-postgres-store]]) |
-| `Count` excludes `Deleting` and deleted rows | `TestCountExcludesDeleting` | built ([[043-postgres-store]]) |
+| Both stores pass one suite over every method of every interface; the memory store is exempt only from durability across a restart and the schema check | `TestSuiteHoldsTheMemoryAdapter` and `TestPostgresStore` over one `storetest` suite, the second in a test container | built for `Desired`, `Observed`, `Journal`, `Values` and `Leases` ([[043-postgres-store]], [[046-secret-kind]]); the seams have no accessor yet |
+| Writes inside `Tx` commit together or not at all: a desired put plus a debit, and a desired put plus a count check, under a failure injected between them | the `Transactions` case of `TestSuiteHoldsTheMemoryAdapter` and `TestPostgresStore`, `TestSpawnDebitIsAtomic` | built ([[040-mesh-and-spawn]] closed the ledger half: a spawn's debit, the child's row and its record commit together) |
+| `Put` with a stale version is `ErrVersionConflict`; with the current version it advances it | the `Versions` case of `TestSuiteHoldsTheMemoryAdapter` and `TestPostgresStore` | built ([[043-postgres-store]]) |
+| `(kind, owner, name)` is unique among live rows and reusable after delete | the `Names` case of `TestSuiteHoldsTheMemoryAdapter` and `TestPostgresStore` | built ([[043-postgres-store]]) |
+| `Rebuild` for one environment replaces only that environment's observed rows and touches no `objects` row; a desired sandbox with no observed counterpart is reported `Lost` and keeps its `Queued` or `Recovering` status | the `Observed` case of `TestSuiteHoldsTheMemoryAdapter` and `TestPostgresStore` | built ([[043-postgres-store]]) |
+| `Count` excludes `Deleting` and deleted rows | the `Count` case of `TestSuiteHoldsTheMemoryAdapter` and `TestPostgresStore` | built ([[043-postgres-store]]) |
 | A plaintext value is returned by `Open` alone; its only caller in the tree is the control plane's compile path; both stores hold ciphertext; `Rewrap` under a new key leaves every ciphertext byte unchanged and `Open` still works | `TestValuesAreConfined`, `TestRewrapRotatesTheKey` | built ([[043-postgres-store]], [[046-secret-kind]]); the confinement test parses every non-test file and holds `Values.Open` and `Controlled.OpenValue` to one caller each |
-| `Debit` at one remaining unit under contention yields one success; `Credit` restores it | `TestLedgerIsAtomic` | built ([[040-mesh-and-spawn]]), with the budget carried by the debit rather than held in the row: `Debit(parentID, budget)`, `Credit`, `Used` and `Forget`, and the count under eight racing debits |
-| `Pending` returns one event per object, oldest first, and holds later events behind a deferred one; `Drop` after the retry window; `ByObject` pages newest first; `Prune` respects retention | `TestJournal` | `Append`, `ByObject` and `Prune` built ([[043-postgres-store]]); delivery waits for [[009-events]] |
+| `Debit` at one remaining unit under contention yields one success; `Credit` restores it | the `Ledger` case of `TestSuiteHoldsTheMemoryAdapter` and `TestPostgresStore` | built ([[040-mesh-and-spawn]]), with the budget carried by the debit rather than held in the row: `Debit(parentID, budget)`, `Credit`, `Used` and `Forget`, and the count under eight racing debits |
+| `Pending` returns one event per object, oldest first, and holds later events behind a deferred one; `Drop` after the retry window; `ByObject` pages newest first; `Prune` respects retention | the `Journal` case of `TestSuiteHoldsTheMemoryAdapter` and `TestPostgresStore` | `Append`, `ByObject` and `Prune` built ([[043-postgres-store]]); delivery waits for [[009-events]] |
 | `Dequeue` orders by priority, fair share, arrival; capacity in use equals the sum over the named phases after a restart | `TestQueueOrder`, `TestCapacityIsDerived` | not built |
 | `Claim` redelivers an operation whose claimer's heartbeat lapsed, exactly once to a live worker | `TestOperationsRedeliver` | not built |
 | A schema ahead of the binary and a dirty migration each refuse to start naming the version | `TestSchemaGuards` | built ([[043-postgres-store]]) |
 | Every list and count query in the index list uses its index | `TestQueriesUseIndexes` with `EXPLAIN` | not built |
-| Two holders contend for one lease; one holds; the other acquires after the TTL lapses | `TestLeases` | built, with renewal at a third of the term and a release on Close ([[043-postgres-store]]) |
+| Two holders contend for one lease; one holds; the other acquires after the TTL lapses | the `Leases` case of `TestSuiteHoldsTheMemoryAdapter` and `TestPostgresStore` | built, with renewal at a third of the term and a release on Close ([[043-postgres-store]]) |
 | No package outside `internal/store` imports the Postgres driver or the migrator | `TestDriverIsConfined` | built ([[043-postgres-store]]) |

@@ -1,0 +1,12 @@
+{
+  "apiVersion": "cella.latere.ai/v1beta1",
+  "kind": "Sandbox",
+  "metadata": {
+    "name": "half-a-desktop"
+  },
+  "spec": {
+    "display": {
+      "width": 1280
+    }
+  }
+}

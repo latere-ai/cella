@@ -1,0 +1,9 @@
+{
+  "apiVersion": "cella.latere.ai/v1beta1",
+  "kind": "Sandbox",
+  "metadata": {"name": "open-with-a-deny-list"},
+  "spec": {
+    "command": ["/bin/sh", "-c", "sleep 60"],
+    "network": {"egress": {"mode": "open", "deniedHosts": ["metadata.example"]}}
+  }
+}

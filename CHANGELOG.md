@@ -6,6 +6,16 @@ refused before it is pushed.
 
 ## Unreleased
 
+- Two pages for whoever builds on Cella rather than only runs it.
+  `docs/plane.md` is how a platform sells sandboxes on top of the control
+  plane: the two doors, the three endpoints you write, what each concern
+  costs through either door, and a complete server under `examples/plane/`
+  that composes the packages behind an API of its own and compiles on every
+  push. `SECURITY.md` now carries what the project protects and what proves
+  it: the four commitments, one row per asset with the control that answers
+  it and the tests that hold the control to its word, and what is out of
+  scope.
+
 - The API is now an executable contract. `test/conformance` runs one case per
   rule the `/v1` API states against any server that claims to serve it, and
   prints what held, what failed with the request and the answer that

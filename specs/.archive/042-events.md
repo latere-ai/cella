@@ -10,7 +10,7 @@ depends_on:
 affects: [internal/events/, internal/store/, internal/api/, internal/config/, controller/, cmd/cellad/, specs/]
 effort: medium
 created: 2026-09-19
-updated: 2026-09-19
+updated: 2026-09-21
 author: changkun
 ---
 
@@ -366,7 +366,7 @@ delivery and exports the counts on its own type until that spec lands.
 | A canary command string, a canary file body and a secret-shaped value reach no record across an end-to-end run | `TestNoContentInEvents` | built |
 | `cellad serve` on the native driver delivers create, exec, files, stop and delete to a stub sink that verifies every signature, each once, in `seq` order per object, with labels | `TestEventsEndToEnd` | built |
 | A URL without a secret, a secret without a URL, and a non-loopback `http://` sink are start-up failures; the escape hatch admits the stub | `TestSinkStartupRules` | built |
-| `Pending` holds an object's later records behind a deferred one, `Acknowledge`, `Defer` and `Drop` move the row's columns, and both adapters agree | `TestJournalDelivery` in the store suite, over memory and Postgres | built |
+| `Pending` holds an object's later records behind a deferred one, `Acknowledge`, `Defer` and `Drop` move the row's columns, and both adapters agree | the store suite's `Delivery` case under `TestSuiteHoldsTheMemoryAdapter` and `TestPostgresStore` | built |
 
 ## Outcome
 

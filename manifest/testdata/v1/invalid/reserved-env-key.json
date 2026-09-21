@@ -1,0 +1,12 @@
+{
+  "apiVersion": "cella.latere.ai/v1beta1",
+  "kind": "Sandbox",
+  "metadata": {
+    "name": "reserved-env"
+  },
+  "spec": {
+    "env": {
+      "CELLA_TOKEN": "mine"
+    }
+  }
+}

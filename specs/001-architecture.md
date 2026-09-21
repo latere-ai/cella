@@ -6,7 +6,7 @@ depends_on: []
 affects: [manifest/, runtime/, controller/, egress/, internal/, cmd/cellad/, cmd/cella/, docs/]
 effort: medium
 created: 2026-09-12
-updated: 2026-09-20
+updated: 2026-09-21
 author: changkun
 ---
 
@@ -372,8 +372,8 @@ the packages ([[016-building-a-plane]]).
 | A manifest applied through the API and one handed to `manifest.Resolve` by an importer with the same options produce byte-identical resolved manifests | `TestAPIAndImporterResolveAgree`, comparing the `PUT` response body with `Resolve`'s output | not built |
 | A sandbox created on a directly driven environment and one on a worker's environment are indistinguishable through the API except by `status.environment`, `status.driver`, and `status.isolation` | conformance case `case001Indistinguishable` | the case is built and skips with its input named until there is a second environment to compare against ([[052-conformance-suite]], [[021-data-plane-workers]]) |
 | The control plane opens no connection toward a worker's host during the whole e2e tier | [[021-data-plane-workers]]'s `TestNoInboundToTheDataPlane` | not built |
-| `cellad` refuses to start with no issuer configured | `TestServeRefusesToStartWithoutAnIssuer` | built as `TestServeRefusesToStartWithoutIdentity`, whose first case is an empty `CELLA_OIDC_ISSUERS` ([[006-identity]]) |
+| `cellad` refuses to start with no issuer configured | `TestServeRefusesToStartWithoutIdentity` | built as `TestServeRefusesToStartWithoutIdentity`, whose first case is an empty `CELLA_OIDC_ISSUERS` ([[006-identity]]) |
 | With the authorizer URL set and the endpoint down, every request is refused with `authorizer_unavailable` | conformance case `case006AuthorizerUnavailable` | passing over the read, the list, the create and the delete, with the server answering again when the endpoint returns ([[052-conformance-suite]]) |
 | After `cellad` restarts with Postgres and the data plane has lost one of three sandboxes, `GET /v1/sandboxes` lists three and the lost one returns to `Running` with its volume | e2e tier of [[012-test-stubs-and-tiers]] | not built, [[010-state]] |
-| A canary secret value appears in no sandbox environment, file, event, or log across the e2e tier | `TestSecretValuesNeverEnterASandbox` | built ([[046-secret-kind]]): the canary is followed through the sandbox's environment and files, the control plane's data directory, the delivered events, the connection records and both processes' logs |
-| A child spawned with one more allowed host than its parent is refused with `boundary_exceeded` | [[022-mesh-and-spawn]]'s `TestSpawnBoundary` | built ([[040-mesh-and-spawn]]) as `TestBoundaryCheck`'s host case, refusing at `spec.network.egress.allowedHosts`, and over the API as `TestSpawnBoundaryOverTheAPI` |
+| A canary secret value appears in no sandbox environment, file, event, or log across the e2e tier | `TestSecretValuesNeverEnterASandbox`, `TestWorkloadTokenNeverLeavesItsSandbox` | built ([[046-secret-kind]], [[056-contract-evidence]]): the secret value and the workload token are each followed through the sandbox's environment and files, the control plane's data directory, the delivered events, the connection records and both processes' logs |
+| A child spawned with one more allowed host than its parent is refused with `boundary_exceeded` | [[022-mesh-and-spawn]]'s boundary check, `TestBoundaryCheck` and `TestSpawnBoundaryOverTheAPI` | built ([[040-mesh-and-spawn]]) as `TestBoundaryCheck`'s host case, refusing at `spec.network.egress.allowedHosts`, and over the API as `TestSpawnBoundaryOverTheAPI` |

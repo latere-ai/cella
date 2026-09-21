@@ -1,0 +1,8 @@
+{
+  "code": "exclusive_fields",
+  "path": "spec.network.egress.mode",
+  "paths": [
+    "spec.network.egress.mode",
+    "spec.network.egress.allowedHosts"
+  ]
+}
