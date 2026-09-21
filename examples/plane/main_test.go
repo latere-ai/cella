@@ -369,3 +369,14 @@ func TestThePlanIsACeilingOnCount(t *testing.T) {
 		t.Fatalf("the create past the plan answered %d %s", status, answer)
 	}
 }
+
+// TestAnAnswerThePlaneCannotRenderIsAFailure: the status is written after
+// the document, so a body that does not encode is a 500 and not a 200 with
+// nothing after it.
+func TestAnAnswerThePlaneCannotRenderIsAFailure(t *testing.T) {
+	w := httptest.NewRecorder()
+	write(w, http.StatusOK, make(chan int))
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("answered %d %s", w.Code, w.Body)
+	}
+}

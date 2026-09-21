@@ -6,6 +6,7 @@ package manifest
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"go/ast"
 	"go/parser"
@@ -223,7 +224,7 @@ func TestGoldenCorpus(t *testing.T) {
 			var known *Error
 			if err == nil {
 				t.Fatalf("%s resolved; the corpus holds it as a refusal", input)
-			} else if !asManifestError(err, &known) {
+			} else if !errors.As(err, &known) {
 				t.Fatalf("%s failed with %v, which is not a contract error", input, err)
 			}
 			encoded, err := json.MarshalIndent(corpusRefusal{Code: known.Code, Path: known.Path, Paths: known.Paths}, "", "  ")
@@ -233,16 +234,6 @@ func TestGoldenCorpus(t *testing.T) {
 			compareGolden(t, input, encoded)
 		})
 	}
-}
-
-// asManifestError is errors.As without the import, kept local so the corpus
-// reads the one error type this package returns.
-func asManifestError(err error, target **Error) bool {
-	known, ok := err.(*Error)
-	if ok {
-		*target = known
-	}
-	return ok
 }
 
 // TestCorpusCoversTheSchema holds the corpus to its purpose. Every field of

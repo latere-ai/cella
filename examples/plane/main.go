@@ -42,7 +42,7 @@ func main() {
 		Root:  value("PLANE_DATA_DIR", "./plane-data"),
 		Image: value("PLANE_IMAGE", "registry.example/base:1"),
 	}, os.Stdout); err != nil {
-		fmt.Fprintln(os.Stderr, "plane:", err)
+		_, _ = fmt.Fprintln(os.Stderr, "plane:", err)
 		os.Exit(1)
 	}
 }
@@ -85,7 +85,7 @@ func run(ctx context.Context, cfg config, out io.Writer) error {
 	}
 	// The listener is opened before the address is printed, so a port of
 	// zero prints the port the kernel gave and a caller can find the plane.
-	listener, err := net.Listen("tcp", cfg.Addr)
+	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", cfg.Addr)
 	if err != nil {
 		return fmt.Errorf("listening on %s: %w", cfg.Addr, err)
 	}
@@ -95,7 +95,7 @@ func run(ctx context.Context, cfg config, out io.Writer) error {
 		defer cancel()
 		_ = server.Shutdown(shutdown)
 	}()
-	fmt.Fprintln(out, "plane listening on", listener.Addr())
+	_, _ = fmt.Fprintln(out, "plane listening on", listener.Addr())
 	if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
@@ -316,7 +316,14 @@ func statusFor(code string) int {
 }
 
 func write(w http.ResponseWriter, status int, body any) {
+	// The document is rendered before the status is written, so an answer
+	// this plane cannot encode is a 500 and not a 200 with half a body.
+	document, err := json.Marshal(body)
+	if err != nil {
+		http.Error(w, "the plane could not render its answer", http.StatusInternalServerError)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body)
+	_, _ = w.Write(document)
 }
