@@ -145,6 +145,16 @@ func New(o Options) (http.Handler, error) {
 	h.stream("GET /v1/sandboxes/{id}/dial/{port}", h.dial)
 	h.stream("GET /v1/sandboxes/{id}/screenshot", h.screenshot)
 	h.stream("GET /v1/sandboxes/{id}/screen", h.screen)
+	// The three routes an environment key reaches are answered before the
+	// mux, because the key names an environment and no route that decides on
+	// a subject may be reached with one. They are recorded here all the same:
+	// the record is what this server serves, and the API document is held to
+	// it whichever side of the mux answers.
+	h.patterns = append(h.patterns,
+		"GET /v1/environments/{id}/operations",
+		"GET /v1/environments/{id}/egress",
+		"POST /v1/environments/{id}/workers",
+	)
 	return h, nil
 }
 

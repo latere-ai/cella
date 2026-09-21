@@ -2,7 +2,6 @@
   "note": "The cases this repository's own server fails today. Each names a route or a rule of the API design that is not built yet; the case stays as it is and the gap is closed in the server. A declared case that passes fails the run, so a line here cannot outlive its gap.",
   "cases": {
     "case003ContentTypes": "the decoder takes application/json only; a YAML body is refused with unsupported_media_type",
-    "case008NameOnPathAndBody": "PUT /v1/sandboxes/{name} is not served, so apply by name and its name rule have no route",
-    "case008PublicDocuments": "/openapi.yaml is not generated or served; the key set is"
+    "case008NameOnPathAndBody": "PUT /v1/sandboxes/{name} is not served, so apply by name and its name rule have no route"
   }
 }

@@ -27,6 +27,7 @@ import (
 	"latere.ai/x/pkg/health"
 	"latere.ai/x/pkg/otel"
 
+	apidoc "latere.ai/x/cella/api"
 	"latere.ai/x/cella/controller"
 	"latere.ai/x/cella/internal/admission"
 	"latere.ai/x/cella/internal/api"
@@ -468,6 +469,10 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	// against, so a platform or a third service trusts a sandbox without
 	// asking cellad (spec 006).
 	public.Handle("GET "+auth.JWKSPath, identity.Signer.JWKS())
+	// The second public document of design 008: the description a client
+	// generator builds from. It carries no credential either, because a
+	// reader of the contract has none yet.
+	public.Handle("GET "+apidoc.Path, apidoc.Handler())
 	public.HandleFunc("GET /{$}", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = fmt.Fprintln(w, version.String())
