@@ -378,17 +378,18 @@ func (h *handler) drive(r *http.Request, conn *websocket.Conn, w *frameWriter, s
 			}
 		case frame := <-frames:
 			_ = conn.SetReadDeadline(time.Now().Add(idleTimeout))
-			if !h.apply(r, w, stream, obj, frame) {
+			if !h.applyFrame(r, w, stream, obj, frame) {
 				return
 			}
 		}
 	}
 }
 
-// apply carries out one client frame and reports whether the session goes on.
+// applyFrame carries out one client frame and reports whether the session
+// goes on.
 // Every batch stamps activity, which the controller coalesces per sandbox, so
 // a session holds its sandbox away from the idle rule while it is used.
-func (h *handler) apply(r *http.Request, w *frameWriter, stream runtime.Session, obj v1.Sandbox, frame inbound) bool {
+func (h *handler) applyFrame(r *http.Request, w *frameWriter, stream runtime.Session, obj v1.Sandbox, frame inbound) bool {
 	switch frame.kind {
 	case websocket.BinaryMessage:
 		if len(frame.data) == 0 {

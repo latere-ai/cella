@@ -39,6 +39,26 @@ paths:
           description: The answer this route serves.
         default:
           $ref: "#/components/responses/Error"
+  /v1/sandboxes/{name}:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        description: The object's name, which the apply writes under.
+        schema:
+          type: string
+    put:
+      operationId: applySandbox
+      summary: Apply a sandbox by name.
+      description: >-
+        A create when the name is free and an update when the caller holds it.
+        A body naming another object is refused at metadata.name.
+        Authorized as `sandbox.create` or `sandbox.update`.
+      responses:
+        "200":
+          description: The answer this route serves.
+        default:
+          $ref: "#/components/responses/Error"
   /v1/sandboxes/{id}:
     parameters:
       - name: id

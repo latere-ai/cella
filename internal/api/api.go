@@ -115,6 +115,7 @@ func New(o Options) (http.Handler, error) {
 	h.handle("GET /v1/sandboxes/{id}/egress", h.egressRecords)
 	h.handle("POST /v1/sandboxes", h.create)
 	h.handle("GET /v1/sandboxes", h.list)
+	h.handle("PUT /v1/sandboxes/{name}", h.apply)
 	h.handle("GET /v1/sandboxes/{id}", h.item)
 	h.handle("DELETE /v1/sandboxes/{id}", h.item)
 	h.handle("POST /v1/sandboxes/{id}/{verb}", h.item)
@@ -288,15 +289,105 @@ func (h *handler) resolveOptions(w http.ResponseWriter, r *http.Request) (manife
 	return o, nil
 }
 
+// create serves POST /v1/sandboxes: a create whose name the body carries or
+// the server generates.
 func (h *handler) create(w http.ResponseWriter, r *http.Request) {
-	body, err := h.readBody(w, r)
+	h.createNamed(w, r, "")
+}
+
+// apply serves PUT /v1/sandboxes/{name}: a create when the name is free and
+// an update when the caller already holds it, which is the grammar every kind
+// of this API shares. The name is the caller's own namespace, so a name
+// another subject holds is free here.
+func (h *handler) apply(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	existing, err := h.Controller.Get(r.Context(), name, caller(r).Subject)
+	if errors.Is(err, controller.ErrNotFound) {
+		h.createNamed(w, r, name)
+		return
+	}
 	if err != nil {
 		respondError(w, err)
 		return
 	}
+	h.update(w, r, existing)
+}
+
+// update is the update half of an apply. The manifest is resolved against the
+// object that exists, which is what refuses an immutable field and holds a
+// workload to the boundary it was given, and the accepted result becomes
+// desired state.
+func (h *handler) update(w http.ResponseWriter, r *http.Request, existing v1.Sandbox) {
+	obj, ok := h.applyBody(w, r, existing.Metadata.Name)
+	if !ok {
+		return
+	}
+	options, err := h.resolveOptions(w, r)
+	if err != nil {
+		respondError(w, err)
+		return
+	}
+	options.Existing = &existing
+	// A workload applying a name its owner already holds is updating that
+	// object and not spawning a child, which is what design 008 says of an
+	// existing name.
+	options.Parent = nil
+	obj, _, err = manifest.ResolveNativeWith(r.Context(), obj, options)
+	if err != nil {
+		respondError(w, err)
+		return
+	}
+	obj.Status = existing.Status
+	res := resource(obj)
+	res.Fields["proposed"] = map[string]any{"owner": obj.Status.Owner, "metadata": obj.Metadata, "spec": obj.Spec}
+	if _, err = h.decide(r, authorizer.ActionSandboxUpdate, res); err != nil {
+		respondError(w, err)
+		return
+	}
+	stored, err := h.Controller.Update(r.Context(), obj)
+	if err != nil {
+		respondError(w, err)
+		return
+	}
+	respond(w, http.StatusOK, stored)
+}
+
+// applyBody reads one manifest and holds it to the name the route named. A
+// body that names another object is refused at the field, never renamed, so
+// an apply writes the object the path says and no other. An empty name on a
+// named route takes the path's, which is what lets one manifest be applied
+// under several names.
+func (h *handler) applyBody(w http.ResponseWriter, r *http.Request, name string) (v1.Sandbox, bool) {
+	body, err := h.readBody(w, r)
+	if err != nil {
+		respondError(w, err)
+		return v1.Sandbox{}, false
+	}
 	obj, err := manifest.Decode(body, r.Header.Get("Content-Type"))
 	if err != nil {
 		respondError(w, err)
+		return v1.Sandbox{}, false
+	}
+	if name == "" {
+		return obj, true
+	}
+	if obj.Metadata.Name == "" {
+		obj.Metadata.Name = name
+	}
+	if obj.Metadata.Name != name {
+		respondError(w, &manifest.Error{Code: "invalid_field", Path: "metadata.name",
+			Detail: "the path names " + name + " and the body names " + obj.Metadata.Name})
+		return v1.Sandbox{}, false
+	}
+	return obj, true
+}
+
+// createNamed is the create half of both routes. The name is the route's
+// where it named one and empty on the collection, where the body carries it
+// or the server generates one.
+func (h *handler) createNamed(w http.ResponseWriter, r *http.Request, name string) {
+	obj, ok := h.applyBody(w, r, name)
+	if !ok {
 		return
 	}
 	options, err := h.resolveOptions(w, r)
@@ -774,8 +865,14 @@ func errorEnvelope(err error, requestID string) (int, httpjson.Error) {
 		message = "The sandbox has no spawn budget left."
 	}
 	details := map[string]any{"request_id": requestID, "detail": fmt.Sprint(err)}
-	if me != nil && len(me.Paths) > 0 {
+	// Design 008 carries paths as a list for every code that names fields.
+	// A refusal naming one field names it in the same member as a refusal
+	// naming several, so a client reads one shape.
+	switch {
+	case me != nil && len(me.Paths) > 0:
 		details["paths"] = me.Paths
+	case me != nil && me.Path != "":
+		details["paths"] = []string{me.Path}
 	}
 	return status, httpjson.Error{Code: code, Message: message, Details: details}
 }
