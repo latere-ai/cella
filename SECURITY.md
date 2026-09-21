@@ -29,8 +29,7 @@ yet; the first one is `v0.1.0`.
 
 Each row is an asset, the control that protects it, and the tests in this
 repository that hold the control to its word. A control without a test is a
-claim, so the tests are named here and a rename that leaves this table
-behind fails the build.
+claim, so every control names the test you can read and run yourself.
 
 | Asset | Control | Proved by |
 |---|---|---|

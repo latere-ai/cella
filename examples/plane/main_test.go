@@ -297,8 +297,8 @@ func TestTheRootIsWhereTheStateGoes(t *testing.T) {
 	}
 }
 
-// TestTheAddressIsTheOnesTheOperatorNamed: an address already taken is a
-// start-up failure and not a silent one.
+// TestTheAddressMustBeFree: an address already taken is a start-up failure
+// and not a silent one.
 func TestTheAddressMustBeFree(t *testing.T) {
 	base := start(t, config{Image: "registry.example/base:1"})
 	taken := strings.TrimPrefix(base, "http://")
