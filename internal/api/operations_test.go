@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -37,7 +38,7 @@ func archive(t *testing.T, name, body string) []byte {
 	}
 	return b.Bytes()
 }
-func (f *fixture) upload(path, token, media string, body []byte, status int) {
+func (f *fixture) upload(path, token, media string, body []byte, status int) []byte {
 	f.t.Helper()
 	req, err := http.NewRequest(http.MethodPut, f.url+path, bytes.NewReader(body))
 	if err != nil {
@@ -54,6 +55,7 @@ func (f *fixture) upload(path, token, media string, body []byte, status int) {
 	if res.StatusCode != status {
 		f.t.Fatalf("upload status %d want %d: %s", res.StatusCode, status, b)
 	}
+	return b
 }
 func TestWorkspaceFilesEndToEnd(t *testing.T) {
 	f := setup(t, nil)
@@ -255,5 +257,34 @@ func TestActivityIsStamped(t *testing.T) {
 	f.request("GET", "/v1/sandboxes/"+executed.Status.ID+"/logs", f.alice, "", 200)
 	if got := stamps.stamped(); len(got) != 2 {
 		t.Fatalf("a log read stamped activity: %v", got)
+	}
+}
+
+// TestUploadsSpoolUnderTheConfiguredDirectory: the archive is written to the
+// spool directory the handler was given and to nothing else, because the
+// operating system's temp dir is not writable everywhere cellad runs (a
+// container with a read-only root filesystem), and the spool is gone when
+// the request ends.
+func TestUploadsSpoolUnderTheConfiguredDirectory(t *testing.T) {
+	f := setup(t, nil)
+	obj := f.sandbox("spooled")
+	base := "/v1/sandboxes/" + obj.Status.ID + "/files"
+	f.upload(base+"?dest=/workspace", f.alice, "application/x-tar", archive(t, "spooled.txt", "spooled"), 204)
+	left, err := filepath.Glob(filepath.Join(f.h.(*handler).SpoolDir, "cella-upload-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(left) != 0 {
+		t.Fatalf("the spool kept %v after the request ended", left)
+	}
+
+	// A spool directory that cannot be written refuses the upload with the
+	// environment's unavailability code rather than a partial extraction,
+	// which is what the read-only root filesystem produced before the
+	// directory was configurable.
+	f.h.(*handler).SpoolDir = filepath.Join(t.TempDir(), "missing")
+	body := f.upload(base+"?dest=/workspace", f.alice, "application/x-tar", archive(t, "unspooled.txt", "unspooled"), 503)
+	if !strings.Contains(string(body), "driver_unavailable") {
+		t.Fatalf("an unwritable spool answered %s", body)
 	}
 }

@@ -47,6 +47,12 @@ type Options struct {
 	Authorizer     *auth.Authorizer
 	MaxBodyBytes   int64
 	MaxUploadBytes int64
+	// SpoolDir is where an archive upload is written before it is extracted,
+	// so the size cap is checked over the whole body. It must be writable
+	// where the process runs: a container with a read-only root filesystem
+	// has no writable temp dir, so cellad points it under its data dir.
+	// Empty means the operating system's temp dir.
+	SpoolDir string
 	// Egress is the environment's gateways. It is optional: with none, the
 	// sync stream answers not found and a sandbox's records are empty.
 	Egress *EgressHub

@@ -89,7 +89,7 @@ func setupDriver(t *testing.T, policy authz.Authorizer, wrap func(runtime.Driver
 	rec := &apiRecorder{}
 	h, err := New(Options{
 		Controller: c, Verifier: verifier, Authorizer: auth.NewAuthorizer(policy),
-		Metrics: rec, Log: slog.New(slog.DiscardHandler),
+		Metrics: rec, Log: slog.New(slog.DiscardHandler), SpoolDir: t.TempDir(),
 	})
 	if err != nil {
 		t.Fatal(err)

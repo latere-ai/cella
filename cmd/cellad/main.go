@@ -406,9 +406,13 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	if err != nil {
 		return fail(stderr, err)
 	}
+	spool := filepath.Join(cfg.DataDir, "spool")
+	if err := os.MkdirAll(spool, 0o750); err != nil {
+		return fail(stderr, fmt.Errorf("creating the upload spool directory: %w", err))
+	}
 	handler, err := api.New(api.Options{
 		Controller: control, Verifier: identity.Verifier, Authorizer: identity.Authorizer,
-		MaxBodyBytes: cfg.MaxBodyBytes, MaxUploadBytes: cfg.MaxUploadBytes,
+		MaxBodyBytes: cfg.MaxBodyBytes, MaxUploadBytes: cfg.MaxUploadBytes, SpoolDir: spool,
 		Egress: hub, Events: emitter, Keys: keys, Workers: workers,
 		Admit: admit, Defaults: manifest.Defaults{Image: cfg.Admission.DefaultImage},
 		Metrics: registry,

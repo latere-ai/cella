@@ -68,9 +68,12 @@ func (h *handler) files(w http.ResponseWriter, r *http.Request) {
 		// Validate total request size before extraction begins. A tar reader may stop
 		// at its terminator without reading an oversized suffix, so a reader cap alone
 		// would not enforce the HTTP upload limit or prevent partial writes.
-		spool, err := os.CreateTemp("", "cella-upload-*")
+		spool, err := os.CreateTemp(h.SpoolDir, "cella-upload-*")
 		if err != nil {
-			respondError(w, err)
+			// The spool is the control plane's own disk. Its failure is a
+			// 503 to retry, never the object's absence a raw path error
+			// would be read as.
+			respondError(w, &manifest.Error{Code: "driver_unavailable", Detail: "spooling the upload: " + err.Error()})
 			return
 		}
 		defer func() { _ = os.Remove(spool.Name()) }()
