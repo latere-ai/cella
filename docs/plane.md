@@ -31,6 +31,7 @@ package main
 
 import (
 	"context"
+	"log"
 	"net/http"
 	"os"
 	"time"
@@ -53,11 +54,12 @@ func (plans) Decide(_ context.Context, req authz.Request) (authz.Decision, error
 }
 
 func main() {
-	http.ListenAndServe(":8081", server.New(server.Options{
+	endpoint := server.New(server.Options{
 		Bearer:     os.Getenv("AUTHZ_TOKEN"),
 		Vocabulary: authorizer.Vocabulary(),
 		Decider:    plans{},
-	}))
+	})
+	log.Fatal(http.ListenAndServe(":8081", endpoint))
 }
 ```
 
