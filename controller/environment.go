@@ -409,7 +409,7 @@ func (c *Controller) environmentTick(ctx context.Context) {
 // fake clock.
 func (c *Controller) Phases(ctx context.Context) error {
 	var failed error
-	for _, name := range c.environmentNames() {
+	for _, name := range c.environmentsHeld() {
 		if err := c.phaseOf(ctx, name); err != nil {
 			failed = errors.Join(failed, fmt.Errorf("the phase of %s: %w", name, err))
 		}
@@ -426,7 +426,11 @@ func (c *Controller) phaseOf(ctx context.Context, name string) error {
 	}
 	d, err := c.driverFor(name)
 	if err != nil {
-		return err
+		// The object is held and nothing drives it, which is a control plane
+		// built with no seam for a worker's driver. There is nothing to
+		// observe, so the phase the object was applied with stands and every
+		// act on a sandbox of it is ErrNoEnvironment.
+		return nil
 	}
 	next := obj
 	next.Status.Driver = d.Name()

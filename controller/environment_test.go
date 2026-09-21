@@ -699,3 +699,343 @@ func phase(t *testing.T, c *Controller, name string) string {
 	}
 	return obj.Status.Phase
 }
+
+// TestTheRegistryAnswersForAnAbsentEnvironment: every accessor answers
+// nothing rather than reaching for a driver that is not there, so a caller
+// gated on a capability is refused before an act is attempted.
+func TestTheRegistryAnswersForAnAbsentEnvironment(t *testing.T) {
+	c, here, _, _ := twoEnvironments(t, Options{Pool: v1.PoolSpec{Size: 0}})
+	switch {
+	case c.DriverName() != here.Name():
+		t.Errorf("the default reports the driver %q", c.DriverName())
+	case c.Isolation() != here.Isolation():
+		t.Errorf("the default reports isolation %q", c.Isolation())
+	case !c.Capabilities().Equal(here.Capabilities()):
+		t.Errorf("the default reports capabilities %+v", c.Capabilities())
+	case c.DriverNameOf("us-east") != "":
+		t.Errorf("an absent environment reports the driver %q", c.DriverNameOf("us-east"))
+	case c.IsolationOf("us-east") != driver.IsolationNone:
+		t.Errorf("an absent environment reports isolation %q", c.IsolationOf("us-east"))
+	case !c.CapabilitiesOf("us-east").Equal(driver.Capabilities{}):
+		t.Errorf("an absent environment declares %+v", c.CapabilitiesOf("us-east"))
+	}
+	if pool, capacity := c.poolOf("us-east"); pool.Size != 0 || capacity != 0 {
+		t.Errorf("an absent environment keeps a pool of %+v under %d", pool, capacity)
+	}
+	if names := c.ListEnvironments(); len(names) != 1 || names[0].Metadata.Name != "default" {
+		t.Errorf("the list answers %+v", names)
+	}
+}
+
+// TestAControlPlaneThatStoresNoEnvironment: a store without the kind serves
+// the environment this cellad drives itself and refuses to apply another,
+// which is a capability rather than a failure somewhere below.
+func TestAControlPlaneThatStoresNoEnvironment(t *testing.T) {
+	clock := newClock()
+	d := newDriver(clock)
+	c, err := Open(Options{
+		Store: &plainStore{objects: map[string]v1.Sandbox{}}, Driver: d,
+		Environment: "default", Clock: clock, Log: slog.New(slog.DiscardHandler),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+	if _, err = c.GetEnvironment("default"); err != nil {
+		t.Errorf("the environment this cellad drives is not readable: %v", err)
+	}
+	if _, _, err = c.ApplyEnvironment(t.Context(), environmentManifest("eu-gpu"), 0); !errors.Is(err, ErrNoEnvironmentStore) {
+		t.Errorf("an apply answered %v", err)
+	}
+	if err = c.DeleteEnvironment(t.Context(), "eu-gpu"); !errors.Is(err, ErrNoEnvironmentStore) {
+		t.Errorf("a delete answered %v", err)
+	}
+	// Placement still works: the environment this process drives is the one
+	// every manifest that names none gets.
+	if _, err = c.Create(t.Context(), workspace(), "alice", 0); err != nil {
+		t.Errorf("a create on a control plane with no environment store failed: %v", err)
+	}
+}
+
+// environmentManifest is one worker environment as a caller applies it.
+func environmentManifest(name string) v1.Environment {
+	return v1.Environment{
+		APIVersion: v1.APIVersion, Kind: v1.KindEnvironment,
+		Metadata: v1.Metadata{Name: name, Labels: map[string]string{"region": "eu"},
+			Annotations: map[string]string{"note": "kept"}},
+		Spec: v1.EnvironmentSpec{
+			Mode: v1.EnvironmentWorker, Isolation: v1.IsolationNone,
+			Capacity:   v1.Capacity{CPU: "8", Sandboxes: 10},
+			Scheduling: v1.SchedulingSpec{Mode: v1.SchedulingDirect, Queues: []string{"default"}, DefaultQueue: "default"},
+			Pool:       v1.PoolSpec{Display: &v1.Display{Width: 1280, Height: 800}},
+		},
+	}
+}
+
+// TestApplyWithoutADriverSeam: a control plane that stores environments but
+// has no way to build a worker's driver refuses the apply rather than storing
+// an environment nothing serves.
+func TestApplyWithoutADriverSeam(t *testing.T) {
+	clock := newClock()
+	d := newDriver(clock)
+	c, err := Open(Options{
+		DataDir: t.TempDir(), Driver: d, Environment: "default",
+		Clock: clock, Log: slog.New(slog.DiscardHandler),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+	if _, _, err = c.ApplyEnvironment(t.Context(), environmentManifest("eu-gpu"), 0); !errors.Is(err, ErrNoEnvironmentStore) {
+		t.Errorf("an apply with no driver seam answered %v", err)
+	}
+}
+
+// TestAStoredEnvironmentComesBackWithoutADriverSeam: a control plane that
+// restarts without the seam holds the object and drives nothing through it,
+// so an act on a sandbox of that environment names the environment rather
+// than failing on a driver that is not there.
+func TestAStoredEnvironmentComesBackWithoutADriverSeam(t *testing.T) {
+	dir := t.TempDir()
+	c, _, _, _ := twoEnvironments(t, Options{DataDir: dir})
+	applyWorker(t, c, "eu-gpu")
+	if err := c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	clock := newClock()
+	again, err := Open(Options{
+		DataDir: dir, Driver: newDriver(clock), Environment: "default",
+		Clock: clock, Log: slog.New(slog.DiscardHandler),
+	})
+	if err != nil {
+		t.Fatalf("the control plane did not open: %v", err)
+	}
+	t.Cleanup(func() { _ = again.Close() })
+	if _, err = again.GetEnvironment("eu-gpu"); err != nil {
+		t.Errorf("the stored environment did not come back: %v", err)
+	}
+	// Nothing can be placed there: the environment is Pending because no
+	// data plane reported, and it has no driver to report through either.
+	obj := workspace()
+	obj.Spec.Environment = "eu-gpu"
+	if _, err = again.Create(t.Context(), obj, "alice", 0); !errors.Is(err, ErrEnvironmentUnavailable) {
+		t.Errorf("a create on an environment with no driver answered %v", err)
+	}
+	if _, err = again.driverFor("eu-gpu"); !errors.Is(err, ErrNoEnvironment) {
+		t.Errorf("the environment answered a driver: %v", err)
+	}
+}
+
+// TestTheEnvironmentLoopTicks: the loop runs its first pass at once and then
+// on every tick, and stops with the context.
+func TestTheEnvironmentLoopTicks(t *testing.T) {
+	c, _, w, clock := twoEnvironments(t, Options{})
+	applyWorker(t, c, "eu-gpu")
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() { defer close(done); c.RunEnvironments(ctx) }()
+	w.registrations = []Registration{{Worker: "wrk_1", Driver: "native", LastHeartbeat: clock.Now(), Connected: true}}
+	clock.ticks <- clock.Now()
+	waitFor(t, "the loop to write the phase", func() bool {
+		obj, err := c.GetEnvironment("eu-gpu")
+		return err == nil && obj.Status.Phase == v1.EnvironmentReady && obj.Status.Driver == "native"
+	})
+	cancel()
+	<-done
+	if !clock.tickerStopped() {
+		t.Error("the loop left its ticker running")
+	}
+}
+
+// TestTheEnvironmentLoopSurvivesALeaseThatFails: a lease the store cannot
+// answer holds the tick rather than ending the loop.
+func TestTheEnvironmentLoopSurvivesALeaseThatFails(t *testing.T) {
+	c, _, _, _ := twoEnvironments(t, Options{Lease: failingLease{}})
+	applyWorker(t, c, "eu-gpu")
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() { defer close(done); c.RunEnvironments(ctx) }()
+	cancel()
+	<-done
+	if phase(t, c, "eu-gpu") != v1.EnvironmentPending {
+		t.Errorf("a tick that could not take the lease wrote %s", phase(t, c, "eu-gpu"))
+	}
+}
+
+// failingLease is a store that cannot answer whether this replica holds one.
+type failingLease struct{}
+
+func (failingLease) Acquire(context.Context, string, time.Duration) (bool, error) {
+	return false, errors.New("the lease table is unavailable")
+}
+
+// TestTheLookupCarriesWhatThePhaseLoopWrote: an environment the loop has
+// reached resolves against the status it wrote, and one it has not against
+// the driver behind it.
+func TestTheLookupCarriesWhatThePhaseLoopWrote(t *testing.T) {
+	c, _, w, _ := twoEnvironments(t, Options{})
+	applyWorker(t, c, "eu-gpu")
+	before, err := c.Lookup().Environment(t.Context(), "eu-gpu")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before.Status.Isolation == "" {
+		t.Errorf("an environment the loop has not reached resolves against nothing: %+v", before.Status)
+	}
+	ready(t, c, w, "eu-gpu")
+	after, err := c.Lookup().Environment(t.Context(), "eu-gpu")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Status.Phase != v1.EnvironmentReady {
+		t.Errorf("the lookup answers phase %q", after.Status.Phase)
+	}
+}
+
+// TestAnEnvironmentIsClonedOutOfTheRegistry: what a caller reads carries
+// every reference the stored object holds, and writing through it changes
+// nothing the registry keeps.
+func TestAnEnvironmentIsClonedOutOfTheRegistry(t *testing.T) {
+	c, _, _, _ := twoEnvironments(t, Options{})
+	applied, _, err := c.ApplyEnvironment(t.Context(), environmentManifest("eu-gpu"), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	applied.Metadata.Labels["region"] = "us"
+	applied.Metadata.Annotations["note"] = "changed"
+	applied.Spec.Scheduling.Queues[0] = "other"
+	applied.Spec.Pool.Display.Width = 1920
+	read, err := c.GetEnvironment("eu-gpu")
+	if err != nil {
+		t.Fatal(err)
+	}
+	switch {
+	case read.Metadata.Labels["region"] != "eu":
+		t.Errorf("a caller's write reached the registry's labels: %v", read.Metadata.Labels)
+	case read.Metadata.Annotations["note"] != "kept":
+		t.Errorf("a caller's write reached the annotations: %v", read.Metadata.Annotations)
+	case read.Spec.Scheduling.Queues[0] != "default":
+		t.Errorf("a caller's write reached the queues: %v", read.Spec.Scheduling.Queues)
+	case read.Spec.Pool.Display.Width != 1280:
+		t.Errorf("a caller's write reached the pool's display: %+v", read.Spec.Pool.Display)
+	}
+}
+
+// TestTheSnapshotStoreHoldsTheEnvironmentKind: the local file store keeps the
+// object, its version and the status beside it, with the same conditional
+// write the durable store makes.
+func TestTheSnapshotStoreHoldsTheEnvironmentKind(t *testing.T) {
+	opened, err := OpenFileStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = opened.Close() })
+	s, ok := opened.(Environments)
+	if !ok {
+		t.Fatal("the snapshot store does not hold the Environment kind")
+	}
+	if _, err = opened.Load(); err != nil {
+		t.Fatal(err)
+	}
+	ctx := t.Context()
+	obj := environmentManifest("eu-gpu")
+
+	// A create at a version nobody holds is a write of a row that exists.
+	if _, err = s.WriteEnvironment(ctx, obj, 7, MutationEnvironmentCreated); !errors.Is(err, ErrVersionConflict) {
+		t.Errorf("a create at a version answered %v", err)
+	}
+	first, err := s.WriteEnvironment(ctx, obj, 0, MutationEnvironmentCreated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.WriteEnvironment(ctx, obj, 0, MutationEnvironmentUpdated); !errors.Is(err, ErrVersionConflict) {
+		t.Errorf("a second create of one name answered %v", err)
+	}
+	obj.Spec.Capacity.Sandboxes = 25
+	second, err := s.WriteEnvironment(ctx, obj, first, MutationEnvironmentUpdated)
+	if err != nil || second <= first {
+		t.Fatalf("the update at %d answered %d, %v", first, second, err)
+	}
+
+	// The status write touches the status and leaves the version alone.
+	obj.Status.Phase = v1.EnvironmentReady
+	if err = s.WriteEnvironmentStatus(ctx, obj, MutationEnvironmentRegistered); err != nil {
+		t.Fatalf("the status write failed: %v", err)
+	}
+	held, err := s.LoadEnvironments()
+	if err != nil {
+		t.Fatal(err)
+	}
+	switch read := held["eu-gpu"]; {
+	case read.Status.Phase != v1.EnvironmentReady:
+		t.Errorf("the status write did not land: %+v", read.Status)
+	case read.Status.Version != second:
+		t.Errorf("the status write moved the version to %d, want %d", read.Status.Version, second)
+	case read.Spec.Capacity.Sandboxes != 25:
+		t.Errorf("the object is %+v", read.Spec.Capacity)
+	}
+
+	// An environment the store does not hold is not found, and a delete of
+	// one it never had is not an error: the object is gone either way.
+	absent := environmentManifest("us-east")
+	if err = s.WriteEnvironmentStatus(ctx, absent, ""); !errors.Is(err, ErrNotFound) {
+		t.Errorf("a status write on an absent environment answered %v", err)
+	}
+	if err = s.RemoveEnvironment(ctx, "us-east", MutationEnvironmentDeleted); err != nil {
+		t.Errorf("a delete of an absent environment answered %v", err)
+	}
+	if err = s.RemoveEnvironment(ctx, "eu-gpu", MutationEnvironmentDeleted); err != nil {
+		t.Fatal(err)
+	}
+	if held, err = s.LoadEnvironments(); err != nil || len(held) != 0 {
+		t.Errorf("the load answers %v, %v after the delete", held, err)
+	}
+}
+
+// TestThePhaseLoopPassesOverAnEnvironmentItCannotDrive: an object with no
+// driver has nothing to observe, so the phase it was applied with stands and
+// the pass reaches every other environment.
+func TestThePhaseLoopPassesOverAnEnvironmentItCannotDrive(t *testing.T) {
+	c, _, _, _ := twoEnvironments(t, Options{})
+	applyWorker(t, c, "eu-gpu")
+	c.envMu.Lock()
+	delete(c.drivers, "eu-gpu")
+	c.envMu.Unlock()
+	if err := c.Phases(t.Context()); err != nil {
+		t.Errorf("the tick answered %v", err)
+	}
+	if phase(t, c, "eu-gpu") != v1.EnvironmentPending {
+		t.Errorf("an environment with no driver is %s", phase(t, c, "eu-gpu"))
+	}
+	if phase(t, c, "default") != v1.EnvironmentReady {
+		t.Errorf("the default is %s after that pass", phase(t, c, "default"))
+	}
+}
+
+// TestAnOfflineEnvironmentStaysOffline: a tick that still finds nothing
+// leaves the phase and its reason where they are rather than writing them
+// again, so the feed carries one record per transition.
+func TestAnOfflineEnvironmentStaysOffline(t *testing.T) {
+	events := &actRecorder{}
+	c, _, w, clock := twoEnvironments(t, Options{EnvironmentOffline: time.Minute, Events: events})
+	applyWorker(t, c, "eu-gpu")
+	ready(t, c, w, "eu-gpu")
+	w.registrations = nil
+	clock.Advance(2 * time.Minute)
+	for range 3 {
+		if err := c.Phases(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		clock.Advance(time.Minute)
+	}
+	obj, err := c.GetEnvironment("eu-gpu")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if obj.Status.Phase != v1.EnvironmentOffline || obj.Status.Reason != v1.ReasonHeartbeatLost {
+		t.Errorf("the environment is %s/%s", obj.Status.Phase, obj.Status.Reason)
+	}
+	if got := events.environmentsOf(MutationEnvironmentOffline); len(got) != 1 {
+		t.Errorf("three ticks past the window recorded %d transitions", len(got))
+	}
+}

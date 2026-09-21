@@ -102,13 +102,15 @@ func (c *Controller) CapabilitiesOf(environment string) driver.Capabilities {
 	return d.Capabilities()
 }
 
-// environmentNames is every environment this control plane holds, in the
-// order a list returns them.
-func (c *Controller) environmentNames() []string {
+// environmentsHeld is every environment this control plane holds an object
+// for, in the order a list returns them. It is what the phase loop passes
+// over; the driver registry may hold fewer, because an environment whose
+// driver could not be built is still an object an operator applied.
+func (c *Controller) environmentsHeld() []string {
 	c.envMu.RLock()
 	defer c.envMu.RUnlock()
-	out := make([]string, 0, len(c.drivers))
-	for name := range c.drivers {
+	out := make([]string, 0, len(c.environments))
+	for name := range c.environments {
 		out = append(out, name)
 	}
 	slices.Sort(out)

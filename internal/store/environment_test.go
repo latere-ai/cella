@@ -5,6 +5,8 @@ package store_test
 
 import (
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 
 	"latere.ai/x/cella/controller"
@@ -158,5 +160,95 @@ func TestBridgeRemovesTheEnvironmentKind(t *testing.T) {
 	}
 	if err = c.RemoveEnvironment(ctx, "eu-gpu", controller.MutationEnvironmentDeleted); err != nil {
 		t.Errorf("a second delete answered %v", err)
+	}
+}
+
+// TestBridgeRefusesAnEnvironmentRowItCannotRead: a row whose object does not
+// decode ends the load with the id named, rather than handing the controller
+// an environment that is half an object.
+func TestBridgeRefusesAnEnvironmentRowItCannotRead(t *testing.T) {
+	c, s := bound(t)
+	ctx := t.Context()
+	err := s.Tx(ctx, func(tx store.Tx) error {
+		_, err := tx.Desired().Put(ctx, store.Object{
+			Kind: store.KindEnvironment, ID: "eu-gpu", Owner: "alice", Name: "eu-gpu",
+			Environment: "eu-gpu", Data: []byte("not an object"),
+		}, 0)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = c.LoadEnvironments(); err == nil {
+		t.Errorf("a row that does not decode was loaded")
+	} else if !strings.Contains(err.Error(), "eu-gpu") {
+		t.Errorf("the refusal does not name the row: %v", err)
+	}
+}
+
+// TestBridgeRefusesAStatusItCannotRead: the same for the status the phase
+// loop writes beside the object.
+func TestBridgeRefusesAStatusItCannotRead(t *testing.T) {
+	c, s := bound(t)
+	ctx := t.Context()
+	if _, err := c.WriteEnvironment(ctx, environment("eu-gpu"), 0, controller.MutationEnvironmentCreated); err != nil {
+		t.Fatal(err)
+	}
+	err := s.Tx(ctx, func(tx store.Tx) error {
+		return tx.Desired().PutStatus(ctx, store.KindEnvironment, "eu-gpu", []byte("not a status"))
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = c.LoadEnvironments(); err == nil {
+		t.Errorf("a status that does not decode was loaded")
+	}
+}
+
+// TestBridgeRefusesAnActItCannotRecord: an act design 009 can build no record
+// for is refused before anything is written, so the state and the journal
+// never disagree.
+func TestBridgeRefusesAnActItCannotRecord(t *testing.T) {
+	c, _ := bound(t)
+	ctx := t.Context()
+	// An environment with no name names no object, and a record is about an
+	// object.
+	nameless := environment("")
+	if _, err := c.WriteEnvironment(ctx, nameless, 0, controller.MutationEnvironmentCreated); err == nil {
+		t.Errorf("a record with no object was written")
+	}
+	if err := c.WriteEnvironmentStatus(ctx, nameless, controller.MutationEnvironmentOffline); err == nil {
+		t.Errorf("a status write recorded an act it could not build")
+	}
+	if err := c.RemoveEnvironment(ctx, "", controller.MutationEnvironmentDeleted); err == nil {
+		t.Errorf("a delete recorded an act it could not build")
+	}
+	held, err := c.LoadEnvironments()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(held) != 0 {
+		t.Errorf("the refused write left %v behind", held)
+	}
+}
+
+// TestBridgeLoadsEveryPageOfEnvironments: the load reads the whole table
+// rather than the first page of it.
+func TestBridgeLoadsEveryPageOfEnvironments(t *testing.T) {
+	c, _ := bound(t)
+	ctx := t.Context()
+	const many = store.DefaultPageLimit + 5
+	for i := range many {
+		if _, err := c.WriteEnvironment(ctx, environment(fmt.Sprintf("env-%04d", i)), 0,
+			controller.MutationEnvironmentCreated); err != nil {
+			t.Fatal(err)
+		}
+	}
+	held, err := c.LoadEnvironments()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(held) != many {
+		t.Errorf("the load answers %d of %d environments", len(held), many)
 	}
 }
