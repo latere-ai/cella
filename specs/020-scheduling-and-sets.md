@@ -12,7 +12,7 @@ depends_on:
 affects: [controller/, manifest/v1/, internal/api/, internal/config/]
 effort: large
 created: 2026-09-12
-updated: 2026-09-20
+updated: 2026-09-21
 author: changkun
 ---
 

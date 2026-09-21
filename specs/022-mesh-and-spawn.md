@@ -11,7 +11,7 @@ depends_on:
 affects: [manifest/, controller/, internal/auth/, internal/api/, internal/store/, runtime/]
 effort: medium
 created: 2026-09-12
-updated: 2026-09-20
+updated: 2026-09-21
 author: changkun
 ---
 

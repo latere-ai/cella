@@ -15,7 +15,7 @@ depends_on:
 affects: [internal/metrics/, internal/api/, controller/, internal/events/, internal/egressd/, internal/worker/, internal/store/, internal/auth/, cmd/cellad/, tools/rules/, deploy/base/prometheusrule.yaml, .github/workflows/verify.yml]
 effort: small
 created: 2026-09-12
-updated: 2026-09-20
+updated: 2026-09-21
 author: changkun
 ---
 

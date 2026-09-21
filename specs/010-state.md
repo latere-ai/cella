@@ -9,7 +9,7 @@ depends_on:
 affects: [internal/store/, internal/config/, migrations/]
 effort: large
 created: 2026-09-12
-updated: 2026-09-20
+updated: 2026-09-21
 author: changkun
 ---
 

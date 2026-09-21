@@ -19,7 +19,7 @@ depends_on:
 affects: [test/conformance/, test/e2e/, internal/config/, .github/workflows/]
 effort: large
 created: 2026-09-12
-updated: 2026-09-20
+updated: 2026-09-21
 author: changkun
 ---
 

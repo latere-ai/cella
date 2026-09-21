@@ -10,7 +10,7 @@ depends_on:
 affects: [manifest/v1/, runtime/remote/, internal/worker/, internal/api/, internal/auth/, internal/config/, controller/, internal/store/]
 effort: large
 created: 2026-09-12
-updated: 2026-09-20
+updated: 2026-09-21
 author: changkun
 ---
 

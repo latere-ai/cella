@@ -10,7 +10,7 @@ depends_on:
 affects: [internal/events/, internal/store/, internal/api/, internal/config/, controller/, cmd/cellad/, specs/]
 effort: medium
 created: 2026-09-19
-updated: 2026-09-19
+updated: 2026-09-21
 author: changkun
 ---
 
