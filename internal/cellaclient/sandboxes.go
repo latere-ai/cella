@@ -110,6 +110,22 @@ func (c *Client) GetSandbox(ctx context.Context, ref string) (v1.Sandbox, []byte
 	return decodeInto[v1.Sandbox](raw, err)
 }
 
+// GetObjectAs reads one object in the syntax the caller names: the answer's
+// own bytes, undecoded. Design 008 renders one object as YAML where the
+// request names one of the three YAML types, so the syntax is the server's to
+// produce and this client's to pass through.
+func (c *Client) GetObjectAs(ctx context.Context, kind Kind, ref, accept string) ([]byte, error) {
+	return c.accepting(ctx, kind.Path()+"/"+url.PathEscape(ref), nil, accept)
+}
+
+// ListAs reads one page of a kind in the syntax the caller names, with the
+// selectors of design 008. It is one page and not the whole list: the pages
+// are concatenated by re-encoding an envelope, and this command holds no
+// encoder for a syntax the server rendered.
+func (c *Client) ListAs(ctx context.Context, kind Kind, o ListOptions, accept string) ([]byte, error) {
+	return c.accepting(ctx, kind.Path(), o.query("", o.Limit), accept)
+}
+
 // GetSecret reads one Secret. No response carries its value.
 func (c *Client) GetSecret(ctx context.Context, ref string) (v1.Secret, []byte, error) {
 	raw, err := c.send(ctx, http.MethodGet, KindSecret.Path()+"/"+url.PathEscape(ref), nil, nil, "")

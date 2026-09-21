@@ -272,6 +272,23 @@ func (c *Client) send(ctx context.Context, method, path string, query url.Values
 	return io.ReadAll(resp.Body)
 }
 
+// accepting sends one GET under an Accept header and returns the answer's own
+// bytes. It is what -o yaml takes: design 008 renders the syntax, and this
+// client passes the bytes through rather than decoding and re-encoding them.
+func (c *Client) accepting(ctx context.Context, path string, query url.Values, accept string) ([]byte, error) {
+	req, err := c.request(ctx, http.MethodGet, path, query, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", accept)
+	resp, err := c.do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	return io.ReadAll(resp.Body)
+}
+
 // stream is a call whose answer the caller reads: the body is returned open
 // for the caller to close, with the trailer that says a transfer which had
 // already begun failed. Design 008 puts that failure in a trailer because a

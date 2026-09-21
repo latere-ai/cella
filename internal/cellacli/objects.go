@@ -213,7 +213,7 @@ func (l *stringList) Set(v string) error {
 
 // get reads one object or lists a kind.
 func get(ctx context.Context, c *invocation, args []string) error {
-	fs := c.flags("cella get <kind> [<ref>] [-o json|wide|name] [-l k=v]... [--phase p] [--owner o] [--environment e] [--limit n]")
+	fs := c.flags("cella get <kind> [<ref>] [-o json|yaml|wide|name] [-l k=v]... [--phase p] [--owner o] [--environment e] [--limit n]")
 	var labels stringList
 	output := fs.String("o", outputColumns, "the output form: "+strings.Join(outputs, ", "))
 	fs.Var(&labels, "l", "a label selector, repeatable")
@@ -256,6 +256,16 @@ func get(ctx context.Context, c *invocation, args []string) error {
 // one reads a single object.
 func (c *invocation) one(ctx context.Context, client *cellaclient.Client, kind cellaclient.Kind, ref, output string) error {
 	now := c.Now()
+	// -o yaml is the server's own rendering: the command asks for the syntax
+	// and writes the answer through, so the field order is the API's and no
+	// encoder of this command's stands between the two.
+	if output == outputYAML {
+		raw, err := client.GetObjectAs(ctx, kind, ref, yamlAccept)
+		if err != nil {
+			return err
+		}
+		return writeRaw(c.Stdout, raw)
+	}
 	switch kind {
 	case cellaclient.KindSecret:
 		obj, raw, err := client.GetSecret(ctx, ref)
@@ -289,6 +299,16 @@ func (c *invocation) one(ctx context.Context, client *cellaclient.Client, kind c
 // many lists a kind, following the cursor to the end.
 func (c *invocation) many(ctx context.Context, client *cellaclient.Client, kind cellaclient.Kind, output string, o cellaclient.ListOptions) error {
 	now := c.Now()
+	// A YAML list is one page as the server rendered it, cursor included. The
+	// pages of -o json are concatenated into one envelope by re-encoding it,
+	// and this command holds no encoder for a syntax the server produced.
+	if output == outputYAML {
+		raw, err := client.ListAs(ctx, kind, o, yamlAccept)
+		if err != nil {
+			return err
+		}
+		return writeRaw(c.Stdout, raw)
+	}
 	if kind == cellaclient.KindSecret {
 		items, raws, err := client.ListSecrets(ctx, o)
 		if err != nil {

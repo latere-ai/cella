@@ -100,6 +100,10 @@ type observed struct {
 	written  bool
 	hijacked bool
 	code     string
+	// yaml is design 008's negotiated syntax for this answer. It rides the
+	// writer because respond is reached from handlers several calls down that
+	// hold no request.
+	yaml bool
 }
 
 func (o *observed) WriteHeader(code int) {
@@ -183,16 +187,32 @@ func envelopeCode(slot *routeSlot, o *observed) string {
 	return slot.code
 }
 
-// handle mounts one route behind the mux. The wrapper is design 017's
+// handle mounts one route whose answer is one object or one page, in the
+// syntax design 008 lets the request negotiate.
+func (h *handler) handle(pattern string, fn http.HandlerFunc) { h.route(pattern, fn, true) }
+
+// stream mounts one route whose content type is the route's own: an archive,
+// a file body, a frame, a log, a framed stream or a socket. Nothing about
+// those is negotiable, so an Accept naming the route's own type is honoured
+// rather than refused.
+func (h *handler) stream(pattern string, fn http.HandlerFunc) { h.route(pattern, fn, false) }
+
+// route mounts one pattern behind the mux. The wrapper is design 017's
 // middleware: it fills the slot with the pattern the mux matched and names the
 // server span after it, which is the only point at which the pattern is known.
-func (h *handler) handle(pattern string, fn http.HandlerFunc) {
+// It is also where design 008's content negotiation runs, because a refusal
+// owed to the caller has to reach it before the handler acts.
+func (h *handler) route(pattern string, fn http.HandlerFunc, negotiates bool) {
+	h.patterns = append(h.patterns, pattern)
 	h.mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
 		if slot := slotOf(r.Context()); slot != nil {
 			slot.route, slot.sandbox = r.Pattern, r.PathValue("id")
 		}
 		nameSpan(r.Context(), r.Pattern)
 		stampSandbox(r.Context(), r.PathValue("id"))
+		if negotiates && !acceptable(w, r) {
+			return
+		}
 		fn(w, r)
 	})
 }

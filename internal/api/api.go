@@ -82,6 +82,11 @@ type handler struct {
 	mux     *http.ServeMux
 	metrics Metrics
 	log     *slog.Logger
+	// patterns is every route this handler registered, in registration
+	// order. It is the half of design 008's document that the server knows;
+	// TestTheDocumentAndTheMuxAgree reads it against api/openapi.yaml, so a
+	// route added here and left out of the document fails the build.
+	patterns []string
 }
 
 func New(o Options) (http.Handler, error) {
@@ -99,27 +104,20 @@ func New(o Options) (http.Handler, error) {
 		metrics: cmp.Or(o.Metrics, Metrics(nopMetrics{})),
 		log:     cmp.Or(o.Log, slog.Default()),
 	}
-	h.handle("GET /v1/sandboxes/{id}/files", h.files)
-	h.handle("PUT /v1/sandboxes/{id}/files", h.filesPut)
+	// The routes whose answer is one object or one page, in the syntax the
+	// request negotiated.
 	h.handle("DELETE /v1/sandboxes/{id}/files", h.fileRemove)
-	h.handle("GET /v1/sandboxes/{id}/files/content", h.fileContent)
 	h.handle("GET /v1/sandboxes/{id}/files/stat", h.fileStat)
 	h.handle("GET /v1/sandboxes/{id}/files/list", h.fileList)
 	h.handle("POST /v1/sandboxes/{id}/files/mkdir", h.fileMkdir)
 	h.handle("POST /v1/sandboxes/{id}/files/move", h.fileMove)
-	h.handle("GET /v1/sandboxes/{id}/logs", h.logs)
 	h.handle("GET /v1/sandboxes/{id}/egress", h.egressRecords)
 	h.handle("POST /v1/sandboxes", h.create)
 	h.handle("GET /v1/sandboxes", h.list)
 	h.handle("GET /v1/sandboxes/{id}", h.item)
 	h.handle("DELETE /v1/sandboxes/{id}", h.item)
 	h.handle("POST /v1/sandboxes/{id}/{verb}", h.item)
-	h.handle("GET /v1/sandboxes/{id}/exec", h.execSocket)
-	h.handle("GET /v1/sandboxes/{id}/attach", h.attachSocket)
-	h.handle("GET /v1/sandboxes/{id}/dial/{port}", h.dial)
 	h.handle("GET /v1/sandboxes/{id}/display", h.display)
-	h.handle("GET /v1/sandboxes/{id}/screenshot", h.screenshot)
-	h.handle("GET /v1/sandboxes/{id}/screen", h.screen)
 	h.handle("POST /v1/sandboxes/{id}/input", h.input)
 	h.handle("GET /v1/sandboxes/{id}/ports", h.ports)
 	h.handle("GET /v1/events", h.eventFeed)
@@ -132,6 +130,20 @@ func New(o Options) (http.Handler, error) {
 	h.handle("GET /v1/environments/{id}", h.environmentItem)
 	h.handle("POST /v1/environments/{id}/keys", h.environmentKeyMint)
 	h.handle("DELETE /v1/environments/{id}/keys/{jti}", h.environmentKeyRevoke)
+	// The routes whose content type is the route's own: an archive, a file
+	// body, a frame, a log, a framed stream and the four sockets. A caller
+	// asking for one of those asks for the route and not for a syntax, so
+	// there is nothing to negotiate.
+	h.stream("GET /v1/sandboxes/{id}/files", h.files)
+	h.stream("PUT /v1/sandboxes/{id}/files", h.filesPut)
+	h.stream("GET /v1/sandboxes/{id}/files/content", h.fileContent)
+	h.stream("GET /v1/sandboxes/{id}/logs", h.logs)
+	h.stream("POST /v1/sandboxes/{id}/exec", h.execRoute)
+	h.stream("GET /v1/sandboxes/{id}/exec", h.execSocket)
+	h.stream("GET /v1/sandboxes/{id}/attach", h.attachSocket)
+	h.stream("GET /v1/sandboxes/{id}/dial/{port}", h.dial)
+	h.stream("GET /v1/sandboxes/{id}/screenshot", h.screenshot)
+	h.stream("GET /v1/sandboxes/{id}/screen", h.screen)
 	return h, nil
 }
 
@@ -329,6 +341,20 @@ func (h *handler) create(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Location", "/v1/sandboxes/"+obj.Status.ID)
 	respond(w, http.StatusCreated, obj)
 }
+
+// execRoute serves POST /v1/sandboxes/{id}/exec. It is its own pattern rather
+// than a verb of the item route because its two forms answer in two ways: a
+// JSON result under ?wait=1, in the syntax the request negotiates, and the
+// framed stream of design 008 otherwise, whose content type is the route's.
+func (h *handler) execRoute(w http.ResponseWriter, r *http.Request) {
+	obj, err := h.authorizedObject(r, authorizer.ActionSandboxExec)
+	if err != nil {
+		respondError(w, err)
+		return
+	}
+	h.exec(w, r, obj)
+}
+
 func (h *handler) item(w http.ResponseWriter, r *http.Request) {
 	verb := r.PathValue("verb")
 	action := authorizer.ActionSandboxRead
@@ -340,8 +366,6 @@ func (h *handler) item(w http.ResponseWriter, r *http.Request) {
 		switch verb {
 		case "start", "stop":
 			action = authorizer.ActionSandboxUpdate
-		case "exec":
-			action = authorizer.ActionSandboxExec
 		default:
 			respondError(w, controller.ErrNotFound)
 			return
@@ -361,9 +385,6 @@ func (h *handler) item(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch verb {
-	case "exec":
-		h.exec(w, r, obj)
-		return
 	case "start", "stop", "delete":
 		obj, err = h.Controller.Act(r.Context(), obj.Status.ID, verb)
 	default:
@@ -480,6 +501,12 @@ func (h *handler) exec(w http.ResponseWriter, r *http.Request, obj v1.Sandbox) {
 		respondError(w, &manifest.Error{Code: "capability_unsupported", Detail: "only exec?wait=1 is currently supported"})
 		return
 	}
+	// The bounded form answers one JSON result, so it negotiates like every
+	// other object route. The framed form above answers the route's own
+	// content type and negotiates nothing.
+	if !acceptable(w, r) {
+		return
+	}
 	body, err := h.readBody(w, r)
 	if err != nil {
 		respondError(w, err)
@@ -564,7 +591,16 @@ func (b *cappedBuffer) Write(p []byte) (int, error) {
 	b.data = append(b.data, p...)
 	return n, nil
 }
+
+// respond writes one object in the syntax this request negotiated: JSON in
+// the Go type's own order, or YAML where the caller named one of design 003's
+// three types. An error is always JSON, because an envelope a client cannot
+// parse says less than one in the syntax it did not ask for.
 func respond(w http.ResponseWriter, status int, body any) {
+	if wantsYAML(w) {
+		respondYAML(w, status, body)
+		return
+	}
 	httpjson.Write(w, status, body)
 }
 func respondError(w http.ResponseWriter, err error) {
@@ -639,6 +675,9 @@ func errorEnvelope(err error, requestID string) (int, httpjson.Error) {
 	case "unsupported_media_type":
 		status = 415
 		message = "Send the manifest as JSON or YAML."
+	case "not_acceptable":
+		status = 406
+		message = "This endpoint answers in JSON or YAML."
 	case "capability_unsupported":
 		status = 422
 		message = "The environment cannot provide this."

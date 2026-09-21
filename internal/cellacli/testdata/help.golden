@@ -4,7 +4,7 @@ usage: cella <command> [flags] [arguments]
 
 Commands:
   apply    -f <file> [-w]                          apply a Sandbox or a Secret manifest
-  get      <kind> [<ref>] [-o json|wide|name]      read one object or list a kind
+  get      <kind> [<ref>] [-o json|yaml|wide|name] read one object or list a kind
   delete   <kind> <ref>                            delete one object
   start    <ref>                                   start a stopped sandbox
   stop     <ref>                                   stop a running sandbox

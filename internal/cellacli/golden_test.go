@@ -188,3 +188,35 @@ func TestAFieldTheServerLeftEmptyIsADash(t *testing.T) {
 		t.Fatalf("the row is\n%s", got.stdout)
 	}
 }
+
+// TestOneObjectUnderYAMLIsTheAPIsOwnBytes: -o yaml asks the server for the
+// syntax and writes what arrives, so the bytes are the API's and the command
+// holds no encoder of its own.
+func TestOneObjectUnderYAMLIsTheAPIsOwnBytes(t *testing.T) {
+	const document = "apiVersion: cella.latere.ai/v1beta1\nkind: Sandbox\nmetadata:\n    name: dev\n"
+	var asked string
+	p := newPlane(t, func(w http.ResponseWriter, r *http.Request) {
+		asked = r.Header.Get("Accept")
+		w.Header().Set("Content-Type", "application/yaml")
+		_, _ = w.Write([]byte(document))
+	})
+	got := p.run(t, "", "get", "sandbox", "dev", "-o", "yaml")
+	if got.code != 0 {
+		t.Fatalf("exit %d, stderr %q", got.code, got.stderr)
+	}
+	if asked != "application/yaml" {
+		t.Errorf("the command asked with Accept %q", asked)
+	}
+	if got.stdout != document {
+		t.Fatalf("the command wrote\n%s\nand the API answered\n%s", got.stdout, document)
+	}
+	// A list asks the same way and writes the page through.
+	const page = "items:\n    - kind: Sandbox\nnext: \"\"\n"
+	p = newPlane(t, func(w http.ResponseWriter, r *http.Request) {
+		asked = r.Header.Get("Accept")
+		_, _ = w.Write([]byte(page))
+	})
+	if got = p.run(t, "", "get", "sandboxes", "-o", "yaml"); got.stdout != page || asked != "application/yaml" {
+		t.Fatalf("a list wrote %q under Accept %q", got.stdout, asked)
+	}
+}
