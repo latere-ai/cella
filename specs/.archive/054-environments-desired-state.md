@@ -259,10 +259,11 @@ lookup, and a loop writes each environment's phase.
 | The resolver reading this control plane's registry | `Controller.Lookup`, `internal/api/api.go`'s `resolveOptions` |
 | The phase loop's wiring and the worker registrations it reads | `cmd/cellad/main.go`, `api.WorkerRegistrations` |
 
-Coverage on `go test -cover` over the packages this slice touched:
-`controller` 92.1%, `internal/api` 91.3%, `internal/store` 92.2%,
-`internal/events` 93.8%, `manifest/v1` 93.0%, `runtime/remote` 90.7%,
-`cmd/cellad` 90.6%. The whole bar is `go tool lateregate`, 16 gates.
+Coverage on the bar's own profile, over the packages this slice touched:
+`controller` 91.8%, `internal/api` 92.1%, `internal/store` 91.3%,
+`internal/events` 94.0%, `internal/config` 96.2%, `manifest/v1` 94.3%,
+`runtime/remote` 90.6%, `cmd/cellad` 90.3%. Every package of the module
+clears the floor, 35 measured.
 
 The bridge's cases run over the memory adapter. The `Desired` half the
 Environment kind uses is keyed by kind rather than written per kind, so the
