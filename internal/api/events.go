@@ -6,10 +6,16 @@ package api
 import (
 	"log/slog"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
+	"latere.ai/x/pkg/authz"
+
+	"latere.ai/x/cella/authorizer"
 	"latere.ai/x/cella/internal/auth"
 	"latere.ai/x/cella/internal/events"
+	"latere.ai/x/cella/manifest"
 	v1 "latere.ai/x/cella/manifest/v1"
 )
 
@@ -40,4 +46,83 @@ func (h *handler) emit(r *http.Request, obj v1.Sandbox, kind events.Type, data a
 		return
 	}
 	h.Events.Write(r.Context(), record)
+}
+
+// eventFeed serves GET /v1/events?object=: design 009's records for one
+// object, newest first and paged by the sequence the journal assigned. The
+// handler reads the object, derives its kind from the id, and authorizes that
+// kind's read, so a feed tells a caller nothing a read of the object would
+// not.
+func (h *handler) eventFeed(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	object := q.Get("object")
+	if object == "" {
+		respondError(w, &manifest.Error{Code: "invalid_field", Path: "object",
+			Detail: "the feed is per object; name one with ?object="})
+		return
+	}
+	// Design 009 serves a following feed as newline-delimited JSON. This
+	// server serves the pages only, and a caller that asked to follow and was
+	// handed one page would read the absence of later records as their
+	// absence.
+	if q.Get("follow") != "" {
+		respondError(w, &manifest.Error{Code: "capability_unsupported",
+			Detail: "this server serves no following feed; read the pages with ?cursor="})
+		return
+	}
+	limit := 50
+	if raw := q.Get("limit"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > 200 {
+			respondError(w, &manifest.Error{Code: "invalid_field", Path: "limit", Detail: "limit must be between 1 and 200"})
+			return
+		}
+		limit = parsed
+	}
+	id, resource, action, err := h.feedObject(r, object)
+	if err != nil {
+		respondError(w, err)
+		return
+	}
+	if _, err = h.decide(r, action, resource); err != nil {
+		respondError(w, err)
+		return
+	}
+	items, next, err := h.Events.Feed(r.Context(), id, q.Get("cursor"), limit)
+	if err != nil {
+		respondError(w, err)
+		return
+	}
+	if items == nil {
+		items = []events.Record{}
+	}
+	respond(w, http.StatusOK, map[string]any{"items": items, "next": next})
+}
+
+// feedObject is the object a feed names: its stored id, what the authorizer
+// decides on, and the action of design 009's rule that a feed is read under
+// the object's own kind. The kind comes from the prefix design 001 gives an
+// id; an object named rather than identified is a sandbox, which is the one
+// kind whose names this route resolves.
+func (h *handler) feedObject(r *http.Request, key string) (string, authz.Resource, string, error) {
+	switch {
+	case strings.HasPrefix(key, v1.SecretIDPrefix):
+		obj, err := h.Controller.GetSecret(r.Context(), key, caller(r).Subject)
+		if err != nil {
+			return "", authz.Resource{}, "", err
+		}
+		return obj.Status.ID, secretResource(obj), authorizer.ActionSecretRead, nil
+	case strings.HasPrefix(key, v1.EnvironmentIDPrefix), key == h.Controller.Environment():
+		obj, err := h.environment(key)
+		if err != nil {
+			return "", authz.Resource{}, "", err
+		}
+		return obj.Status.ID, environmentResource(obj), authorizer.ActionEnvironmentRead, nil
+	default:
+		obj, err := h.Controller.Get(r.Context(), key, caller(r).Subject)
+		if err != nil {
+			return "", authz.Resource{}, "", err
+		}
+		return obj.Status.ID, resource(obj), authorizer.ActionSandboxRead, nil
+	}
 }

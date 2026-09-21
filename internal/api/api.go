@@ -122,6 +122,7 @@ func New(o Options) (http.Handler, error) {
 	h.handle("GET /v1/sandboxes/{id}/screen", h.screen)
 	h.handle("POST /v1/sandboxes/{id}/input", h.input)
 	h.handle("GET /v1/sandboxes/{id}/ports", h.ports)
+	h.handle("GET /v1/events", h.eventFeed)
 	h.handle("POST /v1/secrets", h.createSecret)
 	h.handle("GET /v1/secrets", h.listSecrets)
 	h.handle("PUT /v1/secrets/{key}", h.applySecret)
