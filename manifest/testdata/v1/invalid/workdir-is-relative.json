@@ -1,0 +1,10 @@
+{
+  "apiVersion": "cella.latere.ai/v1beta1",
+  "kind": "Sandbox",
+  "metadata": {
+    "name": "relative"
+  },
+  "spec": {
+    "workdir": "work"
+  }
+}

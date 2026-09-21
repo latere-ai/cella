@@ -1,0 +1,12 @@
+{
+  "apiVersion": "cella.latere.ai/v1beta1",
+  "kind": "Sandbox",
+  "metadata": {
+    "name": "long-lived"
+  },
+  "spec": {
+    "lifecycle": {
+      "ttl": "720h"
+    }
+  }
+}

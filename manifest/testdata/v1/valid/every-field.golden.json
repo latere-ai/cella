@@ -1,0 +1,72 @@
+{
+  "sandbox": {
+    "apiVersion": "cella.latere.ai/v1beta1",
+    "kind": "Sandbox",
+    "metadata": {
+      "name": "research",
+      "labels": {
+        "team": "research"
+      },
+      "annotations": {
+        "example.com/note": "the entry that sets every field of the schema"
+      }
+    },
+    "spec": {
+      "environment": "default",
+      "image": "registry.example/agent:2",
+      "command": [
+        "/bin/sh",
+        "-c"
+      ],
+      "args": [
+        "sleep 60"
+      ],
+      "workdir": "/workspace/src",
+      "user": "1000:1000",
+      "resources": {
+        "cpu": "2",
+        "memory": "4Gi",
+        "disk": "20Gi"
+      },
+      "workspace": {
+        "path": "/workspace",
+        "source": "empty"
+      },
+      "env": {
+        "MODEL": "small"
+      },
+      "network": {
+        "egress": {
+          "mode": "allowlist",
+          "allowedHosts": [
+            "api.vendor.example",
+            "*.docs.example"
+          ]
+        },
+        "ports": [
+          {
+            "name": "http",
+            "port": 8080,
+            "expose": "public"
+          }
+        ]
+      },
+      "mesh": {
+        "enabled": true,
+        "spawn": {
+          "budget": 4,
+          "depth": 2
+        }
+      },
+      "lifecycle": {
+        "autoStop": "30m",
+        "ttl": "4h",
+        "autoDelete": "24h"
+      },
+      "display": {
+        "width": 1280,
+        "height": 720
+      }
+    }
+  }
+}

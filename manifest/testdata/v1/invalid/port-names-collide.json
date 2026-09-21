@@ -1,0 +1,21 @@
+{
+  "apiVersion": "cella.latere.ai/v1beta1",
+  "kind": "Sandbox",
+  "metadata": {
+    "name": "ports"
+  },
+  "spec": {
+    "network": {
+      "ports": [
+        {
+          "name": "http",
+          "port": 8080
+        },
+        {
+          "name": "http",
+          "port": 8081
+        }
+      ]
+    }
+  }
+}

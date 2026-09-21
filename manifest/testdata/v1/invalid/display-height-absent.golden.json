@@ -1,0 +1,8 @@
+{
+  "code": "invalid_field",
+  "path": "spec.display.width",
+  "paths": [
+    "spec.display.width",
+    "spec.display.height"
+  ]
+}

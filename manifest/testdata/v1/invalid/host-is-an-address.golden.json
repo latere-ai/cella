@@ -1,0 +1,4 @@
+{
+  "code": "invalid_field",
+  "path": "spec.network.egress.allowedHosts[0]"
+}

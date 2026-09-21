@@ -1,0 +1,13 @@
+{
+  "apiVersion": "cella.latere.ai/v1beta1",
+  "kind": "Sandbox",
+  "metadata": {
+    "name": "tiny-desktop"
+  },
+  "spec": {
+    "display": {
+      "width": 16,
+      "height": 16
+    }
+  }
+}

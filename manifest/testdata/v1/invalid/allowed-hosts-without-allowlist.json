@@ -1,0 +1,17 @@
+{
+  "apiVersion": "cella.latere.ai/v1beta1",
+  "kind": "Sandbox",
+  "metadata": {
+    "name": "wrong-list"
+  },
+  "spec": {
+    "network": {
+      "egress": {
+        "mode": "open",
+        "allowedHosts": [
+          "api.vendor.example"
+        ]
+      }
+    }
+  }
+}
