@@ -18,7 +18,7 @@ import (
 // the request id this response already carries.
 func actorOf(w http.ResponseWriter, c auth.Caller) events.Actor {
 	id, _ := c.Sandbox()
-	return events.Actor{Subject: c.Subject, Workload: id, RequestID: w.Header().Get("X-Request-ID")}
+	return events.Actor{Subject: c.Subject, Workload: id, RequestID: w.Header().Get(RequestIDHeader)}
 }
 
 // emit records one operation: an act on a sandbox that changes no desired

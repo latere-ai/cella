@@ -25,7 +25,14 @@ const alphabet = "0123456789abcdefghjkmnpqrstvwxyz"
 // NewID is a record's id: the prefix and a ULID, so ids sort by the instant
 // they were made. Order within an object is still the sequence; the id
 // orders records of different objects for a reader with no other key.
-func NewID() string {
+func NewID() string { return IDPrefix + ULID() }
+
+// ULID is the twenty-six Crockford base32 characters of a ULID: the
+// millisecond of the mint in the high bits and eighty random bits behind it,
+// so two ids made in order sort in that order. It is exported because design
+// 001 gives every prefixed id of this system the same body, and design 008's
+// request id is one of them.
+func ULID() string {
 	var b [16]byte
 	ms := uint64(time.Now().UTC().UnixMilli())
 	for i := 5; i >= 0; i-- {
@@ -46,7 +53,7 @@ func NewID() string {
 			out[pos] = alphabet[(acc>>uint(bits))&31]
 		}
 	}
-	return IDPrefix + string(out[:])
+	return string(out[:])
 }
 
 // OfSandbox is the record object for one sandbox: its identity and the

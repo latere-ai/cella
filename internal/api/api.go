@@ -8,7 +8,6 @@ import (
 	"archive/tar"
 	"cmp"
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -145,7 +144,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	rw := &observed{ResponseWriter: w}
 	defer h.observe(r.Context(), slot, rw, time.Now())
 	w = rw
-	w.Header().Set("X-Request-ID", rand.Text())
+	w.Header().Set(RequestIDHeader, requestID(r))
 	token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 	if !ok || strings.TrimSpace(token) == "" {
 		respondError(w, &auth.Error{Code: auth.CodeUnauthenticated, Detail: "missing bearer"})
@@ -180,7 +179,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		respondError(w, &auth.Error{Code: auth.CodeForbidden, Detail: "environment keys authorize data plane streams only"})
 		return
 	}
-	slot.subject, slot.requestID = caller.Subject, w.Header().Get("X-Request-ID")
+	slot.subject, slot.requestID = caller.Subject, w.Header().Get(RequestIDHeader)
 	stampSpan(r.Context(), caller.Subject, slot.requestID)
 	ctx := context.WithValue(r.Context(), callerKey{}, caller)
 	// The slot rides the context from here, so the wrapper behind the mux
@@ -244,7 +243,7 @@ func (h *handler) resolveOptions(w http.ResponseWriter, r *http.Request) (manife
 	o.Claims = c.Claims
 	o.Defaults = h.Defaults
 	o.Admit = h.Admit
-	o.RequestID = w.Header().Get("X-Request-ID")
+	o.RequestID = w.Header().Get(RequestIDHeader)
 	id, workload := c.Sandbox()
 	if !workload {
 		return o, nil
@@ -568,7 +567,7 @@ func respond(w http.ResponseWriter, status int, body any) {
 	httpjson.Write(w, status, body)
 }
 func respondError(w http.ResponseWriter, err error) {
-	status, envelope := errorEnvelope(err, w.Header().Get("X-Request-ID"))
+	status, envelope := errorEnvelope(err, w.Header().Get(RequestIDHeader))
 	noteCode(w, envelope.Code)
 	httpjson.WriteError(w, status, envelope)
 }

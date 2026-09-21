@@ -111,7 +111,7 @@ func (h *handler) socket(w http.ResponseWriter, r *http.Request, terminal bool) 
 	}
 	// The request id is read before the upgrade: once the connection is the
 	// client's, the response header is no longer reachable.
-	requestID := w.Header().Get("X-Request-ID")
+	requestID := w.Header().Get(RequestIDHeader)
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		// Upgrade has written the reply, so the caller already has the reason.
