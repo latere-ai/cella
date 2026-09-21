@@ -214,9 +214,11 @@ doubles to thirty. Each connection begins with a registration, so the
 control plane always knows which process is claiming work.
 
 The control plane stops counting a worker after
-`CELLA_ENVIRONMENT_OFFLINE` (two minutes by default) without a heartbeat.
-Operations that were in flight on a stream that dropped are failed, and
-the caller retries.
+`CELLA_ENVIRONMENT_OFFLINE` (two minutes by default) without a heartbeat,
+and never sooner than the 45 second lease a worker's own connection runs
+under, so a short window cannot declare a healthy worker gone between two
+heartbeats. Operations that were in flight on a stream that dropped are
+failed, and the caller retries.
 
 ## Running several
 
