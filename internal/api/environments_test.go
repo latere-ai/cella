@@ -208,8 +208,9 @@ func TestEnvironmentKeyRoutesWithoutASigner(t *testing.T) {
 	f.request(http.MethodDelete, "/v1/environments/default/keys/01JABC", f.alice, "", http.StatusUnprocessableEntity)
 }
 
-// TestEnvironmentRoutes holds the read and the list of the kind.
-func TestEnvironmentRoutes(t *testing.T) {
+// TestTheDefaultEnvironmentReads holds the read and the list of the
+// environment this control plane drives itself.
+func TestTheDefaultEnvironmentReads(t *testing.T) {
 	p := setupKeyed(t, nil)
 	var obj v1.Environment
 	if err := json.Unmarshal(p.request(http.MethodGet, "/v1/environments/default", p.alice, "", http.StatusOK), &obj); err != nil {

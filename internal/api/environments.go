@@ -123,10 +123,6 @@ func (h *handler) environmentCreate(w http.ResponseWriter, r *http.Request) {
 		respondError(w, err)
 		return
 	}
-	if _, err = h.Controller.GetEnvironment(decoded.Metadata.Name); err == nil && decoded.Metadata.Name != "" {
-		respondError(w, controller.ErrNameTaken)
-		return
-	}
 	obj, err := h.resolveEnvironment(r, decoded, nil)
 	if err != nil {
 		respondError(w, err)
@@ -135,6 +131,12 @@ func (h *handler) environmentCreate(w http.ResponseWriter, r *http.Request) {
 	obj.Status.Owner = caller(r).Subject
 	if _, err = h.decide(r, authorizer.ActionEnvironmentCreate, environmentResource(obj)); err != nil {
 		respondError(w, err)
+		return
+	}
+	// The name is checked after the decision, so a caller who may not create
+	// an environment learns that rather than learning which names are taken.
+	if _, err = h.Controller.GetEnvironment(obj.Metadata.Name); err == nil {
+		respondError(w, controller.ErrNameTaken)
 		return
 	}
 	stored, _, err := h.Controller.ApplyEnvironment(r.Context(), obj, 0)
