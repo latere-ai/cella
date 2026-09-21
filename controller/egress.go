@@ -37,6 +37,9 @@ type Egress interface {
 	// TLS with, in PEM, or empty when none has connected. The driver
 	// projects it into the sandbox so the workload trusts that door.
 	CA() string
+	// Connected is how many gateways of the environment hold a stream open,
+	// which the phase loop writes into status.gateways (spec 021).
+	Connected() int
 }
 
 // GatewayAddresses is where sandboxes of this environment reach the gateway's
@@ -258,10 +261,10 @@ func (c *Controller) egressSpec(m egress.Map) driver.Egress {
 // driver keeps the workload inside the boundary and the gateway substitutes
 // within it; a boundary one of them does not hold is not enforced, and the
 // condition says which one is missing rather than reporting true.
-func (c *Controller) egressCondition(m egress.Map, held bool, now time.Time) v1.Condition {
+func (c *Controller) egressCondition(environment string, m egress.Map, held bool, now time.Time) v1.Condition {
 	cond := v1.Condition{Type: v1.ConditionEgressEnforced, Status: v1.ConditionTrue, Reason: v1.ReasonEnforced, Since: now}
 	switch {
-	case !slices.Contains(c.driver.Capabilities().Egress, m.Mode):
+	case !slices.Contains(c.CapabilitiesOf(environment).Egress, m.Mode):
 		cond.Status = v1.ConditionFalse
 		cond.Reason = v1.ReasonNotEnforcedByDriver
 		cond.Message = "This environment records the boundary and does not confine the workload to it."

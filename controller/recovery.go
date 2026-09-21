@@ -42,7 +42,7 @@ func recoveryBackoff(attempt int) time.Duration {
 // reached the driver, Failed never will, and Deleting is this control plane's
 // own act in flight. That is the hosted reaper's terminal probe restated: a
 // sandbox the platform itself ended is not one the data plane lost.
-func (c *Controller) vanished(states []driver.State) []string {
+func (c *Controller) vanished(environment string, states []driver.State) []string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	observed := make(map[string]struct{}, len(states))
@@ -51,6 +51,9 @@ func (c *Controller) vanished(states []driver.State) []string {
 	}
 	var out []string
 	for id, obj := range c.objects {
+		if obj.Status.Environment != environment {
+			continue
+		}
 		if _, held := observed[id]; held {
 			// It is back, or it never went: whatever was counted against it
 			// is not owed any more.
@@ -90,7 +93,11 @@ func (c *Controller) enforceLost(ctx context.Context, id string, now time.Time) 
 	if !tracked || !canBeLost(obj.Status.Phase) {
 		return false, nil
 	}
-	_, err := c.driver.Inspect(ctx, id)
+	d, err := c.driverFor(obj.Status.Environment)
+	if err != nil {
+		return false, err
+	}
+	_, err = d.Inspect(ctx, id)
 	switch {
 	case err == nil:
 		delete(c.lost, id)
@@ -128,7 +135,7 @@ func (c *Controller) graceLocked(ctx context.Context, obj v1.Sandbox, now time.T
 	c.log.InfoContext(ctx, "reaper ended a lost sandbox", "sandbox", id, "reason", ReasonLost,
 		"grace", c.lostGrace)
 	c.metrics.ReaperAction(ReasonLost, ActionDeleted)
-	return true, c.deleteLocked(ctx, id, ReasonLost)
+	return true, c.deleteLocked(ctx, obj.Status.Environment, id, ReasonLost)
 }
 
 // recoverLocked is the lost rule with a durable store: the sandbox is marked
@@ -182,7 +189,7 @@ func (c *Controller) recoverLocked(ctx context.Context, obj v1.Sandbox, now time
 		return false, fmt.Errorf("pushing the boundary: %w", err)
 	}
 	obj.Status.Secrets = boundary.Secrets
-	obj.Status.Conditions = setCondition(obj.Status.Conditions, c.egressCondition(boundary.Map, boundary.Held, now))
+	obj.Status.Conditions = setCondition(obj.Status.Conditions, c.egressCondition(obj.Status.Environment, boundary.Map, boundary.Held, now))
 	// The recreated sandbox carries a newly minted identity and the one it
 	// held is revoked, so a copy of the lost sandbox that is still running
 	// somewhere speaks for nobody (spec 006).
@@ -192,7 +199,11 @@ func (c *Controller) recoverLocked(ctx context.Context, obj v1.Sandbox, now time
 		c.retry[id] = now.Add(recoveryBackoff(attempt))
 		return false, err
 	}
-	_, err = c.driver.Create(ctx, specOf(obj, lifecycle, c.egressSpec(boundary.Map), boundary.Env, token))
+	d, err := c.driverFor(obj.Status.Environment)
+	if err != nil {
+		return false, err
+	}
+	_, err = d.Create(ctx, specOf(obj, lifecycle, c.egressSpec(boundary.Map), boundary.Env, token))
 	switch {
 	case errors.Is(err, driver.ErrAlreadyExists):
 		// The driver had the sandbox after all and adopted it, which means
@@ -200,7 +211,7 @@ func (c *Controller) recoverLocked(ctx context.Context, obj v1.Sandbox, now time
 		// projected into it before the old one is ended, so the workload is
 		// never left holding a revoked token.
 		if state != nil {
-			if err := c.driver.Update(ctx, id, driver.Change{Token: []byte(token)}); err != nil {
+			if err := d.Update(ctx, id, driver.Change{Token: []byte(token)}); err != nil {
 				c.retry[id] = now.Add(recoveryBackoff(attempt))
 				return false, errors.Join(fmt.Errorf("re-projecting the token into the adopted %s: %w", id, err),
 					c.revokeToken(ctx, state))

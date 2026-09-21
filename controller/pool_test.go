@@ -97,8 +97,7 @@ func TestPoolNeedsTheCapability(t *testing.T) {
 // rewritten by an adoption.
 func TestPoolMatch(t *testing.T) {
 	c, _, _ := newPool(t, poolOptions(1))
-	c.pool.Image = "registry.example.com/base:1"
-	c.pool.Resources = v1.Resources{CPU: "1", Memory: "1Gi"}
+	setPool(c, v1.PoolSpec{Image: "registry.example.com/base:1", Resources: v1.Resources{CPU: "1", Memory: "1Gi"}})
 	base := func() v1.Sandbox {
 		obj := workspace()
 		obj.Spec.Image = c.pool.Image
@@ -129,7 +128,7 @@ func TestPoolMatch(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			obj := base()
 			tc.mutar(&obj)
-			if got := c.matchesPool(obj); got != tc.want {
+			if got := matchesPool(c.pool, obj); got != tc.want {
 				t.Fatalf("matchesPool = %v, want %v", got, tc.want)
 			}
 		})
@@ -138,6 +137,17 @@ func TestPoolMatch(t *testing.T) {
 
 // TestPoolAdoption is one create served from an entry: no driver create, the
 // entry's id, the adoption's instant, and the reason a caller reads.
+// setPool changes what one environment keeps prewarmed the way an apply
+// does, so a case can widen or narrow the pool under a running controller.
+func setPool(c *Controller, pool v1.PoolSpec) {
+	c.envMu.Lock()
+	defer c.envMu.Unlock()
+	c.pool = pool
+	obj := c.environments[c.environment]
+	obj.Spec.Pool = pool
+	c.environments[c.environment] = obj
+}
+
 func TestPoolAdoption(t *testing.T) {
 	c, d, clock := newPool(t, poolOptions(1))
 	if _, err := c.Refill(t.Context()); err != nil {
@@ -270,7 +280,7 @@ func TestPoolRefill(t *testing.T) {
 	}
 	// Every entry carries the shape it was made for and nothing of a caller.
 	for _, entry := range d.entries() {
-		if entry.Labels[PoolShapeLabel] != c.poolShape() {
+		if entry.Labels[PoolShapeLabel] != poolShape(c.pool) {
 			t.Errorf("the entry %s is stamped %q, want the environment's shape", entry.ID, entry.Labels[PoolShapeLabel])
 		}
 		if entry.Owner != "" || entry.Name != "" {
@@ -285,7 +295,7 @@ func TestPoolRefill(t *testing.T) {
 // create would take the slow path with no test failing.
 func TestPoolPrewarmMatchesItsOwnShape(t *testing.T) {
 	c, d, _ := newPool(t, poolOptions(1))
-	c.pool.Image = "registry.example.com/base:1"
+	setPool(c, v1.PoolSpec{Image: "registry.example.com/base:1", Resources: c.pool.Resources, Size: c.pool.Size, Display: c.pool.Display})
 	if _, err := c.Refill(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -293,8 +303,8 @@ func TestPoolPrewarmMatchesItsOwnShape(t *testing.T) {
 	obj.Spec.Image = c.pool.Image
 	obj.Spec.Resources = c.pool.Resources
 	obj.Spec.Workdir = ""
-	entries := c.poolEntries(t.Context())
-	if c.matchEntry(entries, obj) == nil {
+	entries := c.poolEntries(t.Context(), c.environment)
+	if c.matchEntry(c.pool, entries, obj) == nil {
 		t.Fatalf("the pool's own entry does not match the environment's own shape: %+v", d.entries())
 	}
 }
@@ -317,8 +327,7 @@ func TestPoolMatchesOnTheDesktop(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c, d, _ := newPool(t, poolOptions(1))
-			c.pool.Image = "registry.example.com/base:1"
-			c.pool.Display = tc.pool
+			setPool(c, v1.PoolSpec{Image: "registry.example.com/base:1", Resources: c.pool.Resources, Size: c.pool.Size, Display: tc.pool})
 			if _, err := c.Refill(t.Context()); err != nil {
 				t.Fatal(err)
 			}
@@ -327,8 +336,8 @@ func TestPoolMatchesOnTheDesktop(t *testing.T) {
 			obj.Spec.Resources = c.pool.Resources
 			obj.Spec.Workdir = ""
 			obj.Spec.Display = tc.wanted
-			entries := c.poolEntries(t.Context())
-			if got := c.matchEntry(entries, obj) != nil; got != tc.wantAdoptable {
+			entries := c.poolEntries(t.Context(), c.environment)
+			if got := c.matchEntry(c.pool, entries, obj) != nil; got != tc.wantAdoptable {
 				t.Fatalf("the entry is adoptable = %v, want %v: %+v", got, tc.wantAdoptable, d.entries())
 			}
 		})
@@ -491,14 +500,14 @@ func TestPoolOrphans(t *testing.T) {
 	if got := len(d.entries()); got != 3 {
 		t.Fatalf("the pool holds %d entries, want three", got)
 	}
-	c.pool.Size = 1
+	setPool(c, v1.PoolSpec{Size: 1, Image: c.pool.Image, Resources: c.pool.Resources, Display: c.pool.Display})
 	if _, err := c.Refill(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if got := len(d.entries()); got != 1 {
 		t.Fatalf("the pool holds %d entries after the size fell, want one", got)
 	}
-	c.pool.Size = 0
+	setPool(c, v1.PoolSpec{Size: 0, Image: c.pool.Image, Resources: c.pool.Resources, Display: c.pool.Display})
 	if _, err := c.Refill(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -525,7 +534,7 @@ func TestPoolSurplusIsReadyFirst(t *testing.T) {
 		s.Phase = driver.Pending
 		f.states[coming] = s
 	})
-	c.pool.Size = 1
+	setPool(c, v1.PoolSpec{Size: 1, Image: c.pool.Image, Resources: c.pool.Resources, Display: c.pool.Display})
 	if _, err := c.Refill(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -580,12 +589,19 @@ func TestPoolLoopRunsAndStops(t *testing.T) {
 	}
 }
 
-// TestPoolLoopIsSilentWithoutTheCapability holds the other side: a driver that
-// can keep no entry runs no loop.
+// TestPoolLoopIsSilentWithoutTheCapability holds the other side: an
+// environment whose driver can keep no entry is passed over by every tick.
+// The loop itself runs, because one control plane holds environments that
+// come and go and the capability is the environment's rather than the
+// process's.
 func TestPoolLoopIsSilentWithoutTheCapability(t *testing.T) {
 	c, d, _ := newFake(t, Options{})
+	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct{})
-	go func() { defer close(done); c.RunPool(t.Context()) }()
+	// The loop's first pass runs before it waits on the ticker, so a
+	// cancelled context still exercises one tick over the environment.
+	go func() { defer close(done); c.RunPool(ctx) }()
+	cancel()
 	<-done
 	if len(d.entries()) != 0 {
 		t.Fatal("a driver without the capability prewarmed")
@@ -690,8 +706,8 @@ func TestPoolShapeReadsEveryField(t *testing.T) {
 		{"a display", v1.PoolSpec{Display: &v1.Display{Width: 1280, Height: 800}}},
 		{"another display", v1.PoolSpec{Display: &v1.Display{Width: 1920, Height: 1080}}},
 	} {
-		c.pool = tc.pool
-		shape := c.poolShape()
+		setPool(c, tc.pool)
+		shape := poolShape(c.pool)
 		if other, clash := seen[shape]; clash {
 			t.Fatalf("%s and %s hash to one shape", tc.name, other)
 		}

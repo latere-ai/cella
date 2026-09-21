@@ -10,21 +10,36 @@ import (
 	"latere.ai/x/cella/runtime"
 )
 
-func (c *Controller) Capabilities() runtime.Capabilities { return c.driver.Capabilities() }
 func (c *Controller) ExportTar(ctx context.Context, id string, paths []string, dst io.Writer) error {
-	return c.driver.ExportTar(ctx, id, paths, dst)
+	d, err := c.driverOf(id)
+	if err != nil {
+		return err
+	}
+	return d.ExportTar(ctx, id, paths, dst)
 }
 func (c *Controller) ImportTar(ctx context.Context, id, dest string, src io.Reader) error {
-	return c.driver.ImportTar(ctx, id, dest, src)
+	d, err := c.driverOf(id)
+	if err != nil {
+		return err
+	}
+	return d.ImportTar(ctx, id, dest, src)
 }
 func (c *Controller) Logs(ctx context.Context, id string, req runtime.LogsRequest) (io.ReadCloser, error) {
-	return c.driver.Logs(ctx, id, req)
+	d, err := c.driverOf(id)
+	if err != nil {
+		return nil, err
+	}
+	return d.Logs(ctx, id, req)
 }
 
 // Attach opens one terminal in a sandbox. A driver that declares no Attach has
 // no Attacher, which the API reports as the capability the environment lacks.
 func (c *Controller) Attach(ctx context.Context, id string, req runtime.AttachRequest) (runtime.Session, error) {
-	a, ok := c.driver.(runtime.Attacher)
+	d, err := c.driverOf(id)
+	if err != nil {
+		return nil, err
+	}
+	a, ok := d.(runtime.Attacher)
 	if !ok {
 		return nil, runtime.ErrUnsupported
 	}
@@ -34,8 +49,12 @@ func (c *Controller) Attach(ctx context.Context, id string, req runtime.AttachRe
 // Files returns the driver's per-file half. A driver that declares no Files
 // has no FileStore, which the API reports as the capability the environment
 // lacks.
-func (c *Controller) Files() (runtime.FileStore, error) {
-	store, ok := c.driver.(runtime.FileStore)
+func (c *Controller) Files(id string) (runtime.FileStore, error) {
+	d, err := c.driverOf(id)
+	if err != nil {
+		return nil, err
+	}
+	store, ok := d.(runtime.FileStore)
 	if !ok {
 		return nil, runtime.ErrUnsupported
 	}

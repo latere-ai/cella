@@ -39,6 +39,9 @@ var (
 	ErrNameTaken = errors.New("sandbox name is already in use")
 	ErrQuota     = errors.New("sandbox count limit reached")
 	ErrPhase     = errors.New("sandbox phase does not allow this operation")
+	// ErrVersionConflict is a conditional write whose row moved since it was
+	// read. Design 008 answers it with 409 version_conflict.
+	ErrVersionConflict = errors.New("the object changed since it was read")
 )
 
 type Options struct {
@@ -98,14 +101,40 @@ type Options struct {
 	// read it. Zero takes the defaults.
 	PoolInFlight int
 	PoolGrace    time.Duration
+	// CapacityQuantities are the cpu, memory and disk the environment this
+	// cellad drives declares beside Capacity's count, from CELLA_CAPACITY_*.
+	// An empty triple with a zero count seeds the word auto: the ceiling is
+	// the cluster's or the host's and this control plane does not read it.
+	CapacityQuantities v1.Capacity
+	// SchedulingMode is that environment's placement mode, from
+	// CELLA_SCHEDULING_MODE. Empty takes direct.
+	SchedulingMode string
+	// NewDriver builds the driver of an environment a worker serves (spec
+	// 021). It is optional: with none, a control plane serves the
+	// environment it drives itself and refuses to apply another.
+	NewDriver NewDriverFunc
+	// Registrations reports the workers holding one environment's stream,
+	// which is what the phase loop computes from. It is optional: with
+	// none, no environment reports a worker.
+	Registrations func(environment string) []Registration
+	// EnvironmentOffline is how long an environment is held at its phase
+	// with nothing answering before it is Offline. Zero takes the default;
+	// CELLA_ENVIRONMENT_OFFLINE sets it.
+	EnvironmentOffline time.Duration
 }
 type Controller struct {
-	mu            sync.Mutex
-	store         Store
-	durable       Durable
-	recovers      bool
-	driver        driver.Driver
-	environment   string
+	mu          sync.Mutex
+	store       Store
+	durable     Durable
+	recovers    bool
+	environment string
+	// envMu guards the registry below: the environments this control plane
+	// holds and the driver serving each. It is taken after the controller's
+	// lock and never before it, so every call site reaches one lookup
+	// whether it already holds the controller's lock or not.
+	envMu         sync.RWMutex
+	environments  map[string]v1.Environment
+	drivers       map[string]driver.Driver
 	objects       map[string]v1.Sandbox
 	clock         Clock
 	lease         Lease
@@ -146,6 +175,19 @@ type Controller struct {
 	capacity     int
 	poolInFlight int
 	poolGrace    time.Duration
+	// environmentStore is the Environment kind's store, taken where the
+	// store has it; newDriver builds the driver of an environment a worker
+	// serves, and registrations reports what its workers sent.
+	environmentStore Environments
+	newDriver        NewDriverFunc
+	registrations    func(string) []Registration
+	// offline is how long an environment is held at its phase with nothing
+	// answering, and answered when each last answered. The instant lives in
+	// the process because the window it bounds is this replica's own view of
+	// a data plane.
+	offline  time.Duration
+	answerMu sync.Mutex
+	answered map[string]time.Time
 }
 
 // Open restores desired state from an operator-supplied store, or the provisional
@@ -180,8 +222,10 @@ func Open(o Options) (*Controller, error) {
 		objects = map[string]v1.Sandbox{}
 	}
 	c := &Controller{
-		store: store, driver: o.Driver, environment: o.Environment, objects: objects,
-		clock: o.Clock, lease: o.Lease, log: logger(o.Log),
+		store: store, environment: o.Environment, objects: objects,
+		environments: map[string]v1.Environment{},
+		drivers:      map[string]driver.Driver{o.Environment: o.Driver},
+		clock:        o.Clock, lease: o.Lease, log: logger(o.Log),
 		reapInterval: o.ReapInterval, touchInterval: o.TouchInterval,
 		lifecycle: o.Lifecycle, touched: map[string]time.Time{},
 		lostGrace: o.LostGrace, recoveryAttempts: o.RecoveryAttempts,
@@ -191,6 +235,8 @@ func Open(o Options) (*Controller, error) {
 		secretObjects: map[string]v1.Secret{},
 		pool:          o.Pool, capacity: o.Capacity,
 		poolInFlight: o.PoolInFlight, poolGrace: o.PoolGrace,
+		newDriver: o.NewDriver, registrations: o.Registrations,
+		offline: o.EnvironmentOffline, answered: map[string]time.Time{},
 	}
 	// A store of design 010 takes one conditional write per object and
 	// carries the journal; one that is also durable is what lets the lost
@@ -243,12 +289,25 @@ func Open(o Options) (*Controller, error) {
 	if c.poolGrace <= 0 {
 		c.poolGrace = DefaultPoolGrace
 	}
+	if c.offline <= 0 {
+		c.offline = DefaultEnvironmentOffline
+	}
+	// A store that holds the Environment kind is what makes an environment
+	// desired state; one that does not serves the environment this cellad
+	// drives itself and refuses to apply another.
+	if e, ok := store.(Environments); ok {
+		c.environmentStore = e
+	}
+	if err := c.openEnvironments(context.Background(), o); err != nil {
+		_ = store.Close()
+		return nil, err
+	}
 	// A pool on a driver that cannot hold one is a deployment that would
 	// never accelerate a create and never say why, so it is refused here
 	// rather than logged once a tick.
-	if c.pool.Size > 0 && !c.driver.Capabilities().Pool {
+	if c.pool.Size > 0 && !o.Driver.Capabilities().Pool {
 		_ = store.Close()
-		return nil, fmt.Errorf("the %s driver declares no Pool capability, so this environment keeps no prewarmed entries", c.driver.Name())
+		return nil, fmt.Errorf("the %s driver declares no Pool capability, so this environment keeps no prewarmed entries", o.Driver.Name())
 	}
 	return c, nil
 }
@@ -259,8 +318,6 @@ func Open(o Options) (*Controller, error) {
 func (c *Controller) Recovers() bool      { return c.recovers }
 func (c *Controller) Close() error        { c.mu.Lock(); defer c.mu.Unlock(); return c.store.Close() }
 func (c *Controller) Environment() string { return c.environment }
-func (c *Controller) Isolation() string   { return c.driver.Isolation() }
-func (c *Controller) DriverName() string  { return c.driver.Name() }
 
 // persist records one object and the mutation that produced it: one
 // conditional write and one journal row where the store is a Durable, the
@@ -344,8 +401,15 @@ func (c *Controller) create(ctx context.Context, obj v1.Sandbox, owner string, m
 		return obj, err
 	}
 	started := c.clock.Now()
-	entries := c.poolEntries(ctx)
-	entry := c.matchEntry(entries, obj)
+	environment := cmp.Or(obj.Spec.Environment, c.environment)
+	// An environment below Ready takes no sandbox and keeps the ones it
+	// holds, which is the gate of spec 021's phase table.
+	if err := c.admits(environment); err != nil {
+		return obj, err
+	}
+	pool, _ := c.poolOf(environment)
+	entries := c.poolEntries(ctx, environment)
+	entry := c.matchEntry(pool, entries, obj)
 	// A sandbox's place in its tree is create-time identity: the driver
 	// stamps the mesh and the parent on objects it cannot rewrite, and an
 	// adoption writes only the half of a sandbox a mutation may reach. A
@@ -354,7 +418,7 @@ func (c *Controller) create(ctx context.Context, obj v1.Sandbox, owner string, m
 	if parent != nil || obj.Spec.Mesh.Enabled {
 		entry = nil
 	}
-	c.countAdoption(entry)
+	c.countAdoption(pool, entry)
 	out, err := c.createLocked(ctx, obj, owner, max, warnings, lifecycle, entries, entry, parent)
 	if entry != nil && err != nil && adoptionLost(err) {
 		c.log.InfoContext(ctx, "the pool entry could not be adopted; this create takes the slow path",
@@ -369,11 +433,11 @@ func (c *Controller) create(ctx context.Context, obj v1.Sandbox, owner string, m
 
 // countAdoption records what the pool did for this create. An environment
 // that keeps no pool is not a miss: there was nothing to hit.
-func (c *Controller) countAdoption(entry *driver.State) {
+func (c *Controller) countAdoption(pool v1.PoolSpec, entry *driver.State) {
 	switch {
 	case entry != nil:
 		c.metrics.PoolAdoption(MetricAdopted)
-	case c.pool.Size > 0:
+	case pool.Size > 0:
 		c.metrics.PoolAdoption(MetricMiss)
 	}
 }
@@ -397,11 +461,18 @@ func (c *Controller) createLocked(ctx context.Context, obj v1.Sandbox, owner str
 	// on a container driver, which cannot be renamed, so carrying it forward
 	// is what makes the boundary's principal, the token's subject and the
 	// driver's stamped identity name one thing.
+	// The environment the manifest names is where this sandbox is placed,
+	// and the driver serving it is what every step below calls. A manifest
+	// that named none is on the environment cellad drives itself.
+	environment := cmp.Or(obj.Spec.Environment, c.environment)
+	d, err := c.driverFor(environment)
+	if err != nil {
+		return obj, err
+	}
 	var id string
 	if entry != nil {
 		id = entry.ID
 	} else {
-		var err error
 		if id, err = newID(); err != nil {
 			return obj, err
 		}
@@ -427,12 +498,13 @@ func (c *Controller) createLocked(ctx context.Context, obj v1.Sandbox, owner str
 	// nothing. A real create may not, and where entries hold the ceiling the
 	// oldest give it up.
 	if entry == nil {
-		if err := c.makeRoom(ctx, entries); err != nil {
+		if err := c.makeRoom(ctx, environment, entries); err != nil {
 			return obj, err
 		}
 	}
 	now := time.Now().UTC()
-	obj.Status = v1.SandboxStatus{ID: id, Owner: owner, Environment: c.environment, Driver: c.driver.Name(), Isolation: c.driver.Isolation(), Phase: driver.Pending, CreatedAt: now, Warnings: warnings}
+	obj.Spec.Environment = environment
+	obj.Status = v1.SandboxStatus{ID: id, Owner: owner, Environment: environment, Driver: d.Name(), Isolation: d.Isolation(), Phase: driver.Pending, CreatedAt: now, Warnings: warnings}
 	// The tree position is written before the object is: a child's parent,
 	// root and mesh are what the debit, the boundary and the driver all read.
 	if err := c.spawnStatus(&obj, parent); err != nil {
@@ -446,8 +518,8 @@ func (c *Controller) createLocked(ctx context.Context, obj v1.Sandbox, owner str
 	// The boundary is put in a gateway before the driver is called, so a
 	// sandbox never starts before a gateway knows it (spec 018). A boundary
 	// that no gateway will hold is a refusal here, with nothing created.
-	boundary, err := c.pushEgress(ctx, &obj)
-	if err != nil {
+	boundary, egressErr := c.pushEgress(ctx, &obj)
+	if err = egressErr; err != nil {
 		// The map may already sit in a gateway that took the put and never
 		// answered, so the principal is purged with the object: every map a
 		// gateway holds is a map desired state has.
@@ -455,12 +527,12 @@ func (c *Controller) createLocked(ctx context.Context, obj v1.Sandbox, owner str
 		return obj, errors.Join(err, c.forget(ctx, id, MutationDeleted), c.credit(ctx, parent))
 	}
 	obj.Status.Secrets = boundary.Secrets
-	obj.Status.Conditions = setCondition(obj.Status.Conditions, c.egressCondition(boundary.Map, boundary.Held, now))
+	obj.Status.Conditions = setCondition(obj.Status.Conditions, c.egressCondition(environment, boundary.Map, boundary.Held, now))
 	// The identity is minted after the boundary and before the driver, which
 	// is step 5 of design 005's create order: a sandbox that never starts
 	// leaves a token nobody holds, and the undo below ends it.
-	token, tokenState, err := c.mintToken(ctx, obj)
-	if err != nil {
+	token, tokenState, mintErr := c.mintToken(ctx, obj)
+	if err = mintErr; err != nil {
 		obj.Status.Phase = PhaseFailed
 		obj.Status.Reason = ReasonCreateFailed
 		c.purgeEgress(ctx, id)
@@ -469,9 +541,9 @@ func (c *Controller) createLocked(ctx context.Context, obj v1.Sandbox, owner str
 	obj.Status.TokenState = tokenState
 	if entry != nil {
 		adoption := adoptionOf(obj, lifecycle, c.egressSpec(boundary.Map), boundary.Env, token)
-		err = c.driver.Update(ctx, id, driver.Change{Adopt: &adoption})
+		err = d.Update(ctx, id, driver.Change{Adopt: &adoption})
 	} else {
-		_, err = c.driver.Create(ctx, specOf(obj, lifecycle, c.egressSpec(boundary.Map), boundary.Env, token))
+		_, err = d.Create(ctx, specOf(obj, lifecycle, c.egressSpec(boundary.Map), boundary.Env, token))
 	}
 	if err != nil {
 		c.purgeEgress(ctx, id)
@@ -595,7 +667,11 @@ func (c *Controller) refresh(ctx context.Context, obj v1.Sandbox) (v1.Sandbox, e
 	if obj.Status.Phase == "Deleting" {
 		return obj, nil
 	}
-	state, err := c.driver.Inspect(ctx, obj.Status.ID)
+	d, err := c.driverFor(obj.Status.Environment)
+	if err != nil {
+		return obj, err
+	}
+	state, err := d.Inspect(ctx, obj.Status.ID)
 	if errors.Is(err, driver.ErrNotFound) {
 		if obj.Status.Phase != driver.Pending && obj.Status.Phase != "Failed" {
 			obj.Status.Phase = "Lost"
@@ -672,7 +748,10 @@ func (c *Controller) Act(ctx context.Context, id, verb string) (v1.Sandbox, erro
 	if !ok {
 		return obj, ErrNotFound
 	}
-	var err error
+	d, err := c.driverFor(obj.Status.Environment)
+	if err != nil {
+		return obj, err
+	}
 	switch verb {
 	case "start":
 		obj, err = c.refresh(ctx, obj)
@@ -682,7 +761,7 @@ func (c *Controller) Act(ctx context.Context, id, verb string) (v1.Sandbox, erro
 		if obj.Status.Phase != driver.Stopped {
 			return obj, ErrPhase
 		}
-		err = c.driver.Start(ctx, id)
+		err = d.Start(ctx, id)
 	case "stop":
 		obj, err = c.refresh(ctx, obj)
 		if err != nil {
@@ -691,7 +770,7 @@ func (c *Controller) Act(ctx context.Context, id, verb string) (v1.Sandbox, erro
 		if obj.Status.Phase != driver.Running {
 			return obj, ErrPhase
 		}
-		err = c.driver.Stop(ctx, id)
+		err = d.Stop(ctx, id)
 	case "delete":
 		old := obj
 		// The tree below this sandbox goes first, deepest generation
@@ -727,7 +806,11 @@ func (c *Controller) Act(ctx context.Context, id, verb string) (v1.Sandbox, erro
 // driver's lights, so its absence is not an error.
 func (c *Controller) deleteOne(ctx context.Context, obj *v1.Sandbox) error {
 	id := obj.Status.ID
-	err := c.driver.Delete(ctx, id)
+	d, err := c.driverFor(obj.Status.Environment)
+	if err != nil {
+		return err
+	}
+	err = d.Delete(ctx, id)
 	if errors.Is(err, driver.ErrNotFound) {
 		err = nil
 	}
@@ -773,7 +856,11 @@ func verbMutation(verb string) string {
 	return MutationStopped
 }
 func (c *Controller) Exec(ctx context.Context, id string, req driver.ExecRequest) (driver.Exec, error) {
-	return c.driver.Exec(ctx, id, req)
+	d, err := c.driverOf(id)
+	if err != nil {
+		return nil, err
+	}
+	return d.Exec(ctx, id, req)
 }
 
 // export is the object as a caller reads it: everything clone carries, less

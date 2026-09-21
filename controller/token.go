@@ -110,7 +110,11 @@ func (c *Controller) rotateLocked(ctx context.Context, obj v1.Sandbox) error {
 	if state == nil {
 		return nil
 	}
-	if err := c.driver.Update(ctx, id, driver.Change{Token: []byte(token)}); err != nil {
+	d, err := c.driverFor(obj.Status.Environment)
+	if err != nil {
+		return errors.Join(err, c.revokeToken(ctx, state))
+	}
+	if err := d.Update(ctx, id, driver.Change{Token: []byte(token)}); err != nil {
 		return errors.Join(fmt.Errorf("re-projecting the token into %s: %w", id, err),
 			c.revokeToken(ctx, state))
 	}

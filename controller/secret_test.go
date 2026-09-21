@@ -275,7 +275,7 @@ func TestTheMapCarriesTheValue(t *testing.T) {
 	}
 	// The workload holds the placeholder under the key its manifest named,
 	// and the manifest's own environment is untouched.
-	spec := c.driver.(*gatewayDriver).specs[0]
+	spec := openDriver(c).(*gatewayDriver).specs[0]
 	if spec.Env["GITHUB_TOKEN"] != placeholder {
 		t.Fatalf("the sandbox's environment is %v", spec.Env)
 	}
@@ -316,7 +316,7 @@ func TestACompanionKeySaysWhereToPutIt(t *testing.T) {
 	if _, err := c.Create(ctx, obj, "alice", 0); err != nil {
 		t.Fatal(err)
 	}
-	spec := c.driver.(*gatewayDriver).specs[0]
+	spec := openDriver(c).(*gatewayDriver).specs[0]
 	if spec.Env["VENDOR_KEY_HEADER"] != "X-Api-Key" {
 		t.Fatalf("the header companion is %q", spec.Env["VENDOR_KEY_HEADER"])
 	}
@@ -407,7 +407,7 @@ func TestAMountOfAnAbsentSecretIsNotInjectable(t *testing.T) {
 	if !slices.Equal(created.Status.Secrets.NotInjectable, []string{"absent"}) {
 		t.Fatalf("status.secrets = %+v", created.Status.Secrets)
 	}
-	spec := c.driver.(*gatewayDriver).specs[0]
+	spec := openDriver(c).(*gatewayDriver).specs[0]
 	if !egress.IsPlaceholder(spec.Env["TOKEN"]) {
 		t.Fatalf("the sandbox's environment is %v", spec.Env)
 	}

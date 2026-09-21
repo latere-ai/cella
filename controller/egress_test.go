@@ -52,7 +52,8 @@ func (g *gateway) Purge(_ context.Context, principal string) {
 	g.purged = append(g.purged, principal)
 }
 
-func (g *gateway) CA() string { return g.ca }
+func (g *gateway) CA() string     { return g.ca }
+func (g *gateway) Connected() int { return 1 }
 
 func (g *gateway) maps() []egress.Map {
 	g.mu.Lock()

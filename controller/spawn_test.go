@@ -18,8 +18,9 @@ import (
 // actRecorder collects the acts the controller emitted, which is the seam a
 // store with no journal of its own is read through.
 type actRecorder struct {
-	mu   sync.Mutex
-	acts []Act
+	mu           sync.Mutex
+	acts         []Act
+	environments []EnvironmentAct
 }
 
 func (r *actRecorder) Emit(_ context.Context, a Act) {
@@ -29,6 +30,26 @@ func (r *actRecorder) Emit(_ context.Context, a Act) {
 }
 
 func (r *actRecorder) EmitSecret(context.Context, SecretAct) {}
+
+func (r *actRecorder) EmitEnvironment(_ context.Context, a EnvironmentAct) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.environments = append(r.environments, a)
+}
+
+// environmentsOf returns every environment act of one type, in the order they
+// were emitted.
+func (r *actRecorder) environmentsOf(kind string) []EnvironmentAct {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []EnvironmentAct
+	for _, a := range r.environments {
+		if a.Type == kind {
+			out = append(out, a)
+		}
+	}
+	return out
+}
 
 // of returns every act of one type, in the order they were emitted.
 func (r *actRecorder) of(kind string) []Act {
@@ -511,7 +532,7 @@ func TestADeadlineEndsTheTree(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.mu.Lock()
-	err = c.deleteLocked(ctx, parent.Status.ID, ReasonExpired)
+	err = c.deleteLocked(ctx, c.environment, parent.Status.ID, ReasonExpired)
 	c.mu.Unlock()
 	if err != nil {
 		t.Fatal(err)

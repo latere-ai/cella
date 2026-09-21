@@ -160,8 +160,8 @@ func (d failureDriver) Start(context.Context, string) error  { return d.errorAct
 func (d failureDriver) Stop(context.Context, string) error   { return d.errorAct }
 func TestFailuresRemainRecoverable(t *testing.T) {
 	c, _ := newController(t)
-	real := c.driver
-	c.driver = failureDriver{Driver: real, createErr: errors.New("create failed"), inspectErr: driver.ErrNotFound, deleteErr: errors.New("delete failed")}
+	real, _ := c.driverFor(c.environment)
+	c.setDriver(c.environment, failureDriver{Driver: real, createErr: errors.New("create failed"), inspectErr: driver.ErrNotFound, deleteErr: errors.New("delete failed")})
 	obj, err := c.Create(t.Context(), workspace(), "alice", 0)
 	if err == nil || obj.Status.Phase != "Failed" {
 		t.Fatal(obj, err)
@@ -178,7 +178,7 @@ func TestFailuresRemainRecoverable(t *testing.T) {
 	if err != nil || got.Status.Phase != "Lost" {
 		t.Fatal(got, err)
 	}
-	c.driver = failureDriver{Driver: real, inspectErr: errors.New("inspection failed"), deleteErr: driver.ErrNotFound}
+	c.setDriver(c.environment, failureDriver{Driver: real, inspectErr: errors.New("inspection failed"), deleteErr: driver.ErrNotFound})
 	if _, err = c.Refresh(t.Context(), obj); err == nil {
 		t.Fatal("inspection error lost")
 	}
@@ -318,7 +318,7 @@ func TestDeletingObjectsDoNotConsumeCountQuota(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c.driver = deleteFailureDriver{c.driver}
+	c.setDriver(c.environment, deleteFailureDriver{openDriver(c)})
 	if _, err = c.Act(t.Context(), obj.Status.ID, "delete"); err == nil {
 		t.Fatal("expected cleanup failure")
 	}
@@ -341,10 +341,20 @@ func (d *recordingDriver) Create(ctx context.Context, spec driver.CreateSpec) (d
 	return d.Driver.Create(ctx, spec)
 }
 
+// openDriver is the driver of the environment the controller under test
+// drives itself, which is the one a case swaps to make a driver fail.
+func openDriver(c *Controller) driver.Driver {
+	d, err := c.driverFor(c.environment)
+	if err != nil {
+		panic(err)
+	}
+	return d
+}
+
 func TestCreateSpecCarriesManifestFields(t *testing.T) {
 	c, _ := newController(t)
-	recorder := &recordingDriver{Driver: c.driver}
-	c.driver = recorder
+	recorder := &recordingDriver{Driver: openDriver(c)}
+	c.setDriver(c.environment, recorder)
 	obj := workspace()
 	obj.Spec.User = "1000:1000"
 	obj.Spec.Resources = v1.Resources{CPU: "500m", Memory: "2Gi", Disk: "10Gi"}
