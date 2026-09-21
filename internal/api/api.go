@@ -117,6 +117,7 @@ func New(o Options) (http.Handler, error) {
 	h.handle("POST /v1/sandboxes/{id}/{verb}", h.item)
 	h.handle("GET /v1/sandboxes/{id}/exec", h.execSocket)
 	h.handle("GET /v1/sandboxes/{id}/attach", h.attachSocket)
+	h.handle("GET /v1/sandboxes/{id}/dial/{port}", h.dial)
 	h.handle("GET /v1/sandboxes/{id}/display", h.display)
 	h.handle("GET /v1/sandboxes/{id}/screenshot", h.screenshot)
 	h.handle("GET /v1/sandboxes/{id}/screen", h.screen)

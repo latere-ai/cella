@@ -6,7 +6,6 @@
     "case008NameOnPathAndBody": "PUT /v1/sandboxes/{name} is not served, so apply by name and its name rule have no route",
     "case008ExecStream": "POST .../exec without wait=1 is refused; the framed exec stream is not served",
     "case008PublicDocuments": "/openapi.yaml is not generated or served; the key set is",
-    "case009ObjectFeed": "GET /v1/events is not served; the journal reaches the operator's sink only",
-    "case004CapabilityGates": "the dial route is not registered, so an environment without Dial answers 404 rather than the gate's 422"
+    "case009ObjectFeed": "GET /v1/events is not served; the journal reaches the operator's sink only"
   }
 }
