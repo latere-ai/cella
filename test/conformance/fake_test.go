@@ -47,6 +47,10 @@ type fake struct {
 	// is what proves a case reads the answer and not only its status.
 	wrongMessage bool
 	wrongValues  bool
+	// execStream makes the framed exec stream malformed in one named way, so
+	// a test reads every assertion case008ExecStream makes and not only the
+	// first. The empty string serves the stream design 008 states.
+	execStream string
 	// noSecretKey answers a secret's apply the way an installation that
 	// holds no key to seal a value under answers it.
 	noSecretKey bool
@@ -438,13 +442,63 @@ func (f *fake) exec(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	w.Header().Set("Content-Type", "application/vnd.cella.exec-stream")
+	f.mu.Lock()
+	mode := f.execStream
+	f.mu.Unlock()
+	if mode == "status" {
+		f.refuse(w, "driver_unavailable")
+		return
+	}
+	contentType := "application/vnd.cella.exec-stream"
+	if mode == "type" {
+		contentType = "application/json"
+	}
+	w.Header().Set("Content-Type", contentType)
 	w.WriteHeader(http.StatusOK)
 	frame := func(channel byte, payload string) {
 		header := make([]byte, 5)
 		header[0] = channel
 		binary.BigEndian.PutUint32(header[1:], uint32(len(payload)))
 		_, _ = w.Write(append(header, payload...))
+	}
+	switch mode {
+	case "oversize":
+		header := make([]byte, 5)
+		header[0] = 1
+		binary.BigEndian.PutUint32(header[1:], (1<<20)+1)
+		_, _ = w.Write(header)
+		return
+	case "short":
+		// A header whose length names more than the body carries.
+		header := make([]byte, 5)
+		header[0] = 1
+		binary.BigEndian.PutUint32(header[1:], 64)
+		_, _ = w.Write(append(header, []byte("a few bytes")...))
+		return
+	case "channel":
+		frame(9, "a channel design 008 does not name")
+		return
+	case "truncated":
+		frame(1, stdout)
+		return
+	case "error":
+		frame(4, `{"error":{"code":"driver_unavailable"}}`)
+		return
+	case "exit":
+		frame(1, stdout)
+		frame(2, stderr)
+		frame(3, "not a number")
+		return
+	case "wrongexit":
+		frame(1, stdout)
+		frame(2, stderr)
+		frame(3, "0")
+		return
+	case "wrongoutput":
+		frame(1, "another command's output")
+		frame(2, stderr)
+		frame(3, strconv.Itoa(code))
+		return
 	}
 	frame(1, stdout)
 	frame(2, stderr)
