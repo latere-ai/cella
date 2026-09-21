@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -79,9 +80,14 @@ func run(ctx context.Context, cfg config, out io.Writer) error {
 	go core.RunReaper(ctx)
 
 	server := &http.Server{
-		Addr:              cfg.Addr,
 		Handler:           (&plane{core: core, cfg: cfg}).routes(),
 		ReadHeaderTimeout: 10 * time.Second,
+	}
+	// The listener is opened before the address is printed, so a port of
+	// zero prints the port the kernel gave and a caller can find the plane.
+	listener, err := net.Listen("tcp", cfg.Addr)
+	if err != nil {
+		return fmt.Errorf("listening on %s: %w", cfg.Addr, err)
 	}
 	go func() {
 		<-ctx.Done()
@@ -89,8 +95,8 @@ func run(ctx context.Context, cfg config, out io.Writer) error {
 		defer cancel()
 		_ = server.Shutdown(shutdown)
 	}()
-	fmt.Fprintln(out, "plane listening on", cfg.Addr)
-	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	fmt.Fprintln(out, "plane listening on", listener.Addr())
+	if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
 	return nil
@@ -160,12 +166,27 @@ func (p *plane) read(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "who are you", http.StatusUnauthorized)
 		return
 	}
-	object, err := p.core.Get(r.Context(), r.PathValue("id"), subject)
+	object, err := p.own(r, subject)
 	if err != nil {
 		refuse(w, err)
 		return
 	}
 	write(w, http.StatusOK, object)
+}
+
+// own reads the sandbox the path names and holds it to the subject. The
+// core keeps the owner and answers by id to whoever asks: who may see an
+// object is the platform's question, and a refusal answers as an absence,
+// so a caller cannot probe for what another subject has.
+func (p *plane) own(r *http.Request, subject string) (v1.Sandbox, error) {
+	object, err := p.core.Get(r.Context(), r.PathValue("id"), subject)
+	if err != nil {
+		return v1.Sandbox{}, err
+	}
+	if object.Status.Owner != subject {
+		return v1.Sandbox{}, controller.ErrNotFound
+	}
+	return object, nil
 }
 
 func (p *plane) delete(w http.ResponseWriter, r *http.Request) {
@@ -174,7 +195,7 @@ func (p *plane) delete(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "who are you", http.StatusUnauthorized)
 		return
 	}
-	if _, err := p.core.Get(r.Context(), r.PathValue("id"), subject); err != nil {
+	if _, err := p.own(r, subject); err != nil {
 		refuse(w, err)
 		return
 	}
@@ -194,10 +215,13 @@ func (p *plane) options(subject string) manifest.Options {
 	return manifest.Options{
 		Actor:  manifest.Actor{Subject: subject, Sub: subject},
 		Lookup: manifest.FixedEnvironment(manifest.NativeEnvironment("default")),
+		// No default image: this plane's one environment runs host
+		// processes and refuses an image at all. A plane whose environment
+		// runs images names Defaults.Image here, or lets the admission step
+		// below supply it, which is what an image catalogue is.
 		Defaults: manifest.Defaults{
 			CPU: "1", Memory: "2Gi", Disk: "10Gi",
 			AutoStop: "15m", TTL: "8h", AutoDelete: "24h",
-			Image: p.cfg.Image,
 		},
 		Ceilings: manifest.Ceilings{CPU: plan.CPU, Memory: plan.Memory, TTL: plan.TTL},
 		Admit:    p.catalogue,
@@ -226,6 +250,17 @@ func ceilings(subject string) plan {
 // again, so a step that writes a field the schema does not have is a
 // refusal and not a surprise later.
 func (p *plane) catalogue(_ context.Context, in *v1.Sandbox, req manifest.AdmitRequest) (*v1.Sandbox, []string, error) {
+	out := *in
+	if out.Metadata.Labels == nil {
+		out.Metadata.Labels = map[string]string{}
+	}
+	out.Metadata.Labels["plane.example.com/account"] = strings.ReplaceAll(req.Actor.Sub, "@", "-at-")
+	// The catalogue applies where the environment runs images. Where it runs
+	// none, an image is refused by the contract itself and this platform has
+	// nothing to add.
+	if req.Environment == nil || req.Environment.Status.Isolation == v1.IsolationNone {
+		return &out, nil, nil
+	}
 	// A step that cannot decide says so with the code. A plain error is a
 	// refusal, which is the safe default and the wrong answer when the
 	// catalogue itself is the thing that is down.
@@ -235,17 +270,12 @@ func (p *plane) catalogue(_ context.Context, in *v1.Sandbox, req manifest.AdmitR
 			Detail: "this plane has no image catalogue configured",
 		}
 	}
-	out := *in
 	if out.Spec.Image == "" || out.Spec.Image == "default" {
 		out.Spec.Image = p.cfg.Image
 	}
 	if !strings.HasPrefix(out.Spec.Image, "registry.example/") {
 		return nil, nil, errors.New("the image is not in this platform's catalogue")
 	}
-	if out.Metadata.Labels == nil {
-		out.Metadata.Labels = map[string]string{}
-	}
-	out.Metadata.Labels["plane.example.com/account"] = strings.ReplaceAll(req.Actor.Sub, "@", "-at-")
 	return &out, nil, nil
 }
 
