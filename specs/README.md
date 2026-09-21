@@ -74,6 +74,7 @@ later.
 | [031](031-hosted-sandbox-consolidation.md) | Hosted sandbox consolidation: every package of latere-ai/sandbox lands in cella, in the platform, or is dropped | large | in-progress | 001 |
 | [050](.archive/050-cella-command.md) | Cella command: the agent client over /v1, its client package, exit codes and the skill | medium | complete | 008, 011, 031, 048 |
 | [052](.archive/052-conformance-suite.md) | Conformance suite: the /v1 contract as executable cases, the report, the declared gaps, the pipeline job | large | complete | 008, 015, 031, 049, 050 |
+| [055](.archive/055-api-contract-gaps.md) | API contract gaps: YAML bodies, content negotiation, apply by name, the framed exec stream, the API document, the object feed, the dial gate | large | complete | 003, 008, 009, 031, 052 |
 
 ## Dependency graph
 
@@ -284,4 +285,5 @@ The map, the order, and the rule for a slice are in 031.
 | [050-cella-command.md](.archive/050-cella-command.md) | complete | The `cella` command, the typed client and its own WebSocket, the exit scheme, the columns and `--json`, the skill, and the client's four release archives |
 | [040-mesh-and-spawn.md](.archive/040-mesh-and-spawn.md) | complete | The spawn tree and its propagated budget, the mesh a child inherits, the boundary as a subset check at resolve |
 | [052-conformance-suite.md](.archive/052-conformance-suite.md) | complete | The `/v1` contract as 51 executable cases with a report, the declared gaps of this server, and the suite in both pipelines |
+| [055-api-contract-gaps.md](.archive/055-api-contract-gaps.md) | complete | The seven gaps the suite declared, closed: YAML bodies with the unknown-field path and the two YAML limits, `Accept` negotiation, `PUT /v1/sandboxes/{name}`, the framed exec stream, `GET /openapi.yaml` held to the mux, `GET /v1/events`, the dial gate, and the request id of design 008 |
 | [051-environments-and-workers.md](051-environments-and-workers.md) | in-progress | The `Environment` kind and its field table, the environment key's mint and revocation, the worker registration and stream, the `remote` driver passing the conformance suite, and the `worker` role; environments as desired state and the controller's per-environment driver map are its open half |

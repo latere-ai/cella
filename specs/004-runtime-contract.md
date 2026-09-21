@@ -8,7 +8,7 @@ depends_on:
 affects: [runtime/, runtime/k8s/, runtime/podman/, runtime/native/, runtime/local/, runtime/vm/, runtime/remote/, runtime/runtimetest/, internal/config/]
 effort: large
 created: 2026-09-12
-updated: 2026-09-20
+updated: 2026-09-21
 author: changkun
 ---
 
@@ -30,7 +30,7 @@ the suite.
 
 ## Current state
 
-The initial native implementation is in `runtime/native` ([[025-native-runtime-migration]]), and the container driver of the server-side default is in `runtime/k8s` ([[036-k8s-driver]]) with the lifecycle, execution, logs, archive transfer and stamped identity of this contract. `DisplayDriver` and `InputDriver` are implemented by `runtime/podman` and `runtime/k8s`, with `State.Ports` and the `DisplayReady` condition ([[041-display-and-input]]); `Dialer` is declared and implemented by none. The exported package and capability types follow this design; the other drivers and remaining native capabilities below are not complete.
+The initial native implementation is in `runtime/native` ([[025-native-runtime-migration]]), and the container driver of the server-side default is in `runtime/k8s` ([[036-k8s-driver]]) with the lifecycle, execution, logs, archive transfer and stamped identity of this contract. `DisplayDriver` and `InputDriver` are implemented by `runtime/podman` and `runtime/k8s`, with `State.Ports` and the `DisplayReady` condition ([[041-display-and-input]]); `Dialer` is declared and implemented by none, and the route that would reach it answers the capability gate ([[055-api-contract-gaps]]). The exported package and capability types follow this design; the other drivers and remaining native capabilities below are not complete.
 
 Design provenance: The interface descends from one that three container
 drivers have implemented in the hosted platform; the changes are that

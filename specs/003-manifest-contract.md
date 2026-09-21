@@ -7,7 +7,7 @@ depends_on:
 affects: [manifest/, manifest/v1/, docs/]
 effort: large
 created: 2026-09-12
-updated: 2026-09-20
+updated: 2026-09-21
 author: changkun
 ---
 
@@ -37,7 +37,7 @@ nothing a workload does inside it later can widen that boundary.
 
 ## Current state
 
-A strict JSON Sandbox subset is implemented by [[026-direct-control-plane]]: metadata, the configured environment, and native execution fields. [[044-manifest-fields]] added `user`, `resources`, `workspace.path`, `lifecycle`, the full `metadata` and `env` rules, `status.expiresAt` and `status.warnings`, the quantity and duration parsers, and the staged `Resolve` with `Defaults`, `Ceilings`, `Limits`, `Admit`, `Existing` and `NewName`, over a `Lookup` that answers `Environment`. [[039-egress-gateway]] added `network.egress` with the host rule, the mode inference, the `narrow` rule a workload cannot widen, `status.conditions`, and the egress row of the capability check. [[046-secret-kind]] added `secrets[]` with its environment-key rules, `status.secrets`, `Lookup.Secret` and reference resolution, and the `Secret` kind's own decode, defaults and validation. [[047-admission-client]] added the image rule that closes stage 3, `Defaults.Image`, `Actor.Issuer` and `.Sub`, and the `Claims`, `Workload` and `RequestID` an admission step reads. [[040-mesh-and-spawn]] added `mesh.enabled` and `mesh.spawn`, `status.parent`, `.root`, `.mesh` and `.spawn`, `Options.Parent`, stage 6 over every rule with a field, the child's defaults for `ttl` and for a boundary it does not declare, and the `Mesh` row of stage 7. YAML decoding, the volume, port, scheduling and display fields, `workspace.git`, rule 4, and the golden corpus remain to build.
+A strict JSON Sandbox subset is implemented by [[026-direct-control-plane]]: metadata, the configured environment, and native execution fields. [[044-manifest-fields]] added `user`, `resources`, `workspace.path`, `lifecycle`, the full `metadata` and `env` rules, `status.expiresAt` and `status.warnings`, the quantity and duration parsers, and the staged `Resolve` with `Defaults`, `Ceilings`, `Limits`, `Admit`, `Existing` and `NewName`, over a `Lookup` that answers `Environment`. [[039-egress-gateway]] added `network.egress` with the host rule, the mode inference, the `narrow` rule a workload cannot widen, `status.conditions`, and the egress row of the capability check. [[046-secret-kind]] added `secrets[]` with its environment-key rules, `status.secrets`, `Lookup.Secret` and reference resolution, and the `Secret` kind's own decode, defaults and validation. [[047-admission-client]] added the image rule that closes stage 3, `Defaults.Image`, `Actor.Issuer` and `.Sub`, and the `Claims`, `Workload` and `RequestID` an admission step reads. [[040-mesh-and-spawn]] added `mesh.enabled` and `mesh.spawn`, `status.parent`, `.root`, `.mesh` and `.spawn`, `Options.Parent`, stage 6 over every rule with a field, the child's defaults for `ttl` and for a boundary it does not declare, and the `Mesh` row of stage 7. [[055-api-contract-gaps]] added the shared decoder: the three YAML types beside JSON, one document per request, the version before the kind before any field, the unknown-field path, the alias and nesting limits, and the golden corpus under `manifest/testdata/v1/`. The volume, port and scheduling fields, `workspace.git` and rule 4 remain to build.
 
 Design provenance: The schema descends from a manifest that has served a
 hosted platform for months, with these changes: the platform's own
@@ -487,10 +487,10 @@ mapping and user sentences of the errors ([[008-api]]).
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| The example above decodes from YAML and from its JSON form to equal objects, and resolves without error under options that grant every capability it uses | `TestDecodeYAMLAndJSONAgree`, `TestTheExampleResolves` | not built |
-| Every unknown field, at any depth, is refused with its path | `TestUnknownFieldNamesThePath`, table-driven over twenty paths | not built |
-| A second YAML document, a wrong version, a wrong kind, and an unsupported content type are refused with their codes, version before kind | `TestDecodeRefusals` | partial: `TestDecode` over a second JSON document, the version, the kind and a content type that is not JSON |
-| An alias chain past 1 MiB and nesting past 64 levels are each refused in under 100 ms | `TestYAMLLimits` | not built |
+| The example above decodes from YAML and from its JSON form to equal objects, and resolves without error under options that grant every capability it uses | `TestDecodeYAMLAndJSONAgree`, `TestTheExampleResolves` | built over the fields this schema carries, with `TestDecodeTakesYAMLAndJSON` over the three YAML types, and over HTTP as conformance case `case003ContentTypes` ([[055-api-contract-gaps]]); the example's volume, port, scheduling and `workspace.git` fields wait on the specs that add them |
+| Every unknown field, at any depth, is refused with its path | `TestUnknownFieldNamesThePath`, table-driven over twenty paths | built: fourteen paths through `metadata`, `spec`, `status` and two list entries, with the open maps that admit any member and the two other kinds ([[055-api-contract-gaps]]) |
+| A second YAML document, a wrong version, a wrong kind, and an unsupported content type are refused with their codes, version before kind | `TestDecodeRefusals` | built: the second document in both syntaxes, the version and the kind each before any field, and every content type outside the four ([[055-api-contract-gaps]]) |
+| An alias chain past 1 MiB and nesting past 64 levels are each refused in under 100 ms | `TestYAMLLimits` | built ([[055-api-contract-gaps]]) |
 | Every syntax rule in the field table has a refusing case: quantity, duration and `never`, RFC 3339, DNS-1123 names, port range and uniqueness, display ranges, OCI reference, absolute paths | `TestFieldSyntax`, table-driven | partial: `TestFieldSyntax`, `TestParseQuantity` and `TestParseDuration` over the fields that exist |
 | Every default in the table is applied and returned; a field the caller set is never overwritten; `mode` is inferred from hosts and secrets; an absent name comes from `NewName` | `TestDefaultsFillOnlyAbsentFields`, `TestModeInference`, `TestNameGeneration` | partial: `TestDefaultsFillOnlyAbsentFields`, `TestNameGeneration`, `TestModeInference` ([[039-egress-gateway]]) and `TestModeInferenceFromASecret` ([[046-secret-kind]]); the fields the later kinds add wait on them |
 | Each `exclusive_fields`, `path_conflict`, and `missing_field` case in the table is refused with the code | `TestExclusiveMissingAndPathConflicts` | partial: `TestEgressExclusiveFields` with [[039-egress-gateway]]; the path and missing-field cases wait on volumes |
@@ -508,6 +508,6 @@ mapping and user sentences of the errors ([[008-api]]).
 | Each capability row of stage 7 refuses or warns as stated when the capability is absent and passes when present | `TestCapabilityRows`, table-driven over every row | partial: the `Resize` row in `TestImmutableFields`, the workspace source rows in `TestFieldSyntax`, and the `Mesh` row in `TestMeshCapability` ([[040-mesh-and-spawn]]) |
 | `status` on apply is ignored; `Resolve` returns an empty status but warnings | `TestStatusIsIgnoredOnApply` | built |
 | `Resolve` on the same input, options, and lookup answers twice yields byte-identical JSON | `TestResolveIsDeterministic` | built |
-| Every manifest in `testdata/v1/` resolves to its golden output | `TestGoldenCorpus` | not built |
+| Every manifest in `testdata/v1/` resolves to its golden output | `TestGoldenCorpus` | built over four rows, each decoded from YAML and from its JSON form and resolved under fixed options ([[055-api-contract-gaps]]) |
 | The quantity parser agrees with the Kubernetes parser on a fuzz corpus | `FuzzQuantity` against `resource.ParseQuantity` in a test-only dependency | not built |
 | `manifest/v1` imports only the standard library; `manifest` imports no `internal/` or `runtime` package | `TestManifestImports` | built |

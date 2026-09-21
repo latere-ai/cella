@@ -1,6 +1,6 @@
 ---
 title: "API contract gaps: YAML bodies, content negotiation, apply by name, the framed exec stream, the API document, the object feed, the dial gate"
-status: in-progress
+status: complete
 track: core
 depends_on:
   - specs/008-api.md
@@ -264,3 +264,50 @@ and its headers.
 | A request carries `req_` and a ULID; a client's `X-Request-Id` within the rule is echoed everywhere and one outside it is replaced | `TestRequestID` | built |
 | `cella get -o yaml` asks the server with `Accept` and writes the bytes it received | `TestOneObjectUnderYAMLIsTheAPIsOwnBytes` | built |
 | The seven declared cases pass against this server and `known.json` declares none | `TestTheConformanceSuiteHoldsAgainstThisServer` | built |
+
+## Outcome
+
+The seven declared cases pass and `test/conformance/known.json` declares
+none: `go test ./cmd/cellad` runs the whole suite against a `cellad serve`
+in process and reports 43 passed, 0 failed, 8 skipped for an input this
+environment does not carry, and 0 declared gaps. The request-id follow-up of
+[[031-hosted-sandbox-consolidation]] is closed with them.
+
+Coverage after the slice, per package the work touched: `manifest` 95.7%,
+`internal/api` 92.2%, `internal/events` 95.1%, `internal/store` 91.4%,
+`controller` above the bar with the rest, `internal/cellacli` 90.2%,
+`internal/cellaclient` 91.3%, `test/conformance` 90.5%, `api` served by its
+own test. The bar is `go tool lateregate`, sixteen gates.
+
+### What the slice did not build
+
+- `ETag` and `If-Match`. Design 008 takes the value from the store's row
+  version, which `internal/store` keeps to itself: neither
+  `controller.Controller` nor the snapshot store exposes one, and a header
+  computed from anything else would be a concurrency token that does not
+  track concurrency. The apply route serves the create and the update halves
+  and refuses nothing on a version; `TestApplyConcurrency` stays open.
+- The dial byte pump. The route is registered and answers the capability
+  gate, which is what the gate's case reads. Design 004 declares `Dialer` and
+  no driver implements it, so a socket behind the gate would be code no test
+  could reach.
+- `follow=1` on the object feed. It is refused with a developer detail rather
+  than ignored, so a caller that asked to follow is not handed one page and
+  left to read the absence of later records as their absence.
+- `tools/apidoc`. `api/openapi.yaml` is written and carried, and a test walks
+  the mux and the document in both directions, so neither can gain a route
+  the other does not have. The field schemas of each kind are the generator's
+  and are not in the document.
+- `cella exec` still takes `?wait=1`. The server serves the framed stream and
+  the command reading it changes what `--json` answers and what the command
+  exits with, which is design 011's exit table rather than this slice's
+  handler. `cella get -o yaml` is wired, for one object and for one page.
+
+### What the specs record
+
+Design 008 moves nine State cells, design 003 six, design 009 one, and
+designs 004 and 011 one each. Three repository tests asserted the gaps rather
+than the rules and were corrected with the reason: `TestRequestValidation`
+read the framed exec stream's refusal, and the media-type rows of
+`TestDecode`, `TestDecodeSecret` and `TestDecodeEnvironment` read a YAML body
+as unsupported.
