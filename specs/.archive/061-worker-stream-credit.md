@@ -1,6 +1,6 @@
 ---
 title: "Worker stream credit: the per sub-stream window, its negotiation in the hello, and Watch across the seam"
-status: in-progress
+status: complete
 track: core
 depends_on:
   - specs/021-data-plane-workers.md
@@ -187,7 +187,10 @@ contract's type and nothing on the wire changes.
   holds and the consumer misses nothing it does not re-read.
 - A `Watch` operation that ends, because the connection ended or the
   worker's driver failed, delivers a `relist` to every consumer, since
-  events may have been missed until the next one opens.
+  events may have been missed until the next one opens. One that ended
+  while the connection stayed up is the worker's driver failing to watch,
+  and the control plane opens it again after one second, doubling to
+  thirty while it keeps failing at once.
 
 ## Not in this slice
 
@@ -207,13 +210,72 @@ slice measures is read by its tests.
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| The `credit` message, the hello's `window` and `watch`, and the `event` message encode and decode both ways | `TestCreditMessages` | not built |
-| A peer that breaks the window, grants what it cannot, credits control, or says hello twice is closed with `ErrFrame` | `TestAMisbehavingPeerIsClosed` | not built |
-| One sub-stream whose reader stalls holds only itself: another operation on the same connection completes while it is stalled, and the stalled one completes once read | `TestAStalledReaderHoldsOnlyItsOwnStream` | not built |
-| An exec of 64 MiB output, an attach with resize, a tar both ways, and a file read past the window stream through one connection under credit, and no sub-stream on either side ever holds more than the window, measured | `TestRemoteStreams` | not built |
-| A writer waiting for credit is released by the caller closing, by the far side answering, and by the connection ending; a body the worker refused part way ends the copy at once | `TestAWaitingWriterIsReleased` | not built |
-| A cancel releases a driver reading a body; a resize past the queue replaces the oldest; the worker takes the control plane's heartbeat without a warning | `TestACancelReleasesTheBodyReader`, `TestResizesNeverHoldThePump`, `TestTheWorkerTakesTheHeartbeat` | not built |
-| A worker and a control plane of different releases keep the stream: no credit, no `event`, and the previous back pressure | `TestAPeerWithoutCreditKeepsThePreviousStream` | not built |
-| `Watch` events cross the seam in order and update what `Inspect` and `List` answer, and a `relist` makes the control plane issue a `List` whose answer is in place before the `relist` is delivered | `TestRemoteWatch` | not built |
-| A consumer that falls behind receives a `relist`; a closed driver channel crosses as a `relist`; a worker whose driver does not watch is never asked | `TestAWatchThatFallsBehindRelists`, `TestAClosedWatchRelists`, `TestAWorkerThatDoesNotWatchIsNotAsked` | not built |
-| No file this slice adds names a Latere host, image, pool or namespace | `TestNoLatereCoordinates` | not built |
+| The `credit` message, the hello's `window` and `watch`, and the `event` message encode and decode both ways | `TestCreditMessages` | built |
+| A peer that breaks the window, grants what it cannot, credits control, or says hello twice is closed with `ErrFrame` | `TestAMisbehavingPeerIsClosed` | built |
+| One sub-stream whose reader stalls holds only itself: another operation on the same connection completes while it is stalled, and the stalled one completes once read | `TestAStalledReaderHoldsOnlyItsOwnStream` | built |
+| A caller that stalls past a frame's write deadline keeps the worker's WebSocket, and another exec runs on it meanwhile | `TestAStalledCallerKeepsTheStream` | built |
+| An exec of 64 MiB output, an attach with resize, a tar both ways, and a file read past the window stream through one connection under credit, and no sub-stream on either side ever holds more than the window, measured | `TestRemoteStreams` | built |
+| A writer waiting for credit is released by the caller closing, by the far side answering, and by the connection ending; a body the worker refused part way ends the copy at once | `TestAWaitingWriterIsReleased` | built |
+| A cancel releases a driver reading a body; a resize past the queue replaces the oldest; the worker takes the control plane's heartbeat without a warning | `TestACancelReleasesTheBodyReader`, `TestResizesNeverHoldThePump`, `TestTheWorkerTakesTheHeartbeat` | built |
+| A worker and a control plane of different releases keep the stream: no credit, no `event`, and the previous back pressure | `TestAPeerWithoutCreditKeepsThePreviousStream` | built |
+| An operation issued as its worker's stream ends is refused rather than reaching the released connection | `TestAnOperationRacesItsWorkerLeaving` | built |
+| `Watch` events cross the seam in order and update what `Inspect` and `List` answer, and a `relist` makes the control plane issue a `List` whose answer is in place before the `relist` is delivered | `TestRemoteWatch` | built |
+| A consumer that falls behind receives a `relist`; a closed driver channel crosses as a `relist`, and a Watch the driver fails is opened again; a worker whose driver does not watch is never asked | `TestAWatchThatFallsBehindRelists`, `TestAClosedWatchRelists`, `TestAWorkerThatDoesNotWatchIsNotAsked` | built |
+| No file this slice adds names a Latere host, image, pool or namespace | `TestNoLatereCoordinates` | built |
+
+## Outcome
+
+The credit window of [[021-data-plane-workers]] is built, agreed in the
+hello, and `Watch` crosses the seam. What landed:
+
+| Piece | Where |
+|---|---|
+| `DefaultWindow`, the `credit` and `event` messages, the hello's `window` and `watch`, `OpWatch` | `runtime/remote/protocol.go` |
+| The per sub-stream receive buffer, the send credit and its wait, the agreement, the resize queue, the cancel that ends incoming sub-streams, the first reason as what `Run` returns | `runtime/remote/link.go` |
+| `Event`, `Watcher` and the consumer's bounded queue | `runtime/remote/watch.go` |
+| The file read kept inside its operation, and the worker's Watch loop | `runtime/remote/execute.go` |
+| The hello that announces the window and the watch, the answer that turns credit on, the heartbeat | `runtime/remote/serve.go` |
+| The hello's answer, the connection's Watch reopened with backoff, events into the observed state, the relist's `List`, the consumers, `Release` under the lock, `Open` reading the link under the lock | `runtime/remote/hub.go` |
+| `Transport.Watch` and `Driver.Watch` | `runtime/remote/remote.go` |
+| The frame write deadline the socket tests shorten | `internal/worker/socket.go` |
+| The operator's section on long streams and upgrades | `docs/workers.md` |
+
+Coverage on `go test -cover`: `runtime/remote` 92.3%, `internal/worker`
+91.3%. `go test -race` is clean over both. The high water mark
+`TestRemoteStreams` measured was 8,388,608 bytes on the control plane,
+exactly the window, while the 64 MiB exec's reader stalled, and
+8,355,840 on the worker while the archive and the file body came down.
+
+Five of the bug fix tests were run against the tree before this slice
+and fail there: `TestAStalledReaderHoldsOnlyItsOwnStream` hangs,
+`TestAStalledCallerKeepsTheStream` drops the stream with a broken pipe,
+`TestResizesNeverHoldThePump` never reads the result behind the
+resizes, `TestTheWorkerTakesTheHeartbeat` finds the warning, and
+`TestACancelReleasesTheBodyReader` finds the staged write still held.
+`TestAnOperationRacesItsWorkerLeaving` fails on the tree before its fix
+with a data race and a nil pointer dereference in `transport.Open`.
+
+### Divergences
+
+| From | To | Why |
+|---|---|---|
+| 021's `credit {id, bytes}` per operation | `credit {id, stream, bytes}` per sub-stream, 021 rewritten | an exec's two outputs share an operation, and a caller that reads one to its end before the other would stop the one it reads under one window per operation |
+| A window both sides assume | each side announces its own in the hello, 8 MiB by default | a later release changes it without a protocol change |
+| A new subprotocol for a changed stream | `cella.worker.v1` kept, credit agreed in the hello | a control plane and its workers are often operated by different parties and upgraded apart; a new subprotocol would refuse every worker at the control plane's upgrade, and the API's upgrader offers one subprotocol |
+| 004's `Watch` on `Driver` | `Watcher` and `Event` declared in `runtime/remote` | the contract declares no `Watch` and no driver implements one; the types move to `runtime` when one does |
+| The relist's `List` through the operations table | issued on the connection that sent the relist, as the Watch is | neither is a caller's operation and neither is redelivered |
+
+Two defects found on the way were fixed with their tests:
+`transport.Open` read a worker's link outside the hub's lock, so an
+operation issued as the worker's stream ended could reach a released
+link and dereference nil, which crashes the control plane from a loop
+that recovers nothing; and `Hub.Release` walked the environment's
+workers after dropping the lock.
+
+### What this leaves open
+
+| Open | Why |
+|---|---|
+| The dial and the screen of 021's `TestRemoteStreams` row | the remote driver implements neither `Dialer` nor `DisplayDriver`; both ride `bytes` sub-streams, which are credited like any other |
+| `Watch` on the in-process drivers, in the conformance suite, and consumed by the controller | no driver watches; [[004-runtime-contract]] and [[005-lifecycle-controller]] |
+| A metric of what each stream holds | the high water mark is read by the tests alone |
