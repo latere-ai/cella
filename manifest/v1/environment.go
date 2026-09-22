@@ -162,6 +162,9 @@ const (
 	// ReasonNoCapacity is a create a direct environment could not fit, which
 	// it fails rather than holds.
 	ReasonNoCapacity = "NoCapacity"
+	// ReasonPreempted is a sandbox the scheduler stopped to place one of
+	// higher priority. It waits in its queue again, with its workspace kept.
+	ReasonPreempted = "Preempted"
 )
 
 // PoolSpec is what the environment keeps prewarmed: entries of one shape, made

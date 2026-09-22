@@ -171,7 +171,12 @@ type SandboxStatus struct {
 	ExpiresAt      time.Time     `json:"expiresAt,omitzero"`
 	ExitCode       *int          `json:"exitCode,omitempty"`
 	Reason         string        `json:"reason,omitempty"`
-	Warnings       []string      `json:"warnings,omitempty"`
+	// Preemptions is how many times the scheduler stopped this sandbox to
+	// place one of higher priority (spec 020). It is status and not a
+	// label or a table of its own because the bound it is held to must
+	// survive a restart and a change of the replica that schedules.
+	Preemptions int      `json:"preemptions,omitempty"`
+	Warnings    []string `json:"warnings,omitempty"`
 	// EgressState is the control plane's own record of the sandbox's
 	// boundary: the credential both gateway doors authenticate and the
 	// generation of the map that carries it. It is desired state, not
