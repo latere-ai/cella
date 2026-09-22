@@ -16,6 +16,7 @@ import (
 	"net/http/httptest"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -310,26 +311,49 @@ func (d failingExecDriver) Exec(context.Context, string, runtime.ExecRequest) (r
 	return d.execution, nil
 }
 
-type brokenExec struct{ closed bool }
+// brokenExec is a session whose stdout fails after one chunk. The handler
+// closes it from its own goroutine, which on the framed stream may run after
+// the client has read the last frame, so a test waits on done rather than
+// reading a flag the handler writes.
+type brokenExec struct {
+	once sync.Once
+	done chan struct{}
+}
+
+func newBrokenExec() *brokenExec { return &brokenExec{done: make(chan struct{})} }
+
+// closed reports whether the handler closed the session within a bound that
+// is a failure's and not a schedule's.
+func (e *brokenExec) closed() bool {
+	select {
+	case <-e.done:
+		return true
+	case <-time.After(10 * time.Second):
+		return false
+	}
+}
 
 func (e *brokenExec) Stdout() io.Reader {
 	return io.MultiReader(strings.NewReader("partial"), brokenReader{})
 }
 func (e *brokenExec) Stderr() io.Reader                 { return strings.NewReader("") }
 func (e *brokenExec) Wait(context.Context) (int, error) { return 0, nil }
-func (e *brokenExec) Close() error                      { e.closed = true; return nil }
+func (e *brokenExec) Close() error                      { e.once.Do(func() { close(e.done) }); return nil }
 
 type brokenReader struct{}
 
 func (brokenReader) Read([]byte) (int, error) { return 0, io.ErrUnexpectedEOF }
 func TestExecStreamFailureCannotReportSuccess(t *testing.T) {
-	execution := &brokenExec{}
+	execution := newBrokenExec()
 	f := setupDriver(t, nil, func(d runtime.Driver) runtime.Driver { return failingExecDriver{d, execution} })
 	var obj v1.Sandbox
 	_ = json.Unmarshal(f.request("POST", "/v1/sandboxes", f.alice, createBody, 201), &obj)
 	b := f.request("POST", "/v1/sandboxes/"+obj.Status.ID+"/exec?wait=1", f.alice, `{"command":["true"]}`, 503)
-	if !bytes.Contains(b, []byte("driver_unavailable")) || !execution.closed {
-		t.Fatal(string(b), execution.closed)
+	if !bytes.Contains(b, []byte("driver_unavailable")) {
+		t.Fatal(string(b))
+	}
+	if !execution.closed() {
+		t.Fatal("the failed session was not closed")
 	}
 	// A tree selector naming a root this node does not hold is an empty
 	// page and not a refusal: a root that was deleted and one that never

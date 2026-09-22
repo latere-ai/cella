@@ -136,7 +136,7 @@ func TestExecStreamTimeout(t *testing.T) {
 // envelope the frame carries is the same one an early refusal would have
 // written.
 func TestExecStreamErrorFrame(t *testing.T) {
-	execution := &brokenExec{}
+	execution := newBrokenExec()
 	f := setupDriver(t, nil, func(d runtime.Driver) runtime.Driver { return failingExecDriver{d, execution} })
 	obj := f.sandbox("work")
 	res := f.openStream("POST", "/v1/sandboxes/"+obj.Status.ID+"/exec", f.alice, `{"command":["true"]}`)
@@ -162,7 +162,7 @@ func TestExecStreamErrorFrame(t *testing.T) {
 	if string(stdout) != "partial" {
 		t.Errorf("channel 1 carried %q", stdout)
 	}
-	if !execution.closed {
+	if !execution.closed() {
 		t.Error("the failed session was not closed")
 	}
 }
