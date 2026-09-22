@@ -11,11 +11,16 @@ that serves the same API.
 ## Run it against an installation
 
 ```sh
-go test -tags=e2e -v -run '^TestContract$' ./test/conformance -args \
+go test -tags=e2e -count=1 -timeout 30m -v -run '^TestContract$' ./test/conformance -args \
   -url https://cella.example.com \
   -token "$CELLA_TOKEN" \
   -capabilities files,attach
 ```
+
+`-count=1` makes every run ask the server: without it, `go test` may replay
+an earlier pass from its build cache. `-timeout 30m` leaves room for a run
+against a cluster, which can take longer than the ten minutes `go test` allows
+by default.
 
 The run creates objects named `conformance-<run>-<n>`, records every id it
 made, and deletes those ids and only those. It never deletes by name pattern
@@ -105,6 +110,23 @@ environment cannot provide this* rather than a surprise.
 A capability you do not pass is a group that skips. Declaring one the server
 does not honour is a failure, which is the point: the declaration is what a
 caller reads before it writes a manifest.
+
+## Run it from GitHub Actions
+
+The repository carries a workflow, `conformance`, that runs the command above
+from a clean checkout against an address you give it. In your fork, or in this
+repository if you maintain it:
+
+1. Add a repository secret `CONFORMANCE_TOKEN` holding a bearer the server
+   accepts, and optionally `CONFORMANCE_ADMIN_TOKEN` holding an administrator's
+   bearer, which the environment cases need.
+2. Run the workflow from the Actions tab, or with
+   `gh workflow run conformance.yml -f url=https://cella.example.com -f capabilities=files,attach`.
+   The `image` input names the image every case creates from.
+
+The bearer is a secret and never an input, because the inputs of a run are
+shown to anyone who can read it. The run fails before the suite starts when
+`CONFORMANCE_TOKEN` is not set, and otherwise passes or fails with the suite.
 
 ## Against a server you wrote
 

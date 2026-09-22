@@ -7,10 +7,12 @@ import (
 	"bytes"
 	"context"
 	"io/fs"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -372,7 +374,7 @@ func TestVerifyRendersTheDeployTreeOnEveryPush(t *testing.T) {
 // release pipeline: a step that reads a command's output through a pipe
 // reports the command's exit code and not the reader's.
 func TestEveryPipedStepFailsOnTheCommandAndNotTheTee(t *testing.T) {
-	for _, name := range []string{"release.yml", "verify.yml"} {
+	for _, name := range []string{"release.yml", "verify.yml", "conformance.yml"} {
 		data, err := os.ReadFile(filepath.Join(".github", "workflows", name))
 		if err != nil {
 			t.Fatal(err)
@@ -394,6 +396,149 @@ func TestEveryPipedStepFailsOnTheCommandAndNotTheTee(t *testing.T) {
 			}
 		}
 	}
+}
+
+// TestTheExternalRunIsTheDocumentedCommand holds the conformance workflow to
+// docs/conformance.md: on dispatch, a clean checkout runs the command the page
+// documents against the address given, with the same go test flags, the same
+// package and the same suite flags in the same order, the values free. The
+// bearer is a repository secret that reaches the step through its
+// environment, and no expression is part of the script, so neither a secret
+// nor an input is printed with it or becomes a command.
+func TestTheExternalRunIsTheDocumentedCommand(t *testing.T) {
+	doc, err := os.ReadFile(filepath.Join("docs", "conformance.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, after, ok := strings.Cut(string(doc), "## Run it against an installation")
+	if !ok {
+		t.Fatal("docs/conformance.md has no section that runs the suite against an installation")
+	}
+	documented := shellCommand(t, "docs/conformance.md", fencedBlock(after, "sh"), "go test")
+	for _, flag := range []string{"-count=1", "-timeout"} {
+		if !slices.Contains(documented, flag) {
+			t.Errorf("the documented command carries no %s, so a run can be replayed or cut short", flag)
+		}
+	}
+
+	path := filepath.Join(".github", "workflows", "conformance.yml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var o object
+	if err := unmarshalYAML(data, &o); err != nil {
+		t.Fatal(err)
+	}
+	// YAML 1.1 reads the bare key `on` as a boolean, which the JSON the
+	// decoder converts through spells "true".
+	triggers, _ := o["on"].(map[string]any)
+	if triggers == nil {
+		triggers, _ = o["true"].(map[string]any)
+	}
+	if len(triggers) != 1 || triggers["workflow_dispatch"] == nil {
+		t.Fatalf("the workflow runs on %v; the external run is on dispatch alone", keysOf(triggers))
+	}
+	if dig(triggers, "workflow_dispatch", "inputs", "url", "required") != true {
+		t.Error("the dispatch does not require the address of the server under test")
+	}
+	for name := range dig(triggers, "workflow_dispatch", "inputs").(map[string]any) {
+		if strings.Contains(strings.ToLower(name), "token") {
+			t.Errorf("the dispatch takes %s as an input, which the run's summary shows to every reader", name)
+		}
+	}
+	if str(dig(o, "permissions", "contents")) != "read" {
+		t.Error("the workflow does not hold its token to reading the repository")
+	}
+	job, ok := dig(o, "jobs", "conformance-external").(map[string]any)
+	if !ok {
+		t.Fatal("the workflow has no conformance-external job")
+	}
+	var step map[string]any
+	for _, s := range list(job["steps"]) {
+		m, _ := s.(map[string]any)
+		if strings.Contains(str(m["run"]), "TestContract") {
+			step = m
+		}
+		if uses := str(m["uses"]); uses != "" && !regexp.MustCompile(`@[0-9a-f]{40}$`).MatchString(uses) {
+			t.Errorf("%s is not pinned by commit", uses)
+		}
+	}
+	if step == nil {
+		t.Fatal("no step of the job runs the suite")
+	}
+	script := str(step["run"])
+	if strings.Contains(script, "${{") {
+		t.Error("the script carries an expression, so a value is written into the text the runner prints and executes")
+	}
+	env := envOf(step["env"])
+	if !strings.Contains(env["CELLA_TEST_TOKEN"], "secrets.") {
+		t.Errorf("the bearer comes from %q and not from a repository secret", env["CELLA_TEST_TOKEN"])
+	}
+	if !strings.Contains(env["CELLA_TEST_URL"], "inputs.url") {
+		t.Errorf("the address comes from %q and not from the dispatch", env["CELLA_TEST_URL"])
+	}
+	run := shellCommand(t, path, script, "go test")
+
+	// The go test half is equal token for token; the suite's flags are the
+	// same flags in the same order, each with its own value.
+	split := func(cmd []string) (head, flags []string) {
+		i := slices.Index(cmd, "-args")
+		if i < 0 {
+			t.Fatalf("%v passes the suite no flags", cmd)
+		}
+		for j := i + 1; j < len(cmd); j += 2 {
+			flags = append(flags, cmd[j])
+		}
+		return cmd[:i+1], flags
+	}
+	docHead, docFlags := split(documented)
+	runHead, runFlags := split(run)
+	if !slices.Equal(runHead, docHead) {
+		t.Errorf("the job runs %v, the page documents %v", runHead, docHead)
+	}
+	if !slices.Equal(runFlags, docFlags) {
+		t.Errorf("the job gives the suite %v, the page documents %v", runFlags, docFlags)
+	}
+}
+
+// fencedBlock is the first fenced code block of one language in a text.
+func fencedBlock(text, lang string) string {
+	_, rest, ok := strings.Cut(text, "```"+lang+"\n")
+	if !ok {
+		return ""
+	}
+	block, _, _ := strings.Cut(rest, "```")
+	return block
+}
+
+// shellCommand reads the one command of a script that begins with prefix, its
+// continuation lines joined, split into words, and cut at the first pipe or
+// redirection, which is where the command ends and its reader begins.
+func shellCommand(t *testing.T, where, script, prefix string) []string {
+	t.Helper()
+	joined := strings.ReplaceAll(script, "\\\n", " ")
+	for line := range strings.SplitSeq(joined, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, prefix+" ") {
+			continue
+		}
+		var words []string
+		for _, word := range strings.Fields(line) {
+			if word == "|" || strings.HasPrefix(word, "2>") || strings.HasPrefix(word, ">") {
+				break
+			}
+			words = append(words, word)
+		}
+		return words
+	}
+	t.Fatalf("%s runs no %q command", where, prefix)
+	return nil
+}
+
+// keysOf is the keys of a map, for a message.
+func keysOf(m map[string]any) []string {
+	return slices.Sorted(maps.Keys(m))
 }
 
 // needsOf reads a job's dependencies. YAML writes one as a scalar and

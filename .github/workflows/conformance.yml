@@ -1,0 +1,73 @@
+# SPDX-FileCopyrightText: 2026 Latere AI
+# SPDX-License-Identifier: Apache-2.0
+#
+# The conformance suite of spec 015 against a server somebody else runs, on
+# dispatch only: a clean checkout runs the command docs/conformance.md
+# documents, against the address given, and passes when the suite does. The
+# pipelines that bring their own stacks up (verify's install job, release's
+# conformance job) run the suite against those; this is the external form, for
+# an installation or a server written from the API alone.
+#
+# It is a workflow of its own rather than a job of verify.yml: a dispatch of
+# verify runs the gate, the image and the install walk, which are about this
+# tree and not about the address given, and the release pipeline reads
+# verify's runs to decide whether a tag is green.
+#
+# A dispatch input is shown in the run's summary to anyone who can read the
+# run, so the bearer is a repository secret and never an input. Every value
+# reaches the step through its environment and never through an expression in
+# the script, so neither a secret nor an input is part of the script the
+# runner prints, and an input cannot become a command. Every third-party
+# action is pinned by commit.
+name: conformance
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: The server under test, as a hosted runner reaches it
+        required: true
+        type: string
+      capabilities:
+        description: What the environment declares, comma separated (files, attach, dial, display, input, volumes, mesh)
+        required: false
+        type: string
+        default: ''
+      image:
+        description: The image every case creates from; empty creates from a command alone
+        required: false
+        type: string
+        default: ''
+permissions:
+  contents: read
+
+jobs:
+  conformance-external:
+    name: the documented command against the address given
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      # CONFORMANCE_TOKEN is the caller's bearer and CONFORMANCE_ADMIN_TOKEN,
+      # optional, an administrator's, which the environment cases need.
+      - name: The conformance suite against the address given
+        shell: bash
+        env:
+          CELLA_TEST_URL: ${{ inputs.url }}
+          CELLA_TEST_CAPABILITIES: ${{ inputs.capabilities }}
+          CELLA_TEST_IMAGE: ${{ inputs.image }}
+          CELLA_TEST_TOKEN: ${{ secrets.CONFORMANCE_TOKEN }}
+          CELLA_TEST_ADMIN: ${{ secrets.CONFORMANCE_ADMIN_TOKEN }}
+        run: |
+          set -o pipefail
+          if [ -z "${CELLA_TEST_TOKEN}" ]; then
+            echo "set the repository secret CONFORMANCE_TOKEN to a bearer the server under test accepts" >&2
+            exit 1
+          fi
+          go test -tags=e2e -count=1 -timeout 30m -v -run '^TestContract$' ./test/conformance -args \
+            -url "${CELLA_TEST_URL}" \
+            -token "${CELLA_TEST_TOKEN}" \
+            -capabilities "${CELLA_TEST_CAPABILITIES}" 2>&1 | tee conformance.txt
+          grep -q -- '--- PASS: TestContract' conformance.txt

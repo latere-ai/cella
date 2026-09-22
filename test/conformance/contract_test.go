@@ -7,7 +7,7 @@
 // else is running. It is behind the e2e tag because a run of it needs a
 // server, and the bar's untagged suite has none.
 //
-//	go test -tags=e2e -v -run '^TestContract$' ./test/conformance -args \
+//	go test -tags=e2e -count=1 -timeout 30m -v -run '^TestContract$' ./test/conformance -args \
 //	  -url $CELLA_TEST_URL -issuer $CELLA_TEST_ISSUER -capabilities files,attach
 //
 // With no -url it skips whole and says which flag turns it on.
