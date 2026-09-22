@@ -324,7 +324,7 @@ func (d adopting) Create(ctx context.Context, s driver.CreateSpec) (driver.Ref, 
 func withDriver(t *testing.T, st Store, d driver.Driver, clock *fakeClock, o Options) *Controller {
 	t.Helper()
 	o.Store, o.Driver, o.Clock, o.Environment, o.Log = st, d, clock, "default", slog.New(slog.DiscardHandler)
-	c, err := Open(o)
+	c, err := Open(t.Context(), o)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -479,7 +479,7 @@ func TestRecoveryEndToEndOverNative(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = d.Close() })
 	st := newDurable(true)
-	c, err := Open(Options{
+	c, err := Open(t.Context(), Options{
 		Store: st, Driver: d, Environment: "default",
 		ReapInterval: 5 * time.Millisecond, Log: slog.New(slog.DiscardHandler),
 	})

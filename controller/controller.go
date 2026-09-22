@@ -198,7 +198,7 @@ type Controller struct {
 // Open restores desired state from an operator-supplied store, or the provisional
 // single-process local file store when DataDir is set. Store is the seam for
 // the transactional memory and Postgres adapters specified by design 010.
-func Open(o Options) (*Controller, error) {
+func Open(ctx context.Context, o Options) (*Controller, error) {
 	if o.Driver == nil || o.Environment == "" || (o.Store == nil && o.DataDir == "") {
 		return nil, errors.New("controller requires a driver, store or data directory, and environment")
 	}
@@ -309,7 +309,7 @@ func Open(o Options) (*Controller, error) {
 	if e, ok := store.(Environments); ok {
 		c.environmentStore = e
 	}
-	if err := c.openEnvironments(context.Background(), o); err != nil {
+	if err := c.openEnvironments(ctx, o); err != nil {
 		_ = store.Close()
 		return nil, err
 	}

@@ -71,7 +71,7 @@ func TestTheStartUpLineReportsRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = d.Close() })
-	c, err := controller.Open(controller.Options{
+	c, err := controller.Open(t.Context(), controller.Options{
 		Store: &durableStore{objects: map[string]v1.Sandbox{}}, Driver: d, Environment: "default",
 	})
 	if err != nil {

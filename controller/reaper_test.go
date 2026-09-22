@@ -296,7 +296,7 @@ func newFakeOver(t *testing.T, o Options, d *fakeDriver, clock *fakeClock) (*Con
 	if o.Store == nil && o.DataDir == "" {
 		o.DataDir = t.TempDir()
 	}
-	c, err := Open(o)
+	c, err := Open(t.Context(), o)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -701,7 +701,7 @@ func TestReaperEndToEndOverNative(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = d.Close() })
-	c, err := Open(Options{
+	c, err := Open(t.Context(), Options{
 		DataDir: t.TempDir(), Driver: d, Environment: "default",
 		ReapInterval: 5 * time.Millisecond, Log: slog.New(slog.DiscardHandler),
 		Lifecycle: driver.Lifecycle{AutoStop: 40 * time.Millisecond, AutoDelete: 40 * time.Millisecond},

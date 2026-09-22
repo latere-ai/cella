@@ -118,7 +118,7 @@ func openController(t *testing.T, o Options) *Controller {
 	if o.Environment == "" {
 		o.Environment = "default"
 	}
-	c, err := Open(o)
+	c, err := Open(t.Context(), o)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -307,7 +307,7 @@ func TestTheCredentialIsDesiredStateAndNotAnAnswer(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		c, err := Open(Options{Store: store, Environment: "default", Driver: &gatewayDriver{modes: []v1.EgressMode{v1.EgressAllowlist}}, Egress: gw})
+		c, err := Open(t.Context(), Options{Store: store, Environment: "default", Driver: &gatewayDriver{modes: []v1.EgressMode{v1.EgressAllowlist}}, Egress: gw})
 		if err != nil {
 			t.Fatal(err)
 		}

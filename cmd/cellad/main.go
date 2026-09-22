@@ -370,7 +370,7 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	if _, transactional := desired.(*store.Controlled); !transactional {
 		controllerEvents = emitter
 	}
-	control, err = controller.Open(controller.Options{
+	control, err = controller.Open(ctx, controller.Options{
 		Store: desired, Driver: runtimeDriver, Environment: cfg.DefaultEnvironment,
 		Lease: lease, ReapInterval: cfg.ReapInterval, TouchInterval: cfg.TouchInterval,
 		LostGrace: cfg.LostGrace, Events: controllerEvents, Tokens: tokens,

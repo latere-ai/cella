@@ -75,7 +75,7 @@ func setupKeyed(t *testing.T, policy authz.Authorizer) *keyed {
 	}
 	t.Cleanup(func() { _ = d.Close() })
 	hub := remote.NewHub(remote.HubOptions{Offline: time.Minute})
-	c, err := controller.Open(controller.Options{
+	c, err := controller.Open(t.Context(), controller.Options{
 		DataDir: t.TempDir(), Driver: d, Environment: "default",
 		Registrations: WorkerRegistrations(hub),
 		NewDriver: func(obj v1.Environment) (runtime.Driver, error) {

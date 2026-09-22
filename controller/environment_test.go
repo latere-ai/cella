@@ -38,7 +38,7 @@ func twoEnvironments(t *testing.T, o Options) (*Controller, *fakeDriver, *worker
 	}
 	o.NewDriver = func(v1.Environment) (driver.Driver, error) { return there, nil }
 	o.Registrations = func(string) []Registration { return w.registrations }
-	c, err := Open(o)
+	c, err := Open(t.Context(), o)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -733,7 +733,7 @@ func TestTheRegistryAnswersForAnAbsentEnvironment(t *testing.T) {
 func TestAControlPlaneThatStoresNoEnvironment(t *testing.T) {
 	clock := newClock()
 	d := newDriver(clock)
-	c, err := Open(Options{
+	c, err := Open(t.Context(), Options{
 		Store: &plainStore{objects: map[string]v1.Sandbox{}}, Driver: d,
 		Environment: "default", Clock: clock, Log: slog.New(slog.DiscardHandler),
 	})
@@ -778,7 +778,7 @@ func environmentManifest(name string) v1.Environment {
 func TestApplyWithoutADriverSeam(t *testing.T) {
 	clock := newClock()
 	d := newDriver(clock)
-	c, err := Open(Options{
+	c, err := Open(t.Context(), Options{
 		DataDir: t.TempDir(), Driver: d, Environment: "default",
 		Clock: clock, Log: slog.New(slog.DiscardHandler),
 	})
@@ -803,7 +803,7 @@ func TestAStoredEnvironmentComesBackWithoutADriverSeam(t *testing.T) {
 		t.Fatal(err)
 	}
 	clock := newClock()
-	again, err := Open(Options{
+	again, err := Open(t.Context(), Options{
 		DataDir: dir, Driver: newDriver(clock), Environment: "default",
 		Clock: clock, Log: slog.New(slog.DiscardHandler),
 	})

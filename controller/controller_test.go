@@ -36,7 +36,7 @@ func newController(t *testing.T) (*Controller, Options) {
 	}
 	t.Cleanup(func() { _ = d.Close() })
 	o := Options{DataDir: t.TempDir(), Driver: d, Environment: "default"}
-	c, err := Open(o)
+	c, err := Open(t.Context(), o)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func TestDurableLifecycle(t *testing.T) {
 	if obj.Status.Phase != driver.Running || obj.Status.Owner != "alice" || c.Environment() != "default" || c.Isolation() != "none" {
 		t.Fatal(obj)
 	}
-	if _, err = Open(o); err == nil {
+	if _, err = Open(t.Context(), o); err == nil {
 		t.Fatal("second process opened live store")
 	}
 	obj.Metadata.Labels["team"] = "mutated"
@@ -86,7 +86,7 @@ func TestDurableLifecycle(t *testing.T) {
 	if err = c.Close(); err != nil {
 		t.Fatal(err)
 	}
-	c, err = Open(o)
+	c, err = Open(t.Context(), o)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,12 +199,12 @@ func TestCorruptStateRefused(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(o.DataDir, "objects.json"), []byte(data), 0600); err != nil {
 			t.Fatal(err)
 		}
-		if c, err := Open(o); err == nil {
+		if c, err := Open(t.Context(), o); err == nil {
 			c.Close()
 			t.Fatal("corrupt state accepted")
 		}
 	}
-	if _, err := Open(Options{}); err == nil {
+	if _, err := Open(t.Context(), Options{}); err == nil {
 		t.Fatal("missing options")
 	}
 	bad := filepath.Join(t.TempDir(), "file")
@@ -212,7 +212,7 @@ func TestCorruptStateRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	o.DataDir = bad
-	if _, err := Open(o); err == nil {
+	if _, err := Open(t.Context(), o); err == nil {
 		t.Fatal("file as dir")
 	}
 }
@@ -237,12 +237,12 @@ func TestStoreFailuresNeverLoseDesiredState(t *testing.T) {
 	c, o := newController(t)
 	m := &memoryStore{loadErr: errors.New("unavailable")}
 	o.Store = m
-	if _, err := Open(o); err == nil {
+	if _, err := Open(t.Context(), o); err == nil {
 		t.Fatal("load failure ignored")
 	}
 	m = &memoryStore{saveErr: errors.New("write failed")}
 	o.Store = m
-	other, err := Open(o)
+	other, err := Open(t.Context(), o)
 	if err != nil {
 		t.Fatal(err)
 	}

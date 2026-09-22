@@ -425,12 +425,15 @@ func (c *Controller) phaseOf(ctx context.Context, name string) error {
 		return nil
 	}
 	d, err := c.driverFor(name)
-	if err != nil {
+	if errors.Is(err, ErrNoEnvironment) {
 		// The object is held and nothing drives it, which is a control plane
 		// built with no seam for a worker's driver. There is nothing to
 		// observe, so the phase the object was applied with stands and every
 		// act on a sandbox of it is ErrNoEnvironment.
 		return nil
+	}
+	if err != nil {
+		return err
 	}
 	next := obj
 	next.Status.Driver = d.Name()

@@ -61,7 +61,7 @@ func setupRecordedDriver(t *testing.T, wrap func(runtime.Driver) runtime.Driver)
 	}
 	t.Cleanup(func() { _ = s.Close() })
 	emitter := events.NewEmitter(store.EventJournal(s, store.Delivered), slog.New(slog.DiscardHandler))
-	c, err := controller.Open(controller.Options{
+	c, err := controller.Open(t.Context(), controller.Options{
 		DataDir: t.TempDir(), Driver: runtimeDriver, Environment: "default", Events: emitter,
 		TouchInterval: time.Millisecond,
 	})

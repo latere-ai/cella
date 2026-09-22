@@ -137,7 +137,7 @@ func withTokens(t *testing.T, lifetime time.Duration, o Options) (*Controller, *
 	if o.Store == nil && o.DataDir == "" {
 		o.DataDir = t.TempDir()
 	}
-	c, err := Open(o)
+	c, err := Open(t.Context(), o)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -48,7 +48,7 @@ func setupEnvironments(t *testing.T) *kinds {
 	}
 	t.Cleanup(func() { _ = d.Close() })
 	k := &kinds{}
-	c, err := controller.Open(controller.Options{
+	c, err := controller.Open(t.Context(), controller.Options{
 		DataDir: t.TempDir(), Driver: d, Environment: "default",
 		NewDriver:     func(v1.Environment) (runtime.Driver, error) { return d, nil },
 		Registrations: func(string) []controller.Registration { return k.live() },

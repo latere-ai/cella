@@ -87,7 +87,7 @@ func TestPoolNeedsTheCapability(t *testing.T) {
 	d := newDriver(clock)
 	o := poolOptions(2)
 	o.Driver, o.Clock, o.Environment, o.DataDir = d, clock, "default", t.TempDir()
-	if _, err := Open(o); err == nil {
+	if _, err := Open(t.Context(), o); err == nil {
 		t.Fatal("a pool opened on a driver that declares none")
 	}
 }

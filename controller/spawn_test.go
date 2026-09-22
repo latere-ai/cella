@@ -74,7 +74,7 @@ func spawning(t *testing.T) (*Controller, *actRecorder) {
 	}
 	t.Cleanup(func() { _ = d.Close() })
 	events := &actRecorder{}
-	c, err := Open(Options{DataDir: t.TempDir(), Driver: d, Environment: "default", Events: events})
+	c, err := Open(t.Context(), Options{DataDir: t.TempDir(), Driver: d, Environment: "default", Events: events})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -306,7 +306,7 @@ func TestFailedSpawnCreditsBack(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = d.Close() })
 	refusing := &refusingCreate{Driver: d}
-	c, err := Open(Options{DataDir: t.TempDir(), Driver: refusing, Environment: "default"})
+	c, err := Open(t.Context(), Options{DataDir: t.TempDir(), Driver: refusing, Environment: "default"})
 	if err != nil {
 		t.Fatal(err)
 	}
