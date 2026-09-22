@@ -477,3 +477,26 @@ func TestAQueuedCreateWakesTheLoop(t *testing.T) {
 		t.Fatalf("the victim is %s", got.Status.Phase)
 	}
 }
+
+// TestARequeuedSandboxHoldsItsDiskOnce: a preempted sandbox holds its disk
+// while it waits, so the fit that places it again asks for its cpu, memory and
+// slot and not for that disk a second time. Counting it twice would keep a
+// victim on a full disk from ever running again.
+func TestARequeuedSandboxHoldsItsDiskOnce(t *testing.T) {
+	c, _, _ := scheduled(t, v1.SchedulingQueued, v1.Capacity{Disk: "1Gi", Sandboxes: 1}, Options{})
+	victim := preemptible("victim", "1", 0)
+	victim.Spec.Resources.Disk = "1Gi"
+	v := mustCreate(t, c, victim, "alice")
+	obj, owner := asking("head", "bob", "1", 5)
+	obj.Spec.Resources.Disk = ""
+	head := mustCreate(t, c, obj, owner)
+	schedule(t, c)
+	if got := read(t, c, v.Status.ID); !requeued(got) {
+		t.Fatalf("the victim is %s", got.Status.Phase)
+	}
+	deleteSandbox(t, c, head.Status.ID)
+	schedule(t, c)
+	if phase, _ := sandboxPhase(t, c, v.Status.ID); phase != driver.Running {
+		t.Fatalf("a victim whose disk is all the environment has is %s once the head is gone", phase)
+	}
+}

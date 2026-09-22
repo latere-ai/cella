@@ -61,7 +61,7 @@ func (c *Controller) victims(environment string, head v1.Sandbox) ([]v1.Sandbox,
 	if err != nil {
 		return nil, err
 	}
-	need, err := requestOf(head.Spec.Resources)
+	need, err := askOf(head)
 	if err != nil {
 		return nil, fmt.Errorf("the resources of %s: %w", head.Status.ID, err)
 	}
