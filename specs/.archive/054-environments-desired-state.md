@@ -4,7 +4,7 @@ status: complete
 track: core
 depends_on:
   - specs/021-data-plane-workers.md
-  - specs/051-environments-and-workers.md
+  - specs/.archive/051-environments-and-workers.md
   - specs/004-runtime-contract.md
   - specs/005-lifecycle-controller.md
   - specs/008-api.md

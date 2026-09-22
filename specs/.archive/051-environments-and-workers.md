@@ -1,6 +1,6 @@
 ---
 title: "Environments and workers: the Environment kind, its keys, the registered driver map, the remote driver and the worker role"
-status: in-progress
+status: complete
 track: core
 depends_on:
   - specs/021-data-plane-workers.md
@@ -13,7 +13,7 @@ depends_on:
 affects: [manifest/v1/, manifest/, internal/store/, internal/api/, internal/auth/, internal/events/, internal/worker/, runtime/remote/, cmd/cellad/, internal/config/, controller/, arch_test.go, docs/, CHANGELOG.md]
 effort: large
 created: 2026-09-20
-updated: 2026-09-20
+updated: 2026-09-22
 author: changkun
 ---
 
@@ -307,16 +307,19 @@ yet. The mesh and spawn objects of [[022-mesh-and-spawn]].
 | Capabilities are the intersection of the live workers' reports | `TestRegistrationMismatch` | built |
 | The remote driver reads a sandbox from what the workers reported rather than waking one | `TestObservedStateAnswersWithoutTheWorker` | built |
 | Neither `runtime/remote` nor the worker role reaches a client this repository does not admit, and neither reaches the Postgres driver | `TestRootPackagesDialNothing` | built |
-| Every phase transition of the machine above fires on its trigger and gates what the table says | `TestEnvironmentPhases` under a fake clock | not built: the phase loop is the desired-state half |
-| The default environment is created from the variables at first start and the stored object is authoritative afterwards; it is not deletable | `TestDefaultEnvironment` | not built: the same half |
-| A registered worker environment routes its sandboxes to the remote driver and the default's to the in-process one | `TestControllerRoutesByEnvironment` | not built: `Controller.driverFor` is the same half |
-| A sandbox on the default environment and one on a worker's differ only by `status.environment`, `status.driver` and `status.isolation` | `case001Indistinguishable` | not built: it needs the routing above |
+| Every phase transition of the machine above fires on its trigger and gates what the table says | `TestEnvironmentPhases`, `TestTheInProcessEnvironmentAnswersFromItsDriver`, `TestTheLoopRunsUnderItsLease`, `TestCreateOnAnEnvironmentBelowReady` | built by [[054-environments-desired-state]] for `Pending`, `Ready` and `Offline`; `Degraded` stays with [[021-data-plane-workers]] |
+| The default environment is created from the variables at first start and the stored object is authoritative afterwards; it is not deletable | `TestDefaultEnvironment`, `TestDefaultEnvironmentDeclaresAutoWithNoFigures`, `TestEnvironmentRefusals` | built by [[054-environments-desired-state]] |
+| A registered worker environment routes its sandboxes to the remote driver and the default's to the in-process one | `TestControllerRoutesByEnvironment`, `TestARestartKeepsSandboxesOnEveryEnvironment`, `TestWorkerEnvironmentEndToEnd` | built by [[054-environments-desired-state]] |
+| A sandbox on the default environment and one on a worker's differ only by `status.environment`, `status.driver` and `status.isolation` | `TestTheConformanceSuiteHoldsAgainstThisServer`, case `case001Indistinguishable` | built by [[054-environments-desired-state]] |
 | No file this slice adds names a Latere host, image, pool or namespace | `TestNoLatereCoordinates` | built |
 
-## Outcome, so far
+## Outcome
 
-The seam of [[021-data-plane-workers]] is built and proved; the desired
-state half of it is not. What landed:
+The seam of [[021-data-plane-workers]] is built and proved here, and
+the desired state half of it by [[054-environments-desired-state]],
+which closed the four rows this slice left open: the phase loop, the
+seeded default, the routing by `spec.environment`, and
+`case001Indistinguishable`. What landed here:
 
 | Piece | Where |
 |---|---|
@@ -350,11 +353,12 @@ signer.
 
 ### What this leaves open
 
+Environments as desired state, `Controller.driverFor`, the phase loop and
+the `environment.registered` and `.offline` records were built by
+[[054-environments-desired-state]]. Two items stay open, and both are
+rows of [[021-data-plane-workers]]:
+
 | Open | Why |
 |---|---|
-| Environments as desired state: the stored object, the default seeded from the variables, `PUT`/`POST`/`DELETE /v1/environments` | It needs `Controller.driverFor` below it, and a registry the resolver's `Lookup` reads |
-| `Controller.driverFor`: the per-environment driver map, the reaper and the pool per environment | 44 call sites of `c.driver` across the reaper, the pool, recovery, egress and display, some under the controller's lock and some not. It is the half of this spec that collides with the controller work of [[022-mesh-and-spawn]], and half-applied it delivers nothing |
-| The phase loop writing `status.phase` and `status.reason` under the environments lease | It writes to the stored object, which is the item above |
-| `environment.registered` and `.offline` emitted from the phase loop | The same. `.keyed` and `.key_revoked` are emitted from the key routes and the vocabulary is declared |
 | The `credit` control message of 021's flow control | The framing reserves it. Until it lands the only back pressure is the sub-stream's own pipe, which blocks the connection's read pump: an operation that answers and then streams must send its answer first, which `TestReadAnswersBeforeItStreams` holds, and the window is what would make the ordering unnecessary |
 | The `workers` and `operations` rows read back by the hub for redelivery | `Claim`, `Register`, `Heartbeat`, `Forget` and `Workers` are built and proved at the store; the hub writes the row and the answer and keeps the live registrations in memory, which is one replica's view. A fleet reads them from the table |
