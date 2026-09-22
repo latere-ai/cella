@@ -218,6 +218,26 @@ func TestPoolMismatchCreatesForReal(t *testing.T) {
 	}
 }
 
+// TestPoolSkipsDeclaredPorts: a manifest that declares a port is created for
+// real, because an entry's published ports were fixed when it was created.
+func TestPoolSkipsDeclaredPorts(t *testing.T) {
+	c, d, _ := newPool(t, poolOptions(1))
+	if _, err := c.Refill(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	obj := workspace()
+	obj.Spec.Network.Ports = []v1.Port{{Name: "web", Port: 8080}}
+	if _, err := c.Create(t.Context(), obj, "alice", 0); err != nil {
+		t.Fatal(err)
+	}
+	if d.adopted() != 0 {
+		t.Errorf("a manifest that declares a port adopted an entry")
+	}
+	if len(d.entries()) != 1 {
+		t.Errorf("the pool holds %d entries, want the one it was not allowed to use", len(d.entries()))
+	}
+}
+
 // TestPoolAdoptionFallsBack is the race the pool is built around: the entry is
 // taken between the match and the adoption. The create runs again on the slow
 // path under a new id, and nothing of the attempt is left: no desired row, no
