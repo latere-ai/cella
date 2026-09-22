@@ -391,7 +391,7 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		Egress:    hub, Gateway: controller.GatewayAddresses{Proxy: cfg.Gateway.ProxyAddr, Reverse: cfg.Gateway.ReverseAddr},
 		Pool: cfg.Scheduling.Pool, PoolInFlight: cfg.Scheduling.PoolInFlight, PoolGrace: cfg.Scheduling.PoolGrace,
 		Capacity: cfg.Scheduling.Capacity.Sandboxes, CapacityQuantities: cfg.Scheduling.Capacity,
-		SchedulingMode: cfg.Scheduling.Mode, ScheduleInterval: cfg.Scheduling.ScheduleInterval,
+		SchedulingMode: cfg.Scheduling.Mode, ScheduleInterval: cfg.Scheduling.ScheduleInterval, MaxPreemptions: cfg.Scheduling.MaxPreemptions,
 		EnvironmentOffline: cfg.EnvironmentOffline,
 		// The driver of an environment a worker serves is the remote driver
 		// over the stream that worker opened. The controller holds no

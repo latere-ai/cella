@@ -31,6 +31,9 @@ func TestSchedulingDefaults(t *testing.T) {
 	if c.Scheduling.ScheduleInterval != controller.DefaultScheduleInterval {
 		t.Errorf("the schedule interval is %s", c.Scheduling.ScheduleInterval)
 	}
+	if c.Scheduling.MaxPreemptions != controller.DefaultMaxPreemptions {
+		t.Errorf("the preemption bound is %d", c.Scheduling.MaxPreemptions)
+	}
 }
 
 // TestLoadScheduling: the queued mode seeds the default environment in that
@@ -44,6 +47,17 @@ func TestLoadScheduling(t *testing.T) {
 	}
 	if c.Scheduling.Mode != v1.SchedulingQueued || c.Scheduling.ScheduleInterval != 2*time.Second {
 		t.Fatalf("the scheduling is %s every %s", c.Scheduling.Mode, c.Scheduling.ScheduleInterval)
+	}
+	// The bound on preemptions is read as written, and the zero that makes
+	// no sandbox a victim reaches the controller as the value that says so.
+	for raw, want := range map[string]int{"5": 5, "0": controller.NoPreemptions} {
+		c, err := Load(env(identity(t, map[string]string{"CELLA_MAX_PREEMPTIONS": raw})))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c.Scheduling.MaxPreemptions != want {
+			t.Errorf("CELLA_MAX_PREEMPTIONS=%s reads as %d, want %d", raw, c.Scheduling.MaxPreemptions, want)
+		}
 	}
 }
 
@@ -83,6 +97,9 @@ func TestPoolConfigRefusals(t *testing.T) {
 	}{
 		{"a schedule interval below the floor", map[string]string{"CELLA_SCHEDULE_INTERVAL": "10ms"}, "CELLA_SCHEDULE_INTERVAL"},
 		{"an unknown mode", map[string]string{"CELLA_SCHEDULING_MODE": "soon"}, `CELLA_SCHEDULING_MODE is "soon"`},
+		{"a preemption bound that is not a number", map[string]string{"CELLA_MAX_PREEMPTIONS": "few"}, "CELLA_MAX_PREEMPTIONS"},
+		{"a negative preemption bound", map[string]string{"CELLA_MAX_PREEMPTIONS": "-1"}, "CELLA_MAX_PREEMPTIONS"},
+		{"a preemption bound beyond the bound", map[string]string{"CELLA_MAX_PREEMPTIONS": "1000"}, "CELLA_MAX_PREEMPTIONS"},
 		{"a size that is not a number", map[string]string{"CELLA_POOL_SIZE": "four"}, "CELLA_POOL_SIZE"},
 		{"a negative size", map[string]string{"CELLA_POOL_SIZE": "-1"}, "CELLA_POOL_SIZE"},
 		{"a size beyond the bound", map[string]string{"CELLA_POOL_SIZE": "100000"}, "CELLA_POOL_SIZE"},

@@ -47,6 +47,20 @@ func requestOf(r v1.Resources) (usage, error) {
 	return u, nil
 }
 
+// askOf is what placing one sandbox adds to what its environment holds: its
+// request, less the disk of a sandbox the loop preempted, which it has held
+// all the while it waited and must not be asked for twice.
+func askOf(obj v1.Sandbox) (usage, error) {
+	request, err := requestOf(obj.Spec.Resources)
+	if err != nil {
+		return usage{}, err
+	}
+	if requeued(obj) {
+		request.disk = 0
+	}
+	return request, nil
+}
+
 // holdsCompute reports whether a sandbox in this phase holds its cpu, its
 // memory and its slot of the count: every phase in which the driver runs it or
 // is bringing it up or down. A queued sandbox holds nothing yet, and a lost
@@ -62,10 +76,14 @@ func holdsCompute(phase string) bool {
 // holdsDisk reports whether a sandbox holds its disk. A stopped sandbox's
 // workspace stays on the substrate until it is deleted, and so does a failed
 // one's, except where it failed before any driver held it: a create a direct
-// environment could not fit and a queued sandbox whose deadline passed.
+// environment could not fit and a queued sandbox whose deadline passed. A
+// queued sandbox holds its disk only where the loop preempted it, because
+// its driver keeps it stopped with its workspace while it waits.
 func holdsDisk(obj v1.Sandbox) bool {
 	switch obj.Status.Phase {
-	case PhaseQueued, PhaseDeleting, PhaseLost:
+	case PhaseQueued:
+		return requeued(obj)
+	case PhaseDeleting, PhaseLost:
 		return false
 	case PhaseFailed:
 		return obj.Status.Reason != ReasonNoCapacity && obj.Status.Reason != ReasonStartDeadline
@@ -161,7 +179,7 @@ func (c *Controller) makeRoom(ctx context.Context, environment string, obj v1.Sa
 	if err != nil {
 		return false, err
 	}
-	request, err := requestOf(obj.Spec.Resources)
+	request, err := askOf(obj)
 	if err != nil {
 		return false, fmt.Errorf("the resources of %s: %w", obj.Metadata.Name, err)
 	}

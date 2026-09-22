@@ -119,6 +119,12 @@ type Options struct {
 	// SchedulingMode is that environment's placement mode, from
 	// CELLA_SCHEDULING_MODE. Empty takes direct.
 	SchedulingMode string
+	// MaxPreemptions is how many times one sandbox may be stopped to place
+	// one of higher priority before it is no longer a victim, which bounds
+	// how long a preemptible sandbox can be kept from running. Zero takes
+	// DefaultMaxPreemptions and NoPreemptions makes no sandbox a victim;
+	// CELLA_MAX_PREEMPTIONS sets it.
+	MaxPreemptions int
 	// NewDriver builds the driver of an environment a worker serves (spec
 	// 021). It is optional: with none, a control plane serves the
 	// environment it drives itself and refuses to apply another.
@@ -191,9 +197,10 @@ type Controller struct {
 	poolInFlight int
 	poolGrace    time.Duration
 	// The scheduler loop's tick and the wake a released sandbox sends it
-	// (spec 057).
+	// (spec 057), and how many times one sandbox may be preempted.
 	scheduleInterval time.Duration
 	wake             chan struct{}
+	maxPreemptions   int
 	// environmentStore is the Environment kind's store, taken where the
 	// store has it; newDriver builds the driver of an environment a worker
 	// serves, and registrations reports what its workers sent.
@@ -261,7 +268,7 @@ func Open(ctx context.Context, o Options) (*Controller, error) {
 		secretObjects: map[string]v1.Secret{},
 		pool:          o.Pool, capacity: o.Capacity,
 		poolInFlight: o.PoolInFlight, poolGrace: o.PoolGrace,
-		scheduleInterval: cmp.Or(o.ScheduleInterval, DefaultScheduleInterval), wake: make(chan struct{}, 1),
+		scheduleInterval: cmp.Or(o.ScheduleInterval, DefaultScheduleInterval), wake: make(chan struct{}, 1), maxPreemptions: cmp.Or(o.MaxPreemptions, DefaultMaxPreemptions),
 		newDriver: o.NewDriver, releaseDriver: o.ReleaseDriver, registrations: o.Registrations,
 		offline: o.EnvironmentOffline, answered: map[string]time.Time{},
 	}
@@ -463,17 +470,32 @@ func (c *Controller) create(ctx context.Context, obj v1.Sandbox, owner string, m
 	if c.waiting(environment, obj.Spec.Scheduling.Queue) > 0 {
 		entry = nil
 	}
-	c.countAdoption(pool, entry)
 	out, err := c.createLocked(ctx, obj, owner, max, warnings, lifecycle, entries, entry, parent)
 	if entry != nil && err != nil && adoptionLost(err) {
 		c.log.InfoContext(ctx, "the pool entry could not be adopted; this create takes the slow path",
 			"entry", entry.ID, "err", err)
-		out, err = c.createLocked(ctx, obj, owner, max, warnings, lifecycle, without(entries, entry.ID), nil, parent)
-		c.observeCreate(out, PoolMiss, started)
+		remaining := without(entries, entry.ID)
+		entry = nil
+		out, err = c.createLocked(ctx, obj, owner, max, warnings, lifecycle, remaining, nil, parent)
+	}
+	// The pool is counted once the outcome is known. A create refused before
+	// step 1 of the create order, for its owner's count, a name already
+	// taken or a spent spawn budget, asked nothing of the pool or of a
+	// driver, so it is neither an adoption nor a miss and has no duration;
+	// one whose adoption was lost took the slow path and is a miss.
+	if refused(err) {
 		return out, err
 	}
+	c.countAdoption(pool, entry)
 	c.observeCreate(out, poolResult(entry), started)
 	return out, err
+}
+
+// refused reports whether a create ended before step 1 of the create order
+// wrote anything: the owner's count, a name already taken, or a spawn budget
+// already spent.
+func refused(err error) bool {
+	return errors.Is(err, ErrQuota) || errors.Is(err, ErrNameTaken) || errors.Is(err, ErrBudgetExhausted)
 }
 
 // observeCreate records one create's duration where the driver was asked for
@@ -578,7 +600,9 @@ func (c *Controller) createLocked(ctx context.Context, obj v1.Sandbox, owner str
 	switch placement {
 	case placeQueued:
 		// A queued sandbox stops here and resumes at step 3 when the loop
-		// places it.
+		// places it. The loop is woken rather than left to its tick, so a
+		// head that preemption can place is placed now.
+		c.wakeScheduler()
 		return c.positioned(export(obj)), nil
 	case placeNoCapacity:
 		// A direct environment starts a sandbox now or fails it. Nothing

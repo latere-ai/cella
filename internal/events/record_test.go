@@ -254,6 +254,11 @@ func TestReasonOfHoldsTheEnum(t *testing.T) {
 		{"Exited", TypeStopped, ReasonExited},
 		{"ProcessUnrecoverable", TypeFailed, ReasonDriverFailed},
 		{"ProcessUnrecoverable", TypeRecovering, ""},
+		// The scheduler's reasons are the enum's own, so a sandbox the
+		// loop stopped or could not place is not read as a driver failure.
+		{"Preempted", TypeStopped, ReasonPreempted},
+		{"NoCapacity", TypeFailed, ReasonNoCapacity},
+		{"StartDeadline", TypeFailed, ReasonStartDeadline},
 	} {
 		if got := ReasonOf(tc.status, tc.kind); got != tc.want {
 			t.Errorf("ReasonOf(%q, %s) = %q, want %q", tc.status, tc.kind, got, tc.want)

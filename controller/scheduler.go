@@ -92,6 +92,14 @@ func (c *Controller) waiting(environment, queue string) int {
 // a place in line is never recomputed. The id breaks what is left, so two
 // passes over one state read one order.
 func (c *Controller) line(environment, queue string) ([]v1.Sandbox, error) {
+	return c.ordered(environment, func(obj v1.Sandbox) bool { return obj.Spec.Scheduling.Queue == queue })
+}
+
+// ordered is the sandboxes waiting on one environment that keep selects, in
+// the order line gives one queue. Every queue of an environment is ordered by
+// the same comparison, so the order of all of them is each queue's own order
+// merged, which is how one pass reads them.
+func (c *Controller) ordered(environment string, keep func(v1.Sandbox) bool) ([]v1.Sandbox, error) {
 	share := map[string]int64{}
 	var out []v1.Sandbox
 	for _, obj := range c.objects {
@@ -99,7 +107,7 @@ func (c *Controller) line(environment, queue string) ([]v1.Sandbox, error) {
 			continue
 		}
 		if obj.Status.Phase == PhaseQueued {
-			if obj.Spec.Scheduling.Queue == queue {
+			if keep(obj) {
 				out = append(out, obj)
 			}
 			continue
@@ -220,20 +228,17 @@ func (c *Controller) scheduleTick(ctx context.Context) {
 	}
 }
 
-// Schedule is one pass of the loop over every queue that holds a sandbox. A
-// sandbox that waited past its start deadline fails, on any environment; then,
-// on an environment that is Ready, each queue is placed from its head while
-// the head fits, and the first head that does not fit ends that queue's turn,
-// so a large request is not passed by the small ones behind it.
+// Schedule is one pass of the loop over every environment with a sandbox
+// waiting. A sandbox that waited past its start deadline fails, on any
+// environment; then, on an environment that is Ready, its queues are placed
+// from their heads as scheduleEnvironment says.
 func (c *Controller) Schedule(ctx context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	now := c.clock.Now()
 	var failed error
 	for _, environment := range c.environmentsWaiting() {
-		for _, queue := range c.queues(environment) {
-			failed = errors.Join(failed, c.scheduleQueue(ctx, environment, queue, now))
-		}
+		failed = errors.Join(failed, c.scheduleEnvironment(ctx, environment, now))
 	}
 	return failed
 }
@@ -250,13 +255,23 @@ func (c *Controller) environmentsWaiting() []string {
 	return out
 }
 
-func (c *Controller) scheduleQueue(ctx context.Context, environment, queue string, now time.Time) error {
-	line, err := c.line(environment, queue)
+// scheduleEnvironment is one pass over one environment's queues, read as one
+// line: each step tries the head that ranks first among the heads of the
+// queues still open. A head that does not fit, even with the pool's entries
+// and the victims preemption may stop given up, closes its queue for the rest
+// of the pass, so a large request is not passed by the small ones behind it.
+// The priorities one pass tries therefore never rise, and a victim's priority
+// is below its head's, so a pass never stops a sandbox it placed; passing the
+// queues one after another would place a low head in one and stop it for a
+// higher head of the next.
+func (c *Controller) scheduleEnvironment(ctx context.Context, environment string, now time.Time) error {
+	every := func(v1.Sandbox) bool { return true }
+	waiting, err := c.ordered(environment, every)
 	if err != nil {
 		return err
 	}
 	var failed error
-	for _, obj := range line {
+	for _, obj := range waiting {
 		if expired(obj, now) {
 			failed = errors.Join(failed, c.expire(ctx, obj))
 		}
@@ -264,29 +279,33 @@ func (c *Controller) scheduleQueue(ctx context.Context, environment, queue strin
 	if c.admits(environment) != nil {
 		return failed
 	}
+	closed := map[string]bool{}
 	tried := map[string]bool{}
 	for {
-		line, err := c.line(environment, queue)
+		waiting, err := c.ordered(environment, func(obj v1.Sandbox) bool { return !closed[obj.Spec.Scheduling.Queue] })
 		if err != nil {
 			return errors.Join(failed, err)
 		}
-		if len(line) == 0 {
+		if len(waiting) == 0 {
 			return failed
 		}
-		head := line[0]
+		head := waiting[0]
+		queue := head.Spec.Scheduling.Queue
 		// A head this pass already tried and could not move is left where
 		// it is rather than tried again, so a write that keeps failing
 		// cannot hold the loop.
 		if tried[head.Status.ID] {
-			return failed
+			closed[queue] = true
+			continue
 		}
 		tried[head.Status.ID] = true
-		fits, err := c.makeRoom(ctx, environment, head, c.poolEntries(ctx, environment))
+		fits, err := c.fit(ctx, environment, head)
 		if err != nil {
-			return errors.Join(failed, err)
+			failed = errors.Join(failed, err)
 		}
-		if !fits {
-			return failed
+		if err != nil || !fits {
+			closed[queue] = true
+			continue
 		}
 		if err := c.placeQueued(ctx, head); err != nil {
 			failed = errors.Join(failed, fmt.Errorf("placing %s: %w", head.Status.ID, err))
@@ -294,11 +313,29 @@ func (c *Controller) scheduleQueue(ctx context.Context, environment, queue strin
 	}
 }
 
+// fit reports whether a head fits once the pool's entries have given way,
+// and where it does not, whether stopping preemptible sandboxes of lower
+// priority makes it fit, stopping them when it does. The entries give way
+// before anyone is stopped: an entry is nobody's work.
+func (c *Controller) fit(ctx context.Context, environment string, head v1.Sandbox) (bool, error) {
+	fits, err := c.makeRoom(ctx, environment, head, c.poolEntries(ctx, environment))
+	if err != nil || fits {
+		return fits, err
+	}
+	preempted, err := c.preempt(ctx, environment, head)
+	if err != nil || !preempted {
+		return false, err
+	}
+	return c.makeRoom(ctx, environment, head, c.poolEntries(ctx, environment))
+}
+
 // expired reports whether a queued sandbox has waited past its start
 // deadline. A deadline that does not parse is one Resolve refused, so it never
 // reaches here; it is read as no deadline rather than as one already passed.
 func expired(obj v1.Sandbox, now time.Time) bool {
-	if obj.Spec.Scheduling.StartDeadline == "" {
+	// A sandbox the loop preempted started once, which is what the deadline
+	// bounds the wait for; it waits again without one.
+	if obj.Spec.Scheduling.StartDeadline == "" || obj.Status.Preemptions > 0 {
 		return false
 	}
 	deadline, never, err := manifest.ParseDuration(obj.Spec.Scheduling.StartDeadline)
@@ -332,8 +369,12 @@ func (c *Controller) parentOf(obj v1.Sandbox) *v1.Sandbox {
 
 // placeQueued moves one queued sandbox to Pending and resumes its create at
 // step 3. It takes the slow path: a pool entry is adopted only by a create
-// placed at once, under that create's own lock.
+// placed at once, under that create's own lock. A sandbox the loop preempted
+// has its object already, and is started rather than created.
 func (c *Controller) placeQueued(ctx context.Context, obj v1.Sandbox) error {
+	if requeued(obj) {
+		return c.resume(ctx, obj)
+	}
 	started := c.clock.Now()
 	d, err := c.driverFor(obj.Status.Environment)
 	if err != nil {

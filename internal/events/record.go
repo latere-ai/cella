@@ -142,6 +142,12 @@ const (
 	ReasonCreateFailed      Reason = "CreateFailed"
 	ReasonDriverFailed      Reason = "DriverFailed"
 	ReasonRecoveryExhausted Reason = "RecoveryExhausted"
+	// The scheduler's reasons (design 020): a sandbox stopped to place a
+	// higher priority one, a create a direct environment could not fit,
+	// and a sandbox that waited in its queue past its start deadline.
+	ReasonPreempted     Reason = "Preempted"
+	ReasonNoCapacity    Reason = "NoCapacity"
+	ReasonStartDeadline Reason = "StartDeadline"
 )
 
 // Reasons is every reason this slice writes; a test holds each record's
@@ -150,6 +156,7 @@ var Reasons = []Reason{
 	ReasonRequest, ReasonAutoStop, ReasonAutoDelete, ReasonExpired,
 	ReasonParent, ReasonExited, ReasonLost, ReasonCreateFailed,
 	ReasonDriverFailed, ReasonRecoveryExhausted,
+	ReasonPreempted, ReasonNoCapacity, ReasonStartDeadline,
 }
 
 // ReasonOf maps a status reason to the closed enum. A driver names failures

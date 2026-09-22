@@ -9,7 +9,7 @@ depends_on:
 affects: [internal/events/, internal/api/, internal/config/, test/stubs/]
 effort: small
 created: 2026-09-12
-updated: 2026-09-21
+updated: 2026-09-23
 author: changkun
 ---
 
@@ -210,7 +210,7 @@ journal's columns ([[010-state]]); the routes' envelope ([[008-api]]).
 | Criterion | Test that proves it | State |
 |---|---|---|
 | Every type in the table is named as an emission point by its owning spec and every emission point in the specs is in the table | `TestEventTableMatchesTheSpecs`, reading `specs/` | not built: the types of 018 to 023 wait on the slices that emit them |
-| Every type is emitted by the act in its row with the `data` named, `Object.Kind` right per kind, `Sandbox` set for attach and detach, and one `Reason` from the enum on every terminal transition | `TestRecordShapes`, `TestRecordCarriesLabelsAndSeqEverywhere`, table-driven | built for the `Sandbox` types, as `TestRecordShapes` and `TestRecordCarriesLabelsAndSeqEverywhere` ([[042-events]]) |
+| Every type is emitted by the act in its row with the `data` named, `Object.Kind` right per kind, `Sandbox` set for attach and detach, and one `Reason` from the enum on every terminal transition | `TestRecordShapes`, `TestRecordCarriesLabelsAndSeqEverywhere`, table-driven | built for the `Sandbox` types, as `TestRecordShapes` and `TestRecordCarriesLabelsAndSeqEverywhere` ([[042-events]]); the scheduler's `Preempted`, `NoCapacity` and `StartDeadline` joined the enum with [[058-preemption]], as `TestReasonOfHoldsTheEnum`, so a terminal record of the scheduler's no longer reads `DriverFailed` |
 | No event body contains an env value, a secret value, a placeholder, a credential, a token, exec output, frame bytes, input text, a query string, or a header | `TestNoContentInEvents` with canary strings through every emission point | built as `TestNoContentInEvents` over a whole `cellad` session ([[042-events]]) |
 | The signature verifies with the documented formula for each of two secrets, is recomputed with a fresh `t` on a retry, and a body changed by one byte does not verify | `TestSignatureFormula`, `TestSignatureVerifies`, `TestSignatureRejects`, `TestSignatureIsFreshOnEveryAttempt`, and [[012-test-stubs-and-tiers]]'s `TestTheSinkVerifiesWhatTheDelivererSigns` | built as `TestSignatureVerifies`, `TestSignatureRejects`, `TestSignatureIsFreshOnEveryAttempt` and `TestSignatureFormula` ([[042-events]]) |
 | A sink failing three times receives the event on the fourth try and the object's later events after it, in `seq` order; another object's events flow meanwhile; a 400 drops at once; a 401 is held; a record past the retry window drops and is counted | `TestDeliveryIsOrderedPerObject`, `TestDeliveryRetries`, `TestDropRules` under a fake clock | built ([[042-events]]) |

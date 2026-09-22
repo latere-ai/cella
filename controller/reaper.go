@@ -105,6 +105,19 @@ func reapRule(s driver.State, now time.Time) string {
 	return ""
 }
 
+// ruleForLocked is reapRule over what this control plane holds of the
+// sandbox. A sandbox the scheduler preempted is stopped on its driver while it
+// waits in its queue to run again, and autoDelete, which ends a sandbox stopped
+// for good, is not asked of it; its ttl still is. It runs under the
+// controller's lock.
+func (c *Controller) ruleForLocked(s driver.State, now time.Time) string {
+	rule := reapRule(s, now)
+	if rule == ReasonAutoDelete && requeued(c.objects[s.ID]) {
+		return ""
+	}
+	return rule
+}
+
 // activityOf is the instant the autoStop rule counts from: the stamped
 // activity, or the creation of a sandbox that has never been touched, so a
 // driver that stamps nothing does not hold a sandbox open forever.
@@ -223,7 +236,9 @@ func (c *Controller) reapEnvironment(ctx context.Context, environment string) (i
 			// that was never meant to see it.
 			continue
 		}
-		rule := reapRule(s, now)
+		c.mu.Lock()
+		rule := c.ruleForLocked(s, now)
+		c.mu.Unlock()
 		if rule == "" {
 			// The token rule is last in design 005's table and first match
 			// wins, so it is asked only of a sandbox no deadline rule
@@ -313,7 +328,7 @@ func (c *Controller) enforce(ctx context.Context, environment, id, rule string, 
 	if err != nil {
 		return false, err
 	}
-	if reapRule(state, now) != rule {
+	if c.ruleForLocked(state, now) != rule {
 		return false, nil
 	}
 	if rule == ReasonAutoStop {

@@ -203,6 +203,7 @@ func TestCountersRecordWhatTheyOwn(t *testing.T) {
 	r.GatewaySnapshot()
 	r.SandboxCreated(metrics.PoolHit, 2*time.Second)
 	r.PoolAdoption(metrics.OutcomeAdopted)
+	r.SandboxPreempted()
 	r.ReaperAction("Expired", "deleted")
 	r.RecoveryAttempt(metrics.OutcomeRecovered)
 	r.TokenReminted()
@@ -225,6 +226,7 @@ func TestCountersRecordWhatTheyOwn(t *testing.T) {
 		`cella_gateway_snapshots_total 1`,
 		`cella_sandbox_create_duration_seconds_count{driver="native",pool="hit"} 1`,
 		`cella_pool_adoptions_total{outcome="adopted"} 1`,
+		`cella_preemptions_total 1`,
 		`cella_reaper_actions_total{action="deleted",rule="Expired"} 1`,
 		`cella_recovery_attempts_total{outcome="recovered"} 1`,
 		`cella_tokens_reminted_total 1`,

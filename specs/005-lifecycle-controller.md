@@ -8,7 +8,7 @@ depends_on:
 affects: [controller/, internal/config/]
 effort: large
 created: 2026-09-12
-updated: 2026-09-21
+updated: 2026-09-23
 author: changkun
 ---
 
@@ -32,7 +32,7 @@ since it imports nothing under `internal/` ([[001-architecture]]).
 
 ## Current state
 
-[[026-direct-control-plane]] implements synchronous native create, inspect, list, start, stop, and delete with durable intent. [[037-lifecycle-enforcement]] implements the reaper's deadline rules, the `Lease` and `Clock` seams, and `Touch`. [[043-postgres-store]] implements the `lost` rule, `Recovering`, the recreation from desired state and the grace without a durable store, over the store and the observed index of [[010-state]]; recovery reattaches no volume. [[045-workload-tokens]] implements the `token` rule over the `Tokens` seam, the mint at step 5 of the create order with its undo, the re-mint at recovery with the previous `jti` revoked, and the revocation a delete writes. Reconciliation of an update and the cascade remain to build.
+[[026-direct-control-plane]] implements synchronous native create, inspect, list, start, stop, and delete with durable intent. [[037-lifecycle-enforcement]] implements the reaper's deadline rules, the `Lease` and `Clock` seams, and `Touch`. [[043-postgres-store]] implements the `lost` rule, `Recovering`, the recreation from desired state and the grace without a durable store, over the store and the observed index of [[010-state]]; recovery reattaches no volume. [[045-workload-tokens]] implements the `token` rule over the `Tokens` seam, the mint at step 5 of the create order with its undo, the re-mint at recovery with the previous `jti` revoked, and the revocation a delete writes. [[058-preemption]] implements the preemption edges: the scheduler stops a victim through its driver and writes `Running` to `Queued` with `Scheduled Preempted` in one write, since the driver's stop is synchronous and a crash between a `Stopped` and a `Queued` write would leave the victim outside every queue; a preempted sandbox leaves `Queued` by a `Start` of the object its driver kept rather than through `Pending` and a create, and while it waits the `autoDelete` rule is not asked of it. Reconciliation of an update and the cascade remain to build.
 
 Design provenance: The reaper's rules come from the hosted platform, where
 they have run for months; the phase machine, the ordered create with
@@ -60,6 +60,7 @@ stateDiagram-v2
   Stopping --> Stopped: (watch)
   Stopped --> Starting: Start (API)
   Stopped --> Queued: requeue after preemption, Scheduled Preempted (scheduler)
+  Queued --> Starting: a preempted sandbox placed again, Start (scheduler)
   Running --> Deleting: Delete (API), expired (reaper), parent deleted (cascade)
   Stopped --> Deleting: Delete (API), autoDelete or expired (reaper), parent deleted (cascade)
   Pending --> Deleting: Delete (API), parent deleted (cascade)
