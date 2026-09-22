@@ -136,6 +136,14 @@ framing. It shares no type with any implementation, so a server written from
 the API documentation alone passes it. Run it from a checkout of this
 repository against your own address, with your own tokens.
 
+Some defaults are part of the contract and some are yours. A sandbox applied
+with no workspace, working directory, egress or spawn fields has to come back
+with the fixed values the manifest contract states: the workspace at
+`/workspace`, starting empty and used as the working directory, egress `open`,
+and no mesh or spawn rights. The defaults an operator chooses, such as the
+resources, the lifetimes and the image, differ between installations, and the
+suite does not read them.
+
 Two parts are not a black box and no case covers them: the generated API
 document matching the served one, and a rate limit across replicas. Their
 proofs live with the servers that hold them.

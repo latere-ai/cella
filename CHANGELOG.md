@@ -6,6 +6,23 @@ refused before it is pushed.
 
 ## Unreleased
 
+- The conformance suite holds a server to more of the contract. A sandbox
+  applied without them must come back with the defaults the manifest contract
+  states as fixed values: the workspace at `/workspace`, starting empty and
+  used as the working directory, open egress, and no mesh or spawn rights. The
+  spawn case now sends fields the schema knows and runs on every environment,
+  not only one that declares a mesh. The documented command carries
+  `-count=1`, so a run always asks the server instead of replaying an earlier
+  pass from the build cache, and `-timeout 30m`, so a run against a cluster is
+  not cut off at `go test`'s ten minute default. A new `conformance` workflow
+  runs that command from GitHub Actions against an address you give it, with
+  the bearer taken from the repository secret `CONFORMANCE_TOKEN`.
+  [Conformance](docs/conformance.md) has both.
+- `CELLA_TEST_DRIFT_DEFAULT` makes a development `cellad` resolve one spawn
+  default wrongly, so a test can show the conformance suite catches a server
+  that does. It takes `spec.mesh.spawn.budget` or `spec.mesh.spawn.depth`, and
+  `cellad` refuses to start with it unless `CELLA_RUNTIME=native`, so an
+  installation that isolates its sandboxes cannot run with it.
 - An environment can hold what it cannot fit yet. Apply one with
   `scheduling.mode: queued`, or start `cellad` with
   `CELLA_SCHEDULING_MODE=queued`, and a create past its capacity answers
