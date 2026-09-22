@@ -24,7 +24,10 @@ type ServerOptions struct {
 	// up, so the control plane reads a sandbox without waking it. Zero takes
 	// the heartbeat's interval.
 	ReportInterval time.Duration
-	Log            *slog.Logger
+	// Window is the credit this worker grants per sub-stream, which its hello
+	// announces. Zero takes DefaultWindow.
+	Window int
+	Log    *slog.Logger
 }
 
 // Server is the worker's side of one stream: every operation the control
@@ -52,14 +55,21 @@ func NewServer(conn FrameConn, o ServerOptions) *Server {
 		o.ReportInterval = HeartbeatInterval
 	}
 	s := &Server{options: o, running: map[string]context.CancelFunc{}}
-	s.link = NewLink(conn, LinkOptions{OnMessage: s.onMessage})
+	s.link = NewLink(conn, LinkOptions{OnMessage: s.onMessage, Window: o.Window})
 	return s
 }
 
 // Run holds the stream open until it ends: the hello, the first report, then
 // the operations as they arrive.
+//
+// The hello announces the window this worker grants and whether its driver
+// watches. A control plane of this release answers with its own window, which
+// turns credit on; one of an earlier release ignores both and answers
+// nothing, and the stream stays as it was before credit.
 func (s *Server) Run(ctx context.Context) error {
-	if err := s.link.Send(NoOperation, Message{Type: MessageHello, Worker: s.options.Worker}); err != nil {
+	_, watches := s.options.Driver.(Watcher)
+	hello := Message{Type: MessageHello, Worker: s.options.Worker, Window: s.link.Window(), Watch: watches}
+	if err := s.link.Send(NoOperation, hello); err != nil {
 		return err
 	}
 	go s.beat(ctx)
@@ -114,14 +124,30 @@ func (s *Server) report(ctx context.Context, relist bool) {
 	}
 }
 
-// onMessage takes what the control plane sends: one operation at a time. The
-// handler returns at once and the operation runs beside the read pump, so a
-// long call never holds the connection.
+// onMessage takes what the control plane sends that the link did not route
+// itself: the operations, the hello that answers this worker's window, and
+// the heartbeat.
 func (s *Server) onMessage(operation string, m Message) {
-	if m.Type != MessageOperation {
+	switch m.Type {
+	case MessageOperation:
+		s.start(operation, m)
+	case MessageHello:
+		// The control plane's window: credit is on from here, and it came
+		// before the first operation on the one ordered stream.
+		if err := s.link.Credit(m.Window); err != nil {
+			s.options.Log.Warn("the control plane answered the hello with a window this worker cannot use", "err", err)
+			s.link.Shutdown(err)
+		}
+	case MessageHeartbeat:
+		// The frame renewed the read deadline, which is all a heartbeat does.
+	default:
 		s.options.Log.Warn("the control plane sent a frame that belongs the other way", "frame", m.Type)
-		return
 	}
+}
+
+// start runs one operation. The handler returns at once and the operation
+// runs beside the read pump, so a long call never holds the connection.
+func (s *Server) start(operation string, m Message) {
 	opType := OperationType(m)
 	var req Request
 	if m.Request != nil {

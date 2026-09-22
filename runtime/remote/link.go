@@ -18,7 +18,9 @@ import (
 // without a listener.
 type FrameConn interface {
 	// ReadFrame returns the next whole frame, or the error that ended the
-	// connection.
+	// connection. The frame is the caller's to keep: the link holds a
+	// sub-stream's bytes until its reader takes them, so an implementation
+	// never reuses the slice it returned.
 	ReadFrame() ([]byte, error)
 	// WriteFrame sends one whole frame. It is called by one writer only,
 	// which is the WebSocket contract and is what the link guarantees.
@@ -26,9 +28,10 @@ type FrameConn interface {
 	Close() error
 }
 
-// outBuffer is how many frames may queue for one side before the link treats
-// it as gone. A peer that cannot keep up is dropped rather than allowed to
-// grow the other side's memory; its reconnect starts over.
+// outBuffer is how many frames may queue for the writer. Under credit a
+// sub-stream never has more than its window queued, in flight and held by the
+// far side together, so the queue is bounded by what the operations on the
+// connection were credited rather than by this figure.
 const outBuffer = 256
 
 // ErrLinkClosed is every call on a link whose connection ended.
@@ -40,11 +43,21 @@ type LinkOptions struct {
 	// frame and not an answer the link routed itself. It runs on the read
 	// pump, so a handler that blocks holds the connection.
 	OnMessage func(operation string, m Message)
+	// Window is the credit this side grants per sub-stream, which its hello
+	// announces. Zero takes DefaultWindow.
+	Window int
 }
 
 // Link is one worker stream, whichever side holds it: the frames in and out,
 // the sub-streams of every operation on it, and the control messages. It has
 // exactly one writer, which is what a WebSocket requires.
+//
+// Once both sides have agreed on credit, a sub-stream's bytes are bounded by
+// the window each way: the receiver holds at most its window of one
+// sub-stream, the sender waits for credit rather than queueing more, and the
+// read pump never waits on a reader. Without credit, which is a peer of a
+// release before it, the read pump waits for a reader whose sub-stream holds
+// a window already, which is the back pressure the stream had before.
 type Link struct {
 	conn      FrameConn
 	onMessage func(string, Message)
@@ -53,6 +66,13 @@ type Link struct {
 	closeOnce sync.Once
 	failure   atomic.Pointer[error]
 
+	// window is what this side grants per sub-stream and peerWindow what the
+	// far side does, zero until credit is agreed. peak is the most one
+	// sub-stream has held here, which is what the window bounds.
+	window     int64
+	peerWindow atomic.Int64
+	peak       atomic.Int64
+
 	mu       sync.Mutex
 	channels map[string]*Channel
 }
@@ -60,53 +80,101 @@ type Link struct {
 // NewLink wraps one connection. Run drives it; nothing is read or written
 // before.
 func NewLink(conn FrameConn, o LinkOptions) *Link {
+	window := int64(o.Window)
+	if window <= 0 {
+		window = DefaultWindow
+	}
 	return &Link{
 		conn: conn, onMessage: o.OnMessage,
 		out: make(chan []byte, outBuffer), done: make(chan struct{}),
-		channels: map[string]*Channel{},
+		window: window, channels: map[string]*Channel{},
+	}
+}
+
+// Window is the credit this side grants per sub-stream, which it announces in
+// its hello.
+func (l *Link) Window() int { return int(l.window) }
+
+// Credit turns flow control on with the window the far side announced. It is
+// agreed once, on the hello, before the first frame of any operation: a
+// sub-stream opened before it runs without credit for its whole life. A
+// window below one byte, or a second agreement, is ErrFrame.
+func (l *Link) Credit(peerWindow int) error {
+	if peerWindow <= 0 {
+		return fmt.Errorf("%w: a window is at least one byte, not %d", ErrFrame, peerWindow)
+	}
+	if !l.peerWindow.CompareAndSwap(0, int64(peerWindow)) {
+		return fmt.Errorf("%w: the window is agreed once per connection", ErrFrame)
+	}
+	return nil
+}
+
+// notePeak records what one sub-stream holds here, so the bound the window
+// sets is something a reader of the link can measure.
+func (l *Link) notePeak(held int64) {
+	for {
+		peak := l.peak.Load()
+		if held <= peak || l.peak.CompareAndSwap(peak, held) {
+			return
+		}
 	}
 }
 
 // Run holds the connection open until it ends or the context does, and
 // returns what ended it. It is the link's read pump; the write pump runs
 // beside it.
+//
+// What ended it is the first reason recorded. A handler that refused a
+// message shuts the link down with its refusal, and the read that then fails
+// on the closed connection is a consequence of that refusal, not the reason.
 func (l *Link) Run(ctx context.Context) error {
 	go l.writePump(ctx)
 	defer l.Shutdown(nil)
 	for {
 		raw, err := l.conn.ReadFrame()
+		if err == nil {
+			err = l.read(raw)
+		}
 		if err != nil {
 			l.Shutdown(err)
-			return err
+			return l.Err()
 		}
-		operation, stream, payload, err := DecodeFrame(raw)
-		if err != nil {
-			l.Shutdown(err)
-			return err
-		}
-		if stream != StreamControl {
-			l.deliver(operation, stream, payload)
-			continue
-		}
-		m, err := DecodeMessage(payload)
-		if err != nil {
-			l.Shutdown(err)
-			return err
-		}
-		l.route(operation, m)
 	}
 }
+
+// read takes one frame off the connection: a sub-stream's bytes into its
+// buffer, a control message to where it belongs.
+func (l *Link) read(raw []byte) error {
+	operation, stream, payload, err := DecodeFrame(raw)
+	if err != nil {
+		return err
+	}
+	if stream != StreamControl {
+		return l.deliver(operation, stream, payload)
+	}
+	m, err := DecodeMessage(payload)
+	if err != nil {
+		return err
+	}
+	return l.route(operation, m)
+}
+
+// errCancelled is what a sub-stream coming into an operation the far side
+// cancelled reads: a driver blocked reading a body or a terminal's input
+// learns the caller went away rather than waiting for the connection to end.
+var errCancelled = fmt.Errorf("remote: the far side cancelled the operation: %w", context.Canceled)
 
 // route answers the messages the link owns and hands the rest to the caller.
 // A message about an operation this side has already dropped is discarded:
 // the operation is over here and the peer has not learned it yet, which is
-// ordinary on every stream a caller closed early.
-func (l *Link) route(operation string, m Message) {
+// ordinary on every stream a caller closed early. An error is a message this
+// protocol cannot accept, and it ends the connection.
+func (l *Link) route(operation string, m Message) error {
 	switch m.Type {
-	case MessageResult, MessageStarted, MessageResize, MessageCancel:
+	case MessageResult, MessageStarted, MessageResize, MessageCancel, MessageCredit:
 		c, held := l.channel(operation)
 		if !held {
-			return
+			return nil
 		}
 		switch m.Type {
 		case MessageResult:
@@ -114,32 +182,30 @@ func (l *Link) route(operation string, m Message) {
 		case MessageStarted:
 			c.accepted(m)
 		case MessageResize:
-			if c.resizes == nil {
-				return
-			}
-			select {
-			case c.resizes <- [2]int{m.Cols, m.Rows}:
-			case <-l.done:
-			}
+			c.resize(m.Cols, m.Rows)
 		case MessageCancel:
-			c.cancel()
+			c.end(errCancelled)
+		case MessageCredit:
+			return c.grant(m.Stream, m.Bytes)
 		}
-		return
+		return nil
 	}
 	if l.onMessage != nil {
 		l.onMessage(operation, m)
 	}
+	return nil
 }
 
-// deliver writes one sub-stream frame into the channel's pipe. A zero-length
-// frame ends the sub-stream. A frame for an operation this side has dropped
-// is discarded: the operation is over and the peer has not learned it yet.
-func (l *Link) deliver(operation string, stream byte, payload []byte) {
+// deliver puts one sub-stream frame into the operation's buffer for that
+// sub-stream. A zero-length frame ends the sub-stream. A frame for an
+// operation this side has dropped is discarded: the operation is over and the
+// peer has not learned it yet.
+func (l *Link) deliver(operation string, stream byte, payload []byte) error {
 	c, held := l.channel(operation)
 	if !held {
-		return
+		return nil
 	}
-	c.write(stream, payload)
+	return c.inbound(stream).push(payload)
 }
 
 func (l *Link) channel(operation string) (*Channel, bool) {
@@ -154,7 +220,8 @@ func (l *Link) channel(operation string) (*Channel, bool) {
 func (l *Link) Open(operation string, withResizes bool) *Channel {
 	c := &Channel{
 		link: l, operation: operation,
-		readers: map[byte]*io.PipeReader{}, writers: map[byte]*io.PipeWriter{},
+		incoming: map[byte]*inbound{}, outgoing: map[byte]*outbound{},
+		granted: make(chan struct{}), finished: make(chan struct{}),
 		result: make(chan Message, 1), started: make(chan Message, 1),
 		cancelled: make(chan struct{}),
 	}
@@ -284,9 +351,12 @@ type Channel struct {
 	link      *Link
 	operation string
 
-	mu      sync.Mutex
-	readers map[byte]*io.PipeReader
-	writers map[byte]*io.PipeWriter
+	mu       sync.Mutex
+	incoming map[byte]*inbound
+	outgoing map[byte]*outbound
+	// granted is closed and replaced whenever credit arrives, which wakes
+	// every writer of this operation waiting for some.
+	granted chan struct{}
 	// ended is why the operation stopped, once it has. A sub-stream asked
 	// for after that is handed back already ended: a caller that starts
 	// reading an operation the connection has already lost must read the
@@ -296,6 +366,7 @@ type Channel struct {
 	resizes      chan [2]int
 	result       chan Message
 	answered     sync.Once
+	finished     chan struct{}
 	sent         sync.Once
 	started      chan Message
 	acceptedOnce sync.Once
@@ -306,49 +377,29 @@ type Channel struct {
 
 // Reader is one sub-stream coming in, ending in io.EOF at its zero-length
 // frame. Asking for a sub-stream twice returns the same reader.
-func (c *Channel) Reader(stream byte) io.Reader { return c.pipe(stream) }
+func (c *Channel) Reader(stream byte) io.Reader { return c.inbound(stream) }
 
 // Up is Reader under the name the control plane's Stream contract uses.
-func (c *Channel) Up(stream byte) io.Reader { return c.pipe(stream) }
+func (c *Channel) Up(stream byte) io.Reader { return c.inbound(stream) }
 
-func (c *Channel) pipe(stream byte) *io.PipeReader {
+// inbound is one sub-stream's buffer, made the first time either the reader
+// or the far side's first frame names it. Whether it is credited is fixed
+// here, from whether the connection had agreed credit, so one sub-stream never
+// changes rules half way.
+func (c *Channel) inbound(stream byte) *inbound {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if r, held := c.readers[stream]; held {
-		return r
+	if in, held := c.incoming[stream]; held {
+		return in
 	}
-	r, w := io.Pipe()
-	c.readers[stream], c.writers[stream] = r, w
-	if c.ended != nil {
-		_ = w.CloseWithError(c.ended)
+	in := &inbound{
+		channel: c, stream: stream,
+		credited: c.link.peerWindow.Load() > 0, window: c.link.window,
+		err: c.ended,
 	}
-	return r
-}
-
-// write puts one incoming frame into a sub-stream's pipe. A zero-length frame
-// ends it.
-//
-// The write runs on the read pump and an io.Pipe blocks until it is read, so
-// a sub-stream whose reader has stopped holds this connection. That is the
-// only back pressure the protocol has until the credit window of design 021
-// lands, and it is why an operation that answers and then streams sends its
-// answer first: the far side must never be waiting for a result that is
-// queued behind bytes it has not started reading.
-func (c *Channel) write(stream byte, payload []byte) {
-	c.pipe(stream)
-	c.mu.Lock()
-	w := c.writers[stream]
-	c.mu.Unlock()
-	if w == nil {
-		return
-	}
-	if len(payload) == 0 {
-		_ = w.Close()
-		return
-	}
-	if _, err := w.Write(payload); err != nil {
-		_ = w.CloseWithError(err)
-	}
+	in.ready = sync.NewCond(&in.mu)
+	c.incoming[stream] = in
+	return in
 }
 
 // Writer is one sub-stream going out. Closing it writes the zero-length frame
@@ -367,6 +418,33 @@ func (c *Channel) Resizes() <-chan [2]int { return c.resizes }
 // Resize asks the far side for a window.
 func (c *Channel) Resize(cols, rows int) error {
 	return c.link.Send(c.operation, Message{Type: MessageResize, Cols: cols, Rows: rows})
+}
+
+// resize queues one window for the terminal without waiting, on the read
+// pump. A queue that is full holds windows the terminal has not applied yet,
+// and only the newest of them is the terminal's, so the oldest gives way.
+func (c *Channel) resize(cols, rows int) {
+	if c.resizes == nil {
+		return
+	}
+	window := [2]int{cols, rows}
+	for {
+		select {
+		case c.resizes <- window:
+			return
+		default:
+		}
+		select {
+		case <-c.resizes:
+		default:
+		}
+	}
+}
+
+// Event sends one change the worker's driver observed, on the Watch
+// operation.
+func (c *Channel) Event(e Event) error {
+	return c.link.Send(c.operation, Message{Type: MessageEvent, Operation: c.operation, Event: &e})
 }
 
 // Result waits for the operation's answer. A link that ended first is the
@@ -452,8 +530,14 @@ func (c *Channel) Answer(res Response, err error) error {
 	return sendErr
 }
 
+// answer records the far side's result. It also ends every writer of this
+// operation waiting for credit: an operation that answered is over on the far
+// side, which reads nothing more of it and grants nothing more.
 func (c *Channel) answer(m Message) {
-	c.answered.Do(func() { c.result <- m })
+	c.answered.Do(func() {
+		c.result <- m
+		close(c.finished)
+	})
 }
 
 // Cancelled is closed when the far side cancelled the operation, which is the
@@ -477,28 +561,244 @@ func (c *Channel) Close() error {
 }
 
 // end releases every sub-stream with the reason the operation stopped, so a
-// reader blocked on one learns it rather than waiting forever. The reason is
-// kept, because a caller may ask for a sub-stream after the operation ended
-// and must be handed one that is already over.
+// reader blocked on one learns it rather than waiting forever, and a writer
+// waiting for credit learns there will be none. The first reason is kept,
+// because a caller may ask for a sub-stream after the operation ended and
+// must be handed one that is already over.
 func (c *Channel) end(err error) {
 	c.cancel()
 	if err == nil {
 		err = ErrLinkClosed
 	}
 	c.mu.Lock()
-	c.ended = err
-	writers := make([]*io.PipeWriter, 0, len(c.writers))
-	for _, w := range c.writers {
-		writers = append(writers, w)
+	if c.ended == nil {
+		c.ended = err
+	}
+	incoming := make([]*inbound, 0, len(c.incoming))
+	for _, in := range c.incoming {
+		incoming = append(incoming, in)
 	}
 	c.mu.Unlock()
-	for _, w := range writers {
-		_ = w.CloseWithError(err)
+	for _, in := range incoming {
+		in.fail(err)
 	}
 }
 
-// substream is one outgoing sub-stream: frames of at most MaxFrameBytes, and
-// a zero-length frame at the end.
+// outbound is what one sub-stream going out may still send: the far side's
+// window less what it has not credited back. A sub-stream opened before the
+// connection agreed credit is not credited, and sends as the stream did before.
+type outbound struct {
+	credited bool
+	credit   int64
+}
+
+func (c *Channel) outboundLocked(stream byte) *outbound {
+	if o, held := c.outgoing[stream]; held {
+		return o
+	}
+	peer := c.link.peerWindow.Load()
+	o := &outbound{credited: peer > 0, credit: peer}
+	c.outgoing[stream] = o
+	return o
+}
+
+// spend takes up to want bytes of credit on one sub-stream, waiting for a
+// grant when none is left. The wait ends without credit when the operation
+// can no longer use the bytes: the caller closed it or the far side cancelled
+// it, the far side answered it, or the connection ended.
+func (c *Channel) spend(stream byte, want int) (int, error) {
+	for {
+		c.mu.Lock()
+		o := c.outboundLocked(stream)
+		if !o.credited {
+			c.mu.Unlock()
+			return want, nil
+		}
+		if o.credit > 0 {
+			n := int(min(int64(want), o.credit))
+			o.credit -= int64(n)
+			c.mu.Unlock()
+			return n, nil
+		}
+		granted := c.granted
+		c.mu.Unlock()
+		select {
+		case <-granted:
+		case <-c.cancelled:
+			return 0, c.stopped()
+		case <-c.finished:
+			return 0, io.ErrClosedPipe
+		case <-c.link.done:
+			return 0, c.link.closedErr()
+		}
+	}
+}
+
+// stopped is what a writer of an operation that ended reads: the connection's
+// end where that is what ended it, and a closed pipe where the operation alone
+// is over, because the far side will read nothing more of it.
+func (c *Channel) stopped() error {
+	if c.link.Err() != nil {
+		return c.link.closedErr()
+	}
+	return io.ErrClosedPipe
+}
+
+// grant adds the far side's credit to one sub-stream going out. A correct
+// peer never leaves a sub-stream more credit than its own window, never grants
+// nothing, and never credits control or a sub-stream the connection does not
+// credit, so each of those is ErrFrame.
+func (c *Channel) grant(stream int, bytes int64) error {
+	if stream <= int(StreamControl) || stream > 0xff {
+		return fmt.Errorf("%w: a credit names a sub-stream, not %d", ErrFrame, stream)
+	}
+	if bytes <= 0 {
+		return fmt.Errorf("%w: a credit grants at least one byte, not %d", ErrFrame, bytes)
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	o := c.outboundLocked(byte(stream))
+	if !o.credited {
+		return fmt.Errorf("%w: a credit on sub-stream %d, which this connection does not credit", ErrFrame, stream)
+	}
+	if peer := c.link.peerWindow.Load(); bytes > peer-o.credit {
+		return fmt.Errorf("%w: a credit of %d leaves sub-stream %d more than the window of %d", ErrFrame, bytes, stream, peer)
+	}
+	o.credit += bytes
+	close(c.granted)
+	c.granted = make(chan struct{})
+	return nil
+}
+
+// inbound is one sub-stream coming in: the bytes the far side sent that the
+// reader has not taken yet. The read pump appends and the reader takes, and
+// on a credited sub-stream the reader credits the far side back as it takes,
+// so the buffer never holds more than the window and the pump never waits.
+type inbound struct {
+	channel  *Channel
+	stream   byte
+	credited bool
+	window   int64
+
+	mu    sync.Mutex
+	ready *sync.Cond
+	// frames is what arrived and was not taken, held is its size, received
+	// every byte the far side sent, granted every byte credited back beyond
+	// the first window, and taken what was read and not credited back yet.
+	frames   [][]byte
+	held     int64
+	received int64
+	granted  int64
+	taken    int64
+	eof      bool
+	err      error
+}
+
+// grantAt is how much a reader takes before it credits the far side back:
+// half the window, and never more than one frame, so a reader taking a few
+// bytes at a time sends one credit per frame rather than one per read.
+func (in *inbound) grantAt() int64 { return max(1, min(in.window/2, MaxFrameBytes)) }
+
+// push appends one frame on the read pump. A zero-length frame ends the
+// sub-stream. On a credited sub-stream a frame past the window is the far
+// side breaking the protocol, and the connection closes; on one that is not,
+// the pump waits for the reader to make room, which is the back pressure a
+// peer without credit expects.
+func (in *inbound) push(payload []byte) error {
+	in.mu.Lock()
+	defer in.mu.Unlock()
+	if in.eof || in.err != nil {
+		// The sub-stream is over here and the far side has not learned it.
+		return nil
+	}
+	if len(payload) == 0 {
+		in.eof = true
+		in.ready.Broadcast()
+		return nil
+	}
+	size := int64(len(payload))
+	if in.credited {
+		if outstanding := in.received + size - in.granted; outstanding > in.window {
+			return fmt.Errorf("%w: sub-stream %d of %s holds %d bytes the far side was never credited for, past the window of %d",
+				ErrFrame, in.stream, in.channel.operation, outstanding, in.window)
+		}
+	} else {
+		for in.held >= in.window && in.err == nil {
+			in.ready.Wait()
+		}
+		if in.err != nil {
+			return nil
+		}
+	}
+	in.frames = append(in.frames, payload)
+	in.held += size
+	in.received += size
+	in.channel.link.notePeak(in.held)
+	in.ready.Broadcast()
+	return nil
+}
+
+// Read takes what arrived, waiting for bytes, the end of the sub-stream, or
+// the reason the operation stopped. Bytes that arrived before the operation
+// stopped are read first.
+func (in *inbound) Read(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	in.mu.Lock()
+	for len(in.frames) == 0 && !in.eof && in.err == nil {
+		in.ready.Wait()
+	}
+	if len(in.frames) == 0 {
+		err := in.err
+		if in.eof {
+			err = io.EOF
+		}
+		in.mu.Unlock()
+		return 0, err
+	}
+	n := copy(p, in.frames[0])
+	if n == len(in.frames[0]) {
+		in.frames[0] = nil
+		in.frames = in.frames[1:]
+	} else {
+		in.frames[0] = in.frames[0][n:]
+	}
+	in.held -= int64(n)
+	var grant int64
+	if in.credited && in.err == nil {
+		in.taken += int64(n)
+		if in.taken >= in.grantAt() {
+			grant, in.taken = in.taken, 0
+			in.granted += grant
+		}
+	}
+	in.ready.Broadcast()
+	in.mu.Unlock()
+	if grant > 0 {
+		// A credit that cannot be sent is a connection that ended, which
+		// this reader learns on its next read from the reason the
+		// operation stopped.
+		_ = in.channel.link.Send(in.channel.operation, Message{
+			Type: MessageCredit, Operation: in.channel.operation, Stream: int(in.stream), Bytes: grant,
+		})
+	}
+	return n, nil
+}
+
+// fail ends the sub-stream with the reason the operation stopped. A sub-stream
+// that already ended whole keeps its end, because what it carried is complete.
+func (in *inbound) fail(err error) {
+	in.mu.Lock()
+	if !in.eof && in.err == nil {
+		in.err = err
+	}
+	in.ready.Broadcast()
+	in.mu.Unlock()
+}
+
+// substream is one outgoing sub-stream: frames of at most MaxFrameBytes, each
+// within the credit the far side granted, and a zero-length frame at the end.
 type substream struct {
 	channel *Channel
 	stream  byte
@@ -508,16 +808,21 @@ type substream struct {
 func (s *substream) Write(p []byte) (int, error) {
 	written := 0
 	for len(p) > 0 {
-		chunk := min(len(p), MaxFrameBytes)
-		if err := s.channel.link.SendFrame(s.channel.operation, s.stream, p[:chunk]); err != nil {
+		n, err := s.channel.spend(s.stream, min(len(p), MaxFrameBytes))
+		if err != nil {
 			return written, err
 		}
-		written += chunk
-		p = p[chunk:]
+		if err = s.channel.link.SendFrame(s.channel.operation, s.stream, p[:n]); err != nil {
+			return written, err
+		}
+		written += n
+		p = p[n:]
 	}
 	return written, nil
 }
 
+// Close ends the sub-stream. The zero-length frame costs no credit, so a
+// writer that spent its window still ends what it sent.
 func (s *substream) Close() error {
 	if s.closed.Swap(true) {
 		return nil

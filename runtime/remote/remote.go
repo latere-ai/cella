@@ -39,6 +39,10 @@ type Transport interface {
 	// control plane has not been told anything yet, which is when a caller
 	// must ask the worker instead.
 	ObservedList() ([]runtime.State, bool)
+	// Watch is the events the workers' drivers report, until the context
+	// ends. What they change is already in Observed and ObservedList when
+	// the event is delivered.
+	Watch(ctx context.Context) (<-chan Event, error)
 }
 
 // Stream is one operation in flight: its sub-streams and its answer.
@@ -86,6 +90,7 @@ var (
 	_ runtime.Driver    = (*Driver)(nil)
 	_ runtime.Attacher  = (*Driver)(nil)
 	_ runtime.FileStore = (*Driver)(nil)
+	_ Watcher           = (*Driver)(nil)
 )
 
 // New returns the driver of one worker environment.
@@ -239,6 +244,19 @@ func (d *Driver) List(ctx context.Context, f runtime.Filter) ([]runtime.State, e
 		}
 	}
 	return out, nil
+}
+
+// Watch is the environment's events as the drivers of its workers observe
+// them. A relist is delivered once the List it caused has replaced what
+// Inspect and List answer from, so a consumer that lists on a relist reads the
+// environment as the worker listed it. An environment whose workers' drivers
+// do not watch delivers nothing but the relist that follows a Watch ending,
+// and its consumer reads the state the workers report instead.
+func (d *Driver) Watch(ctx context.Context) (<-chan Event, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return d.transport.Watch(ctx)
 }
 
 // Exec runs one command on the worker and relays its three sub-streams. The

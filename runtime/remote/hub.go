@@ -50,7 +50,10 @@ type HubOptions struct {
 	// Now is the clock, for the phase loop's tests. Nil is the wall clock.
 	Now   func() time.Time
 	Queue Queue
-	Log   *slog.Logger
+	// Window is the credit the control plane grants per sub-stream, which it
+	// announces in answer to a worker's hello. Zero takes DefaultWindow.
+	Window int
+	Log    *slog.Logger
 }
 
 // Hub is every worker stream one control plane holds, grouped by the
@@ -62,6 +65,7 @@ type Hub struct {
 	newID   func() string
 	now     func() time.Time
 	queue   Queue
+	window  int
 	log     *slog.Logger
 
 	mu           sync.Mutex
@@ -79,6 +83,9 @@ type environment struct {
 	// asks the worker rather than answering an empty world.
 	observed map[string]runtime.State
 	reported bool
+	// subscribers are the consumers of the environment's events, through
+	// the remote driver's Watch.
+	subscribers map[*subscription]struct{}
 }
 
 // worker is one registration and, while it holds one, its stream.
@@ -92,7 +99,7 @@ type worker struct {
 // NewHub returns a hub holding no environment and no connection.
 func NewHub(o HubOptions) *Hub {
 	h := &Hub{
-		offline: o.Offline, newID: o.NewID, now: o.Now, queue: o.Queue, log: o.Log,
+		offline: o.Offline, newID: o.NewID, now: o.Now, queue: o.Queue, window: o.Window, log: o.Log,
 		environments: map[string]*environment{},
 	}
 	if h.offline <= 0 {
@@ -176,7 +183,7 @@ func (h *Hub) Forget(environmentID, workerID string) {
 // the hello, so a socket that opens and says nothing holds no work.
 func (h *Hub) Serve(ctx context.Context, environmentID string, conn FrameConn) error {
 	c := &connection{hub: h, environment: environmentID}
-	c.link = NewLink(conn, LinkOptions{OnMessage: c.onMessage})
+	c.link = NewLink(conn, LinkOptions{OnMessage: c.onMessage, Window: h.window})
 	defer c.release()
 	go h.beat(ctx, c.link)
 	err := c.link.Run(ctx)
@@ -198,6 +205,11 @@ type connection struct {
 
 	mu     sync.Mutex
 	worker *worker
+	// listing says a List a relist asked for is in flight on this
+	// connection, and relistAgain that another relist arrived meanwhile, so
+	// a burst of relists costs one List more rather than one each.
+	listing     bool
+	relistAgain bool
 }
 
 func (c *connection) bound() *worker {
@@ -221,14 +233,14 @@ func (c *connection) release() {
 }
 
 // onMessage takes what a worker sends that the link did not route itself: the
-// hello that binds the connection, the heartbeats, and the state its driver
-// observes.
+// hello that binds the connection, the heartbeats, the state its driver
+// observes, and the events its driver's Watch reports.
 func (c *connection) onMessage(_ string, m Message) {
 	switch m.Type {
 	case MessageHello:
-		if err := c.bind(m.Worker); err != nil {
-			c.hub.log.Warn("a worker opened a stream without a registration",
-				"environment", c.environment, "worker", m.Worker)
+		if err := c.hello(m); err != nil {
+			c.hub.log.Warn("a worker's hello was refused",
+				"environment", c.environment, "worker", m.Worker, "err", err)
 			c.link.Shutdown(err)
 		}
 	case MessageHeartbeat:
@@ -236,11 +248,176 @@ func (c *connection) onMessage(_ string, m Message) {
 	case MessageState:
 		c.hub.stamp(c.environment, c.workerID())
 		c.hub.observe(c.environment, m)
+	case MessageEvent:
+		c.hub.stamp(c.environment, c.workerID())
+		if err := c.event(m); err != nil {
+			c.hub.log.Warn("a worker sent an event this control plane cannot read",
+				"environment", c.environment, "err", err)
+			c.link.Shutdown(err)
+		}
 	default:
 		c.hub.log.Warn("a worker sent a frame that belongs the other way",
 			"environment", c.environment, "frame", m.Type)
 		c.link.Shutdown(fmt.Errorf("%w: %s belongs the other way", ErrFrame, m.Type))
 	}
+}
+
+// hello answers a worker's first frame. A worker that announced a window
+// gets this side's in answer, and credit is on for the connection; the answer
+// is queued before the registration is bound, and nothing is sent to a worker
+// before it is bound, so the worker has credit on before the first frame of
+// any operation reaches it. A worker whose driver watches gets the
+// connection's Watch operation.
+func (c *connection) hello(m Message) error {
+	if m.Window != 0 {
+		if err := c.link.Credit(m.Window); err != nil {
+			return err
+		}
+		if err := c.link.Send(NoOperation, Message{Type: MessageHello, Window: c.link.Window()}); err != nil {
+			return err
+		}
+	}
+	if err := c.bind(m.Worker); err != nil {
+		return err
+	}
+	if m.Watch {
+		go c.watch()
+	}
+	return nil
+}
+
+// issue sends one operation of the connection's own on this connection
+// alone: the Watch, and the List a relist asks for. Neither is a row of the
+// operations table, because neither is a caller's and neither is redelivered.
+func (c *connection) issue(opType string, req Request) (*Channel, error) {
+	id := c.hub.newID()
+	channel := c.link.Open(id, false)
+	message := withOperationType(Message{Type: MessageOperation, Operation: id, Request: &req}, opType)
+	if err := c.link.Send(id, message); err != nil {
+		c.link.Drop(id)
+		return nil, err
+	}
+	return channel, nil
+}
+
+// maxRewatchDelay bounds how long the control plane waits before it opens a
+// worker's Watch again after one ended while the stream stayed up.
+const maxRewatchDelay = 30 * time.Second
+
+// watch holds the connection's Watch operation open for as long as the
+// connection lasts. Whatever ended one, events may have been missed from then
+// until the next opens, so every consumer is told to read the environment
+// again. A Watch that ended while the stream stayed up is the worker's driver
+// failing to watch, and it is opened again, sooner after one that ran for a
+// while than after one that failed at once.
+func (c *connection) watch() {
+	delay := rewatchDelay
+	for {
+		opened := time.Now()
+		err := c.watchOnce()
+		c.hub.publish(c.environment, Event{Type: EventRelist})
+		if c.link.Err() != nil {
+			return
+		}
+		c.hub.log.Warn("a worker's watch ended", "environment", c.environment, "err", err, "retryIn", delay)
+		if time.Since(opened) > maxRewatchDelay {
+			delay = rewatchDelay
+		}
+		select {
+		case <-c.link.Done():
+			return
+		case <-time.After(delay):
+		}
+		delay = min(delay*2, maxRewatchDelay)
+	}
+}
+
+// watchOnce opens one Watch and waits for it to end.
+func (c *connection) watchOnce() error {
+	channel, err := c.issue(OpWatch, Request{})
+	if err != nil {
+		return err
+	}
+	_, err = channel.Result(context.Background())
+	if closeErr := channel.Close(); err == nil {
+		err = closeErr
+	}
+	if err == nil {
+		err = errors.New("remote: the worker ended its watch")
+	}
+	return err
+}
+
+// event applies one change a worker's driver observed. A relist is answered
+// with a List on this connection, and the consumers read the relist once its
+// answer is in place. An event of a type this release does not know is left
+// alone, so a worker of a later release does not lose its connection over
+// one.
+func (c *connection) event(m Message) error {
+	if m.Event == nil {
+		return fmt.Errorf("%w: an event message carries an event", ErrFrame)
+	}
+	e := *m.Event
+	switch e.Type {
+	case EventRelist:
+		c.relist()
+	case EventAdded, EventModified, EventLost, EventDeleted:
+		if e.State.ID == "" {
+			return fmt.Errorf("%w: a %s event names the sandbox it is about", ErrFrame, e.Type)
+		}
+		c.hub.event(c.environment, e)
+	default:
+		c.hub.log.Warn("a worker reported an event of a type this control plane does not know",
+			"environment", c.environment, "type", e.Type)
+	}
+	return nil
+}
+
+// relist issues the List a relist asks for, beside the read pump that
+// delivered the relist, because its answer arrives on that same pump.
+func (c *connection) relist() {
+	c.mu.Lock()
+	if c.listing {
+		c.relistAgain = true
+		c.mu.Unlock()
+		return
+	}
+	c.listing = true
+	c.mu.Unlock()
+	go func() {
+		for {
+			c.list()
+			c.mu.Lock()
+			if !c.relistAgain {
+				c.listing = false
+				c.mu.Unlock()
+				return
+			}
+			c.relistAgain = false
+			c.mu.Unlock()
+		}
+	}()
+}
+
+// list replaces what the control plane holds of the environment with what
+// the worker's driver lists, and then tells the consumers to read it again.
+func (c *connection) list() {
+	channel, err := c.issue(OpList, Request{Filter: &runtime.Filter{}})
+	if err != nil {
+		return // the connection ended before the List was sent
+	}
+	res, err := channel.Result(context.Background())
+	if closeErr := channel.Close(); closeErr != nil && err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		if c.link.Err() == nil {
+			c.hub.log.Warn("the List a relist asked for failed", "environment", c.environment, "err", err)
+		}
+		return
+	}
+	c.hub.observe(c.environment, Message{Type: MessageState, States: res.States, Relist: true})
+	c.hub.publish(c.environment, Event{Type: EventRelist})
 }
 
 func (c *connection) workerID() string {
@@ -324,6 +501,35 @@ func (h *Hub) observe(environmentID string, m Message) {
 	env.reported = true
 }
 
+// event applies one change to what the control plane holds of the
+// environment and hands it to every consumer.
+func (h *Hub) event(environmentID string, e Event) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	env := h.environmentLocked(environmentID)
+	if e.Type == EventDeleted {
+		delete(env.observed, e.State.ID)
+	} else {
+		env.observed[e.State.ID] = e.State
+	}
+	env.publishLocked(e)
+}
+
+// publish hands one event to every consumer of the environment.
+func (h *Hub) publish(environmentID string, e Event) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if env, held := h.environments[environmentID]; held {
+		env.publishLocked(e)
+	}
+}
+
+func (env *environment) publishLocked(e Event) {
+	for s := range env.subscribers {
+		s.push(e)
+	}
+}
+
 // Transport is the driver's side of one environment. It is valid before any
 // worker has registered: a driver built over it answers that nothing is
 // registered rather than failing to exist.
@@ -359,25 +565,41 @@ type WorkerState struct {
 
 // Release drops everything one environment holds, which is what a delete of
 // the object writes.
+//
+// What it ends is read under the hub's lock and ended after it: a link's
+// shutdown and a consumer's goroutine both take that lock on their way out.
 func (h *Hub) Release(environmentID string) {
 	h.mu.Lock()
 	env, held := h.environments[environmentID]
 	delete(h.environments, environmentID)
-	h.mu.Unlock()
-	if !held {
-		return
-	}
-	for _, w := range env.workers {
-		if w.link != nil {
-			w.link.Shutdown(errors.New("remote: the environment was deleted"))
+	var links []*Link
+	var subscribers []*subscription
+	if held {
+		for _, w := range env.workers {
+			if w.link != nil {
+				links = append(links, w.link)
+			}
 		}
+		for s := range env.subscribers {
+			subscribers = append(subscribers, s)
+		}
+	}
+	h.mu.Unlock()
+	for _, link := range links {
+		link.Shutdown(errors.New("remote: the environment was deleted"))
+	}
+	for _, s := range subscribers {
+		s.close()
 	}
 }
 
 func (h *Hub) environmentLocked(id string) *environment {
 	env, held := h.environments[id]
 	if !held {
-		env = &environment{workers: map[string]*worker{}, observed: map[string]runtime.State{}}
+		env = &environment{
+			workers: map[string]*worker{}, observed: map[string]runtime.State{},
+			subscribers: map[*subscription]struct{}{},
+		}
 		h.environments[id] = env
 	}
 	return env
@@ -453,6 +675,24 @@ func (t *transport) ObservedList() ([]runtime.State, bool) {
 	}
 	slices.SortFunc(out, func(a, b runtime.State) int { return strings.Compare(a.ID, b.ID) })
 	return out, true
+}
+
+// Watch is the environment's events as its workers' drivers report them,
+// until the context ends or the environment is released. A consumer that
+// falls behind receives a relist in place of what it missed.
+func (t *transport) Watch(ctx context.Context) (<-chan Event, error) {
+	s := newSubscription()
+	t.hub.mu.Lock()
+	env := t.hub.environmentLocked(t.environment)
+	env.subscribers[s] = struct{}{}
+	t.hub.mu.Unlock()
+	go func() {
+		s.run(ctx)
+		t.hub.mu.Lock()
+		delete(env.subscribers, s)
+		t.hub.mu.Unlock()
+	}()
+	return s.out, nil
 }
 
 // Open enqueues one operation and sends it to a live worker. The row records
