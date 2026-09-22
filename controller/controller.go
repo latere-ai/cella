@@ -32,6 +32,9 @@ const (
 	PhaseDeleting   = "Deleting"
 	PhaseLost       = "Lost"
 	PhaseRecovering = "Recovering"
+	// PhaseQueued is a sandbox a queued environment holds until it fits. No
+	// driver holds it (spec 057).
+	PhaseQueued = "Queued"
 )
 
 var (
@@ -106,6 +109,9 @@ type Options struct {
 	// An empty triple with a zero count seeds the word auto: the ceiling is
 	// the cluster's or the host's and this control plane does not read it.
 	CapacityQuantities v1.Capacity
+	// ScheduleInterval is how often the scheduler loop passes over the
+	// queued environments when nothing wakes it; zero is the default.
+	ScheduleInterval time.Duration
 	// SchedulingMode is that environment's placement mode, from
 	// CELLA_SCHEDULING_MODE. Empty takes direct.
 	SchedulingMode string
@@ -179,6 +185,10 @@ type Controller struct {
 	capacity     int
 	poolInFlight int
 	poolGrace    time.Duration
+	// The scheduler loop's tick and the wake a released sandbox sends it
+	// (spec 057).
+	scheduleInterval time.Duration
+	wake             chan struct{}
 	// environmentStore is the Environment kind's store, taken where the
 	// store has it; newDriver builds the driver of an environment a worker
 	// serves, and registrations reports what its workers sent.
@@ -246,6 +256,7 @@ func Open(ctx context.Context, o Options) (*Controller, error) {
 		secretObjects: map[string]v1.Secret{},
 		pool:          o.Pool, capacity: o.Capacity,
 		poolInFlight: o.PoolInFlight, poolGrace: o.PoolGrace,
+		scheduleInterval: cmp.Or(o.ScheduleInterval, DefaultScheduleInterval), wake: make(chan struct{}, 1),
 		newDriver: o.NewDriver, releaseDriver: o.ReleaseDriver, registrations: o.Registrations,
 		offline: o.EnvironmentOffline, answered: map[string]time.Time{},
 	}
@@ -358,6 +369,9 @@ func (c *Controller) persist(ctx context.Context, obj v1.Sandbox, mutation strin
 	if c.durable == nil {
 		c.emit(ctx, mutation, clone(obj))
 	}
+	if held && releases(previous, &obj) {
+		c.wakeScheduler()
+	}
 	return nil
 }
 
@@ -379,6 +393,9 @@ func (c *Controller) forget(ctx context.Context, id, mutation string) error {
 	}
 	if c.durable == nil {
 		c.emit(ctx, mutation, previous)
+	}
+	if held && releases(previous, nil) {
+		c.wakeScheduler()
 	}
 	return nil
 }
@@ -436,17 +453,32 @@ func (c *Controller) create(ctx context.Context, obj v1.Sandbox, owner string, m
 	if parent != nil || obj.Spec.Mesh.Enabled {
 		entry = nil
 	}
+	// A pool entry is taken only by a create placed at once: one that would
+	// wait behind others in its queue does not pass them by adopting.
+	if c.waiting(environment, obj.Spec.Scheduling.Queue) > 0 {
+		entry = nil
+	}
 	c.countAdoption(pool, entry)
 	out, err := c.createLocked(ctx, obj, owner, max, warnings, lifecycle, entries, entry, parent)
 	if entry != nil && err != nil && adoptionLost(err) {
 		c.log.InfoContext(ctx, "the pool entry could not be adopted; this create takes the slow path",
 			"entry", entry.ID, "err", err)
 		out, err = c.createLocked(ctx, obj, owner, max, warnings, lifecycle, without(entries, entry.ID), nil, parent)
-		c.metrics.SandboxCreated(PoolMiss, c.clock.Now().Sub(started))
+		c.observeCreate(out, PoolMiss, started)
 		return out, err
 	}
-	c.metrics.SandboxCreated(poolResult(entry), c.clock.Now().Sub(started))
+	c.observeCreate(out, poolResult(entry), started)
 	return out, err
+}
+
+// observeCreate records one create's duration where the driver was asked for
+// the sandbox. One that was queued or refused for capacity asked no driver;
+// the loop records a queued one when it places it.
+func (c *Controller) observeCreate(out v1.Sandbox, pool string, started time.Time) {
+	if out.Status.Phase == PhaseQueued || out.Status.Reason == ReasonNoCapacity {
+		return
+	}
+	c.metrics.SandboxCreated(pool, c.clock.Now().Sub(started))
 }
 
 // countAdoption records what the pool did for this create. An environment
@@ -512,17 +544,22 @@ func (c *Controller) createLocked(ctx context.Context, obj v1.Sandbox, owner str
 	if max > 0 && count >= max {
 		return obj, ErrQuota
 	}
-	// An adoption always fits: it turns one entry into one sandbox and moves
-	// nothing. A real create may not, and where entries hold the ceiling the
-	// oldest give it up.
+	// Step 2 of the create order. An adoption always fits: it turns one
+	// entry into one sandbox and moves nothing. A real create may not, and
+	// where entries hold what it needs the oldest give it up.
+	placement := placeNow
 	if entry == nil {
-		if err := c.makeRoom(ctx, environment, entries); err != nil {
+		if placement, err = c.place(ctx, environment, obj, entries); err != nil {
 			return obj, err
 		}
 	}
 	now := time.Now().UTC()
 	obj.Spec.Environment = environment
 	obj.Status = v1.SandboxStatus{ID: id, Owner: owner, Environment: environment, Driver: d.Name(), Isolation: d.Isolation(), Phase: driver.Pending, CreatedAt: now, Warnings: warnings}
+	if placement == placeQueued {
+		obj.Status.Phase = PhaseQueued
+		obj.Status.Conditions = setCondition(obj.Status.Conditions, waitingCondition(v1.ReasonQueued, now))
+	}
 	// The tree position is written before the object is: a child's parent,
 	// root and mesh are what the debit, the boundary and the driver all read.
 	if err := c.spawnStatus(&obj, parent); err != nil {
@@ -533,6 +570,33 @@ func (c *Controller) createLocked(ctx context.Context, obj v1.Sandbox, owner str
 	if err := c.debit(ctx, obj, parent); err != nil {
 		return obj, err
 	}
+	switch placement {
+	case placeQueued:
+		// A queued sandbox stops here and resumes at step 3 when the loop
+		// places it.
+		return c.positioned(export(obj)), nil
+	case placeNoCapacity:
+		// A direct environment starts a sandbox now or fails it. Nothing
+		// past step 1 ran, so the failure is the whole of the undo.
+		obj.Status.Phase = PhaseFailed
+		obj.Status.Reason = ReasonNoCapacity
+		obj.Status.Conditions = setCondition(obj.Status.Conditions, waitingCondition(v1.ReasonNoCapacity, now))
+		return export(obj), errors.Join(c.persist(ctx, obj, MutationFailed), c.credit(ctx, parent))
+	}
+	return c.realize(ctx, obj, d, lifecycle, entry, parent, false)
+}
+
+// realize is steps 3 onward of design 005's create order over a sandbox whose
+// desired state is written: the boundary, the identity, and the driver's
+// create or the adoption of an entry. A create placed at once runs it inline;
+// the scheduler loop runs it for a queued sandbox it places, which is later,
+// so the caller already holds the object and a refusal at the boundary is
+// recorded as a failure rather than taken back.
+func (c *Controller) realize(ctx context.Context, obj v1.Sandbox, d driver.Driver, lifecycle driver.Lifecycle,
+	entry *driver.State, parent *v1.Sandbox, later bool,
+) (v1.Sandbox, error) {
+	id, environment, now := obj.Status.ID, obj.Status.Environment, time.Now().UTC()
+	var err error
 	// The boundary is put in a gateway before the driver is called, so a
 	// sandbox never starts before a gateway knows it (spec 018). A boundary
 	// that no gateway will hold is a refusal here, with nothing created.
@@ -542,6 +606,11 @@ func (c *Controller) createLocked(ctx context.Context, obj v1.Sandbox, owner str
 		// answered, so the principal is purged with the object: every map a
 		// gateway holds is a map desired state has.
 		c.purgeEgress(ctx, id)
+		if later {
+			obj.Status.Phase = PhaseFailed
+			obj.Status.Reason = ReasonCreateFailed
+			return export(obj), errors.Join(err, c.persist(ctx, obj, MutationFailed), c.credit(ctx, parent))
+		}
 		return obj, errors.Join(err, c.forget(ctx, id, MutationDeleted), c.credit(ctx, parent))
 	}
 	obj.Status.Secrets = boundary.Secrets
@@ -664,7 +733,7 @@ func (c *Controller) Get(ctx context.Context, key, owner string) (v1.Sandbox, er
 	if !ok {
 		return v1.Sandbox{}, ErrNotFound
 	}
-	return export(obj), nil
+	return c.positioned(export(obj)), nil
 }
 
 // List returns desired records. Runtime refresh is deferred until after API authorization.
@@ -676,13 +745,15 @@ func (c *Controller) List() []v1.Sandbox {
 	defer c.mu.Unlock()
 	out := make([]v1.Sandbox, 0, len(c.objects))
 	for _, obj := range c.objects {
-		out = append(out, export(obj))
+		out = append(out, c.positioned(export(obj)))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Status.ID < out[j].Status.ID })
 	return out
 }
 func (c *Controller) refresh(ctx context.Context, obj v1.Sandbox) (v1.Sandbox, error) {
-	if obj.Status.Phase == "Deleting" {
+	// Deleting is this control plane's own act in flight, and no driver
+	// holds a Queued sandbox: asking one would read its absence as a loss.
+	if obj.Status.Phase == PhaseDeleting || obj.Status.Phase == PhaseQueued {
 		return obj, nil
 	}
 	d, err := c.driverFor(obj.Status.Environment)

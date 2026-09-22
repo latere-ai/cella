@@ -42,18 +42,6 @@ const (
 // PoolLease is the lease name of one environment's refill loop.
 func PoolLease(environment string) string { return PoolLeasePrefix + environment }
 
-// countsAgainstCapacity reports whether a sandbox in this phase holds a slot
-// of the environment's ceiling. It is the count form of spec 020's capacity:
-// the resource form needs the granted resources of every sandbox, which no
-// driver reports yet.
-func countsAgainstCapacity(phase string) bool {
-	switch phase {
-	case PhaseDeleting, PhaseFailed, PhaseLost, driver.Stopped:
-		return false
-	}
-	return true
-}
-
 // RunPool ticks the refill loop until ctx ends. One tick passes over every
 // placeable environment; one whose driver declares no Pool holds no entry, so
 // there is nothing to keep and nothing to clean up.
@@ -129,7 +117,7 @@ func (c *Controller) refillEnvironment(ctx context.Context, environment string) 
 		switch {
 		case s.Pool:
 			entries = append(entries, s)
-		case countsAgainstCapacity(s.Phase):
+		case holdsCompute(s.Phase):
 			live++
 		}
 	}
@@ -371,38 +359,6 @@ func sameDisplay(a, b *v1.Display) bool {
 		return a == b
 	}
 	return *a == *b
-}
-
-// makeRoom frees a slot for a real create where the environment has a ceiling
-// and entries hold it. The oldest entries go first, and a create that does not
-// fit with no entry left is the quota refusal the API answers.
-func (c *Controller) makeRoom(ctx context.Context, environment string, entries []driver.State) error {
-	_, capacity := c.poolOf(environment)
-	if capacity <= 0 {
-		return nil
-	}
-	d, err := c.driverFor(environment)
-	if err != nil {
-		return err
-	}
-	live := 0
-	for _, obj := range c.objects {
-		if obj.Status.Environment == environment && countsAgainstCapacity(obj.Status.Phase) {
-			live++
-		}
-	}
-	for live+len(entries)+1 > capacity {
-		if len(entries) == 0 {
-			return ErrQuota
-		}
-		oldest := entries[0]
-		entries = entries[1:]
-		if err := d.Delete(ctx, oldest.ID); err != nil && !errors.Is(err, driver.ErrNotFound) {
-			return fmt.Errorf("pool: freeing capacity by deleting %s: %w", oldest.ID, err)
-		}
-		c.log.InfoContext(ctx, "the pool gave up an entry so a create would fit", "sandbox", oldest.ID)
-	}
-	return nil
 }
 
 // adoptionOf is what one entry is turned into: every field of the sandbox the

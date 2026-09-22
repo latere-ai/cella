@@ -387,7 +387,7 @@ func TestPoolRefillHoldsTheLease(t *testing.T) {
 
 // TestPoolYieldsCapacity is spec 020's capacity rule in the count form: a real
 // create that does not fit takes the oldest entries first, and one that cannot
-// fit at all is refused.
+// fit at all is failed NoCapacity on this direct environment.
 func TestPoolYieldsCapacity(t *testing.T) {
 	o := poolOptions(2)
 	o.Capacity = 2
@@ -423,8 +423,9 @@ func TestPoolYieldsCapacity(t *testing.T) {
 	}
 	third := workspace()
 	third.Metadata.Name, third.Spec.Command = "third", []string{"sh"}
-	if _, err := c.Create(t.Context(), third, "alice", 0); !errors.Is(err, ErrQuota) {
-		t.Fatalf("a create over the ceiling is %v, want ErrQuota", err)
+	over, err := c.Create(t.Context(), third, "alice", 0)
+	if err != nil || over.Status.Phase != PhaseFailed || over.Status.Reason != ReasonNoCapacity {
+		t.Fatalf("a create over the ceiling is %s %s, %v; want Failed NoCapacity", over.Status.Phase, over.Status.Reason, err)
 	}
 	// The loop keeps no entry while the sandboxes hold the whole ceiling.
 	if _, err := c.Refill(t.Context()); err != nil {
@@ -715,16 +716,34 @@ func TestPoolShapeReadsEveryField(t *testing.T) {
 	}
 }
 
-// TestCapacityCountsThePhases is the count form of spec 020's capacity: a
-// sandbox on its way out or already gone holds no slot.
+// TestCapacityCountsThePhases is spec 020's two derivations: cpu, memory and
+// the count are held by a sandbox the driver runs or is bringing up or down,
+// and disk by those and by a stopped or failed one, except one that failed
+// before any driver held it. A queued sandbox holds nothing yet.
 func TestCapacityCountsThePhases(t *testing.T) {
-	for phase, want := range map[string]bool{
-		driver.Pending: true, driver.Running: true, "Starting": true, "Stopping": true,
-		PhaseRecovering: true, driver.Stopped: false, PhaseFailed: false,
-		PhaseLost: false, PhaseDeleting: false,
+	for _, tc := range []struct {
+		phase, reason string
+		compute, disk bool
+	}{
+		{driver.Pending, "", true, true},
+		{driver.Running, "", true, true},
+		{"Starting", "", true, true},
+		{"Stopping", "", true, true},
+		{PhaseRecovering, "", true, true},
+		{driver.Stopped, "", false, true},
+		{PhaseFailed, ReasonCreateFailed, false, true},
+		{PhaseFailed, ReasonNoCapacity, false, false},
+		{PhaseFailed, ReasonStartDeadline, false, false},
+		{PhaseQueued, "", false, false},
+		{PhaseLost, "", false, false},
+		{PhaseDeleting, "", false, false},
 	} {
-		if got := countsAgainstCapacity(phase); got != want {
-			t.Errorf("%s counts %v, want %v", phase, got, want)
+		obj := v1.Sandbox{Status: v1.SandboxStatus{Phase: tc.phase, Reason: tc.reason}}
+		if got := holdsCompute(tc.phase); got != tc.compute {
+			t.Errorf("%s %s holds compute %v, want %v", tc.phase, tc.reason, got, tc.compute)
+		}
+		if got := holdsDisk(obj); got != tc.disk {
+			t.Errorf("%s %s holds disk %v, want %v", tc.phase, tc.reason, got, tc.disk)
 		}
 	}
 }

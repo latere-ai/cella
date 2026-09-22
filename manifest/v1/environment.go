@@ -156,6 +156,12 @@ const (
 	// already prewarmed. It is the only place a caller sees that its create
 	// was accelerated.
 	ReasonFromPool = "FromPool"
+	// ReasonQueued is a sandbox a queued environment holds until it fits;
+	// the condition's message is its position in its queue.
+	ReasonQueued = "Queued"
+	// ReasonNoCapacity is a create a direct environment could not fit, which
+	// it fails rather than holds.
+	ReasonNoCapacity = "NoCapacity"
 )
 
 // PoolSpec is what the environment keeps prewarmed: entries of one shape, made
