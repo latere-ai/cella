@@ -63,6 +63,12 @@
         "ttl": "4h",
         "autoDelete": "24h"
       },
+      "scheduling": {
+        "priority": 5,
+        "queue": "batch",
+        "startDeadline": "10m",
+        "preemptible": true
+      },
       "display": {
         "width": 1280,
         "height": 720

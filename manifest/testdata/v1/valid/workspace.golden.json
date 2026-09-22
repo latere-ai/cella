@@ -46,6 +46,9 @@
         "ttl": "24h",
         "autoDelete": "72h"
       },
+      "scheduling": {
+        "queue": "default"
+      },
       "display": {
         "width": 1280,
         "height": 800

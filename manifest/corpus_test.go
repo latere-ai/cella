@@ -46,6 +46,11 @@ var corpusNow = time.Date(2026, 9, 21, 12, 0, 0, 0, time.UTC)
 func corpusEnvironment() v1.Environment {
 	env := NativeEnvironment("default")
 	env.Spec.Isolation = v1.IsolationContainer
+	// The queued mode reads every scheduling field, where a direct
+	// environment refuses them all, so the corpus can set each one.
+	env.Spec.Scheduling = v1.SchedulingSpec{
+		Mode: v1.SchedulingQueued, Queues: []string{"default", "batch"}, DefaultQueue: "default",
+	}
 	env.Status = v1.EnvironmentStatus{
 		Driver:    "k8s",
 		Isolation: v1.IsolationContainer,

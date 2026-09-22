@@ -143,11 +143,6 @@ func TestEnvironmentFieldRules(t *testing.T) {
 			code: "invalid_field", path: "spec.scheduling.mode",
 		},
 		{
-			name: "the queued mode, which no server runs yet",
-			obj:  environment(func(e *v1.Environment) { e.Spec.Scheduling.Mode = v1.SchedulingQueued }),
-			code: "capability_unsupported", path: "spec.scheduling.mode",
-		},
-		{
 			name: "a queue name that is not a DNS label",
 			obj: environment(func(e *v1.Environment) {
 				e.Spec.Scheduling.Queues = []string{"Roll Outs"}
@@ -276,6 +271,26 @@ func TestEnvironmentAccepts(t *testing.T) {
 				t.Errorf("this shape is admitted by the table and was refused: %v", err)
 			}
 		})
+	}
+}
+
+// TestEnvironmentAcceptsTheQueuedMode: an environment may hold what it cannot
+// fit yet (spec 057), with its queues and its default among them, and a
+// change of mode applies to the next placement rather than being refused.
+func TestEnvironmentAcceptsTheQueuedMode(t *testing.T) {
+	obj := environment(func(e *v1.Environment) {
+		e.Spec.Scheduling = v1.SchedulingSpec{Mode: v1.SchedulingQueued, Queues: []string{"default", "rollouts"}, DefaultQueue: "rollouts"}
+	})
+	resolved, err := ResolveEnvironment(obj, EnvironmentOptions{})
+	if err != nil {
+		t.Fatalf("the queued mode was refused: %v", err)
+	}
+	if !Queued(*resolved) || resolved.Spec.Scheduling.DefaultQueue != "rollouts" {
+		t.Fatalf("the queued environment resolved to %+v", resolved.Spec.Scheduling)
+	}
+	direct := environment(func(e *v1.Environment) { e.Spec.Scheduling.Mode = v1.SchedulingDirect })
+	if _, err := ResolveEnvironment(direct, EnvironmentOptions{Existing: resolved}); err != nil {
+		t.Fatalf("moving a queued environment to direct was refused: %v", err)
 	}
 }
 

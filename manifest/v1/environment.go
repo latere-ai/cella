@@ -137,8 +137,8 @@ type SchedulingSpec struct {
 }
 
 // The scheduling modes. Direct starts a sandbox now or fails it; Queued admits
-// against the environment's capacity by priority and fair share and is spec
-// 020's later work, refused as capability_unsupported until the queue lands.
+// against the environment's capacity by priority and fair share, and holds a
+// sandbox it cannot fit yet until it can.
 const (
 	SchedulingDirect = "direct"
 	SchedulingQueued = "queued"

@@ -54,9 +54,24 @@ type SandboxSpec struct {
 	Network     Network           `json:"network,omitzero"`
 	Mesh        Mesh              `json:"mesh,omitzero"`
 	Lifecycle   Lifecycle         `json:"lifecycle,omitzero"`
+	// Scheduling is where in its environment's queues the sandbox waits. It
+	// is read only on an environment in the queued mode, and a direct one
+	// refuses every field of it.
+	Scheduling Scheduling `json:"scheduling,omitzero"`
 	// Display asks for a virtual desktop of this size. Absent, the sandbox
 	// has no screen and none of the computer-use operations answer for it.
 	Display *Display `json:"display,omitempty"`
+}
+
+// Scheduling is a sandbox's place in its environment's queues (spec 020).
+// Priority orders a queue, higher first; Queue names the one it waits in;
+// StartDeadline bounds how long it may wait before it fails; Preemptible lets
+// a higher priority stop it to make room.
+type Scheduling struct {
+	Priority      int      `json:"priority,omitempty"`
+	Queue         string   `json:"queue,omitempty"`
+	StartDeadline Duration `json:"startDeadline,omitempty"`
+	Preemptible   bool     `json:"preemptible,omitempty"`
 }
 
 // Display is a virtual desktop's geometry, as a sandbox declares it in

@@ -36,6 +36,9 @@
         "autoStop": "15m",
         "ttl": "24h",
         "autoDelete": "72h"
+      },
+      "scheduling": {
+        "queue": "default"
       }
     }
   }

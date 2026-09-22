@@ -135,6 +135,9 @@ func validateSpec(s v1.SandboxSpec) error {
 	if err := validateLifecycle(s.Lifecycle); err != nil {
 		return err
 	}
+	if err := validateSandboxScheduling(s.Scheduling); err != nil {
+		return err
+	}
 	if err := validateNetwork(s.Network); err != nil {
 		return err
 	}
@@ -235,6 +238,28 @@ func validateLifecycle(l v1.Lifecycle) error {
 		if _, _, err := ParseDuration(*field.value); err != nil {
 			return failAt("invalid_field", field.path, upperFirst(err.Error())+".")
 		}
+	}
+	return nil
+}
+
+// validateSandboxScheduling is the syntax of spec.scheduling. Whether the fields
+// mean anything is the environment's mode, which the capability stage reads.
+func validateSandboxScheduling(s v1.Scheduling) error {
+	if s.Priority < 0 {
+		return failAt("invalid_field", pathSchedulingPriority, "A priority is zero or above.")
+	}
+	if s.Queue != "" && (len(s.Queue) > maxNameLength || !namePattern.MatchString(s.Queue)) {
+		return failAt("invalid_field", pathSchedulingQueue, "A queue name is a DNS label: lower-case letters, digits and hyphens.")
+	}
+	if s.StartDeadline == "" {
+		return nil
+	}
+	_, never, err := ParseDuration(s.StartDeadline)
+	if err != nil {
+		return failAt("invalid_field", pathSchedulingDeadline, upperFirst(err.Error())+".")
+	}
+	if never {
+		return failAt("invalid_field", pathSchedulingDeadline, "A start deadline is a duration; leave it out to wait without one.")
 	}
 	return nil
 }
