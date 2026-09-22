@@ -656,8 +656,10 @@ func TestAnOperationRacesItsWorkerLeaving(t *testing.T) {
 		}()
 	}
 	time.Sleep(20 * time.Millisecond)
-	s.cancel()
+	// The connection is taken away, not the context either side runs
+	// under: what the operations race is the stream ending.
 	_ = s.workerSide.Close()
+	_ = s.control.Close()
 	waitFor(t, "the worker gone", func() bool { return !s.hub.Transport("env_test").Live() })
 	close(stop)
 	for range 4 {
