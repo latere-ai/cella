@@ -6,6 +6,7 @@ package worker
 import (
 	"errors"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -16,6 +17,19 @@ import (
 // writeDeadline bounds one frame's write, so a peer that stopped reading does
 // not hold the writer forever.
 const writeDeadline = 10 * time.Second
+
+// writeDeadlineOverride replaces writeDeadline where it is set, which only
+// this package's tests do, to reach the deadline without waiting for it.
+var writeDeadlineOverride atomic.Int64
+
+// frameDeadline is when a frame written now must have been written by.
+func frameDeadline() time.Time {
+	deadline := writeDeadline
+	if override := writeDeadlineOverride.Load(); override > 0 {
+		deadline = time.Duration(override)
+	}
+	return time.Now().Add(deadline)
+}
 
 // Socket is the worker protocol's frames over one WebSocket. The link above
 // it guarantees a single writer, and the mutex here is what makes that
@@ -58,7 +72,7 @@ func (s *Socket) ReadFrame() ([]byte, error) {
 func (s *Socket) WriteFrame(raw []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.conn.SetWriteDeadline(time.Now().Add(writeDeadline)); err != nil {
+	if err := s.conn.SetWriteDeadline(frameDeadline()); err != nil {
 		return err
 	}
 	return s.conn.WriteMessage(websocket.BinaryMessage, raw)
