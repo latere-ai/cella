@@ -60,3 +60,20 @@ func (c *Controller) Files(id string) (runtime.FileStore, error) {
 	}
 	return store, nil
 }
+
+// Dialer returns the dial half of the driver serving one sandbox's
+// environment. It is the interface and not a connection, because the API
+// decides what to answer before it upgrades a socket or writes a response. A
+// driver that declares no Dial has no Dialer, which the API reports as the
+// capability the environment lacks.
+func (c *Controller) Dialer(id string) (runtime.Dialer, error) {
+	d, err := c.driverOf(id)
+	if err != nil {
+		return nil, err
+	}
+	dialer, ok := d.(runtime.Dialer)
+	if !ok {
+		return nil, runtime.ErrUnsupported
+	}
+	return dialer, nil
+}
