@@ -15,7 +15,7 @@ depends_on:
 affects: [cmd/cella/, internal/cellacli/, internal/cellaclient/, skills/cella/, docs/cli.md, internal/config/]
 effort: medium
 created: 2026-09-12
-updated: 2026-09-21
+updated: 2026-09-23
 author: changkun
 ---
 
@@ -216,6 +216,6 @@ semantics ([[008-api]]).
 | A list follows `next` to the end and stops at `--limit`; every selector flag becomes its query parameter | `TestAListFollowsTheCursorAndCarriesTheSelectors`, `TestALimitStopsTheListAndNeverAsksPastTheCeiling` | passing, as `TestAListFollowsTheCursorAndCarriesTheSelectors` and `TestALimitStopsTheListAndNeverAsksPastTheCeiling` ([[050-cella-command]]) |
 | The three output examples above are what the binary prints | `TestTheOutputsAreWhatTheGoldenFilesHold` over the golden forms | the forms pass as golden files ([[050-cella-command]]); the examples themselves carry an `OWNER` and an id of one installation and are not compared byte for byte |
 | `unsupported_version` prints the server identity after the refusal; unknown fields render without error | `TestAFieldTheServerLeftEmptyIsADash` | the unknown-field half passes, as `TestAFieldTheServerLeftEmptyIsADash` ([[050-cella-command]]); printing the server's identity after that one refusal is not built |
-| The skill's frontmatter is under 256 bytes and an agent given only the skill completes the agent scenario | `TestTheSkillIsSmallEnoughToBeResident`, conformance case `case011AgentScenario` | the bound passes, as `TestTheSkillIsSmallEnoughToBeResident` ([[050-cella-command]]); the scenario waits on [[015-conformance-suite]] |
+| The skill's frontmatter is under 256 bytes and an agent given only the skill completes the agent scenario | `TestTheSkillIsSmallEnoughToBeResident`, conformance case `case011AgentScenario` | built: the bound passes, as `TestTheSkillIsSmallEnoughToBeResident` ([[050-cella-command]]); the scenario the skill teaches, apply, exec, copy a file out, get and delete through the built `cella`, passes as conformance case `case011AgentScenario` against `cellad serve` in `TestTheConformanceSuiteHoldsAgainstThisServer` on every push ([[059-conformance-closure]]). The case runs the scenario; whether a model given the skill alone chooses those commands is not a property a test of this tree holds |
 | `docs/cli.md` equals the binary's `--help` for every command | `TestTheDocumentCarriesTheCommandsHelp` | passing, as `TestTheDocumentCarriesTheCommandsHelp` ([[050-cella-command]]) |
 | `./cmd/cella`'s build list is the standard library plus `pkg/httpjson` | the `depcheck` gate | passing: the list is the standard library, `latere.ai/x/pkg/httpjson` and the `github.com/google/uuid` it reaches ([[050-cella-command]]) |
