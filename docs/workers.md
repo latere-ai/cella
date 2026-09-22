@@ -222,6 +222,30 @@ under, so a short window cannot declare a healthy worker gone between two
 heartbeats. Operations that were in flight on a stream that dropped are
 failed, and the caller retries.
 
+## Long streams and slow callers
+
+Everything an operation streams travels on the worker's one connection: an
+exec's output, a terminal, an archive going in or out, a file's body. Each
+of those streams has a window of 8 MiB. The side sending it sends at most
+that much ahead of what the other side has handed on, and then waits for
+room rather than queueing more.
+
+So a caller that stops reading holds its own stream and nothing else. A
+client that pauses a long export, or reads an exec's output slowly, slows
+that one stream; every other exec, terminal and lifecycle call on the same
+worker keeps moving, and the connection stays up however long the caller
+pauses. Memory is bounded the same way: the control plane holds at most
+8 MiB of a stream whose caller is not reading, and the worker at most
+8 MiB of one its driver is not reading.
+
+The window is agreed when the worker connects, so the control plane and
+its workers can be upgraded in either order. A worker and a control plane
+where one side predates the window still connect and work, with the stream
+as it was before: a caller that stops reading can hold that worker's
+connection until it reads again, and a pause longer than ten seconds can
+drop the connection, which the worker then reopens. Upgrade both sides to
+have the window.
+
 ## Running several
 
 Several workers may serve one environment. Each registers, each claims

@@ -6,6 +6,30 @@ refused before it is pushed.
 
 ## Unreleased
 
+- A worker's connection no longer stalls behind a caller that stops
+  reading. Each stream an operation carries on it, an exec's output, a
+  terminal, an archive or a file body, now has a window of 8 MiB: the
+  sender waits for room rather than queueing more, so a slow or paused
+  caller holds its own stream and every other operation on that worker
+  keeps moving. Before, one caller that stopped reading an exec's output
+  held the worker's whole connection, and after ten seconds the
+  connection dropped with every operation on it. The window is agreed
+  when the worker connects, so a worker and a control plane can be
+  upgraded in either order and keep working meanwhile, without the window
+  until both have it. Three fixes came with it: a control plane no longer
+  crashes when an operation is issued at the instant a worker's
+  connection ends, a file write whose caller gave up releases the worker
+  at once rather than when the connection ends, and a worker no longer
+  logs a warning for every heartbeat of its control plane.
+  [Self-hosting a data plane](docs/workers.md) has the whole of it.
+- For whoever writes a driver: `runtime/remote` declares `Watcher` and
+  `Event`, the watch of the runtime contract. A worker whose driver
+  implements `Watcher` sends each change up as it happens, and the remote
+  driver's own `Watch` delivers it on the control plane, with what
+  `Inspect` and `List` answer already updated. A `relist` makes the
+  control plane list the worker's sandboxes again before it passes the
+  `relist` on, and a consumer that falls behind receives a `relist` in
+  place of what it missed. No driver in this repository watches yet.
 - An environment can hold what it cannot fit yet. Apply one with
   `scheduling.mode: queued`, or start `cellad` with
   `CELLA_SCHEDULING_MODE=queued`, and a create past its capacity answers
