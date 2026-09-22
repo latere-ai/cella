@@ -192,11 +192,15 @@ behind the authorizer.
 | The pool behind the authorizer | `internal/api/pool_test.go` |
 | The operator's page | `docs/scheduling.md`, `docs/observability.md` |
 
-Coverage on `go test -race -cover`: `controller` 91.1%,
-`internal/config` 91.5%, `internal/metrics` 100%, `internal/api`
-91.7%, `manifest` 95.8%, `cmd/cellad` 90.4%. `internal/events` reads
-87.5% and `manifest/v1` 64.3%, as before this slice: it added
-constants and a field to both and no statement. The end-to-end that
+Coverage as the bar measures it, across the module's tests:
+`controller` 92.5%, `internal/api` 92.4%, `internal/config` 96.2%,
+`internal/events` 94.1%, `internal/metrics` 100%, `manifest` 95.9%,
+`manifest/v1` 94.3%, `cmd/cellad` 90.4%; the full bar passes all
+sixteen gates, `race` among them. A package's own tests alone read
+`controller` 91.1%, `internal/api` 91.7% and `internal/config` 91.5%;
+`internal/events` 87.5% and `manifest/v1` 64.3% alone are as they were,
+since this slice added constants and a field to both and no statement.
+The end-to-end that
 ran is `TestPreemptionEndToEnd`: `cellad serve` on the native driver,
 queued with room for one sandbox, a preemptible sandbox that wrote a
 file, a create of priority 5 answered `Queued` and placed by the wake
