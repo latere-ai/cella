@@ -698,11 +698,19 @@ func (t *transport) Watch(ctx context.Context) (<-chan Event, error) {
 // Open enqueues one operation and sends it to a live worker. The row records
 // the claim, so a worker that went away has its lifecycle operations
 // redelivered; the frames travel on the connection the worker opened.
+//
+// The link is read under the hub's lock, with the worker it belongs to: a
+// stream that ends clears it under that lock, and an operation issued at that
+// moment reaches the link it read, which refuses it as closed, rather than
+// one that is no longer there.
 func (t *transport) Open(ctx context.Context, opType string, req Request) (Stream, error) {
 	t.hub.mu.Lock()
-	w := t.hub.liveLocked(t.environment)
+	var link *Link
+	if w := t.hub.liveLocked(t.environment); w != nil {
+		link = w.link
+	}
 	t.hub.mu.Unlock()
-	if w == nil {
+	if link == nil {
 		return nil, ErrNoWorker
 	}
 	id := t.hub.newID()
@@ -715,10 +723,10 @@ func (t *transport) Open(ctx context.Context, opType string, req Request) (Strea
 			return nil, err
 		}
 	}
-	channel := w.link.Open(id, opType == OpAttach)
+	channel := link.Open(id, opType == OpAttach)
 	message := Message{Type: MessageOperation, Operation: id, Request: &req}
-	if err = w.link.Send(id, withOperationType(message, opType)); err != nil {
-		w.link.Drop(id)
+	if err = link.Send(id, withOperationType(message, opType)); err != nil {
+		link.Drop(id)
 		return nil, ErrNoWorker
 	}
 	stream := &hubStream{hub: t.hub, channel: channel, id: id, opened: ctx}

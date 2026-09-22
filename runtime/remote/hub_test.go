@@ -625,3 +625,44 @@ func TestAShortWindowDoesNotOutrunTheHeartbeat(t *testing.T) {
 		t.Error("a worker past the lease is still live")
 	}
 }
+
+// TestAnOperationRacesItsWorkerLeaving holds that an operation issued while
+// its worker's stream ends reads the worker as gone rather than reaching for a
+// connection that was released underneath it. Operations run in a loop while
+// the stream closes; every one either completes or is refused, and none
+// touches the released connection, which the race detector would report.
+func TestAnOperationRacesItsWorkerLeaving(t *testing.T) {
+	s := openSeamOver(t, runtimetest.Nop{}, remote.HubOptions{Offline: time.Minute},
+		remote.ServerOptions{ReportInterval: time.Hour}, seamWrap{})
+	ctx := t.Context()
+	stop := make(chan struct{})
+	done := make(chan error, 4)
+	for range 4 {
+		go func() {
+			for {
+				select {
+				case <-stop:
+					done <- nil
+					return
+				default:
+				}
+				err := s.driver.Touch(ctx, "sbx_1")
+				if err != nil && !errors.Is(err, remote.ErrNoWorker) && !errors.Is(err, remote.ErrLinkClosed) &&
+					!errors.Is(err, io.ErrClosedPipe) && !errors.Is(err, io.EOF) {
+					done <- err
+					return
+				}
+			}
+		}()
+	}
+	time.Sleep(20 * time.Millisecond)
+	s.cancel()
+	_ = s.workerSide.Close()
+	waitFor(t, "the worker gone", func() bool { return !s.hub.Transport("env_test").Live() })
+	close(stop)
+	for range 4 {
+		if err := <-done; err != nil {
+			t.Errorf("an operation racing its worker's departure failed with %v", err)
+		}
+	}
+}
