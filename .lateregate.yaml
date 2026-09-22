@@ -284,7 +284,7 @@ identity:
   config_prefix: CELLA
   api_group: cella.latere.ai
   # The default audience of the open core, verified only where the core is
-  # self-hosted; the hosted plane is latere-ai/sandbox, audience sandboxd.
+  # self-hosted; a plane that fronts it verifies an audience of its own.
   reached_by: self-hosted
   # Access is by role: the roles rule runs, and it is one way once set.
   roles_only: true

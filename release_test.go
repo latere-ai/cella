@@ -191,36 +191,59 @@ var coordinates = []struct{ needle, what string }{
 }
 
 // released are the trees a release hands an operator, plus the workflows
-// that build it and the defaults the binary ships with. Spec 001's rule is
-// that none of them names a coordinate of one installation.
-var released = []string{"deploy", "docs", ".github", "internal/config", "tools", "skills"}
+// that build it and the defaults the binary ships with. The walk below reads
+// every file of the repository, and these are held to have been read, so a
+// narrowed walk cannot pass by reading nothing where it matters most.
+var released = []string{"deploy", "docs", ".github", "internal", "tools", "skills", "cmd", "controller", "runtime", "egress", "manifest", "api", "authorizer", "examples", "test"}
 
-// TestNoLatereCoordinatesInReleasedArtifacts is that rule as a test. The
-// API group `cella.latere.ai/` is the one legal occurrence of the name: it
-// is part of the schema every manifest carries, and one byte tells it from
-// a host, the `/` that follows it.
+// needleFiles hold the coordinate lists themselves, each assembled so the file
+// is not its own finding, and are the one place a needle may be spelled out.
+var needleFiles = map[string]bool{
+	"runtime/coordinates_test.go": true, "manifest/imports_test.go": true, "rules_test.go": true,
+}
+
+// schemaGroup reports whether every occurrence of the API group on a line is
+// the schema rather than a host: qualified by the key that follows it, the
+// group constant itself, the identity gate's api_group, or a subdomain of an
+// example domain. One that follows a scheme is a URL's host.
+func schemaGroup(line string) bool {
+	group := "cella." + "latere.ai"
+	// After a scheme it is a host whatever follows it.
+	if strings.Contains(line, "://"+group) {
+		return false
+	}
+	for _, legal := range []string{group + "/", `"` + group + `"`, "api_group: " + group} {
+		line = strings.ReplaceAll(line, legal, "")
+	}
+	for _, example := range []string{".example.org", ".example.com", ".example"} {
+		line = strings.ReplaceAll(line, group+example, "")
+	}
+	return !strings.Contains(line, group)
+}
+
+// TestNoLatereCoordinatesInReleasedArtifacts is spec 001's rule as a test:
+// no file of the repository names a coordinate of one installation. specs/
+// is left to the tests that own it, because a design record names what it was
+// written against. The API group is the one legal occurrence of the name, in
+// the forms the schema spells it.
 func TestNoLatereCoordinatesInReleasedArtifacts(t *testing.T) {
 	read := sources(t)
 	covered := map[string]bool{}
 	for path, body := range read {
-		var tree string
 		for _, root := range released {
 			if strings.HasPrefix(path, root+"/") {
-				tree = root
+				covered[root] = true
 			}
 		}
-		if tree == "" {
+		if needleFiles[path] {
 			continue
 		}
-		covered[tree] = true
 		for _, c := range coordinates {
 			for i, line := range strings.Split(body, "\n") {
 				if !strings.Contains(line, c.needle) {
 					continue
 				}
-				// The API group, qualified by the key that follows it, is
-				// the schema and not a coordinate.
-				if c.needle == "cella."+"latere.ai" && strings.Contains(line, c.needle+"/") {
+				if c.needle == "cella."+"latere.ai" && schemaGroup(line) {
 					continue
 				}
 				t.Errorf("%s:%d names %s (%q); this repository is public and a fork inherits its defaults",
@@ -231,6 +254,28 @@ func TestNoLatereCoordinatesInReleasedArtifacts(t *testing.T) {
 	for _, root := range released {
 		if !covered[root] {
 			t.Errorf("the walk read no file under %s, so its coordinates are unchecked", root)
+		}
+	}
+}
+
+// TestSchemaGroupTellsTheGroupFromAHost drives the exemption over planted
+// lines: a walk over a clean tree passes whether or not the rule works.
+func TestSchemaGroupTellsTheGroupFromAHost(t *testing.T) {
+	group := "cella." + "latere.ai"
+	for line, want := range map[string]bool{
+		`apiVersion: ` + group + `/v1beta1`:             true,
+		`labels["` + group + `/owner"] = owner`:         true,
+		`ReservedKeyDomain = "` + group + `"`:           true,
+		`  api_group: ` + group:                         true,
+		`"` + group + `.example.org/note": "x"`:         true,
+		`url := "https://` + group + `/v1"`:             false,
+		`issuer = "https://` + group + `"`:              false,
+		`// the plane at ` + group + ` is one consumer`: false,
+		`host: ` + group:                                false,
+		`apiVersion: ` + group + `/v1, host: ` + group:  false,
+	} {
+		if got := schemaGroup(line); got != want {
+			t.Errorf("schemaGroup(%q) = %v, want %v", line, got, want)
 		}
 	}
 }

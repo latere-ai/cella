@@ -290,5 +290,5 @@ sandbox tree and is built from its spec.
 |---|---|---|
 | Every row of the map names a slice, `drop`, or a platform spec | review of this table | done |
 | Every cella slice is archived with an Outcome naming its coverage and e2e | `go tool lateregate spec` over `.archive/` | open |
-| No file under `runtime/`, `controller/`, `egress/`, or `manifest/` names a Latere host, image, pool, or namespace outside an example | `TestNoLatereCoordinates` in each slice | open |
+| No file under `runtime/`, `controller/`, `egress/`, or `manifest/` names a Latere host, image, pool, or namespace outside an example | `TestNoLatereCoordinates`, `TestNoLatereCoordinatesInReleasedArtifacts`, `TestSchemaGroupTellsTheGroupFromAHost` | built: every tracked file outside `specs/` is walked, with the API group legal only in the forms the schema spells it and a URL's host never |
 | The sandbox repository's `internal/` has no package without a settled row | the map, on archive | open |
