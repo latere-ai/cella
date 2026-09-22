@@ -221,18 +221,19 @@ type command func(context.Context, *invocation, []string) error
 // commands is the table of design 011, less every row whose route this API
 // does not serve.
 var commands = map[string]command{
-	"apply":   apply,
-	"get":     get,
-	"delete":  remove,
-	"start":   start,
-	"stop":    stop,
-	"exec":    exec,
-	"attach":  attach,
-	"logs":    logs,
-	"cp":      copyFiles,
-	"files":   files,
-	"egress":  egressRecords,
-	"version": version,
+	"apply":        apply,
+	"get":          get,
+	"delete":       remove,
+	"start":        start,
+	"stop":         stop,
+	"exec":         exec,
+	"attach":       attach,
+	"logs":         logs,
+	"cp":           copyFiles,
+	"files":        files,
+	"egress":       egressRecords,
+	"version":      version,
+	"port-forward": portForward,
 }
 
 // splitArgs cuts the arguments at the first `--`, which separates the
