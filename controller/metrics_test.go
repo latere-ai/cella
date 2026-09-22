@@ -24,6 +24,7 @@ type recorder struct {
 	actions   [][2]string
 	recovery  []string
 	reminted  int
+	preempted int
 	leases    [][2]any // name, held
 }
 
@@ -56,6 +57,16 @@ func (r *recorder) TokenReminted() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.reminted++
+}
+func (r *recorder) SandboxPreempted() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.preempted++
+}
+func (r *recorder) preemptions() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.preempted
 }
 func (r *recorder) LeaseHeld(name string, held bool) {
 	r.mu.Lock()

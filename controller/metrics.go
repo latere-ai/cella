@@ -37,6 +37,9 @@ type Metrics interface {
 	RecoveryAttempt(outcome string)
 	// TokenReminted counts one workload token replaced before it expired.
 	TokenReminted()
+	// SandboxPreempted counts one sandbox the scheduler stopped to place
+	// one of higher priority.
+	SandboxPreempted()
 	// LeaseHeld is a loop reporting, on its own tick, whether this replica
 	// holds the lease it runs under.
 	LeaseHeld(name string, held bool)
@@ -81,6 +84,7 @@ func (nopMetrics) PoolSize(int, int)                    {}
 func (nopMetrics) ReaperAction(string, string)          {}
 func (nopMetrics) RecoveryAttempt(string)               {}
 func (nopMetrics) TokenReminted()                       {}
+func (nopMetrics) SandboxPreempted()                    {}
 func (nopMetrics) LeaseHeld(string, bool)               {}
 
 // readyFilling splits the kept pool entries by whether they can be adopted

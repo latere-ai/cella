@@ -65,8 +65,8 @@ type fakeDriver struct {
 	states                                            map[string]driver.State
 	order                                             []string
 	listErr, inspectErr, stopErr, deleteErr, touchErr error
-	createErr, updateErr                              error
-	stops, deletes, touches                           []string
+	createErr, updateErr, startErr                    error
+	stops, deletes, touches, starts                   []string
 	onList                                            func()
 	// projected is what the driver holds inside each sandbox: the token the
 	// create carried, replaced by every re-projection an update makes.

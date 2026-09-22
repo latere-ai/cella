@@ -62,10 +62,14 @@ func holdsCompute(phase string) bool {
 // holdsDisk reports whether a sandbox holds its disk. A stopped sandbox's
 // workspace stays on the substrate until it is deleted, and so does a failed
 // one's, except where it failed before any driver held it: a create a direct
-// environment could not fit and a queued sandbox whose deadline passed.
+// environment could not fit and a queued sandbox whose deadline passed. A
+// queued sandbox holds its disk only where the loop preempted it, because
+// its driver keeps it stopped with its workspace while it waits.
 func holdsDisk(obj v1.Sandbox) bool {
 	switch obj.Status.Phase {
-	case PhaseQueued, PhaseDeleting, PhaseLost:
+	case PhaseQueued:
+		return requeued(obj)
+	case PhaseDeleting, PhaseLost:
 		return false
 	case PhaseFailed:
 		return obj.Status.Reason != ReasonNoCapacity && obj.Status.Reason != ReasonStartDeadline
