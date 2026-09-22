@@ -68,7 +68,7 @@ func (h *handler) fileTarget(w http.ResponseWriter, r *http.Request) (v1.Sandbox
 		respondError(w, err)
 		return obj, nil, false
 	}
-	store, err := h.fileStore()
+	store, err := h.fileStore(obj)
 	if err != nil {
 		respondError(w, err)
 		return obj, nil, false
@@ -79,11 +79,11 @@ func (h *handler) fileTarget(w http.ResponseWriter, r *http.Request) (v1.Sandbox
 
 // fileStore is the driver's per-file half, or the capability the environment
 // does not have.
-func (h *handler) fileStore() (runtime.FileStore, error) {
-	if !h.Controller.Capabilities().Files {
+func (h *handler) fileStore(obj v1.Sandbox) (runtime.FileStore, error) {
+	if !h.Controller.CapabilitiesOf(obj.Status.Environment).Files {
 		return nil, runtime.ErrUnsupported
 	}
-	return h.Controller.Files()
+	return h.Controller.Files(obj.Status.ID)
 }
 
 // queryPath reads the one path a route takes. A repeated selector is refused

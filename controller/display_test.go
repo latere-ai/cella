@@ -63,7 +63,7 @@ func (d *desktopDriver) Inspect(ctx context.Context, id string) (driver.State, e
 // that does not is the unsupported operation the API turns into 422.
 func TestDisplayOperationsReachTheDriver(t *testing.T) {
 	c, _ := newController(t)
-	plain := c.driver
+	plain, _ := c.driverFor(c.environment)
 	if _, err := c.Display(t.Context(), "sbx_x"); !errors.Is(err, driver.ErrUnsupported) {
 		t.Fatalf("Display on a driver with no desktop: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestDisplayOperationsReachTheDriver(t *testing.T) {
 	}
 
 	desk := &desktopDriver{Driver: plain}
-	c.driver = desk
+	c.setDriver(c.environment, desk)
 	geometry, err := c.Display(t.Context(), "sbx_x")
 	if err != nil || geometry != (driver.Geometry{Width: 1280, Height: 800}) {
 		t.Fatalf("Display = %+v, %v", geometry, err)
@@ -111,8 +111,8 @@ func TestRefreshCarriesDisplayAndPorts(t *testing.T) {
 	obj := workspace()
 	obj.Spec.Display = &v1.Display{Width: 1280, Height: 800}
 	obj.Spec.Network.Ports = []v1.Port{{Name: "web", Port: 8080}}
-	recorder := &recordingDriver{Driver: &desktopDriver{Driver: c.driver}}
-	c.driver = recorder
+	recorder := &recordingDriver{Driver: &desktopDriver{Driver: openDriver(c)}}
+	c.setDriver(c.environment, recorder)
 	created, err := c.Create(t.Context(), obj, "alice", 0)
 	if err != nil {
 		t.Fatal(err)
@@ -161,8 +161,8 @@ func TestRefreshCarriesDisplayAndPorts(t *testing.T) {
 // neither the condition nor a port.
 func TestSandboxWithoutADesktopCarriesNoCondition(t *testing.T) {
 	c, _ := newController(t)
-	recorder := &recordingDriver{Driver: c.driver}
-	c.driver = recorder
+	recorder := &recordingDriver{Driver: openDriver(c)}
+	c.setDriver(c.environment, recorder)
 	created, err := c.Create(t.Context(), workspace(), "alice", 0)
 	if err != nil {
 		t.Fatal(err)

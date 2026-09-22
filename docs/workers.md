@@ -37,6 +37,37 @@ nothing else. It listens on no port of its own.
   cluster, or nothing at all for `native`.
 - The `cellad` binary from the release archive.
 
+## Apply the environment
+
+A worker serves an environment, so the environment exists first. Apply one
+as an administrator. `mode: worker` says the driver lives on your machines
+rather than in the control plane's process, `isolation` is the class your
+driver provides, and `capacity` is the ceiling placement admits against:
+
+```sh
+curl -sS -X PUT \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  --data '{
+    "apiVersion": "cella.latere.ai/v1beta1",
+    "kind": "Environment",
+    "metadata": {"name": "eu-gpu", "labels": {"region": "eu"}},
+    "spec": {
+      "mode": "worker",
+      "isolation": "container",
+      "capacity": {"cpu": "128", "memory": "512Gi", "disk": "5Ti", "sandboxes": 100}
+    }
+  }' \
+  https://cella.example.com/v1/environments/eu-gpu
+```
+
+The answer carries an `ETag`. Send it back as `If-Match` on the next apply
+and a write that raced yours is refused with `version_conflict` rather
+than overwriting what moved.
+
+The environment is `Pending` until a worker registers on it. Nothing is
+placed there until it is `Ready`.
+
 ## Mint the key
 
 A worker authenticates with an **environment key**: a credential that
@@ -44,12 +75,12 @@ names one environment and authorizes that environment's registration and
 its stream. Nothing else. It cannot create a sandbox, read one, or reach
 any route that decides on a person.
 
-Mint one as an administrator:
+Mint one as an administrator, for the environment the worker will serve:
 
 ```sh
 curl -sS -X POST \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
-  https://cella.example.com/v1/environments/default/keys
+  https://cella.example.com/v1/environments/eu-gpu/keys
 ```
 
 ```json
@@ -72,7 +103,7 @@ Revoke one:
 ```sh
 curl -sS -X DELETE \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
-  https://cella.example.com/v1/environments/default/keys/01JBQ7...
+  https://cella.example.com/v1/environments/eu-gpu/keys/01JBQ7...
 ```
 
 The key stops working at once, on its next request and on its next frame.
@@ -100,17 +131,54 @@ taking work. Read the environment to see it arrive:
 
 ```sh
 curl -sS -H "Authorization: Bearer $ADMIN_TOKEN" \
-  https://cella.example.com/v1/environments/default | jq .status
+  https://cella.example.com/v1/environments/eu-gpu | jq .status
 ```
 
 ```json
 {
   "phase": "Ready",
-  "driver": "native",
-  "isolation": "none",
+  "driver": "podman",
+  "isolation": "container",
   "workers": 1,
   "lastHeartbeat": "2026-09-20T14:31:02Z"
 }
+```
+
+The phase follows the worker. It is `Ready` while one heartbeats,
+`Offline` with the reason `HeartbeatLost` once nothing has been heard for
+`CELLA_ENVIRONMENT_OFFLINE`, and `Ready` again when a worker returns. An
+environment below `Ready` refuses a new sandbox and leaves the ones it
+already holds running.
+
+## Run sandboxes on it
+
+A manifest names the environment it wants:
+
+```sh
+curl -sS -X POST \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  --data '{
+    "apiVersion": "cella.latere.ai/v1beta1",
+    "kind": "Sandbox",
+    "metadata": {"name": "build"},
+    "spec": {"environment": "eu-gpu", "image": "registry.example.com/base:1"}
+  }' \
+  https://cella.example.com/v1/sandboxes
+```
+
+It reads back like any other sandbox. `status.environment`,
+`status.driver` and `status.isolation` are the only fields that say where
+it ran. A manifest that names no environment gets the one the control
+plane drives itself.
+
+When an environment is finished with, delete it. One that still holds a
+sandbox is refused, so nothing is left running with nothing driving it:
+
+```sh
+curl -sS -X DELETE \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  https://cella.example.com/v1/environments/eu-gpu
 ```
 
 ## Its variables
@@ -146,9 +214,11 @@ doubles to thirty. Each connection begins with a registration, so the
 control plane always knows which process is claiming work.
 
 The control plane stops counting a worker after
-`CELLA_ENVIRONMENT_OFFLINE` (two minutes by default) without a heartbeat.
-Operations that were in flight on a stream that dropped are failed, and
-the caller retries.
+`CELLA_ENVIRONMENT_OFFLINE` (two minutes by default) without a heartbeat,
+and never sooner than the 45 second lease a worker's own connection runs
+under, so a short window cannot declare a healthy worker gone between two
+heartbeats. Operations that were in flight on a stream that dropped are
+failed, and the caller retries.
 
 ## Running several
 

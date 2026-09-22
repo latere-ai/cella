@@ -72,7 +72,7 @@ func setupRecordedDriver(t *testing.T, wrap func(runtime.Driver) runtime.Driver)
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, err := controller.Open(controller.Options{
+	c, err := controller.Open(t.Context(), controller.Options{
 		Store: desired, Driver: runtimeDriver, Environment: "default", Events: emitter,
 		TouchInterval: time.Millisecond,
 	})

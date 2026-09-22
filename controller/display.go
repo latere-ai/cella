@@ -15,18 +15,32 @@ import (
 // declares no Display has no DisplayDriver, which the API reports as the
 // capability the environment lacks.
 func (c *Controller) Display(ctx context.Context, id string) (runtime.Geometry, error) {
-	d, ok := c.driver.(runtime.DisplayDriver)
-	if !ok {
-		return runtime.Geometry{}, runtime.ErrUnsupported
+	d, err := c.displayDriver(id)
+	if err != nil {
+		return runtime.Geometry{}, err
 	}
 	return d.Display(ctx, id)
 }
 
-// Screenshot is one frame of a sandbox's desktop.
-func (c *Controller) Screenshot(ctx context.Context, id string, req runtime.ScreenshotRequest) (io.ReadCloser, error) {
-	d, ok := c.driver.(runtime.DisplayDriver)
+// displayDriver is the display half of the driver serving one sandbox's
+// environment, or the capability that environment does not have.
+func (c *Controller) displayDriver(id string) (runtime.DisplayDriver, error) {
+	d, err := c.driverOf(id)
+	if err != nil {
+		return nil, err
+	}
+	display, ok := d.(runtime.DisplayDriver)
 	if !ok {
 		return nil, runtime.ErrUnsupported
+	}
+	return display, nil
+}
+
+// Screenshot is one frame of a sandbox's desktop.
+func (c *Controller) Screenshot(ctx context.Context, id string, req runtime.ScreenshotRequest) (io.ReadCloser, error) {
+	d, err := c.displayDriver(id)
+	if err != nil {
+		return nil, err
 	}
 	return d.Screenshot(ctx, id, req)
 }
@@ -34,16 +48,20 @@ func (c *Controller) Screenshot(ctx context.Context, id string, req runtime.Scre
 // Screen opens one paced sequence of frames. Cancelling the context ends the
 // session; the channel closes when the sandbox or the session does.
 func (c *Controller) Screen(ctx context.Context, id string, fps int, format string) (<-chan runtime.Frame, error) {
-	d, ok := c.driver.(runtime.DisplayDriver)
-	if !ok {
-		return nil, runtime.ErrUnsupported
+	d, err := c.displayDriver(id)
+	if err != nil {
+		return nil, err
 	}
 	return d.Screen(ctx, id, fps, format)
 }
 
 // Input runs one validated batch of pointer and keyboard events.
 func (c *Controller) Input(ctx context.Context, id string, events []runtime.InputEvent) error {
-	d, ok := c.driver.(runtime.InputDriver)
+	driven, err := c.driverOf(id)
+	if err != nil {
+		return err
+	}
+	d, ok := driven.(runtime.InputDriver)
 	if !ok {
 		return runtime.ErrUnsupported
 	}

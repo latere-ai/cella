@@ -67,7 +67,7 @@ func run(ctx context.Context, cfg config, out io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("opening the runtime: %w", err)
 	}
-	core, err := controller.Open(controller.Options{
+	core, err := controller.Open(ctx, controller.Options{
 		DataDir:     cfg.Root,
 		Driver:      driver,
 		Environment: "default",

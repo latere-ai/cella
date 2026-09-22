@@ -36,7 +36,7 @@ func newController(t *testing.T) (*Controller, Options) {
 	}
 	t.Cleanup(func() { _ = d.Close() })
 	o := Options{DataDir: t.TempDir(), Driver: d, Environment: "default"}
-	c, err := Open(o)
+	c, err := Open(t.Context(), o)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func TestDurableLifecycle(t *testing.T) {
 	if obj.Status.Phase != driver.Running || obj.Status.Owner != "alice" || c.Environment() != "default" || c.Isolation() != "none" {
 		t.Fatal(obj)
 	}
-	if _, err = Open(o); err == nil {
+	if _, err = Open(t.Context(), o); err == nil {
 		t.Fatal("second process opened live store")
 	}
 	obj.Metadata.Labels["team"] = "mutated"
@@ -86,7 +86,7 @@ func TestDurableLifecycle(t *testing.T) {
 	if err = c.Close(); err != nil {
 		t.Fatal(err)
 	}
-	c, err = Open(o)
+	c, err = Open(t.Context(), o)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,8 +160,8 @@ func (d failureDriver) Start(context.Context, string) error  { return d.errorAct
 func (d failureDriver) Stop(context.Context, string) error   { return d.errorAct }
 func TestFailuresRemainRecoverable(t *testing.T) {
 	c, _ := newController(t)
-	real := c.driver
-	c.driver = failureDriver{Driver: real, createErr: errors.New("create failed"), inspectErr: driver.ErrNotFound, deleteErr: errors.New("delete failed")}
+	real, _ := c.driverFor(c.environment)
+	c.setDriver(c.environment, failureDriver{Driver: real, createErr: errors.New("create failed"), inspectErr: driver.ErrNotFound, deleteErr: errors.New("delete failed")})
 	obj, err := c.Create(t.Context(), workspace(), "alice", 0)
 	if err == nil || obj.Status.Phase != "Failed" {
 		t.Fatal(obj, err)
@@ -178,7 +178,7 @@ func TestFailuresRemainRecoverable(t *testing.T) {
 	if err != nil || got.Status.Phase != "Lost" {
 		t.Fatal(got, err)
 	}
-	c.driver = failureDriver{Driver: real, inspectErr: errors.New("inspection failed"), deleteErr: driver.ErrNotFound}
+	c.setDriver(c.environment, failureDriver{Driver: real, inspectErr: errors.New("inspection failed"), deleteErr: driver.ErrNotFound})
 	if _, err = c.Refresh(t.Context(), obj); err == nil {
 		t.Fatal("inspection error lost")
 	}
@@ -199,12 +199,12 @@ func TestCorruptStateRefused(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(o.DataDir, "objects.json"), []byte(data), 0600); err != nil {
 			t.Fatal(err)
 		}
-		if c, err := Open(o); err == nil {
+		if c, err := Open(t.Context(), o); err == nil {
 			c.Close()
 			t.Fatal("corrupt state accepted")
 		}
 	}
-	if _, err := Open(Options{}); err == nil {
+	if _, err := Open(t.Context(), Options{}); err == nil {
 		t.Fatal("missing options")
 	}
 	bad := filepath.Join(t.TempDir(), "file")
@@ -212,7 +212,7 @@ func TestCorruptStateRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	o.DataDir = bad
-	if _, err := Open(o); err == nil {
+	if _, err := Open(t.Context(), o); err == nil {
 		t.Fatal("file as dir")
 	}
 }
@@ -237,12 +237,12 @@ func TestStoreFailuresNeverLoseDesiredState(t *testing.T) {
 	c, o := newController(t)
 	m := &memoryStore{loadErr: errors.New("unavailable")}
 	o.Store = m
-	if _, err := Open(o); err == nil {
+	if _, err := Open(t.Context(), o); err == nil {
 		t.Fatal("load failure ignored")
 	}
 	m = &memoryStore{saveErr: errors.New("write failed")}
 	o.Store = m
-	other, err := Open(o)
+	other, err := Open(t.Context(), o)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -318,7 +318,7 @@ func TestDeletingObjectsDoNotConsumeCountQuota(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c.driver = deleteFailureDriver{c.driver}
+	c.setDriver(c.environment, deleteFailureDriver{openDriver(c)})
 	if _, err = c.Act(t.Context(), obj.Status.ID, "delete"); err == nil {
 		t.Fatal("expected cleanup failure")
 	}
@@ -341,10 +341,20 @@ func (d *recordingDriver) Create(ctx context.Context, spec driver.CreateSpec) (d
 	return d.Driver.Create(ctx, spec)
 }
 
+// openDriver is the driver of the environment the controller under test
+// drives itself, which is the one a case swaps to make a driver fail.
+func openDriver(c *Controller) driver.Driver {
+	d, err := c.driverFor(c.environment)
+	if err != nil {
+		panic(err)
+	}
+	return d
+}
+
 func TestCreateSpecCarriesManifestFields(t *testing.T) {
 	c, _ := newController(t)
-	recorder := &recordingDriver{Driver: c.driver}
-	c.driver = recorder
+	recorder := &recordingDriver{Driver: openDriver(c)}
+	c.setDriver(c.environment, recorder)
 	obj := workspace()
 	obj.Spec.User = "1000:1000"
 	obj.Spec.Resources = v1.Resources{CPU: "500m", Memory: "2Gi", Disk: "10Gi"}

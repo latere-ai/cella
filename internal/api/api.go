@@ -135,7 +135,10 @@ func New(o Options) (http.Handler, error) {
 	h.handle("GET /v1/secrets/{key}", h.secretItem)
 	h.handle("DELETE /v1/secrets/{key}", h.secretItem)
 	h.handle("GET /v1/environments", h.environmentList)
+	h.handle("POST /v1/environments", h.environmentCreate)
 	h.handle("GET /v1/environments/{id}", h.environmentItem)
+	h.handle("PUT /v1/environments/{id}", h.environmentApply)
+	h.handle("DELETE /v1/environments/{id}", h.environmentItem)
 	h.handle("POST /v1/environments/{id}/keys", h.environmentKeyMint)
 	h.handle("DELETE /v1/environments/{id}/keys/{jti}", h.environmentKeyRevoke)
 	// The routes whose content type is the route's own: an archive, a file
@@ -269,12 +272,18 @@ func (h *handler) readBody(w http.ResponseWriter, r *http.Request) ([]byte, erro
 // endpoint and the error a caller reads name the same apply.
 func (h *handler) resolveOptions(w http.ResponseWriter, r *http.Request) (manifest.Options, error) {
 	c := caller(r)
-	o := manifest.DriverOptions(h.Controller.Environment(), h.Controller.DriverName(), h.Controller.Isolation(), h.Controller.Capabilities(), h.secretLookup(r))
-	o.Actor = manifestActor(r)
-	o.Claims = c.Claims
-	o.Defaults = h.Defaults
-	o.Admit = h.Admit
-	o.RequestID = w.Header().Get(RequestIDHeader)
+	// The lookup is this control plane's own registry, so a manifest that
+	// names an environment resolves against that environment's isolation
+	// class and observed capabilities, and one that names an absent
+	// environment is not_found at spec.environment.
+	o := manifest.Options{
+		Lookup:    manifest.WithSecrets(h.Controller.Lookup(), h.secretLookup(r)),
+		Actor:     manifestActor(r),
+		Claims:    c.Claims,
+		Defaults:  h.Defaults,
+		Admit:     h.Admit,
+		RequestID: w.Header().Get(RequestIDHeader),
+	}
 	id, workload := c.Sandbox()
 	if !workload {
 		return o, nil
@@ -428,7 +437,7 @@ func (h *handler) createNamed(w http.ResponseWriter, r *http.Request, name strin
 	// again would ask a sandbox whether it may use an environment, which is
 	// a question about a person.
 	if parent == nil {
-		envDecision, err := h.Authorizer.Lookup(r.Context(), c, requestInfo(r), authorizer.ActionEnvironmentUse, (auth.Environment{ID: obj.Spec.Environment, Name: obj.Spec.Environment, Isolation: h.Controller.Isolation()}).Resource())
+		envDecision, err := h.Authorizer.Lookup(r.Context(), c, requestInfo(r), authorizer.ActionEnvironmentUse, (auth.Environment{ID: obj.Spec.Environment, Name: obj.Spec.Environment, Isolation: h.Controller.IsolationOf(obj.Spec.Environment)}).Resource())
 		if err == nil && envDecision.Limits.RequestsPerMinute > 0 {
 			err = &manifest.Error{Code: "capability_unsupported", Detail: "requests_per_minute limit is not implemented"}
 		}
@@ -759,18 +768,24 @@ func errorEnvelope(err error, requestID string) (int, httpjson.Error) {
 		code = "body_too_large"
 	case errors.Is(err, io.ErrUnexpectedEOF), errors.Is(err, tar.ErrHeader):
 		code = "bad_request"
-	case errors.Is(err, controller.ErrNotFound), errors.Is(err, driver.ErrNotFound), errors.Is(err, fs.ErrNotExist):
+	case errors.Is(err, controller.ErrNotFound), errors.Is(err, driver.ErrNotFound), errors.Is(err, fs.ErrNotExist),
+		errors.Is(err, controller.ErrNoEnvironment):
 		code = "not_found"
 	case errors.Is(err, controller.ErrNameTaken), errors.Is(err, driver.ErrAlreadyExists):
 		code = "name_taken"
-	case errors.Is(err, controller.ErrNoSecretKey):
+	case errors.Is(err, controller.ErrNoSecretKey), errors.Is(err, controller.ErrNoEnvironmentStore):
 		code = "capability_unsupported"
 	case errors.Is(err, controller.ErrQuota):
 		code = "quota_exceeded"
 	case errors.Is(err, controller.ErrBudgetExhausted):
 		code = "spawn_budget_exhausted"
-	case errors.Is(err, controller.ErrPhase), errors.Is(err, driver.ErrNotRunning):
+	case errors.Is(err, controller.ErrPhase), errors.Is(err, driver.ErrNotRunning),
+		errors.Is(err, controller.ErrEnvironmentInUse):
 		code = "phase_conflict"
+	case errors.Is(err, controller.ErrVersionConflict):
+		code = "version_conflict"
+	case errors.Is(err, controller.ErrEnvironmentReserved):
+		code = "reserved_prefix"
 	case errors.Is(err, driver.ErrUnsupported):
 		code = "capability_unsupported"
 	case errors.Is(err, driver.ErrInvalid):
@@ -797,6 +812,9 @@ func errorEnvelope(err error, requestID string) (int, httpjson.Error) {
 	case "phase_conflict":
 		status = 409
 		message = "The sandbox is not in a state that allows this."
+	case "version_conflict":
+		status = 409
+		message = "The object changed since you read it; read it again and retry."
 	case "quota_exceeded":
 		status = 422
 		message = "You have reached your sandbox limit."

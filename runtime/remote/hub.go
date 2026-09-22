@@ -98,6 +98,13 @@ func NewHub(o HubOptions) *Hub {
 	if h.offline <= 0 {
 		h.offline = DefaultOffline
 	}
+	// The lease is the floor. A window below it would declare a worker gone
+	// while the connection it holds is still inside its own read deadline,
+	// so an operator who shortened CELLA_ENVIRONMENT_OFFLINE past the
+	// heartbeat would have every operation refused between two heartbeats.
+	// The window an environment's phase is computed from is the control
+	// plane's and may be shorter; what a worker may be sent is this.
+	h.offline = max(h.offline, HeartbeatTimeout)
 	if h.newID == nil {
 		h.newID = NewOperationID
 	}
@@ -110,8 +117,8 @@ func NewHub(o HubOptions) *Hub {
 	return h
 }
 
-// DefaultOffline is how long an environment is held live without a heartbeat,
-// which CELLA_ENVIRONMENT_OFFLINE sets.
+// DefaultOffline is how long a worker is held live without a heartbeat, which
+// CELLA_ENVIRONMENT_OFFLINE sets and HeartbeatTimeout floors.
 const DefaultOffline = 2 * time.Minute
 
 // Register records one worker on one environment and returns the id it claims

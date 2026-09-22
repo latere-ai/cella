@@ -13,6 +13,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"latere.ai/x/cella/controller"
 	"latere.ai/x/cella/internal/auth"
 	"latere.ai/x/cella/manifest"
 	"latere.ai/x/cella/runtime/remote"
@@ -29,6 +30,30 @@ var workerUpgrader = websocket.Upgrader{
 // ErrWorkerEnvironment is a worker that connected to an environment its key
 // does not name.
 var ErrWorkerEnvironment = errors.New("the key names another environment")
+
+// WorkerRegistrations is the hub as the controller's phase loop reads it: the
+// workers holding one environment's stream open, in the controller's own
+// vocabulary. The controller names no transport of its own, so the two
+// vocabularies meet here and nowhere else.
+func WorkerRegistrations(hub *remote.Hub) func(string) []controller.Registration {
+	return func(environment string) []controller.Registration {
+		// The driver is the environment's, recorded from the first
+		// registration, which is what spec 021 puts in status.driver.
+		driverName := ""
+		if r, held := hub.Transport(environment).Registration(); held {
+			driverName = r.Driver
+		}
+		states := hub.Workers(environment)
+		out := make([]controller.Registration, 0, len(states))
+		for _, w := range states {
+			out = append(out, controller.Registration{
+				Worker: w.Worker, Driver: driverName,
+				LastHeartbeat: w.LastHeartbeat, Connected: w.Connected,
+			})
+		}
+		return out
+	}
+}
 
 // workerRoute is one of the two routes an environment key reaches on behalf
 // of a worker, matched before the mux because every route on the mux decides

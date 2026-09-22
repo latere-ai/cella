@@ -248,3 +248,124 @@ func TestWorkerRoleRefusesAFlagItDoesNotHave(t *testing.T) {
 		t.Errorf("a flag the role does not have exited %d, want 2", code)
 	}
 }
+
+// TestWorkerEnvironmentEndToEnd is the whole of slice 054 over loopback:
+// `cellad serve` with its own driver, an environment an administrator applies
+// and keys, `cellad worker` that registers on it, a sandbox created on that
+// environment through the API and an exec that runs on the worker, and the
+// phase that follows the worker away and back.
+func TestWorkerEnvironmentEndToEnd(t *testing.T) {
+	// The offline window is short here so the case observes the transition
+	// rather than the two minutes a deployment holds an environment for.
+	p := startPlaneWith(t, "", "", map[string]string{"CELLA_ENVIRONMENT_OFFLINE": "2s"})
+
+	// The operator applies the environment and mints it a key. Nothing is
+	// placed on it yet: no worker has registered, so it is Pending.
+	body := `{"apiVersion":"cella.latere.ai/v1beta1","kind":"Environment",` +
+		`"metadata":{"name":"eu-gpu"},` +
+		`"spec":{"mode":"worker","isolation":"none","capacity":{"cpu":"8","memory":"16Gi","sandboxes":10}}}`
+	status, answer := p.do(t, http.MethodPut, "/v1/environments/eu-gpu", strings.NewReader(body))
+	if status != http.StatusCreated {
+		t.Fatalf("the apply answered %d: %s", status, answer)
+	}
+	if got := p.environmentNamed(t, "eu-gpu").Status.Phase; got != v1.EnvironmentPending {
+		t.Errorf("an environment nothing has registered on is %q", got)
+	}
+	status, answer = p.do(t, http.MethodPost, "/v1/environments/eu-gpu/keys", nil)
+	if status != http.StatusCreated {
+		t.Fatalf("the key mint answered %d: %s", status, answer)
+	}
+	var minted struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal([]byte(answer), &minted); err != nil {
+		t.Fatalf("the mint's answer did not decode: %v", err)
+	}
+
+	// The worker connects outbound with that key and the environment becomes
+	// placeable. Nothing dialed the worker.
+	first := startWorker(t, p, minted.Token, nil)
+	waitFor(t, "the environment to report the worker", func() bool {
+		obj := p.environmentNamed(t, "eu-gpu")
+		return obj.Status.Phase == v1.EnvironmentReady && obj.Status.Workers == 1
+	})
+	// The driver an environment reports is the one its workers run, which
+	// spec 021 records from the first registration; `remote` is only how the
+	// control plane reaches them.
+	if got := p.environmentNamed(t, "eu-gpu").Status.Driver; got != "native" {
+		t.Errorf("the environment reports the driver %q, want native", got)
+	}
+
+	// A sandbox named onto that environment is created on the worker's own
+	// driver, and an exec runs there.
+	create := `{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox",` +
+		`"metadata":{"name":"there"},"spec":{"environment":"eu-gpu","command":["sleep","300"]}}`
+	status, answer = p.do(t, http.MethodPost, "/v1/sandboxes", strings.NewReader(create))
+	if status != http.StatusCreated {
+		t.Fatalf("the create on the worker's environment answered %d: %s", status, answer)
+	}
+	var sandbox v1.Sandbox
+	if err := json.Unmarshal([]byte(answer), &sandbox); err != nil {
+		t.Fatalf("the sandbox did not decode: %v", err)
+	}
+	if sandbox.Status.Environment != "eu-gpu" {
+		t.Fatalf("the sandbox names environment %q", sandbox.Status.Environment)
+	}
+	waitFor(t, "the sandbox to run on the worker", func() bool {
+		status, answer := p.do(t, http.MethodGet, "/v1/sandboxes/"+sandbox.Status.ID, nil)
+		if status != http.StatusOK {
+			return false
+		}
+		var obj v1.Sandbox
+		return json.Unmarshal([]byte(answer), &obj) == nil && obj.Status.Phase == "Running"
+	})
+	status, answer = p.do(t, http.MethodPost, "/v1/sandboxes/"+sandbox.Status.ID+"/exec?wait=1",
+		strings.NewReader(`{"command":["sh","-c","echo across the seam"]}`))
+	if status != http.StatusOK {
+		t.Fatalf("the exec on the worker answered %d: %s", status, answer)
+	}
+	if !strings.Contains(answer, "across the seam") {
+		t.Errorf("the exec's output is %s", answer)
+	}
+
+	// The worker goes away and the environment reports it: the phase loop
+	// writes Offline once the window has passed with nothing answering.
+	if code := first.stop(); code != 0 {
+		t.Errorf("the worker exited %d; stderr %q", code, first.errOut.String())
+	}
+	waitFor(t, "the environment to go offline", func() bool {
+		obj := p.environmentNamed(t, "eu-gpu")
+		return obj.Status.Phase == v1.EnvironmentOffline && obj.Status.Reason == v1.ReasonHeartbeatLost
+	})
+	// An offline environment takes no new sandbox and keeps the one it has.
+	again := strings.Replace(create, `"name":"there"`, `"name":"after"`, 1)
+	if status, answer = p.do(t, http.MethodPost, "/v1/sandboxes", strings.NewReader(again)); status != http.StatusServiceUnavailable {
+		t.Errorf("a create on an offline environment answered %d: %s", status, answer)
+	}
+	if status, _ = p.do(t, http.MethodGet, "/v1/sandboxes/"+sandbox.Status.ID, nil); status != http.StatusOK {
+		t.Errorf("the sandbox already placed did not survive the environment going offline")
+	}
+
+	// And a worker that comes back makes the environment placeable again.
+	startWorker(t, p, minted.Token, nil)
+	waitFor(t, "the environment to return to Ready", func() bool {
+		return p.environmentNamed(t, "eu-gpu").Status.Phase == v1.EnvironmentReady
+	})
+	if status, answer = p.do(t, http.MethodPost, "/v1/sandboxes", strings.NewReader(again)); status != http.StatusCreated {
+		t.Errorf("a create on the environment that returned answered %d: %s", status, answer)
+	}
+}
+
+// environmentNamed reads one environment object the control plane serves.
+func (p *plane) environmentNamed(t *testing.T, name string) v1.Environment {
+	t.Helper()
+	status, body := p.do(t, http.MethodGet, "/v1/environments/"+name, nil)
+	if status != http.StatusOK {
+		t.Fatalf("reading the environment %s answered %d: %s", name, status, body)
+	}
+	var obj v1.Environment
+	if err := json.Unmarshal([]byte(body), &obj); err != nil {
+		t.Fatalf("the environment did not decode: %v", err)
+	}
+	return obj
+}

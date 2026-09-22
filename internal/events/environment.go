@@ -4,8 +4,11 @@
 package events
 
 import (
+	"context"
 	"maps"
+	"time"
 
+	"latere.ai/x/cella/controller"
 	v1 "latere.ai/x/cella/manifest/v1"
 )
 
@@ -62,4 +65,32 @@ type Environment struct {
 	Reason  string `json:"reason,omitempty"`
 	JTI     string `json:"jti,omitempty"`
 	Worker  string `json:"worker,omitempty"`
+}
+
+// EnvironmentMutation is the record for one act on one Environment. An
+// environment's transitions carry no reason of design 009's enum: the reason
+// spec 021 gives a phase below Ready is the record's own data.
+func EnvironmentMutation(t Type, obj v1.Environment, data Environment, a Actor, at time.Time) (Record, error) {
+	return build(t, "", OfEnvironment(obj), nil, data, a, at)
+}
+
+// EmitEnvironment is the controller's seam of design 009 for the Environment
+// kind, for a store that keeps no journal of its own.
+func (e *Emitter) EmitEnvironment(ctx context.Context, a controller.EnvironmentAct) {
+	if e == nil || e.journal == nil {
+		return
+	}
+	kind := Type(a.Type)
+	if !Deliverable(kind) {
+		return
+	}
+	record, err := EnvironmentMutation(kind, a.Object,
+		Environment{Workers: a.Workers, Phase: a.Object.Status.Phase, Reason: a.Reason},
+		ActorFrom(ctx), time.Now().UTC())
+	if err != nil {
+		e.log.WarnContext(ctx, "the event was not built",
+			"type", a.Type, "object", a.Object.Metadata.Name, "error", err)
+		return
+	}
+	e.Write(ctx, record)
 }

@@ -51,6 +51,7 @@ func TestTheConformanceSuiteHoldsAgainstThisServer(t *testing.T) {
 		AuthorizerControl: stack.authorizer.URL,
 		AdmissionControl:  stack.admission.URL,
 		SinkControl:       stack.sink,
+		WorkerEnvironment: stack.workerEnvironment,
 		Known:             known,
 	})
 	if report.Marker.Server == "" {
@@ -80,6 +81,10 @@ type stack struct {
 	capabilities []string
 	authorizer   *httptest.Server
 	admission    *httptest.Server
+	// workerEnvironment is the second environment the run compares against
+	// the one this node drives itself: an Environment an administrator
+	// applied, keyed, and a `cellad worker` registered on over loopback.
+	workerEnvironment string
 }
 
 // startStack brings up the stubs, the two control shims and `cellad serve`,
@@ -184,7 +189,77 @@ func startStack(t *testing.T) *stack {
 			t.Error("serve did not stop")
 		}
 	})
+	s.joinWorker(t)
 	return s
+}
+
+// workerEnvironmentName is the second environment the suite compares the
+// node's own against. It is a worker's, so the two differ in where the
+// sandbox runs and in nothing a caller can read.
+const workerEnvironmentName = "worker-b"
+
+// joinWorker applies a worker environment, mints it a key, and runs `cellad
+// worker` in this process against it, so the suite has two environments to
+// compare rather than one.
+func (s *stack) joinWorker(t *testing.T) {
+	t.Helper()
+	admin, err := s.mint(t.Context(), "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := `{"apiVersion":"cella.latere.ai/v1beta1","kind":"Environment",` +
+		`"metadata":{"name":"` + workerEnvironmentName + `"},` +
+		`"spec":{"mode":"worker","isolation":"none","capacity":{"cpu":"8","memory":"16Gi","sandboxes":50}}}`
+	if status, answer := s.call(t, admin, http.MethodPut,
+		"/v1/environments/"+workerEnvironmentName, body); status != http.StatusCreated {
+		t.Fatalf("the worker environment was not applied: %d %s", status, answer)
+	}
+	status, answer := s.call(t, admin, http.MethodPost, "/v1/environments/"+workerEnvironmentName+"/keys", "")
+	if status != http.StatusCreated {
+		t.Fatalf("the environment key was not minted: %d %s", status, answer)
+	}
+	var minted struct {
+		Token string `json:"token"`
+	}
+	if err = json.Unmarshal([]byte(answer), &minted); err != nil {
+		t.Fatalf("the mint's answer did not decode: %v", err)
+	}
+	startWorker(t, &plane{url: s.url}, minted.Token, nil)
+	deadline := time.Now().Add(60 * time.Second)
+	for time.Now().Before(deadline) {
+		status, answer = s.call(t, admin, http.MethodGet, "/v1/environments/"+workerEnvironmentName, "")
+		if status == http.StatusOK && strings.Contains(answer, `"phase":"Ready"`) {
+			s.workerEnvironment = workerEnvironmentName
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("the worker environment never became ready: %d %s", status, answer)
+}
+
+// call is one request to the node with an administrator's bearer.
+func (s *stack) call(t *testing.T, token, method, path, body string) (int, string) {
+	t.Helper()
+	var reader io.Reader
+	if body != "" {
+		reader = strings.NewReader(body)
+	}
+	req, err := http.NewRequestWithContext(t.Context(), method, s.url+path, reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	answer, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resp.StatusCode, string(answer)
 }
 
 // mint is the suite's Token: a subject's bearer from the stub issuer.

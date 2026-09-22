@@ -54,13 +54,10 @@ func countsAgainstCapacity(phase string) bool {
 	return true
 }
 
-// RunPool ticks the refill loop until ctx ends. A driver that declares no Pool
-// runs no loop at all: it can hold no entry, so there is nothing to keep and
-// nothing to clean up.
+// RunPool ticks the refill loop until ctx ends. One tick passes over every
+// placeable environment; one whose driver declares no Pool holds no entry, so
+// there is nothing to keep and nothing to clean up.
 func (c *Controller) RunPool(ctx context.Context) {
-	if !c.driver.Capabilities().Pool {
-		return
-	}
 	ticks, stop := c.clock.Ticker(c.reapInterval)
 	defer stop()
 	c.poolTick(ctx)
@@ -74,20 +71,23 @@ func (c *Controller) RunPool(ctx context.Context) {
 	}
 }
 
-// poolTick runs one pass while this replica holds the environment's pool lease.
+// poolTick runs one pass per environment, each while this replica holds that
+// environment's own pool lease.
 func (c *Controller) poolTick(ctx context.Context) {
-	lease := PoolLease(c.environment)
-	held, err := c.lease.Acquire(ctx, lease, LeaseTTL)
-	c.metrics.LeaseHeld(MetricLeasePool, err == nil && held)
-	if err != nil {
-		c.log.WarnContext(ctx, "pool lease unavailable", "lease", lease, "err", err)
-		return
-	}
-	if !held {
-		return
-	}
-	if acted, err := c.Refill(ctx); err != nil {
-		c.log.WarnContext(ctx, "pool tick incomplete", "acted", acted, "err", err)
+	for _, environment := range c.placeable() {
+		lease := PoolLease(environment)
+		held, err := c.lease.Acquire(ctx, lease, LeaseTTL)
+		c.metrics.LeaseHeld(MetricLeasePool, err == nil && held)
+		if err != nil {
+			c.log.WarnContext(ctx, "pool lease unavailable", "lease", lease, "err", err)
+			continue
+		}
+		if !held {
+			continue
+		}
+		if acted, err := c.refillEnvironment(ctx, environment); err != nil {
+			c.log.WarnContext(ctx, "pool tick incomplete", "environment", environment, "acted", acted, "err", err)
+		}
 	}
 }
 
@@ -98,12 +98,29 @@ func (c *Controller) poolTick(ctx context.Context) {
 // the environment reads as a pool that is short, and the answer to that would
 // be creates: the one thing a tick must not do on no information.
 func (c *Controller) Refill(ctx context.Context) (int, error) {
-	if !c.driver.Capabilities().Pool {
+	acted := 0
+	var failed error
+	for _, environment := range c.placeable() {
+		n, err := c.refillEnvironment(ctx, environment)
+		acted += n
+		failed = errors.Join(failed, err)
+	}
+	return acted, failed
+}
+
+// refillEnvironment brings one environment's pool to its target.
+func (c *Controller) refillEnvironment(ctx context.Context, environment string) (int, error) {
+	pool, capacity := c.poolOf(environment)
+	d, err := c.driverFor(environment)
+	if err != nil {
+		return 0, err
+	}
+	if !d.Capabilities().Pool {
 		return 0, nil
 	}
-	states, err := c.driver.List(ctx, driver.Filter{})
+	states, err := d.List(ctx, driver.Filter{})
 	if err != nil {
-		return 0, fmt.Errorf("pool: reading the environment: %w", err)
+		return 0, fmt.Errorf("pool: reading the environment %s: %w", environment, err)
 	}
 	now := c.clock.Now()
 	var entries []driver.State
@@ -116,15 +133,15 @@ func (c *Controller) Refill(ctx context.Context) (int, error) {
 			live++
 		}
 	}
-	keep, drop := c.sortPool(entries, now)
-	target := c.poolTarget(live)
+	keep, drop := c.sortPool(pool, entries, now)
+	target := poolTarget(pool, capacity, live)
 	keep, drop = takeSurplus(keep, drop, target)
 	c.metrics.PoolSize(readyFilling(keep))
 	acted := 0
 	var failed error
-	shape := c.poolShape()
+	shape := poolShape(pool)
 	for _, entry := range drop {
-		if err := c.driver.Delete(ctx, entry.ID); err != nil && !errors.Is(err, driver.ErrNotFound) {
+		if err := d.Delete(ctx, entry.ID); err != nil && !errors.Is(err, driver.ErrNotFound) {
 			failed = errors.Join(failed, fmt.Errorf("pool: deleting the entry %s: %w", entry.ID, err))
 			continue
 		}
@@ -133,13 +150,13 @@ func (c *Controller) Refill(ctx context.Context) (int, error) {
 		acted++
 	}
 	for range min(target-len(keep), c.poolInFlight) {
-		id, err := c.prewarm(ctx)
+		id, err := c.prewarm(ctx, environment, pool)
 		if err != nil {
 			// One refusal ends this tick's prewarming. An environment that
 			// cannot take a create is asked twice and not fifty times.
 			return acted, errors.Join(failed, fmt.Errorf("pool: prewarming: %w", err))
 		}
-		c.log.InfoContext(ctx, "the pool prewarmed an entry", "sandbox", id, "image", c.pool.Image)
+		c.log.InfoContext(ctx, "the pool prewarmed an entry", "sandbox", id, "image", pool.Image)
 		acted++
 	}
 	return acted, failed
@@ -173,22 +190,22 @@ func takeSurplus(keep, drop []driver.State, target int) ([]driver.State, []drive
 // size, and never more than the ceiling leaves after the sandboxes that hold
 // it. Without the second term the loop and the create path would fight, one
 // deleting an entry to make room and the other making it again.
-func (c *Controller) poolTarget(live int) int {
-	if c.pool.Size <= 0 {
+func poolTarget(pool v1.PoolSpec, capacity, live int) int {
+	if pool.Size <= 0 {
 		return 0
 	}
-	if c.capacity <= 0 {
-		return c.pool.Size
+	if capacity <= 0 {
+		return pool.Size
 	}
-	return max(min(c.pool.Size, c.capacity-live), 0)
+	return max(min(pool.Size, capacity-live), 0)
 }
 
 // sortPool splits the entries into the ones the pool still wants, oldest
 // first, and the ones it does not. An entry inside the grace is always kept:
 // it may still be coming up, and the deletion rules would otherwise race the
 // create that made it.
-func (c *Controller) sortPool(entries []driver.State, now time.Time) (keep, drop []driver.State) {
-	shape := c.poolShape()
+func (c *Controller) sortPool(pool v1.PoolSpec, entries []driver.State, now time.Time) (keep, drop []driver.State) {
+	shape := poolShape(pool)
 	for _, entry := range entries {
 		if now.Sub(entry.CreatedAt) < c.poolGrace || poolDropReason(entry, shape, now, c.poolGrace) == "" {
 			keep = append(keep, entry)
@@ -228,12 +245,12 @@ func poolDropReason(entry driver.State, shape string, now time.Time, grace time.
 // and the display. Two shapes that differ in any of them are different pools,
 // and an entry stamped with one the environment no longer declares is deleted
 // rather than served to a create that would not match it.
-func (c *Controller) poolShape() string {
+func poolShape(pool v1.PoolSpec) string {
 	parts := []string{
-		c.pool.Image,
-		string(c.pool.Resources.CPU), string(c.pool.Resources.Memory), string(c.pool.Resources.Disk),
+		pool.Image,
+		string(pool.Resources.CPU), string(pool.Resources.Memory), string(pool.Resources.Disk),
 	}
-	if d := c.pool.Display; d != nil {
+	if d := pool.Display; d != nil {
 		parts = append(parts, fmt.Sprintf("%dx%d", d.Width, d.Height))
 	}
 	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
@@ -242,16 +259,20 @@ func (c *Controller) poolShape() string {
 
 // prewarm makes one entry: the environment's shape, nobody's sandbox, and the
 // stamp the drift rule reads.
-func (c *Controller) prewarm(ctx context.Context) (string, error) {
+func (c *Controller) prewarm(ctx context.Context, environment string, pool v1.PoolSpec) (string, error) {
+	d, err := c.driverFor(environment)
+	if err != nil {
+		return "", err
+	}
 	id, err := newID()
 	if err != nil {
 		return "", err
 	}
-	_, err = c.driver.Create(ctx, driver.CreateSpec{
+	_, err = d.Create(ctx, driver.CreateSpec{
 		ID:        id,
-		Image:     c.pool.Image,
-		Resources: resourcesOf(c.pool.Resources),
-		Labels:    map[string]string{PoolShapeLabel: c.poolShape()},
+		Image:     pool.Image,
+		Resources: resourcesOf(pool.Resources),
+		Labels:    map[string]string{PoolShapeLabel: poolShape(pool)},
 		Prewarm:   true,
 	})
 	if err != nil {
@@ -270,12 +291,14 @@ func resourcesOf(r v1.Resources) driver.Resources {
 // read under the controller's lock by the create path, which takes the first
 // one that matches, so the entry that has been ready longest is the one a
 // caller gets.
-func (c *Controller) poolEntries(ctx context.Context) []driver.State {
-	if c.pool.Size <= 0 || !c.driver.Capabilities().Pool {
+func (c *Controller) poolEntries(ctx context.Context, environment string) []driver.State {
+	pool, _ := c.poolOf(environment)
+	d, err := c.driverFor(environment)
+	if err != nil || pool.Size <= 0 || !d.Capabilities().Pool {
 		return nil
 	}
-	pool := true
-	entries, err := c.driver.List(ctx, driver.Filter{Pool: &pool})
+	prewarmed := true
+	entries, err := d.List(ctx, driver.Filter{Pool: &prewarmed})
 	if err != nil {
 		// The pool is an acceleration. An environment that cannot be listed
 		// is a create on the slow path, not a create that fails.
@@ -293,11 +316,11 @@ func (c *Controller) poolEntries(ctx context.Context) []driver.State {
 // A quantity is compared as the caller wrote it rather than parsed: the
 // manifest keeps the caller's own spelling, and a pool whose "1000m" did not
 // match a manifest's "1" is slower and never wrong.
-func (c *Controller) matchEntry(entries []driver.State, obj v1.Sandbox) *driver.State {
-	if len(entries) == 0 || !c.matchesPool(obj) {
+func (c *Controller) matchEntry(pool v1.PoolSpec, entries []driver.State, obj v1.Sandbox) *driver.State {
+	if len(entries) == 0 || !matchesPool(pool, obj) {
 		return nil
 	}
-	shape := c.poolShape()
+	shape := poolShape(pool)
 	for i, entry := range entries {
 		if entry.Phase == driver.Running && entry.Labels[PoolShapeLabel] == shape {
 			return &entries[i]
@@ -308,14 +331,14 @@ func (c *Controller) matchEntry(entries []driver.State, obj v1.Sandbox) *driver.
 
 // matchesPool reports whether the resolved manifest asks for nothing the
 // environment's entries cannot carry.
-func (c *Controller) matchesPool(obj v1.Sandbox) bool {
+func matchesPool(pool v1.PoolSpec, obj v1.Sandbox) bool {
 	spec := obj.Spec
 	switch {
-	case spec.Image != c.pool.Image:
+	case spec.Image != pool.Image:
 		return false
-	case spec.Resources != c.pool.Resources:
+	case spec.Resources != pool.Resources:
 		return false
-	case !sameDisplay(spec.Display, c.pool.Display):
+	case !sameDisplay(spec.Display, pool.Display):
 		// The entry's X server sized its frame buffer when the entry came
 		// up, and a running desktop cannot be resized into another, so an
 		// entry is adopted only into the geometry it already has.
@@ -353,23 +376,28 @@ func sameDisplay(a, b *v1.Display) bool {
 // makeRoom frees a slot for a real create where the environment has a ceiling
 // and entries hold it. The oldest entries go first, and a create that does not
 // fit with no entry left is the quota refusal the API answers.
-func (c *Controller) makeRoom(ctx context.Context, entries []driver.State) error {
-	if c.capacity <= 0 {
+func (c *Controller) makeRoom(ctx context.Context, environment string, entries []driver.State) error {
+	_, capacity := c.poolOf(environment)
+	if capacity <= 0 {
 		return nil
+	}
+	d, err := c.driverFor(environment)
+	if err != nil {
+		return err
 	}
 	live := 0
 	for _, obj := range c.objects {
-		if countsAgainstCapacity(obj.Status.Phase) {
+		if obj.Status.Environment == environment && countsAgainstCapacity(obj.Status.Phase) {
 			live++
 		}
 	}
-	for live+len(entries)+1 > c.capacity {
+	for live+len(entries)+1 > capacity {
 		if len(entries) == 0 {
 			return ErrQuota
 		}
 		oldest := entries[0]
 		entries = entries[1:]
-		if err := c.driver.Delete(ctx, oldest.ID); err != nil && !errors.Is(err, driver.ErrNotFound) {
+		if err := d.Delete(ctx, oldest.ID); err != nil && !errors.Is(err, driver.ErrNotFound) {
 			return fmt.Errorf("pool: freeing capacity by deleting %s: %w", oldest.ID, err)
 		}
 		c.log.InfoContext(ctx, "the pool gave up an entry so a create would fit", "sandbox", oldest.ID)

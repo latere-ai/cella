@@ -94,8 +94,10 @@ func (c *Controlled) Load() (map[string]v1.Sandbox, error) {
 		)
 		err := c.store.Tx(ctx, func(tx Tx) error {
 			var err error
-			rows, next, err = tx.Desired().List(ctx, KindSandbox,
-				Filter{Environment: c.environment}, Page{Cursor: cursor})
+			// Every environment's sandboxes, because one control plane
+			// holds every environment it serves and routes each sandbox to
+			// the driver of its own (spec 021).
+			rows, next, err = tx.Desired().List(ctx, KindSandbox, Filter{}, Page{Cursor: cursor})
 			return err
 		})
 		if err != nil {

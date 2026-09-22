@@ -39,3 +39,21 @@ type Capabilities struct {
 	Files     bool         `json:"files"`
 	Detach    bool         `json:"detach"`
 }
+
+// Equal reports whether two declarations say the same thing. The egress modes
+// are a list in a fixed order, so they are compared elementwise and the flags
+// one by one.
+func (c Capabilities) Equal(other Capabilities) bool {
+	if len(c.Egress) != len(other.Egress) {
+		return false
+	}
+	for i, mode := range c.Egress {
+		if other.Egress[i] != mode {
+			return false
+		}
+	}
+	return c.Mesh == other.Mesh && c.Ingress == other.Ingress && c.Volumes == other.Volumes &&
+		c.Snapshots == other.Snapshots && c.Attach == other.Attach && c.Dial == other.Dial &&
+		c.Display == other.Display && c.Input == other.Input && c.Resize == other.Resize &&
+		c.Pool == other.Pool && c.Files == other.Files && c.Detach == other.Detach
+}

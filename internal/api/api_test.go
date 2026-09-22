@@ -78,7 +78,7 @@ func setupDriver(t *testing.T, policy authz.Authorizer, wrap func(runtime.Driver
 	}
 	// The activity window is all but open, so a test observes each stamp a
 	// handler makes rather than the one the default minute lets through.
-	c, err := controller.Open(controller.Options{DataDir: t.TempDir(), Driver: runtimeDriver, Environment: "default", TouchInterval: testTouchInterval})
+	c, err := controller.Open(t.Context(), controller.Options{DataDir: t.TempDir(), Driver: runtimeDriver, Environment: "default", TouchInterval: testTouchInterval})
 	if err != nil {
 		t.Fatal(err)
 	}

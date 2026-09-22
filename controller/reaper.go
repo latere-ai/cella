@@ -147,14 +147,40 @@ func (c *Controller) tick(ctx context.Context) {
 	}
 }
 
-// Reap applies the lifecycle rules once over the environment and reports how
-// many sandboxes it acted on. A List that fails is no list rather than an
-// empty one: an environment the controller cannot read reports nothing, and
-// treating silence as emptiness would end every sandbox in it.
+// Reap applies the lifecycle rules once over every placeable environment and
+// reports how many sandboxes it acted on. An environment below Ready is left
+// alone, which is spec 021's rule: a data plane reporting nothing is not a
+// data plane reporting an empty world.
 func (c *Controller) Reap(ctx context.Context) (int, error) {
-	states, err := c.driver.List(ctx, driver.Filter{})
+	acted := 0
+	var failed error
+	for _, environment := range c.placeable() {
+		n, err := c.reapEnvironment(ctx, environment)
+		acted += n
+		failed = errors.Join(failed, err)
+	}
+	// The revocation list is swept once a tick rather than once an
+	// environment: a row outlives the token it ends and nothing more, and
+	// the tokens are the control plane's whichever environment ran them
+	// (spec 010).
+	if err := c.sweepRevocations(ctx, c.clock.Now()); err != nil {
+		failed = errors.Join(failed, fmt.Errorf("reaper: %w", err))
+	}
+	return acted, failed
+}
+
+// reapEnvironment is one pass over one environment. A List that fails is no
+// list rather than an empty one: an environment the controller cannot read
+// reports nothing, and treating silence as emptiness would end every sandbox
+// in it.
+func (c *Controller) reapEnvironment(ctx context.Context, environment string) (int, error) {
+	d, err := c.driverFor(environment)
 	if err != nil {
-		return 0, fmt.Errorf("reaper: reading the environment: %w", err)
+		return 0, err
+	}
+	states, err := d.List(ctx, driver.Filter{})
+	if err != nil {
+		return 0, fmt.Errorf("reaper: reading the environment %s: %w", environment, err)
 	}
 	now := c.clock.Now()
 	acted := 0
@@ -169,7 +195,7 @@ func (c *Controller) Reap(ctx context.Context) (int, error) {
 		// The index holds what desired state can be compared against, and a
 		// pool entry has no desired row, so entries are left out of it.
 		observed := slices.DeleteFunc(slices.Clone(states), func(s driver.State) bool { return s.Pool })
-		if err := c.durable.Rebuild(ctx, c.environment, observed); err != nil {
+		if err := c.durable.Rebuild(ctx, environment, observed); err != nil {
 			rebuilt = false
 			failed = errors.Join(failed, fmt.Errorf("reaper: rebuilding the observed index: %w", err))
 		}
@@ -198,7 +224,7 @@ func (c *Controller) Reap(ctx context.Context) (int, error) {
 			}
 			continue
 		}
-		done, err := c.enforce(ctx, s.ID, rule, now)
+		done, err := c.enforce(ctx, environment, s.ID, rule, now)
 		if err != nil {
 			failed = errors.Join(failed, fmt.Errorf("reaper: %s on %s: %w", rule, s.ID, err))
 			continue
@@ -208,15 +234,10 @@ func (c *Controller) Reap(ctx context.Context) (int, error) {
 			acted++
 		}
 	}
-	// The revocation list is swept on the same tick: a row outlives the token
-	// it ends and nothing more (spec 010).
-	if err := c.sweepRevocations(ctx, now); err != nil {
-		failed = errors.Join(failed, fmt.Errorf("reaper: %w", err))
-	}
 	if !rebuilt {
 		return acted, failed
 	}
-	for _, id := range c.vanished(states) {
+	for _, id := range c.vanished(environment, states) {
 		done, err := c.enforceLost(ctx, id, now)
 		if err != nil {
 			failed = errors.Join(failed, fmt.Errorf("reaper: %s on %s: %w", ReasonLost, id, err))
@@ -264,10 +285,14 @@ func rotatable(phase string) bool {
 // enforce re-reads the candidate under the controller's lock and acts only
 // while the same rule still matches the fresh state, so a sandbox touched or
 // retimed between the list and the action keeps running.
-func (c *Controller) enforce(ctx context.Context, id, rule string, now time.Time) (bool, error) {
+func (c *Controller) enforce(ctx context.Context, environment, id, rule string, now time.Time) (bool, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	state, err := c.driver.Inspect(ctx, id)
+	d, err := c.driverFor(environment)
+	if err != nil {
+		return false, err
+	}
+	state, err := d.Inspect(ctx, id)
 	if errors.Is(err, driver.ErrNotFound) {
 		return false, nil
 	}
@@ -279,24 +304,28 @@ func (c *Controller) enforce(ctx context.Context, id, rule string, now time.Time
 	}
 	if rule == ReasonAutoStop {
 		c.metrics.ReaperAction(rule, ActionStopped)
-		return true, c.stopLocked(ctx, id, rule)
+		return true, c.stopLocked(ctx, environment, id, rule)
 	}
 	c.metrics.ReaperAction(rule, ActionDeleted)
-	return true, c.deleteLocked(ctx, id, rule)
+	return true, c.deleteLocked(ctx, environment, id, rule)
 }
 
 // stopLocked stops the sandbox and records the phase the driver reports with
 // the rule's reason. A driver object with no desired record is stopped all the
 // same: the substrate is what the rules read, and there is no status to write.
-func (c *Controller) stopLocked(ctx context.Context, id, reason string) error {
-	if err := c.driver.Stop(ctx, id); err != nil {
+func (c *Controller) stopLocked(ctx context.Context, environment, id, reason string) error {
+	d, err := c.driverFor(environment)
+	if err != nil {
+		return err
+	}
+	if err := d.Stop(ctx, id); err != nil {
 		return err
 	}
 	obj, tracked := c.objects[id]
 	if !tracked {
 		return nil
 	}
-	obj, err := c.refresh(ctx, obj)
+	obj, err = c.refresh(ctx, obj)
 	if err != nil {
 		return err
 	}
@@ -311,7 +340,7 @@ func (c *Controller) stopLocked(ctx context.Context, id, reason string) error {
 // A deadline ends a tree the way a request does: the descendants go first,
 // deepest generation before the one above it, each with reason Parent, so a
 // sandbox never outlives the ancestor whose boundary it ran inside (spec 022).
-func (c *Controller) deleteLocked(ctx context.Context, id, reason string) error {
+func (c *Controller) deleteLocked(ctx context.Context, environment, id, reason string) error {
 	obj, tracked := c.objects[id]
 	if tracked {
 		if err := c.cascade(ctx, id); err != nil {
@@ -326,7 +355,11 @@ func (c *Controller) deleteLocked(ctx context.Context, id, reason string) error 
 		obj = intent
 		return c.deleteOne(ctx, &obj)
 	}
-	if err := c.driver.Delete(ctx, id); err != nil && !errors.Is(err, driver.ErrNotFound) {
+	d, err := c.driverFor(environment)
+	if err != nil {
+		return err
+	}
+	if err := d.Delete(ctx, id); err != nil && !errors.Is(err, driver.ErrNotFound) {
 		return err
 	}
 	c.forgetTouch(id)
@@ -343,7 +376,11 @@ func (c *Controller) Touch(ctx context.Context, id string) error {
 	if !c.openTouchWindow(id) {
 		return nil
 	}
-	return c.driver.Touch(ctx, id)
+	d, err := c.driverOf(id)
+	if err != nil {
+		return err
+	}
+	return d.Touch(ctx, id)
 }
 
 // openTouchWindow reports whether this touch is the one that reaches the

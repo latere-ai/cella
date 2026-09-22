@@ -154,9 +154,10 @@ func TestBridgeLoadsEveryPage(t *testing.T) {
 	}
 }
 
-// TestBridgeLoadsOnlyItsEnvironment: a store shared by two environments hands
-// each controller its own, because a controller drives one environment.
-func TestBridgeLoadsOnlyItsEnvironment(t *testing.T) {
+// TestBridgeLoadsEveryEnvironment: one control plane holds every environment
+// it serves, so the bridge hands the controller the sandboxes of all of them
+// and each is routed to the driver of its own (spec 021).
+func TestBridgeLoadsEveryEnvironment(t *testing.T) {
 	c, s := bound(t)
 	if err := c.Write(t.Context(), sandbox("sbx_a", "work", driver.Running), controller.MutationCreated); err != nil {
 		t.Fatal(err)
@@ -173,8 +174,8 @@ func TestBridgeLoadsOnlyItsEnvironment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(objects) != 1 || objects["sbx_a"].Status.ID != "sbx_a" {
-		t.Fatalf("this environment loaded %v", objects)
+	if len(objects) != 2 || objects["sbx_a"].Status.ID != "sbx_a" || objects["sbx_b"].Status.Environment != "other" {
+		t.Fatalf("the bridge loaded %v", objects)
 	}
 }
 

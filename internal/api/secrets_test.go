@@ -64,6 +64,7 @@ func (g *acceptingGateway) Send(_ context.Context, m egress.Map) error {
 }
 func (g *acceptingGateway) Purge(context.Context, string) {}
 func (g *acceptingGateway) CA() string                    { return "" }
+func (g *acceptingGateway) Connected() int                { return 1 }
 
 // last is the newest map this gateway was handed for one principal.
 func (g *acceptingGateway) last(principal string) (egress.Map, bool) {
@@ -95,7 +96,7 @@ func setupWithStore(t *testing.T, policy authz.Authorizer, open func(string) (co
 		t.Fatal(err)
 	}
 	gateway := &acceptingGateway{}
-	c, err := controller.Open(controller.Options{Store: desired, Driver: d, Environment: "default",
+	c, err := controller.Open(t.Context(), controller.Options{Store: desired, Driver: d, Environment: "default",
 		TouchInterval: time.Millisecond, Egress: gateway})
 	if err != nil {
 		t.Fatal(err)

@@ -42,6 +42,7 @@ import (
 	"latere.ai/x/cella/internal/version"
 	"latere.ai/x/cella/internal/worker"
 	"latere.ai/x/cella/manifest"
+	v1 "latere.ai/x/cella/manifest/v1"
 	"latere.ai/x/cella/runtime"
 	"latere.ai/x/cella/runtime/k8s"
 	"latere.ai/x/cella/runtime/native"
@@ -370,13 +371,24 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	if _, transactional := desired.(*store.Controlled); !transactional {
 		controllerEvents = emitter
 	}
-	control, err = controller.Open(controller.Options{
+	control, err = controller.Open(ctx, controller.Options{
 		Store: desired, Driver: runtimeDriver, Environment: cfg.DefaultEnvironment,
 		Lease: lease, ReapInterval: cfg.ReapInterval, TouchInterval: cfg.TouchInterval,
 		LostGrace: cfg.LostGrace, Events: controllerEvents, Tokens: tokens,
 		Egress: hub, Gateway: controller.GatewayAddresses{Proxy: cfg.Gateway.ProxyAddr, Reverse: cfg.Gateway.ReverseAddr},
 		Pool: cfg.Scheduling.Pool, PoolInFlight: cfg.Scheduling.PoolInFlight, PoolGrace: cfg.Scheduling.PoolGrace,
-		Metrics: registry,
+		Capacity: cfg.Scheduling.Capacity.Sandboxes, CapacityQuantities: cfg.Scheduling.Capacity,
+		SchedulingMode: cfg.Scheduling.Mode, EnvironmentOffline: cfg.EnvironmentOffline,
+		// The driver of an environment a worker serves is the remote driver
+		// over the stream that worker opened. The controller holds no
+		// transport of its own, which is what keeps it from dialing one.
+		NewDriver: func(obj v1.Environment) (runtime.Driver, error) {
+			id := obj.Status.ID
+			return remote.New(remote.Options{Environment: id, Transport: workers.Transport(id)})
+		},
+		ReleaseDriver: func(obj v1.Environment) { workers.Release(obj.Status.ID) },
+		Registrations: api.WorkerRegistrations(workers),
+		Metrics:       registry,
 	})
 	if err != nil {
 		return fail(stderr, fmt.Errorf("controller: %w", err))
@@ -397,6 +409,7 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		var loops sync.WaitGroup
 		loops.Go(func() { control.RunReaper(loopCtx) })
 		loops.Go(func() { control.RunPool(loopCtx) })
+		loops.Go(func() { control.RunEnvironments(loopCtx) })
 		loops.Wait()
 	}()
 	stopLoops := sync.OnceFunc(func() { cancelLoops(); <-loopsDone })
