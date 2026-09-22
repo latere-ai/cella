@@ -498,6 +498,17 @@ paths:
           description: The answer this route serves.
         default:
           $ref: "#/components/responses/Error"
+    post:
+      operationId: createEnvironment
+      summary: Create an environment from a manifest.
+      description: >-
+        The name is the environment's id, and a taken name is refused.
+        Authorized as `environment.create`.
+      responses:
+        "200":
+          description: The answer this route serves.
+        default:
+          $ref: "#/components/responses/Error"
   /v1/environments/{id}:
     parameters:
       - name: id
@@ -510,6 +521,30 @@ paths:
       operationId: readEnvironment
       summary: Read one environment with its capabilities.
       description: Authorized as `environment.read`.
+      responses:
+        "200":
+          description: The answer this route serves.
+        default:
+          $ref: "#/components/responses/Error"
+    put:
+      operationId: applyEnvironment
+      summary: Apply an environment by name.
+      description: >-
+        A create when the name is free and an update when it is held. The
+        answer carries an ETag, and an If-Match that names an older version is
+        refused with version_conflict. Authorized as `environment.create` or
+        `environment.update`.
+      responses:
+        "200":
+          description: The answer this route serves.
+        default:
+          $ref: "#/components/responses/Error"
+    delete:
+      operationId: deleteEnvironment
+      summary: Delete an environment no sandbox is placed on.
+      description: >-
+        The environment this control plane drives itself is not deletable.
+        Authorized as `environment.delete`.
       responses:
         "200":
           description: The answer this route serves.
