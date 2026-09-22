@@ -88,6 +88,10 @@ type Options struct {
 	// 006). It is optional: with none, no sandbox is given a token and no
 	// driver projects one.
 	Tokens Tokens
+	// Retention forgets what the store keeps only for a window: finished
+	// journal records and answered worker operations. The reaper's tick
+	// runs it; nil prunes nothing.
+	Retention Retention
 	// Metrics is design 017's recorder. It is optional: with none the
 	// controller counts nothing and behaves the same.
 	Metrics Metrics
@@ -167,6 +171,7 @@ type Controller struct {
 	gateway          GatewayAddresses
 	events           Events
 	tokens           Tokens
+	retention        Retention
 	metrics          Metrics
 	// secrets is the Secret kind's store, and secretObjects this process's
 	// copy of the collection. Neither holds a value: what is here is what a
@@ -252,7 +257,7 @@ func Open(ctx context.Context, o Options) (*Controller, error) {
 		lostGrace: o.LostGrace, recoveryAttempts: o.RecoveryAttempts,
 		lost: map[string]time.Time{}, attempts: map[string]int{}, retry: map[string]time.Time{},
 		egress: o.Egress, gateway: o.Gateway,
-		events: o.Events, tokens: o.Tokens, metrics: cmp.Or(o.Metrics, Metrics(nopMetrics{})),
+		events: o.Events, tokens: o.Tokens, retention: o.Retention, metrics: cmp.Or(o.Metrics, Metrics(nopMetrics{})),
 		secretObjects: map[string]v1.Secret{},
 		pool:          o.Pool, capacity: o.Capacity,
 		poolInFlight: o.PoolInFlight, poolGrace: o.PoolGrace,
