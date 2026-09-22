@@ -1,6 +1,6 @@
 ---
 title: "Dial and the port proxy: Dialer on native and podman, the dial socket, the port proxy, cella port-forward"
-status: in-progress
+status: complete
 track: core
 depends_on:
   - specs/004-runtime-contract.md
@@ -204,15 +204,68 @@ and [[004-runtime-contract]]'s. A half close on the dial socket, which
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| A driver that declares `Dial` reaches an echo server inside a sandbox with bytes both ways and two connections at once, refuses a stopped sandbox with `ErrNotRunning` and an absent one with `ErrNotFound`; `Dial` is no longer declared without a case | `TestNativeConformance`, `TestPodmanConformance`, `TestDialCase` | not built |
-| `native` declares `Dial` and implements `Dialer`, dials loopback only for a running sandbox, and probes its declared ports at inspect | `TestNativeDial`, `TestNativeProbesDeclaredPorts`, `TestNativeConformance`'s `PortsReportListening` | not built |
-| `podman` publishes every declared port on loopback at create, dials the published port read from the engine, and refuses an undeclared port and a stopped container | `TestPodmanPublishesDeclaredPorts`, `TestPodmanDial`, `TestPodmanConformance` | not built |
-| A manifest that declares ports is not adopted into a pool entry | `TestPoolSkipsDeclaredPorts` | not built |
-| The dial socket carries bytes both ways, closes 1000 when the inside closes and 1011 with the code when the dial fails, refuses a bad port and a stopped sandbox before the upgrade, and journals `sandbox.dial` | `TestDialSocket`, `TestDialGate` | not built |
-| The proxy forwards every method, the path suffix with its escaping, the query and the body, drops the hop-by-hop headers and the bearer, passes a WebSocket upgrade, answers `not_found` for an undeclared name and 502 `upstream_unavailable` for a closed port or a stopped sandbox | `TestPortProxy` | not built |
-| The proxy dials only the sandbox's own id and declared port, whatever host, port, path or header the caller writes, and two sandboxes declaring one port each reach their own | `TestPortProxyIsConfined` | not built |
-| The API document names the proxy's operations and the mux serves each | `TestTheDocumentAndTheMuxAgree` | not built |
-| `cellad serve` on the native driver: a sandbox listening on a declared port is reached through the dial socket and through the proxy, and the proxy answers 502 once it stops | `TestDialAndPortProxy` | not built |
-| The contract's own suite runs its dial cases against this server with `dial` declared, and the declaration of gaps stays empty | `TestTheConformanceSuiteHoldsAgainstThisServer` | not built |
-| `cella port-forward` carries bytes both ways per accepted connection and exits with the refusal's code where the dial is refused; the usage table and `docs/cli.md` agree | `TestPortForward`, `TestTheDocumentCarriesTheCommandsHelp` | not built |
-| No file this slice adds names a Latere host, image, pool or namespace | `TestNoLatereCoordinates` | not built |
+| A driver that declares `Dial` reaches an echo server inside a sandbox with bytes both ways and two connections at once, refuses a stopped sandbox with `ErrNotRunning` and an absent one with `ErrNotFound`; `Dial` is no longer declared without a case | `TestNativeConformance`, `TestPodmanConformance`, `TestDialCase` | built |
+| `native` declares `Dial` and implements `Dialer`, dials loopback only for a running sandbox, and probes its declared ports at inspect | `TestNativeDial`, `TestNativeProbesDeclaredPorts`, `TestNativeConformance` | built |
+| `podman` publishes every declared port on loopback at create, dials the published port read from the engine, and refuses an undeclared port and a stopped container | `TestPodmanPublishesDeclaredPorts`, `TestPodmanDial`, `TestPublishedPortsHostDefault`, `TestPodmanConformance` | built |
+| A manifest that declares ports is not adopted into a pool entry | `TestPoolSkipsDeclaredPorts` | built |
+| The dial socket carries bytes both ways, closes 1000 when the inside closes and 1011 with the code when the dial fails, refuses a bad port and a stopped sandbox before the upgrade, and journals `sandbox.dial` | `TestDialSocket`, `TestDialGate`, `TestUpstreamErrorKeepsTheContractsRefusals`, `TestOperationRecordsCarryNoContent` | built |
+| The proxy forwards every method, the path suffix with its escaping, the query and the body, drops the hop-by-hop headers and the bearer, passes a WebSocket upgrade, answers `not_found` for an undeclared name and 502 `upstream_unavailable` for a closed port or a stopped sandbox | `TestPortProxy`, `TestPortProxyGates`, `TestProxyPath` | built |
+| The proxy dials only the sandbox's own id and declared port, whatever host, port, path or header the caller writes, and two sandboxes declaring one port each reach their own | `TestPortProxyIsConfined` | built |
+| The API document names the proxy's operations and the mux serves each | `TestTheDocumentAndTheMuxAgree` | built |
+| `cellad serve` on the native driver: a sandbox listening on a declared port is reached through the dial socket and through the proxy, and the proxy answers 502 once it stops | `TestDialAndPortProxy` | built |
+| The contract's own suite runs its dial cases against this server with `dial` declared, and the declaration of gaps stays empty | `TestTheConformanceSuiteHoldsAgainstThisServer` | built |
+| `cella port-forward` carries bytes both ways per accepted connection and exits with the refusal's code where the dial is refused; the usage table and `docs/cli.md` agree | `TestPortForward`, `TestPortForwardRefusals`, `TestPortForwardReportsAConnectionItCouldNotCarry`, `TestADialStreamCarriesBytesBothWays`, `TestADialStreamNamesTheCodeItClosedWith`, `TestTheDocumentCarriesTheCommandsHelp` | built |
+| No file this slice adds names a Latere host, image, pool or namespace | `TestNoLatereCoordinates`, `TestNoLatereCoordinatesInReleasedArtifacts` | built |
+
+## Outcome
+
+`Dial` is implemented on the native and podman drivers, the dial route
+serves its byte stream, the port proxy serves every method confined to the
+sandbox's declared ports, and `cella port-forward` carries a loopback port
+to a port inside.
+
+| Piece | Where |
+|---|---|
+| `DialReachesAPort` and the `Echo` option; `Dial` off the unchecked list | `runtime/runtimetest/dialcases.go`, `runtime/runtimetest/runtimetest.go` |
+| Native `Dial` on loopback, the declared ports kept in the record and probed at inspect | `runtime/native/dial.go`, `runtime/native/native.go` |
+| Podman's publication of each declared port on `127.0.0.1` and `Dial` through the mapping the engine reports | `runtime/podman/dial.go`, `runtime/podman/podman.go` |
+| `Controller.Dialer`, and the pool rule that a manifest with ports is created for real | `controller/operations.go`, `controller/pool.go` |
+| The dial socket, the shared gate, `upstream_unavailable` in the error table | `internal/api/dial.go`, `internal/api/api.go` |
+| The port proxy | `internal/api/portproxy.go`, `api/openapi.yaml` |
+| `sandbox.dial` | `internal/events/record.go`, `internal/events/build.go` |
+| The client's dial stream and `cella port-forward` | `internal/cellaclient/dial.go`, `internal/cellacli/portforward.go`, `docs/cli.md` |
+| The dial case reads the status and closes; `dial` declared to the suite | `test/conformance/cases_streams.go`, `cmd/cellad/conformance_test.go` |
+| The end to end on a running node | `cmd/cellad/dial_test.go` |
+| The operator's pages | `docs/native.md`, `docs/cli.md`, `SECURITY.md`, `CHANGELOG.md` |
+
+Coverage on `go test -race -cover`: `runtime/runtimetest` 98.0%,
+`runtime/native` 90.5%, `runtime/podman` 93.4% over the fake engine,
+`controller` 90.9%, `internal/api` 92.2%, `internal/events` 95.7%,
+`internal/cellaclient` 92.4%, `internal/cellacli` 90.2%, `cmd/cellad`
+90.4%. `test/conformance` is at 88.1%, where it was before this slice:
+its fake serves no socket by design, and the socket cases are proven
+against the real server by `TestTheConformanceSuiteHoldsAgainstThisServer`.
+`TestPodmanConformance` ran whole against a real engine (podman 6.0.2 in a
+machine on macOS, through its API socket), the dial and port cases
+included; the display cases skip for want of a desktop image.
+
+### What diverges from the specs above
+
+| Spec | What it said | What was built | Why |
+|---|---|---|---|
+| [[004-runtime-contract]] | podman's `Dial` is "yes", with no word on which ports | a declared port only, published at create | the engine's publication is the one route into the container's network namespace the libpod API offers, and it is fixed when the container is made; native reaches any port because it confines nothing |
+| [[004-runtime-contract]] | `remote` passes the whole suite through a native worker | its `NameIsolationCapabilities` and `DialReachesAPort` fail | the remote driver reports the worker's declaration, now carrying `Dial`, and relays no dial; `runtime/remote` was outside this slice |
+| [[023-computer-use-operations]] | the proxy forwards headers but the hop-by-hop set | `Authorization` is dropped too; `Host` is `localhost:<port>`, and the `X-Forwarded-*` set with a prefix says how the caller reached it | the bearer is the caller's to the control plane and never the workload's; a server inside that checks its host expects the one it listens on |
+| [[020-scheduling-and-sets]] | the pool's match rule reads image, resources, desktop, command, user, workspace and workdir | a declared port refuses the match too | a published port is fixed at the entry's create |
+| [[008-api]] | the proxy is `any` method | one pattern with no method, documented as the eight operations OpenAPI has | the document has no word for every method, and the mux test reads a method-less pattern as those eight |
+
+### What this leaves open
+
+| Open | Why |
+|---|---|
+| `Dial` on the `remote` driver, over the worker stream's byte sub-stream, or the driver withholding `Dial` until then | `runtime/remote` belongs to the worker stream's own slice; until one lands, `TestWorkerConformance` fails, and on a worker environment both routes answer 422 |
+| The `sandbox.port` record and `CELLA_EVENTS_PORTS` | the variable belongs to the configuration package another slice owns |
+| `Dial` on `k8s`, through the port forwarding subresource | the k8s driver's own slice |
+| `expose: public`, the `Exposer`, and mesh reachability | [[022-mesh-and-spawn]] and [[004-runtime-contract]] |
+| A half close on the dial socket | [[008-api]]'s stream grammar has none; the end of either direction ends the connection |
+| A closed port on an engine behind a user-space forwarder reads as a connection closed at once | the forwarder accepts the host side before it knows; the proxy answers 502 either way |

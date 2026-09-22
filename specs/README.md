@@ -79,7 +79,7 @@ later.
 | [055](.archive/055-api-contract-gaps.md) | API contract gaps: YAML bodies, content negotiation, apply by name, the framed exec stream, the API document, the object feed, the dial gate | large | complete | 003, 008, 009, 031, 052 |
 | [056](.archive/056-contract-evidence.md) | Contract evidence: the manifest corpus, the control cross-check, the security policy, the plane guide | medium | complete | 003, 013, 016, 031 |
 | [057](.archive/057-scheduling-queue.md) | Scheduling queue: the queued mode, capacity by resource, the queue and its loop, the scheduling fields | large | complete | 003, 005, 010, 017, 020, 021, 031, 038, 054 |
-| [060](060-dial-and-port-proxy.md) | Dial and the port proxy: Dialer on native and podman, the dial socket, the port proxy, cella port-forward | medium | in-progress | 004, 008, 011, 013, 023, 031, 034, 041, 055 |
+| [060](.archive/060-dial-and-port-proxy.md) | Dial and the port proxy: Dialer on native and podman, the dial socket, the port proxy, cella port-forward | medium | complete | 004, 008, 011, 013, 023, 031, 034, 041, 055 |
 
 ## Dependency graph
 
@@ -295,4 +295,4 @@ The map, the order, and the rule for a slice are in 031.
 | [051-environments-and-workers.md](.archive/051-environments-and-workers.md) | complete | The `Environment` kind and its field table, the environment key's mint and revocation, the worker registration and stream, the `remote` driver passing the conformance suite, and the `worker` role; the desired state half landed with 054 |
 | [054-environments-desired-state.md](.archive/054-environments-desired-state.md) | complete | The stored `Environment` object with its apply, read and delete routes, the controller's per-environment driver registry, the phase loop under the environments lease, and a sandbox routed to the worker that serves its environment |
 | [057-scheduling-queue.md](.archive/057-scheduling-queue.md) | complete | The queued mode, capacity by resource with a direct create that does not fit written `Failed NoCapacity`, the queue as the `Queued` rows and the loop that places them, and the scheduling fields |
-| [060-dial-and-port-proxy.md](060-dial-and-port-proxy.md) | in-progress | `Dial` on the native and podman drivers, the byte pump behind the dial route, the port proxy confined to the sandbox's declared ports, and `cella port-forward` |
+| [060-dial-and-port-proxy.md](.archive/060-dial-and-port-proxy.md) | complete | `Dial` on the native and podman drivers, the byte pump behind the dial route, the port proxy confined to the sandbox's declared ports, and `cella port-forward` |
