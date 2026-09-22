@@ -50,6 +50,27 @@ func TestPostgresStore(t *testing.T) {
 	})
 }
 
+// TestTheQueueTableIsGone: the scheduler's queue is the Queued rows of desired
+// state (spec 057), so a migrated database holds no second record of it.
+func TestTheQueueTableIsGone(t *testing.T) {
+	dsn := database(t, server(t))
+	if err := open(t, dsn, storetest.Key, time.Hour).Close(); err != nil {
+		t.Fatalf("closing the store: %v", err)
+	}
+	conn, err := pgx.Connect(t.Context(), dsn)
+	if err != nil {
+		t.Fatalf("connecting: %v", err)
+	}
+	defer func() { _ = conn.Close(context.Background()) }()
+	var found *string
+	if err := conn.QueryRow(t.Context(), `select to_regclass('public.queue')::text`).Scan(&found); err != nil {
+		t.Fatalf("asking for the table: %v", err)
+	}
+	if found != nil {
+		t.Fatalf("the migrated schema still holds %s", *found)
+	}
+}
+
 // TestSchemaGuards: a schema the binary does not know is a start-up failure,
 // not a server that runs statements against columns it cannot see.
 func TestSchemaGuards(t *testing.T) {

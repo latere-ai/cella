@@ -191,7 +191,6 @@ func validateScheduling(s v1.SchedulingSpec) error {
 	switch s.Mode {
 	case v1.SchedulingDirect:
 	case v1.SchedulingQueued:
-		return failAt("capability_unsupported", pathEnvironmentSchedule, "This server does not run a queue yet.")
 	default:
 		return failAt("invalid_field", pathEnvironmentSchedule, "A scheduling mode is direct or queued.")
 	}

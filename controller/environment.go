@@ -291,6 +291,9 @@ func (c *Controller) applyEnvironment(ctx context.Context, obj v1.Environment, i
 		c.drivers[obj.Metadata.Name] = d
 	}
 	c.emitEnvironment(ctx, mutation, obj)
+	// An apply may raise the capacity a queue waits on or change the mode,
+	// which the next pass reads.
+	c.wakeScheduler()
 	return cloneEnvironment(obj), !held, nil
 }
 
@@ -468,6 +471,11 @@ func (c *Controller) phaseOf(ctx context.Context, name string) error {
 	}
 	if mutation != "" {
 		c.emitEnvironment(ctx, mutation, next)
+	}
+	// An environment that came back to Ready places again, and what waits
+	// in its queues need not wait for the next tick to learn it.
+	if next.Status.Phase == v1.EnvironmentReady && obj.Status.Phase != v1.EnvironmentReady {
+		c.wakeScheduler()
 	}
 	return nil
 }

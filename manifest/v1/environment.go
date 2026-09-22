@@ -137,8 +137,8 @@ type SchedulingSpec struct {
 }
 
 // The scheduling modes. Direct starts a sandbox now or fails it; Queued admits
-// against the environment's capacity by priority and fair share and is spec
-// 020's later work, refused as capability_unsupported until the queue lands.
+// against the environment's capacity by priority and fair share, and holds a
+// sandbox it cannot fit yet until it can.
 const (
 	SchedulingDirect = "direct"
 	SchedulingQueued = "queued"
@@ -156,6 +156,12 @@ const (
 	// already prewarmed. It is the only place a caller sees that its create
 	// was accelerated.
 	ReasonFromPool = "FromPool"
+	// ReasonQueued is a sandbox a queued environment holds until it fits;
+	// the condition's message is its position in its queue.
+	ReasonQueued = "Queued"
+	// ReasonNoCapacity is a create a direct environment could not fit, which
+	// it fails rather than holds.
+	ReasonNoCapacity = "NoCapacity"
 )
 
 // PoolSpec is what the environment keeps prewarmed: entries of one shape, made

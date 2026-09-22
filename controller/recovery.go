@@ -38,9 +38,9 @@ func recoveryBackoff(attempt int) time.Duration {
 // vanished is the lost rule's input: the desired sandboxes of this environment
 // with no counterpart in what the driver just listed.
 //
-// A sandbox in Pending, Failed or Deleting is never lost. Pending has not
-// reached the driver, Failed never will, and Deleting is this control plane's
-// own act in flight. That is the hosted reaper's terminal probe restated: a
+// A sandbox in Pending, Queued, Failed or Deleting is never lost. Pending and
+// Queued have not reached the driver, Failed never will, and Deleting is this
+// control plane's own act in flight. That is the hosted reaper's terminal probe restated: a
 // sandbox the platform itself ended is not one the data plane lost.
 func (c *Controller) vanished(environment string, states []driver.State) []string {
 	c.mu.Lock()
@@ -74,7 +74,7 @@ func (c *Controller) vanished(environment string, states []driver.State) []strin
 // canBeLost reports whether a phase can become Lost.
 func canBeLost(phase string) bool {
 	switch phase {
-	case driver.Pending, PhaseFailed, PhaseDeleting:
+	case driver.Pending, PhaseQueued, PhaseFailed, PhaseDeleting:
 		return false
 	}
 	return true

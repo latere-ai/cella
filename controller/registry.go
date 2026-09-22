@@ -46,6 +46,11 @@ func (c *Controller) driverOf(id string) (driver.Driver, error) {
 	if !held || obj.Status.Environment == "" {
 		return c.driverFor(c.environment)
 	}
+	// No driver holds a queued sandbox, so there is nothing to act on
+	// until the scheduler places it.
+	if obj.Status.Phase == PhaseQueued {
+		return nil, ErrPhase
+	}
 	return c.driverFor(obj.Status.Environment)
 }
 

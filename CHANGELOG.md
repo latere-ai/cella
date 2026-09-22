@@ -6,6 +6,21 @@ refused before it is pushed.
 
 ## Unreleased
 
+- An environment can hold what it cannot fit yet. Apply one with
+  `scheduling.mode: queued`, or start `cellad` with
+  `CELLA_SCHEDULING_MODE=queued`, and a create past its capacity answers
+  `201` with the sandbox `Queued` instead of failing. It starts on its own
+  once there is room, by priority, then by which subject uses the least cpu
+  there, then by arrival. A manifest on such an environment can set
+  `spec.scheduling.priority`, `.queue`, `.startDeadline` and
+  `.preemptible`, and a queued sandbox reports its place in the queue on
+  every read. Capacity now counts cpu, memory and disk as well as the
+  number of sandboxes. A create that does not fit on a `direct`
+  environment is now `201` with the sandbox `Failed` and the reason
+  `NoCapacity`, where before it was refused with `quota_exceeded`, a code
+  that reads as your own limit. `cella_queue_depth` and `cella_capacity`
+  are on the scrape surface. [Capacity and queues](docs/scheduling.md)
+  has the whole of it.
 - Two pages for whoever builds on Cella rather than only runs it.
   `docs/plane.md` is how a platform sells sandboxes on top of the control
   plane: the two doors, the three endpoints you write, what each concern

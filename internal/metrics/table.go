@@ -63,7 +63,7 @@ var (
 	// Leases are the loops that run under one, by kind. The refill loop's
 	// lease is keyed by environment and its kind is "pool", because an
 	// environment per series would make the label unbounded.
-	Leases = []string{LeaseReaper, LeaseJournal, LeasePool, LeaseEnvironments}
+	Leases = []string{LeaseReaper, LeaseJournal, LeasePool, LeaseEnvironments, LeaseScheduler}
 	// Doors are where a connection reached the gateway (design 018).
 	Doors = []string{DoorProxy, DoorReverse}
 	// Decisions are what the boundary did with it.
@@ -112,6 +112,7 @@ const (
 	LeaseJournal      = "journal"
 	LeasePool         = "pool"
 	LeaseEnvironments = "environments"
+	LeaseScheduler    = "scheduler"
 
 	DoorProxy   = "proxy"
 	DoorReverse = "reverse"
@@ -165,8 +166,8 @@ var Table = []Row{
 	{Name: "cella_environments", Kind: KindGauge, Labels: []string{"phase", "reason"}, Owners: []string{"021"}, Await: awaitWorkers},
 	{Name: "cella_workers_connected", Kind: KindGauge, Labels: []string{"environment"}, Owners: []string{"021"}, Await: awaitWorkers},
 	{Name: "cella_operations_redelivered_total", Kind: KindCounter, Owners: []string{"021"}, Await: awaitWorkers},
-	{Name: "cella_queue_depth", Kind: KindGauge, Labels: []string{"environment", "queue"}, Owners: []string{"020"}, Await: awaitScheduler},
-	{Name: "cella_capacity", Kind: KindGauge, Labels: []string{"environment", "resource", "kind"}, Owners: []string{"020"}, Await: awaitScheduler},
+	{Name: "cella_queue_depth", Kind: KindGauge, Labels: []string{"environment", "queue"}, Owners: []string{"020"}},
+	{Name: "cella_capacity", Kind: KindGauge, Labels: []string{"environment", "resource", "kind"}, Owners: []string{"020"}},
 	{Name: "cella_preemptions_total", Kind: KindCounter, Owners: []string{"020"}, Await: awaitScheduler},
 	{Name: "cella_pool_size", Kind: KindGauge, Labels: []string{"environment", "state"}, Owners: []string{"020"}},
 	{Name: "cella_pool_adoptions_total", Kind: KindCounter, Labels: []string{"outcome"}, Owners: []string{"020"}},
@@ -228,5 +229,7 @@ var help = map[string]string{
 	"cella_gateways_connected":              "gateways of the environment holding a sync stream",
 	"cella_gateway_snapshots_total":         "boundary snapshots sent to a joining gateway",
 	"cella_pool_size":                       "prewarmed entries by state",
+	"cella_queue_depth":                     "sandboxes waiting in each queue of a queued environment",
+	"cella_capacity":                        "each quantity an environment declares, and what its sandboxes hold of it",
 	"cella_pool_adoptions_total":            "creates that took a prewarmed entry, and those that did not",
 }

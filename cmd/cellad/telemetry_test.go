@@ -480,6 +480,7 @@ func TestVocabulariesAgree(t *testing.T) {
 		{controller.MetricExhausted, metrics.OutcomeExhausted},
 		{controller.MetricLeaseReaper, metrics.LeaseReaper},
 		{controller.MetricLeasePool, metrics.LeasePool},
+		{controller.MetricLeaseScheduler, metrics.LeaseScheduler},
 		{events.MetricLeaseJournal, metrics.LeaseJournal},
 		{events.MetricAcknowledged, metrics.OutcomeAcknowledged},
 		{events.MetricDeferred, metrics.OutcomeDeferred},
@@ -501,7 +502,7 @@ func TestVocabulariesAgree(t *testing.T) {
 		}
 	}
 	// Every word a package passes is in the vocabulary the table publishes.
-	for _, word := range []string{controller.MetricLeaseReaper, controller.MetricLeasePool, events.MetricLeaseJournal} {
+	for _, word := range []string{controller.MetricLeaseReaper, controller.MetricLeasePool, controller.MetricLeaseScheduler, events.MetricLeaseJournal} {
 		if !slices.Contains(metrics.Leases, word) {
 			t.Errorf("%q is passed as a lease name and is outside %v", word, metrics.Leases)
 		}

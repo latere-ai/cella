@@ -239,6 +239,7 @@ func defaulting(ctx context.Context, obj *v1.Sandbox, o Options) (*v1.Environmen
 	if obj.Spec.Workdir == "" {
 		obj.Spec.Workdir = obj.Spec.Workspace.Path
 	}
+	defaultQueue(obj, env)
 	inheritEgress(obj, o.Parent)
 	inferEgressMode(&obj.Spec.Network, len(obj.Spec.Secrets) > 0)
 	if err = validateSpec(obj.Spec); err != nil {
@@ -388,13 +389,7 @@ func ceilings(obj *v1.Sandbox, o Options) error {
 	if err := ttlCeiling(obj.Spec.Lifecycle.TTL, o.Ceilings.TTL); err != nil {
 		return err
 	}
-	// scheduling.priority arrives with the scheduler, so the only priority a
-	// manifest expresses today is zero. A negative ceiling is one it cannot
-	// meet, and a limit that cannot be met is refused rather than ignored.
-	if o.Limits.MaxPriority < 0 {
-		return failAt("ceiling_exceeded", "spec.scheduling.priority", "The priority of 0 is above the limit this caller was granted.")
-	}
-	return nil
+	return priorityCeiling(obj.Spec.Scheduling.Priority, o.Limits.MaxPriority)
 }
 
 func ttlCeiling(ttl, ceiling v1.Duration) error {
@@ -453,6 +448,7 @@ func immutable(existing, obj *v1.Sandbox) error {
 			paths = append(paths, f.path)
 		}
 	}
+	paths = append(paths, schedulingChanges(existing.Spec.Scheduling, obj.Spec.Scheduling)...)
 	if len(paths) == 0 {
 		return nil
 	}
@@ -498,6 +494,9 @@ func capabilities(obj *v1.Sandbox, env *v1.Environment, o Options) ([]string, er
 		return nil, failAt("capability_unsupported", "spec.display", "This environment has no desktop to give a sandbox.")
 	}
 	if err := meshCapability(obj, env); err != nil {
+		return nil, err
+	}
+	if err := schedulingCapability(obj, env); err != nil {
 		return nil, err
 	}
 	if err := portCapability(obj, env, meshMembershipAt(obj, o)); err != nil {
