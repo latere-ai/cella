@@ -62,6 +62,46 @@ func TestAServerThatAgreesPasses(t *testing.T) {
 	}
 }
 
+// TestADriftedDefaultIsReportedFailed: the same fake, resolving the spawn
+// budget one unit off its literal default and everything else as before,
+// fails the defaults case and only that case, and the disagreement names the
+// field, the literal and the value that arrived.
+func TestADriftedDefaultIsReportedFailed(t *testing.T) {
+	honest, err := Execute(t.Context(), newFake(t).config())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(honest.Passed, "case003DefaultsAreReturned") {
+		t.Fatalf("the defaults case did not pass against the honest fake: %v", honest.Failed)
+	}
+	f := newFake(t)
+	f.driftedDefault = true
+	drifted, err := Execute(t.Context(), f.config())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := append(slices.Clone(honest.Failed), "case003DefaultsAreReturned")
+	slices.Sort(want)
+	got := slices.Sorted(slices.Values(drifted.Failed))
+	if !slices.Equal(got, want) {
+		t.Fatalf("the drifted server failed %v, want %v", got, want)
+	}
+	for _, res := range drifted.Results {
+		if res.Name != "case003DefaultsAreReturned" {
+			continue
+		}
+		var d *Disagreement
+		if !asDisagreement(res.Err, &d) {
+			t.Fatalf("the failure carries no disagreement: %v", res.Err)
+		}
+		for _, part := range []string{"POST /v1/sandboxes", "spec.mesh.spawn.budget 0 or absent", "spec.mesh.spawn.budget 1"} {
+			if !strings.Contains(d.Error(), part) {
+				t.Errorf("the disagreement does not carry %q:\n%s", part, d.Error())
+			}
+		}
+	}
+}
+
 // TestGroupsAndSkips: every group of design 015 exists, and a case whose
 // capability or input the configuration does not carry is reported skipped
 // with what is missing named, never silently and never as a pass.

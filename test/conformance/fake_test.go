@@ -47,6 +47,10 @@ type fake struct {
 	// is what proves a case reads the answer and not only its status.
 	wrongMessage bool
 	wrongValues  bool
+	// driftedDefault resolves spec.mesh.spawn.budget to 1 where the manifest
+	// contract's default is 0, and answers everything else as an honest
+	// server does: the fake's form of the drift seam of design 015.
+	driftedDefault bool
 	// execStream makes the framed exec stream malformed in one named way, so
 	// a test reads every assertion case008ExecStream makes and not only the
 	// first. The empty string serves the stream design 008 states.
@@ -321,6 +325,7 @@ func (f *fake) store(body map[string]any, name string) map[string]any {
 		body["metadata"] = metadata
 	}
 	metadata["name"] = name
+	resolveDefaults(body, f.driftedDefault)
 	body["status"] = map[string]any{
 		"id": id, "owner": "fake", "environment": "default",
 		"driver": "fake", "isolation": "none", "phase": "Running",
@@ -337,6 +342,60 @@ func (f *fake) store(body map[string]any, name string) map[string]any {
 	f.files[id] = map[string]string{}
 	f.record(id, "sandbox.created")
 	return body
+}
+
+// resolveDefaults fills the literal defaults of design 003 into a sandbox's
+// specification where the manifest left them out, which is the part of a
+// resolve a case reads. drift resolves the spawn budget one unit off.
+func resolveDefaults(body map[string]any, drift bool) {
+	spec, ok := body["spec"].(map[string]any)
+	if !ok {
+		spec = map[string]any{}
+		body["spec"] = spec
+	}
+	workspace, _ := spec["workspace"].(map[string]any)
+	if workspace == nil {
+		workspace = map[string]any{}
+		spec["workspace"] = workspace
+	}
+	if _, ok := workspace["path"]; !ok {
+		workspace["path"] = "/workspace"
+	}
+	if _, ok := workspace["source"]; !ok {
+		workspace["source"] = "empty"
+	}
+	if _, ok := spec["workdir"]; !ok {
+		spec["workdir"] = workspace["path"]
+	}
+	network, _ := spec["network"].(map[string]any)
+	if network == nil {
+		network = map[string]any{}
+		spec["network"] = network
+	}
+	egress, _ := network["egress"].(map[string]any)
+	if egress == nil {
+		egress = map[string]any{}
+		network["egress"] = egress
+	}
+	if _, ok := egress["mode"]; !ok {
+		egress["mode"] = "open"
+	}
+	if !drift {
+		return
+	}
+	mesh, _ := spec["mesh"].(map[string]any)
+	if mesh == nil {
+		mesh = map[string]any{}
+		spec["mesh"] = mesh
+	}
+	spawn, _ := mesh["spawn"].(map[string]any)
+	if spawn == nil {
+		spawn = map[string]any{}
+		mesh["spawn"] = spawn
+	}
+	if _, ok := spawn["budget"]; !ok {
+		spawn["budget"] = 1
+	}
 }
 
 func (f *fake) read(w http.ResponseWriter, r *http.Request) {

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strings"
 )
 
 // decodeCases prove what a body may be: the content types the manifest
@@ -127,9 +128,32 @@ func case003UnknownField(ctx context.Context, e *Env) error {
 	return e.refuseApply(ctx, request{Body: body, ContentType: "application/json"}, "unknown_field")
 }
 
+// literalDefaults are the defaults the manifest contract states as literals,
+// each with the value a manifest that names none of these fields, carries no
+// host and mounts no secret resolves to. Every conforming server resolves them
+// the same, whatever its operator configured, which is what lets a black-box
+// case hold a server to them; the operator's own defaults (resources, the
+// lifecycle, the image) are an installation's choice and no case reads them.
+// A zero default may also be left out of the answer, which is how JSON
+// carries a false or a 0 it omits.
+var literalDefaults = []struct {
+	path     string
+	want     string
+	orAbsent bool
+}{
+	{"workspace.path", "/workspace", false},
+	{"workspace.source", "empty", false},
+	{"workdir", "/workspace", false},
+	{"network.egress.mode", "open", false},
+	{"mesh.enabled", "false", true},
+	{"mesh.spawn.budget", "0", true},
+	{"mesh.spawn.depth", "0", true},
+}
+
 // case003DefaultsAreReturned: an apply answers the resolved manifest with
-// the status the server keeps, and a read of the same object answers the
-// same specification, so a resolve is what a caller can rely on.
+// the status the server keeps and the literal defaults of the manifest
+// contract, and a read of the same object answers the same specification, so
+// a resolve is what a caller can rely on.
 func case003DefaultsAreReturned(ctx context.Context, e *Env) error {
 	name := e.name()
 	created, err := e.create(ctx, e.caller, e.manifest(name))
@@ -153,6 +177,9 @@ func case003DefaultsAreReturned(ctx context.Context, e *Env) error {
 		if value == "" {
 			return fmt.Errorf("the created object carries no %s", field)
 		}
+	}
+	if err := holdsLiteralDefaults(created.Spec); err != nil {
+		return err
 	}
 	x, err := e.caller.get(ctx, "/v1/sandboxes/"+created.Status.ID)
 	if err != nil {
@@ -242,6 +269,51 @@ func case007AdmissionUnavailable(ctx context.Context, e *Env) error {
 	}
 	defer func() { _ = e.control(context.WithoutCancel(ctx), e.cfg.AdmissionControl, "") }()
 	return e.refuseApply(ctx, request{Body: e.manifest(e.name()), ContentType: "application/json"}, "admission_unavailable")
+}
+
+// holdsLiteralDefaults reads each literal default off a resolved
+// specification and reports the first that differs, naming the field, the
+// literal and what the apply answered.
+func holdsLiteralDefaults(spec json.RawMessage) error {
+	var resolved map[string]any
+	if err := json.Unmarshal(spec, &resolved); err != nil {
+		return &Disagreement{Method: http.MethodPost, Path: "/v1/sandboxes", Want: "a specification that is a JSON object", Got: err.Error(), Body: string(spec)}
+	}
+	for _, d := range literalDefaults {
+		got, present := lookup(resolved, d.path)
+		if present && fmt.Sprint(got) == d.want || !present && d.orAbsent {
+			continue
+		}
+		want := "spec." + d.path + " " + d.want
+		if d.orAbsent {
+			want += " or absent"
+		}
+		answered := "absent"
+		if present {
+			answered = fmt.Sprint(got)
+		}
+		return &Disagreement{
+			Method: http.MethodPost, Path: "/v1/sandboxes",
+			Want: want + ", the default the manifest contract states",
+			Got:  "spec." + d.path + " " + answered, Body: string(spec),
+		}
+	}
+	return nil
+}
+
+// lookup reads one dotted path off a decoded JSON object.
+func lookup(obj map[string]any, path string) (any, bool) {
+	var cur any = obj
+	for part := range strings.SplitSeq(path, ".") {
+		m, ok := cur.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		if cur, ok = m[part]; !ok {
+			return nil, false
+		}
+	}
+	return cur, true
 }
 
 // replaceField rewrites one top-level string field of a manifest.
