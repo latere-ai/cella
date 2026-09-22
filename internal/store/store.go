@@ -322,25 +322,6 @@ type Revocations interface {
 	Forget(ctx context.Context, before time.Time) (int, error)
 }
 
-// QueueItem is one sandbox waiting for capacity on a queued environment.
-type QueueItem struct {
-	SandboxID   string
-	Environment string
-	Queue       string
-	Priority    int
-	Subject     string
-	EnqueuedAt  time.Time
-}
-
-// Queue is the seam slice 038 fills. Design 020 owns the order Dequeue
-// returns and this slice does not guess it; the queue table is in the schema.
-type Queue interface {
-	Enqueue(ctx context.Context, item QueueItem) error
-	Dequeue(ctx context.Context, environment, queue string) (*QueueItem, error)
-	Remove(ctx context.Context, sandboxID string) error
-	Position(ctx context.Context, sandboxID string) (int, error)
-}
-
 // Operation is one unit of work for a data plane worker: one driver call, the
 // worker that holds it, and the answer that ends it.
 type Operation struct {
