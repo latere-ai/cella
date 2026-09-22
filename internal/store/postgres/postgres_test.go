@@ -363,11 +363,13 @@ func terminate() {
 // container, is unreliable on rootless Podman, and TestMain terminates what
 // this binary started anyway.
 func socket(ctx context.Context) {
-	if os.Getenv("DOCKER_HOST") != "" {
+	if host := os.Getenv("DOCKER_HOST"); host != "" {
+		reaperFor(strings.TrimPrefix(host, "unix://"))
 		return
 	}
 	for _, path := range []string{"/var/run/docker.sock", filepath.Join(os.Getenv("HOME"), ".docker/run/docker.sock")} {
 		if info, err := os.Stat(path); err == nil && info.Mode()&os.ModeSocket != 0 {
+			reaperFor(path)
 			return
 		}
 	}
@@ -385,6 +387,26 @@ func socket(ctx context.Context) {
 	_ = os.Setenv("TESTCONTAINERS_RYUK_DISABLED", "true")
 }
 
+// reaperFor turns Ryuk off where the Docker socket that answers is a Podman
+// machine's under another name: the link macOS's Podman helper installs at
+// /var/run/docker.sock is one, and Ryuk there asks for a bridge network the
+// machine does not have, which skips the whole suite.
+func reaperFor(path string) {
+	if onPodman(path) {
+		_ = os.Setenv("TESTCONTAINERS_RYUK_DISABLED", "true")
+	}
+}
+
+// onPodman reports whether a socket path resolves into a Podman machine's
+// directory.
+func onPodman(path string) bool {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return false
+	}
+	return strings.Contains(resolved, "podman")
+}
+
 func runPodman(ctx context.Context) (string, error) {
 	cmd := exec.CommandContext(ctx, "podman", "machine", "inspect", "--format", "{{.ConnectionInfo.PodmanSocket.Path}}")
 	out, err := cmd.Output()
@@ -392,4 +414,44 @@ func runPodman(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("asking podman for its socket: %w", err)
 	}
 	return string(out), nil
+}
+
+// TestTheReaperIsOffBehindAPodmanLink: a Docker socket that is a link into a
+// Podman machine's directory is Podman, and the reaper is turned off for it;
+// a Docker socket of Docker's own leaves the reaper as the library sets it.
+func TestTheReaperIsOffBehindAPodmanLink(t *testing.T) {
+	dir := t.TempDir()
+	machine := filepath.Join(dir, "podman", "machine")
+	if err := os.MkdirAll(machine, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(machine, "podman.sock")
+	if err := os.WriteFile(target, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "docker.sock")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	own := filepath.Join(dir, "docker", "docker.sock")
+	if err := os.MkdirAll(filepath.Dir(own), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(own, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("TESTCONTAINERS_RYUK_DISABLED", "")
+	reaperFor(own)
+	if got := os.Getenv("TESTCONTAINERS_RYUK_DISABLED"); got != "" {
+		t.Fatalf("Docker's own socket turned the reaper off: %q", got)
+	}
+	reaperFor(filepath.Join(dir, "absent.sock"))
+	if got := os.Getenv("TESTCONTAINERS_RYUK_DISABLED"); got != "" {
+		t.Fatalf("a socket that does not resolve turned the reaper off: %q", got)
+	}
+	reaperFor(link)
+	if got := os.Getenv("TESTCONTAINERS_RYUK_DISABLED"); got != "true" {
+		t.Fatalf("a link into a Podman machine left the reaper at %q", got)
+	}
 }
