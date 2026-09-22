@@ -1,6 +1,6 @@
 ---
 title: "Preemption: a higher head stops preemptible sandboxes, a victim waits again in its place, and the bound on how often"
-status: in-progress
+status: complete
 track: core
 depends_on:
   - specs/020-scheduling-and-sets.md
@@ -98,7 +98,7 @@ back into `Queued` from a phase a driver holds is a preemption.
 
 | Concern | A sandbox that never ran | A requeued sandbox |
 |---|---|---|
-| Capacity | holds nothing | holds its disk, the rule of a `Stopped` sandbox |
+| Capacity | holds nothing | holds its disk, the rule of a `Stopped` sandbox; placing it again asks for its cpu, memory and slot and not for that disk a second time |
 | Placement | the create from step 3 ([[057-scheduling-queue]]) | `Driver.Start`, with the boundary, the token and the workspace it already had; `Scheduled` turns `True` with `Placed` |
 | A driver that no longer has it at placement | not possible | written `Lost`, and the lost rule of [[005-lifecycle-controller]] takes it |
 | `startDeadline` | fails it with `StartDeadline` | does not apply: the sandbox started once |
@@ -162,13 +162,65 @@ designed: a victim is a running sandbox on the head's own environment.
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| Victims are the running, preemptible, lower priority sandboxes of the environment, chosen lowest priority, then largest cpu, then newest, and only as many as the head needs; none is stopped for a head the whole list would not fit, or one short of disk | `TestPreemption`, `TestPreemptionStopsOnlyWhatTheHeadNeeds` | not built |
-| A victim is stopped through its driver and written `Queued` with `Scheduled Preempted`, its count and its `createdAt`; its disk stays counted; the stopped record carries `Preempted`; the counter moves per victim | `TestPreemption`, `TestReasonOfHoldsTheEnum` | not built |
-| After `CELLA_MAX_PREEMPTIONS` a sandbox is no longer a victim, a bound of zero preempts nothing, and the count survives a restart | `TestPreemptionIsBounded`, `TestPreemptionSurvivesARestart` | not built |
-| A requeued sandbox is placed again by `Start` with its workspace, is `Lost` when its object is gone, is passed over by `startDeadline` and `autoDelete`, is deleted at its `ttl`, and a delete removes its object | `TestARequeuedSandboxResumes`, `TestARequeuedSandboxKeepsItsDeadlines` | not built |
-| One pass merges the queues by the order and never stops what it placed; a queued create wakes the loop | `TestAPassNeverPreemptsWhatItPlaced`, `TestAQueuedCreateWakesTheLoop` | not built |
-| `CELLA_MAX_PREEMPTIONS` is read with its bounds | `TestLoadScheduling`, `TestPoolConfigRefusals` | not built |
-| `cella_preemptions_total` is registered and moves per victim | `TestMetricsTable`, `TestAwaitingRowsAreRegisteredByNobody`, `TestCountersRecordWhatTheyOwn` | not built |
-| A pool never serves a create the authorizer refused, at `sandbox.create`, at `environment.use`, or at the owner's count, and a refused create moves no adoption counter | `TestPoolIsBehindTheAuthorizer`, `TestARefusedCreateIsNoAdoption` | not built |
-| `cellad serve` on a queued environment of one slot: a higher create stops a preemptible one, which runs again with its files once the higher one is deleted, and the scrape counts it | `TestPreemptionEndToEnd` | not built |
-| No file this slice adds names a Latere host, image, pool or namespace | `TestNoLatereCoordinates` | not built |
+| Victims are the running, preemptible, lower priority sandboxes of the environment, chosen lowest priority, then largest cpu, then newest, and only as many as the head needs; none is stopped for a head the whole list would not fit, or one short of disk | `TestPreemption`, `TestPreemptionStopsOnlyWhatTheHeadNeeds` | built |
+| A victim is stopped through its driver and written `Queued` with `Scheduled Preempted`, its count and its `createdAt`; its disk stays counted; the stopped record carries `Preempted`; the counter moves per victim; a stop the driver refuses ends the preemption and a read that fails after it does not | `TestPreemption`, `TestReasonOfHoldsTheEnum`, `TestPreemptionReadsThroughAFailingDriver` | built |
+| After `CELLA_MAX_PREEMPTIONS` a sandbox is no longer a victim, a bound of zero preempts nothing, and the count survives a restart | `TestPreemptionIsBounded`, `TestPreemptionSurvivesARestart` | built |
+| A requeued sandbox is placed again by `Start` with its workspace and asked for its disk once, is `Lost` when its object is gone, is passed over by `startDeadline` and `autoDelete`, is deleted at its `ttl`, and a delete removes its object | `TestARequeuedSandboxResumes`, `TestARequeuedSandboxHoldsItsDiskOnce`, `TestARequeuedSandboxKeepsItsDeadlines` | built |
+| One pass merges the queues by the order and never stops what it placed; a queued create wakes the loop | `TestAPassNeverPreemptsWhatItPlaced`, `TestAQueuedCreateWakesTheLoop` | built |
+| `CELLA_MAX_PREEMPTIONS` is read with its bounds | `TestSchedulingDefaults`, `TestLoadScheduling`, `TestPoolConfigRefusals` | built |
+| `cella_preemptions_total` is registered and moves per victim | `TestMetricsTable`, `TestAwaitingRowsAreRegisteredByNobody`, `TestCountersRecordWhatTheyOwn` | built |
+| A pool never serves a create the authorizer refused, at `sandbox.create`, at `environment.use`, or at the owner's count, and a refused create moves no adoption counter | `TestPoolIsBehindTheAuthorizer`, `TestARefusedCreateIsNoAdoption` | built |
+| `cellad serve` on a queued environment of one slot: a higher create stops a preemptible one, which runs again with its files once the higher one is deleted, and the scrape counts it | `TestPreemptionEndToEnd` | built |
+| No file this slice adds names a Latere host, image, pool or namespace | `TestNoLatereCoordinates`, `TestNoLatereCoordinatesInReleasedArtifacts` | built for `manifest/v1`, `docs` and `internal/config`, the trees those tests walk; the controller, API and `cellad` files this slice adds are walked by no test and name none |
+
+## Outcome
+
+Preemption is built on queued environments, and the pool is proved
+behind the authorizer.
+
+| Piece | Where |
+|---|---|
+| Victims, the stop and the requeue in one write, the resume by `Start`, `DefaultMaxPreemptions` and `NoPreemptions` | `controller/preempt.go` |
+| The pass that reads an environment's queues as one line, the fit that gives up pool entries before victims, the start deadline a requeued sandbox no longer has, the wake of a queued create | `controller/scheduler.go`, `controller/controller.go` |
+| A requeued sandbox holding its disk, and asked for it once when placed again | `controller/capacity.go` |
+| `autoDelete` not asked of a requeued sandbox | `controller/reaper.go` |
+| The adoption counter moved once a create's outcome is known | `controller/controller.go` |
+| `status.preemptions` and the `Preempted` reason of the `Scheduled` condition | `manifest/v1/sandbox.go`, `manifest/v1/environment.go` |
+| `Preempted`, `NoCapacity` and `StartDeadline` in the transition enum | `internal/events/record.go` |
+| `CELLA_MAX_PREEMPTIONS` | `internal/config/pool.go`, `cmd/cellad/main.go` |
+| `cella_preemptions_total` | `internal/metrics/`, `controller/metrics.go` |
+| The pool behind the authorizer | `internal/api/pool_test.go` |
+| The operator's page | `docs/scheduling.md`, `docs/observability.md` |
+
+Coverage on `go test -race -cover`: `controller` 91.1%,
+`internal/config` 91.5%, `internal/metrics` 100%, `internal/api`
+91.7%, `manifest` 95.8%, `cmd/cellad` 90.4%. `internal/events` reads
+87.5% and `manifest/v1` 64.3%, as before this slice: it added
+constants and a field to both and no statement. The end-to-end that
+ran is `TestPreemptionEndToEnd`: `cellad serve` on the native driver,
+queued with room for one sandbox, a preemptible sandbox that wrote a
+file, a create of priority 5 answered `Queued` and placed by the wake
+its own create sent, the lower one read back `Queued` with `Scheduled
+Preempted` and one preemption, the scrape counting it, and the lower
+one running again with its file once the higher one was deleted.
+
+### What diverges from the specs above
+
+| Spec | What it said | What was built | Why |
+|---|---|---|---|
+| [[005-lifecycle-controller]] | `Running --> Stopping --> Stopped --> Queued` for a victim, and a placement out of `Queued` through `Pending` | `Running` to `Queued` in one write after the driver's synchronous stop; a preempted sandbox leaves `Queued` by `Start`, drawn as `Queued --> Starting` | a crash between two writes would leave a victim `Stopped` and outside every queue, and a create would make a second object beside the one its driver kept |
+| [[020-scheduling-and-sets]] | a victim is `Stopped` with `Scheduled: Preempted` | `Queued` with `Scheduled: Preempted`, `status.reason` `Preempted` and `status.preemptions` | the victim never rests in `Stopped`; the count is status so the bound survives a restart and a new lease holder |
+| [[020-scheduling-and-sets]] | the loop dequeues per queue | one line per environment, head against head | a pass that served queues by name could place a low head and stop it for a higher head of the next queue |
+| [[020-scheduling-and-sets]] | nothing on a victim's `startDeadline`, `autoDelete` or placement | `startDeadline` does not apply, `autoDelete` does not fire, `ttl` does; placing it again asks for its disk once | it has started once, it is waiting to run again rather than stopped for good, and its disk never left |
+| [[020-scheduling-and-sets]] | a lost sandbox is found by the lost rule | a requeued sandbox whose object is gone is found at its placement and written `Lost` | the lost rule passes over `Queued`, so that a recovery does not re-take capacity for a sandbox that is waiting for it |
+| [[038-environment-pools]] | the adoption counter moved before the create's order ran | moved once the outcome is known; a refused create is neither, a lost adoption is a miss | a create the owner's count refused was counted as served by the pool |
+| [[057-scheduling-queue]] | `NoCapacity` and `StartDeadline` written on `Failed` | the same, and now in the transition enum | a record carrying either read `DriverFailed` |
+
+### What this leaves open
+
+| Open | Why |
+|---|---|
+| A recovery that queues on a full queued environment | [[020-scheduling-and-sets]]; a requeued sandbox found `Lost` at its placement is recovered by the lost rule, which re-takes capacity as it does for any lost sandbox |
+| Preemption of a sandbox that is not `Running`, or across environments | not designed: a victim is a running sandbox on its head's own environment |
+| The error branches of the victim choice that parse capacity and resources | the fit before it parses the same quantities first, so the loop never reaches them; they stay for a caller that does |
+| `capacity: auto`, `Options.Scheduler` as a seam, the `SandboxSet` kind | the rest of [[020-scheduling-and-sets]] |
