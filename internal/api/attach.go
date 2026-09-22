@@ -105,7 +105,7 @@ func (h *handler) socket(w http.ResponseWriter, r *http.Request, terminal bool) 
 		respondError(w, err)
 		return
 	}
-	if !h.Controller.Capabilities().Attach {
+	if !h.Controller.CapabilitiesOf(obj.Status.Environment).Attach {
 		respondError(w, &manifest.Error{Code: "capability_unsupported", Detail: "the environment provides no terminal session"})
 		return
 	}

@@ -84,7 +84,7 @@ func (h *handler) desktop(w http.ResponseWriter, r *http.Request, action string,
 		respondError(w, err)
 		return obj, false
 	}
-	caps := h.Controller.Capabilities()
+	caps := h.Controller.CapabilitiesOf(obj.Status.Environment)
 	if !caps.Display {
 		respondError(w, &manifest.Error{Code: "capability_unsupported", Detail: "the environment provides no desktop"})
 		return obj, false

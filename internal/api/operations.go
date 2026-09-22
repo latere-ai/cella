@@ -49,7 +49,7 @@ func (h *handler) files(w http.ResponseWriter, r *http.Request) {
 		respondError(w, err)
 		return
 	}
-	if !h.Controller.Capabilities().Files {
+	if !h.Controller.CapabilitiesOf(obj.Status.Environment).Files {
 		respondError(w, runtime.ErrUnsupported)
 		return
 	}

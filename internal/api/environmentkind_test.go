@@ -35,6 +35,14 @@ type kinds struct {
 
 func setupEnvironments(t *testing.T) *kinds {
 	t.Helper()
+	return setupEnvironmentsOn(t, func(d runtime.Driver) runtime.Driver { return d })
+}
+
+// setupEnvironmentsOn is setupEnvironments with the control plane's own
+// environment behind a wrapped driver, so the default and an applied
+// environment can declare different capabilities over one native runtime.
+func setupEnvironmentsOn(t *testing.T, own func(runtime.Driver) runtime.Driver) *kinds {
+	t.Helper()
 	issuer := issuertest.New(t, issuertest.WithDefaultAudience("cella"))
 	verifier, err := auth.NewVerifier(t.Context(), auth.VerifierOptions{
 		Issuers: []string{issuer.URL()}, Audience: "cella",
@@ -49,7 +57,7 @@ func setupEnvironments(t *testing.T) *kinds {
 	t.Cleanup(func() { _ = d.Close() })
 	k := &kinds{}
 	c, err := controller.Open(t.Context(), controller.Options{
-		DataDir: t.TempDir(), Driver: d, Environment: "default",
+		DataDir: t.TempDir(), Driver: own(d), Environment: "default",
 		NewDriver:     func(v1.Environment) (runtime.Driver, error) { return d, nil },
 		Registrations: func(string) []controller.Registration { return k.live() },
 	})
@@ -334,4 +342,60 @@ func TestASandboxNamesAnEnvironmentThisServerDoesNotHold(t *testing.T) {
 func TestApplyingAnEnvironmentWithoutAStore(t *testing.T) {
 	f := setup(t, &auth.OwnerPolicy{DefaultEnvironment: "default", Admins: []string{"alice"}})
 	f.request(http.MethodPut, "/v1/environments/eu-gpu", f.alice, environmentBody, http.StatusForbidden)
+}
+
+// desktopOnlyDriver declares a desktop and nothing else, so the control
+// plane's own environment and a native one applied beside it differ in every
+// capability a route's gate reads.
+type desktopOnlyDriver struct{ runtime.Driver }
+
+func (desktopOnlyDriver) Capabilities() runtime.Capabilities {
+	return runtime.Capabilities{Display: true, Input: true}
+}
+
+// TestTheGatesReadTheSandboxsOwnEnvironment: a route's capability gate
+// decides on what the environment the sandbox runs on provides, not on what
+// the control plane's own environment provides. The default here declares a
+// desktop and no file operations or terminal; the environment beside it is
+// native and declares the opposite.
+func TestTheGatesReadTheSandboxsOwnEnvironment(t *testing.T) {
+	k := setupEnvironmentsOn(t, func(d runtime.Driver) runtime.Driver { return desktopOnlyDriver{d} })
+	k.send(http.MethodPut, "/v1/environments/eu-gpu", k.alice, environmentBody, nil, http.StatusCreated)
+	k.arrive(t)
+	create := func(name, environment string) string {
+		t.Helper()
+		body := `{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox","metadata":{"name":"` + name + `"},` +
+			`"spec":{"environment":"` + environment + `"}}`
+		out, _ := k.send(http.MethodPost, "/v1/sandboxes", k.alice, body, nil, http.StatusCreated)
+		var obj v1.Sandbox
+		if err := json.Unmarshal(out, &obj); err != nil {
+			t.Fatal(err)
+		}
+		return "/v1/sandboxes/" + obj.Status.ID
+	}
+	there, here := create("there", "eu-gpu"), create("here", "default")
+	refused := func(path string) {
+		t.Helper()
+		out, _ := k.send(http.MethodGet, path, k.alice, "", nil, http.StatusUnprocessableEntity)
+		if !strings.Contains(string(out), "capability_unsupported") {
+			t.Fatalf("%s answered %s", path, out)
+		}
+	}
+
+	// The archive route: served where the sandbox's environment has files,
+	// refused where it has none.
+	k.send(http.MethodGet, there+"/files?path=/workspace", k.alice, "", nil, http.StatusOK)
+	refused(here + "/files?path=/workspace")
+
+	// The desktop routes: refused where the sandbox's environment has no
+	// desktop, whatever the control plane's own declares.
+	refused(there + "/display")
+	refused(there + "/screenshot")
+
+	// The terminal: a request that passes the gate reaches the upgrade, which
+	// refuses a plain GET with 400; one that fails it is refused first.
+	if k.c.CapabilitiesOf("eu-gpu").Attach {
+		k.send(http.MethodGet, there+"/attach", k.alice, "", nil, http.StatusBadRequest)
+	}
+	refused(here + "/attach")
 }

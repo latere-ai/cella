@@ -23,13 +23,14 @@ import (
 // carries nothing tells a caller less than a refusal that says what the
 // environment cannot provide.
 func (h *handler) dial(w http.ResponseWriter, r *http.Request) {
-	if _, err := h.authorizedObject(r, authorizer.ActionSandboxExec); err != nil {
+	obj, err := h.authorizedObject(r, authorizer.ActionSandboxExec)
+	if err != nil {
 		respondError(w, err)
 		return
 	}
 	detail := "the environment reaches no port inside the sandbox"
-	if h.Controller.Capabilities().Dial {
-		detail = "the " + h.Controller.DriverName() + " driver declares Dial and this server serves no dial stream"
+	if h.Controller.CapabilitiesOf(obj.Status.Environment).Dial {
+		detail = "the " + h.Controller.DriverNameOf(obj.Status.Environment) + " driver declares Dial and this server serves no dial stream"
 	}
 	respondError(w, &manifest.Error{Code: "capability_unsupported", Detail: detail})
 }
