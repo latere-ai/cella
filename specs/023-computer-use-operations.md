@@ -11,7 +11,7 @@ depends_on:
 affects: [internal/api/, runtime/, runtime/display/, manifest/v1/, docs/, test/conformance/]
 effort: medium
 created: 2026-09-12
-updated: 2026-09-20
+updated: 2026-09-23
 author: changkun
 ---
 
@@ -35,10 +35,10 @@ and what a browser-ready sandbox is.
 The desktop, the screenshot, the screen stream, the input batch and the
 port probe are built by [[041-display-and-input]] on podman and k8s, with
 the types and the rules in `runtime/display` and the four routes in
-`internal/api`. The HTTP port proxy, the dial socket, `expose: mesh`,
-`expose: public` and the browser-ready example are not: the first two need
-the `Dial` capability, which that slice declares as an interface and no
-driver implements, and the next two need `Mesh` and an `Exposer`.
+`internal/api`. The HTTP port proxy and the dial socket are built by
+[[060-dial-and-port-proxy]] over the `Dial` of the native and podman
+drivers. `expose: mesh`, `expose: public` and the browser-ready example
+are not: the first two need `Mesh` and an `Exposer`.
 
 ## Design
 
@@ -169,7 +169,7 @@ capture tool ([[014-release-and-installation]]).
 | Every gesture type lands: a drag moves a window, a chord `ctrl+a` selects, typed text is visible in the next frame, a scroll moves a document | `TestArgv`, table-driven | partial, [[041-display-and-input]]: every type expands to the argument lists the input tool takes, and a chorded click no longer clears the modifiers it is held under; what the desktop then shows is not asserted |
 | A driver failure at event 5 of 10 answers 200 with `executed: 4` and the index; `Touch` is called for each operation | `TestInputPartialFailure`, `TestScreenStampsActivity` | passing, [[041-display-and-input]] |
 | The screen stream paces at the requested rate, drops the newest frame for a slow client, and closes 1000 with the sandbox | `TestFramesDropsForASlowReader`, `TestScreen` on podman, `TestScreenStream` and `TestScreenSessionEndsWithTheClient` over HTTP | passing, [[041-display-and-input]] |
-| The proxy forwards every method and the path suffix, passes a WebSocket upgrade, answers `not_found` for an undeclared name and 502 for a closed port or a stopped sandbox, and never dials an address the caller supplied | `TestPortProxy`, `TestPortProxyIsConfined` | not built: the proxy needs `Dial`, which no driver implements; [[041-display-and-input]] declares the interface and builds the probe |
+| The proxy forwards every method and the path suffix, passes a WebSocket upgrade, answers `not_found` for an undeclared name and 502 for a closed port or a stopped sandbox, and never dials an address the caller supplied | `TestPortProxy`, `TestPortProxyIsConfined` | built ([[060-dial-and-port-proxy]]); the `sandbox.port` record under `CELLA_EVENTS_PORTS=1` is not emitted |
 | `public` gets a URL where an `Exposer` is installed and `Ingress` is declared; `state` follows the probe | `TestPublicPorts` | not built |
 | `docs/examples/browser.yaml` resolves under the current schema and runs the computer-use scenario end to end | conformance `case023BrowserReady` | not built |
 | `display` on an environment without `Display` or `Input` is refused at resolve | `TestDisplayCapability`, `TestDisplayCapabilityGate` | passing, [[041-display-and-input]] |

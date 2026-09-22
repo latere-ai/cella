@@ -8,7 +8,7 @@ depends_on:
 affects: [runtime/, runtime/k8s/, runtime/podman/, runtime/native/, runtime/local/, runtime/vm/, runtime/remote/, runtime/runtimetest/, internal/config/]
 effort: large
 created: 2026-09-12
-updated: 2026-09-21
+updated: 2026-09-23
 author: changkun
 ---
 
@@ -30,7 +30,7 @@ the suite.
 
 ## Current state
 
-The initial native implementation is in `runtime/native` ([[025-native-runtime-migration]]), and the container driver of the server-side default is in `runtime/k8s` ([[036-k8s-driver]]) with the lifecycle, execution, logs, archive transfer and stamped identity of this contract. `DisplayDriver` and `InputDriver` are implemented by `runtime/podman` and `runtime/k8s`, with `State.Ports` and the `DisplayReady` condition ([[041-display-and-input]]); `Dialer` is declared and implemented by none, and the route that would reach it answers the capability gate ([[055-api-contract-gaps]]). The exported package and capability types follow this design; the other drivers and remaining native capabilities below are not complete.
+The initial native implementation is in `runtime/native` ([[025-native-runtime-migration]]), and the container driver of the server-side default is in `runtime/k8s` ([[036-k8s-driver]]) with the lifecycle, execution, logs, archive transfer and stamped identity of this contract. `DisplayDriver` and `InputDriver` are implemented by `runtime/podman` and `runtime/k8s`, with `State.Ports` and the `DisplayReady` condition ([[041-display-and-input]]); `Dialer` is implemented by `runtime/native`, on the host's loopback, and by `runtime/podman`, through the engine's publication of each declared port on loopback, with the dial socket and the port proxy of [[008-api]] behind it ([[060-dial-and-port-proxy]]); `runtime/remote` relays no dial yet. The exported package and capability types follow this design; the other drivers and remaining native capabilities below are not complete.
 
 Design provenance: The interface descends from one that three container
 drivers have implemented in the hosted platform; the changes are that
@@ -294,11 +294,16 @@ states and the conformance case allows for.
 Podman fixes an object's labels at create, so the mutable half of the
 stamped identity is a second, unmounted volume the driver replaces with
 a generation rather than a label it edits, and the driver holds no
-sandbox state in its own process ([[035-podman-driver]]). `Dial` and
-the per-sandbox networks are not built yet; what is built is the
+sandbox state in its own process ([[035-podman-driver]]). The
+per-sandbox networks are not built yet; what is built is the
 lifecycle, `Exec`, `Logs`, the archive transfers, the stamped identity,
-`Attach`, and the mesh's own network with its member aliases
-([[040-mesh-and-spawn]]).
+`Attach`, the mesh's own network with its member aliases
+([[040-mesh-and-spawn]]), and `Dial`: every declared port is published
+on `127.0.0.1` at a host port the engine picks, and `Dial` reads the
+mapping from the container's inspect, so a second driver over the engine
+dials what the first created ([[060-dial-and-port-proxy]]). Where a
+user-space forwarder stands in front of the engine, a closed port reads
+as a connection the far end closes at once rather than a refused dial.
 
 ### The vm driver
 
@@ -416,7 +421,9 @@ port cases with `DisplayDriver` and `InputDriver`
 ([[041-display-and-input]]). The display cases need an image carrying a
 desktop and the port case a command that binds one, both named in the
 suite's options, and each skips with that reason where the caller named
-none. `Watch`, the remaining
+none. `DialReachesAPort` came with the first `Dialer`s and needs a command
+that serves one port as an echo, named in the options the same way
+([[060-dial-and-port-proxy]]). `Watch`, the remaining
 optional interfaces, and `PhaseTableMatchesPackageDoc` have no operation on
 it yet; a declared capability among them is reported by the suite as
 declared without a case, so a driver's run lists what it claims and the
@@ -447,9 +454,9 @@ requests ([[023-computer-use-operations]]); the microVM driver's design
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| `native` passes the whole conformance suite in the unit suite | `TestNativeConformance` | passing for the cases built, [[032-runtime-conformance-suite]], including the `Attacher` cases of [[034-terminal-attach]], the `FileStore` cases of [[033-file-operations]] and the `Pool` cases of [[038-environment-pools]] |
+| `native` passes the whole conformance suite in the unit suite | `TestNativeConformance` | passing for the cases built, [[032-runtime-conformance-suite]], including the `Attacher` cases of [[034-terminal-attach]], the `FileStore` cases of [[033-file-operations]], the `Pool` cases of [[038-environment-pools]], and `DialReachesAPort` and `PortsReportListening` with the test binary serving the port ([[060-dial-and-port-proxy]]) |
 | `local` passes it on a machine with the sandbox runtime installed, with `Attach`, `Dial`, `Mesh`, `Display`, `Input`, `Resize`, `Pool` and the `open` egress case skipped as undeclared, and is skipped whole with the remediation printed where the runtime is absent | `TestLocalConformance` | not built |
-| `podman` passes it in the podman tier; `k8s` against kind; `remote` through a worker running `native` | `TestPodmanConformance`, `TestClusterConformance`, `TestWorkerConformance` | `podman` passing against a real engine, the `Attacher`, `FileStore`, display, screen, input and port cases included, skipped where no socket answers, [[035-podman-driver]], [[034-terminal-attach]], [[033-file-operations]], [[041-display-and-input]]; `TestClusterConformance` built and skipped where no cluster is configured, [[036-k8s-driver]]; both declare `Pool` and pass its cases, [[038-environment-pools]]; `remote` passing the whole suite against an in-process worker running `native`, [[051-environments-and-workers]], and reached as the driver of an `Environment` with `mode: worker` by `TestControllerRoutesByEnvironment` and `TestWorkerEnvironmentEndToEnd` ([[054-environments-desired-state]]) |
+| `podman` passes it in the podman tier; `k8s` against kind; `remote` through a worker running `native` | `TestPodmanConformance`, `TestClusterConformance`, `TestWorkerConformance` | `podman` passing against a real engine, the `Attacher`, `FileStore`, display, screen, input, port and dial cases included, skipped where no socket answers, [[035-podman-driver]], [[034-terminal-attach]], [[033-file-operations]], [[041-display-and-input]], [[060-dial-and-port-proxy]]; `TestClusterConformance` built and skipped where no cluster is configured, [[036-k8s-driver]]; both declare `Pool` and pass its cases, [[038-environment-pools]]; `remote` passed the whole suite against an in-process worker running `native`, [[051-environments-and-workers]], until `native` declared `Dial` ([[060-dial-and-port-proxy]]): the remote driver reports the worker's declaration and relays no dial, so its `NameIsolationCapabilities` and `DialReachesAPort` fail until the relay over the worker stream lands or the driver withholds `Dial`; it is reached as the driver of an `Environment` with `mode: worker` by `TestControllerRoutesByEnvironment` and `TestWorkerEnvironmentEndToEnd` ([[054-environments-desired-state]]) |
 | A driver that declares a capability without its interface, implements one it does not declare, or declares one the suite finds not to hold, fails | `TestConformanceCatchesAFalseCapability` with nine lying wrappers | passing, [[032-runtime-conformance-suite]], [[034-terminal-attach]], [[033-file-operations]], [[045-workload-tokens]] |
 | `Mesh`: podman puts each member on one network per mesh under `<name>.mesh`, k8s renders the policy admitting that mesh alone with a headless Service and each Pod's `hostname` and `subdomain`, the object ends with the last member, and `native` declares none | `TestMeshNetwork` and `TestPodmanMeshOnARealEngine`, `TestRenderMesh`, `TestMeshPolicyAdmitsTheMeshAndNothingElse`, `TestMeshLifetime`, `TestNativeDeclaresNoMesh` | built ([[040-mesh-and-spawn]]); the peer-reachability case belongs to the conformance tier and waits on [[012-test-stubs-and-tiers]] |
 | Every stamped label value is a legal Kubernetes label value and every key a legal key, for an owner with `@` and a user label with a `/` | `TestStampedIdentityIsLegal` | passing, [[036-k8s-driver]] |
