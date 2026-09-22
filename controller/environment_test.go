@@ -8,6 +8,7 @@ import (
 	"errors"
 	"log/slog"
 	"slices"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -18,9 +19,26 @@ import (
 
 // worker is one environment a data plane serves, as a controller test builds
 // it: the driver behind it and the registrations the phase loop reads.
+// The registrations are read by the phase loop's goroutine while a test moves
+// them, so they sit behind a lock.
 type worker struct {
 	driver        *fakeDriver
+	mu            sync.Mutex
 	registrations []Registration
+}
+
+// set replaces what the workers report.
+func (w *worker) set(registrations []Registration) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.registrations = registrations
+}
+
+// live is what the workers report now.
+func (w *worker) live() []Registration {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.registrations
 }
 
 // twoEnvironments opens a controller over the environment it drives itself and
@@ -37,7 +55,7 @@ func twoEnvironments(t *testing.T, o Options) (*Controller, *fakeDriver, *worker
 		o.DataDir = t.TempDir()
 	}
 	o.NewDriver = func(v1.Environment) (driver.Driver, error) { return there, nil }
-	o.Registrations = func(string) []Registration { return w.registrations }
+	o.Registrations = func(string) []Registration { return w.live() }
 	c, err := Open(t.Context(), o)
 	if err != nil {
 		t.Fatal(err)
@@ -69,7 +87,7 @@ func applyWorker(t *testing.T, c *Controller, name string) v1.Environment {
 // writes from a live registration.
 func ready(t *testing.T, c *Controller, w *worker, name string) {
 	t.Helper()
-	w.registrations = []Registration{{Worker: "wrk_1", LastHeartbeat: c.clock.Now(), Connected: true}}
+	w.set([]Registration{{Worker: "wrk_1", LastHeartbeat: c.clock.Now(), Connected: true}})
 	if err := c.Phases(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -282,7 +300,7 @@ func TestCreateOnAnEnvironmentBelowReady(t *testing.T) {
 
 	// The worker goes away and the window passes: the environment is Offline
 	// and the sandbox it already holds is untouched.
-	w.registrations = nil
+	w.set(nil)
 	clock.Advance(2 * time.Minute)
 	if err = c.Phases(t.Context()); err != nil {
 		t.Fatal(err)
@@ -334,7 +352,7 @@ func TestEnvironmentPhases(t *testing.T) {
 		t.Errorf("an environment nothing ever registered on is %s", phase(t, c, "eu-gpu"))
 	}
 
-	w.registrations = []Registration{{Worker: "wrk_1", LastHeartbeat: clock.Now(), Connected: true}}
+	w.set([]Registration{{Worker: "wrk_1", LastHeartbeat: clock.Now(), Connected: true}})
 	if err := c.Phases(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -356,7 +374,7 @@ func TestEnvironmentPhases(t *testing.T) {
 
 	// One missed heartbeat is not an outage: the environment stays Ready
 	// until the window has passed.
-	w.registrations = nil
+	w.set(nil)
 	clock.Advance(30 * time.Second)
 	if err := c.Phases(t.Context()); err != nil {
 		t.Fatal(err)
@@ -376,7 +394,7 @@ func TestEnvironmentPhases(t *testing.T) {
 	}
 
 	// The worker comes back and the environment is placeable once more.
-	w.registrations = []Registration{{Worker: "wrk_2", LastHeartbeat: clock.Now(), Connected: true}}
+	w.set([]Registration{{Worker: "wrk_2", LastHeartbeat: clock.Now(), Connected: true}})
 	if err := c.Phases(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -394,7 +412,7 @@ func TestEnvironmentPhases(t *testing.T) {
 
 	// A worker that registered and dropped its stream is not counted: the
 	// environment cannot be placed on through it.
-	w.registrations = []Registration{{Worker: "wrk_2", LastHeartbeat: clock.Now(), Connected: false}}
+	w.set([]Registration{{Worker: "wrk_2", LastHeartbeat: clock.Now(), Connected: false}})
 	clock.Advance(2 * time.Minute)
 	if err := c.Phases(t.Context()); err != nil {
 		t.Fatal(err)
@@ -444,7 +462,7 @@ func TestTheInProcessEnvironmentAnswersFromItsDriver(t *testing.T) {
 func TestTheLoopRunsUnderItsLease(t *testing.T) {
 	c, _, w, _ := twoEnvironments(t, Options{Lease: refusingLease{}})
 	applyWorker(t, c, "eu-gpu")
-	w.registrations = []Registration{{Worker: "wrk_1", LastHeartbeat: c.clock.Now(), Connected: true}}
+	w.set([]Registration{{Worker: "wrk_1", LastHeartbeat: c.clock.Now(), Connected: true}})
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct{})
 	go func() { defer close(done); c.RunEnvironments(ctx) }()
@@ -514,7 +532,7 @@ func TestTheReaperHoldsOnAnEnvironmentBelowReady(t *testing.T) {
 	if _, err := c.Create(t.Context(), obj, "alice", 0); err != nil {
 		t.Fatal(err)
 	}
-	w.registrations = nil
+	w.set(nil)
 	clock.Advance(2 * time.Hour)
 	if err := c.Phases(t.Context()); err != nil {
 		t.Fatal(err)
@@ -834,7 +852,7 @@ func TestTheEnvironmentLoopTicks(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct{})
 	go func() { defer close(done); c.RunEnvironments(ctx) }()
-	w.registrations = []Registration{{Worker: "wrk_1", Driver: "native", LastHeartbeat: clock.Now(), Connected: true}}
+	w.set([]Registration{{Worker: "wrk_1", Driver: "native", LastHeartbeat: clock.Now(), Connected: true}})
 	clock.ticks <- clock.Now()
 	waitFor(t, "the loop to write the phase", func() bool {
 		obj, err := c.GetEnvironment("eu-gpu")
@@ -1020,7 +1038,7 @@ func TestAnOfflineEnvironmentStaysOffline(t *testing.T) {
 	c, _, w, clock := twoEnvironments(t, Options{EnvironmentOffline: time.Minute, Events: events})
 	applyWorker(t, c, "eu-gpu")
 	ready(t, c, w, "eu-gpu")
-	w.registrations = nil
+	w.set(nil)
 	clock.Advance(2 * time.Minute)
 	for range 3 {
 		if err := c.Phases(t.Context()); err != nil {
