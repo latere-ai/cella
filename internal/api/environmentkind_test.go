@@ -399,3 +399,17 @@ func TestTheGatesReadTheSandboxsOwnEnvironment(t *testing.T) {
 	}
 	refused(here + "/attach")
 }
+
+// TestTheFeedReadsAnyEnvironment: an environment's id is its name, so the
+// object feed reads the records of every environment this control plane holds
+// by that name, decided under environment.read, and not only those of the one
+// cellad drives itself.
+func TestTheFeedReadsAnyEnvironment(t *testing.T) {
+	k := setupEnvironments(t)
+	k.send(http.MethodPut, "/v1/environments/eu-gpu", k.alice, environmentBody, nil, http.StatusCreated)
+	k.send(http.MethodGet, "/v1/events?object=eu-gpu", k.alice, "", nil, http.StatusOK)
+	body, _ := k.send(http.MethodGet, "/v1/events?object=eu-gpu", k.bob, "", nil, http.StatusForbidden)
+	if !strings.Contains(string(body), "environment.read") {
+		t.Fatalf("the environment feed was decided under another action: %q", body)
+	}
+}

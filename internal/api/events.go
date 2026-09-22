@@ -102,27 +102,26 @@ func (h *handler) eventFeed(w http.ResponseWriter, r *http.Request) {
 // feedObject is the object a feed names: its stored id, what the authorizer
 // decides on, and the action of design 009's rule that a feed is read under
 // the object's own kind. The kind comes from the prefix design 001 gives an
-// id; an object named rather than identified is a sandbox, which is the one
-// kind whose names this route resolves.
+// id. An environment's id is its name (spec 021), so a key naming an
+// environment this control plane holds is that environment; any other key is
+// a sandbox's id or its name.
 func (h *handler) feedObject(r *http.Request, key string) (string, authz.Resource, string, error) {
-	switch {
-	case strings.HasPrefix(key, v1.SecretIDPrefix):
+	if strings.HasPrefix(key, v1.SecretIDPrefix) {
 		obj, err := h.Controller.GetSecret(r.Context(), key, caller(r).Subject)
 		if err != nil {
 			return "", authz.Resource{}, "", err
 		}
 		return obj.Status.ID, secretResource(obj), authorizer.ActionSecretRead, nil
-	case strings.HasPrefix(key, v1.EnvironmentIDPrefix), key == h.Controller.Environment():
-		obj, err := h.environment(key)
-		if err != nil {
-			return "", authz.Resource{}, "", err
-		}
-		return obj.Status.ID, environmentResource(obj), authorizer.ActionEnvironmentRead, nil
-	default:
-		obj, err := h.Controller.Get(r.Context(), key, caller(r).Subject)
-		if err != nil {
-			return "", authz.Resource{}, "", err
-		}
-		return obj.Status.ID, resource(obj), authorizer.ActionSandboxRead, nil
 	}
+	switch env, err := h.Controller.GetEnvironment(key); {
+	case err == nil:
+		return environmentSubject(env), environmentResource(env), authorizer.ActionEnvironmentRead, nil
+	case strings.HasPrefix(key, v1.EnvironmentIDPrefix):
+		return "", authz.Resource{}, "", err
+	}
+	obj, err := h.Controller.Get(r.Context(), key, caller(r).Subject)
+	if err != nil {
+		return "", authz.Resource{}, "", err
+	}
+	return obj.Status.ID, resource(obj), authorizer.ActionSandboxRead, nil
 }
