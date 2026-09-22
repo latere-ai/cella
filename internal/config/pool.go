@@ -25,6 +25,9 @@ const (
 	MaxPoolSize = 1024
 	// MaxPoolInFlight bounds how many entries one refill tick prewarms.
 	MaxPoolInFlight = 64
+	// MaxPreemptionsBound bounds CELLA_MAX_PREEMPTIONS. It is a bound on a
+	// typo: a sandbox stopped a hundred times has not been bounded at all.
+	MaxPreemptionsBound = 100
 )
 
 // Scheduling is the default environment's placement: the mode, the pool, and
@@ -37,6 +40,12 @@ type Scheduling struct {
 	// ScheduleInterval is how often the scheduler loop passes over the
 	// queued environments when nothing wakes it sooner.
 	ScheduleInterval time.Duration
+	// MaxPreemptions is how many times one sandbox may be stopped to place
+	// one of higher priority, in the controller's terms: the zero an
+	// operator writes, which makes no sandbox a victim, is carried as
+	// controller.NoPreemptions, because the controller reads zero as its
+	// default.
+	MaxPreemptions int
 	// Pool is what the environment keeps prewarmed. Size zero is no pool.
 	Pool v1.PoolSpec
 	// PoolInFlight is how many entries one tick prewarms and PoolGrace how
@@ -64,6 +73,10 @@ func loadScheduling(getenv Getenv, problems *[]string) Scheduling {
 		s.Mode = DefaultSchedulingMode
 	}
 	s.ScheduleInterval = interval(getenv, "CELLA_SCHEDULE_INTERVAL", controller.DefaultScheduleInterval, problems)
+	s.MaxPreemptions = count(getenv, "CELLA_MAX_PREEMPTIONS", controller.DefaultMaxPreemptions, 0, MaxPreemptionsBound, problems)
+	if s.MaxPreemptions == 0 {
+		s.MaxPreemptions = controller.NoPreemptions
+	}
 	s.Pool = v1.PoolSpec{
 		Size:  count(getenv, "CELLA_POOL_SIZE", 0, 0, MaxPoolSize, problems),
 		Image: strings.TrimSpace(getenv("CELLA_POOL_IMAGE")),
