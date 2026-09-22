@@ -887,6 +887,9 @@ func errorEnvelope(err error, requestID string) (int, httpjson.Error) {
 	case "spawn_budget_exhausted":
 		status = 422
 		message = "The sandbox has no spawn budget left."
+	case "upstream_unavailable":
+		status = 502
+		message = "Nothing is listening on that port."
 	}
 	details := map[string]any{"request_id": requestID, "detail": fmt.Sprint(err)}
 	// Design 008 carries paths as a list for every code that names fields.
