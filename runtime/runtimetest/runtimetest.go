@@ -40,6 +40,11 @@ type Options struct {
 	// the port probe. Nil skips that case: what binds a port is the image's,
 	// not the contract's.
 	Listen func(port int) []string
+	// Echo is the main command that serves one port inside a sandbox and
+	// writes back every byte each connection sends, to two connections at
+	// once, for the dial case. Nil skips that case: what serves a port is
+	// the image's, not the contract's.
+	Echo func(port int) []string
 }
 
 // tb is the part of testing.TB the cases use. testing.TB cannot be implemented
@@ -93,6 +98,7 @@ var cases = []caseDef{
 	{"ScreenStream", screenStream},
 	{"InputAcceptsAndRefuses", inputAcceptsAndRefuses},
 	{"PortsReportListening", portsReportListening},
+	{"DialReachesAPort", dialReachesAPort},
 	{"DetachRecovers", detachRecovers},
 }
 
@@ -127,7 +133,7 @@ func declaredWithoutCase(c runtime.Capabilities) []string {
 	for _, f := range []struct {
 		name string
 		on   bool
-	}{{"Egress", len(c.Egress) > 0}, {"Mesh", c.Mesh}, {"Ingress", c.Ingress}, {"Volumes", c.Volumes}, {"Snapshots", c.Snapshots}, {"Dial", c.Dial}, {"Resize", c.Resize}} {
+	}{{"Egress", len(c.Egress) > 0}, {"Mesh", c.Mesh}, {"Ingress", c.Ingress}, {"Volumes", c.Volumes}, {"Snapshots", c.Snapshots}, {"Resize", c.Resize}} {
 		if f.on {
 			out = append(out, f.name)
 		}
