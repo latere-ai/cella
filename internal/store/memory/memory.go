@@ -33,14 +33,20 @@ var ErrClosed = errors.New("store: the memory store is closed")
 // sealed under; without one the store serves everything but Values.
 type Options struct {
 	Key []byte
+	// JournalCap is how many records the journal keeps per object: an
+	// append past it drops that object's oldest record, delivered or not,
+	// which is the loss design 009 names for a store that does not outlive
+	// the process. Zero keeps every record.
+	JournalCap int
 }
 
 // Store is one control plane's state in memory.
 type Store struct {
-	mu     sync.Mutex
-	env    store.Envelope
-	data   *data
-	closed bool
+	mu         sync.Mutex
+	env        store.Envelope
+	data       *data
+	journalCap int
+	closed     bool
 }
 
 // Open takes the options and returns a store with nothing in it.
@@ -49,7 +55,7 @@ func Open(o Options) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Store{env: env, data: newData()}, nil
+	return &Store{env: env, data: newData(), journalCap: o.JournalCap}, nil
 }
 
 // Tx runs fn under the one mutex. A failed fn restores the snapshot taken
@@ -64,7 +70,7 @@ func (s *Store) Tx(ctx context.Context, fn func(store.Tx) error) error {
 		return ErrClosed
 	}
 	before := s.data.clone()
-	if err := fn(&txn{d: s.data, env: s.env}); err != nil {
+	if err := fn(&txn{d: s.data, env: s.env, journalCap: s.journalCap}); err != nil {
 		s.data = before
 		return err
 	}
@@ -200,13 +206,14 @@ func cloneState(s driver.State) driver.State {
 // for its whole life, which is why the store has no accessor outside Tx: a
 // second lock from inside fn would deadlock.
 type txn struct {
-	d   *data
-	env store.Envelope
+	d          *data
+	env        store.Envelope
+	journalCap int
 }
 
 func (t *txn) Desired() store.Desired   { return desired{t.d} }
 func (t *txn) Observed() store.Observed { return observed{t.d} }
-func (t *txn) Journal() store.Journal   { return journal{t.d} }
+func (t *txn) Journal() store.Journal   { return journal{t.d, t.journalCap} }
 func (t *txn) Values() store.Values     { return values{t.d, t.env} }
 func (t *txn) Leases() store.Leases     { return leases{t.d} }
 
@@ -414,7 +421,10 @@ func (x observed) Rebuild(ctx context.Context, environment string, states []driv
 	return nil
 }
 
-type journal struct{ d *data }
+type journal struct {
+	d   *data
+	cap int
+}
 
 func (x journal) Append(ctx context.Context, e store.Event) (int64, error) {
 	if err := ctx.Err(); err != nil {
@@ -432,7 +442,13 @@ func (x journal) Append(ctx context.Context, e store.Event) (int64, error) {
 		e.At = time.Now().UTC()
 	}
 	e.Payload = slices.Clone(e.Payload)
-	x.d.events[e.ObjectID] = append(x.d.events[e.ObjectID], e)
+	held := append(x.d.events[e.ObjectID], e)
+	// The sequence keeps counting past a dropped record, so the feed pages
+	// by the same numbers and a reader never sees one reused.
+	if x.cap > 0 && len(held) > x.cap {
+		held = slices.Delete(held, 0, len(held)-x.cap)
+	}
+	x.d.events[e.ObjectID] = held
 	return e.Seq, nil
 }
 

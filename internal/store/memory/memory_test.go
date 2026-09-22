@@ -126,3 +126,47 @@ func TestMemoryHonoursACancelledContext(t *testing.T) {
 		t.Fatalf("the transaction did not commit: %v", err)
 	}
 }
+
+// TestTheMemoryJournalKeepsARing: an object's records past the cap drop the
+// oldest, delivered or not, the sequence keeps counting past what was
+// dropped, and a cap of zero keeps everything.
+func TestTheMemoryJournalKeepsARing(t *testing.T) {
+	appendN := func(t *testing.T, s *memory.Store, object string, n int) []store.Event {
+		t.Helper()
+		var out []store.Event
+		err := s.Tx(t.Context(), func(tx store.Tx) error {
+			for range n {
+				if _, err := tx.Journal().Append(t.Context(), store.Event{ObjectID: object, Type: "sandbox.exec"}); err != nil {
+					return err
+				}
+			}
+			var err error
+			out, _, err = tx.Journal().ByObject(t.Context(), object, store.Page{Limit: 100})
+			return err
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	ring, err := memory.Open(memory.Options{JournalCap: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ring.Close() })
+	kept := appendN(t, ring, "sbx_a", 5)
+	if len(kept) != 3 || kept[0].Seq != 5 || kept[2].Seq != 3 {
+		t.Fatalf("a ring of three over five appends keeps %+v, want sequences 5, 4, 3", kept)
+	}
+	if other := appendN(t, ring, "sbx_b", 1); len(other) != 1 || other[0].Seq != 1 {
+		t.Fatalf("the cap is per object, and another object's journal reads %+v", other)
+	}
+	unbounded, err := memory.Open(memory.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = unbounded.Close() })
+	if all := appendN(t, unbounded, "sbx_a", 5); len(all) != 5 {
+		t.Fatalf("a cap of zero kept %d of five", len(all))
+	}
+}
