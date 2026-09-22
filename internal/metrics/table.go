@@ -168,7 +168,7 @@ var Table = []Row{
 	{Name: "cella_operations_redelivered_total", Kind: KindCounter, Owners: []string{"021"}, Await: awaitWorkers},
 	{Name: "cella_queue_depth", Kind: KindGauge, Labels: []string{"environment", "queue"}, Owners: []string{"020"}},
 	{Name: "cella_capacity", Kind: KindGauge, Labels: []string{"environment", "resource", "kind"}, Owners: []string{"020"}},
-	{Name: "cella_preemptions_total", Kind: KindCounter, Owners: []string{"020"}, Await: awaitScheduler},
+	{Name: "cella_preemptions_total", Kind: KindCounter, Owners: []string{"020"}},
 	{Name: "cella_pool_size", Kind: KindGauge, Labels: []string{"environment", "state"}, Owners: []string{"020"}},
 	{Name: "cella_pool_adoptions_total", Kind: KindCounter, Labels: []string{"outcome"}, Owners: []string{"020"}},
 	{Name: "cella_set_replicas", Kind: KindGauge, Labels: []string{"phase"}, Owners: []string{"020"}, Await: awaitScheduler},
@@ -232,4 +232,5 @@ var help = map[string]string{
 	"cella_queue_depth":                     "sandboxes waiting in each queue of a queued environment",
 	"cella_capacity":                        "each quantity an environment declares, and what its sandboxes hold of it",
 	"cella_pool_adoptions_total":            "creates that took a prewarmed entry, and those that did not",
+	"cella_preemptions_total":               "sandboxes the scheduler stopped to place one of higher priority",
 }

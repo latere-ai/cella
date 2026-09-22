@@ -78,6 +78,7 @@ type Registry struct {
 	egressBytes *pkgmetrics.Counter
 	snapshots   *pkgmetrics.Counter
 	adoptions   *pkgmetrics.Counter
+	preemptions *pkgmetrics.Counter
 
 	requestDuration *pkgmetrics.Histogram
 	createDuration  *pkgmetrics.Histogram
@@ -125,6 +126,7 @@ func New(o Options) *Registry {
 	r.egressBytes = counter("cella_egress_bytes_total")
 	r.snapshots = counter("cella_gateway_snapshots_total")
 	r.adoptions = counter("cella_pool_adoptions_total")
+	r.preemptions = counter("cella_preemptions_total")
 
 	r.requestDuration = histogram("cella_request_duration_seconds", LatencyBuckets)
 	r.createDuration = histogram("cella_sandbox_create_duration_seconds", CreateBuckets)
@@ -358,6 +360,10 @@ func (r *Registry) PoolSize(ready, filling int) {
 	r.pool[PoolReady] = ready
 	r.pool[PoolFilling] = filling
 }
+
+// SandboxPreempted counts one sandbox the scheduler stopped to place one of
+// higher priority.
+func (r *Registry) SandboxPreempted() { r.preemptions.Inc(nil) }
 
 // ReaperAction counts one lifecycle rule the reaper enforced.
 func (r *Registry) ReaperAction(rule, action string) {
