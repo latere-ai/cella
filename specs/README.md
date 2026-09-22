@@ -79,7 +79,7 @@ later.
 | [055](.archive/055-api-contract-gaps.md) | API contract gaps: YAML bodies, content negotiation, apply by name, the framed exec stream, the API document, the object feed, the dial gate | large | complete | 003, 008, 009, 031, 052 |
 | [056](.archive/056-contract-evidence.md) | Contract evidence: the manifest corpus, the control cross-check, the security policy, the plane guide | medium | complete | 003, 013, 016, 031 |
 | [057](.archive/057-scheduling-queue.md) | Scheduling queue: the queued mode, capacity by resource, the queue and its loop, the scheduling fields | large | complete | 003, 005, 010, 017, 020, 021, 031, 038, 054 |
-| [059](059-conformance-closure.md) | Conformance closure: the drift seam, the external run on dispatch, the agent scenario against this server | medium | in-progress | 003, 011, 012, 015, 031, 052 |
+| [059](.archive/059-conformance-closure.md) | Conformance closure: the drift seam, the external run on dispatch, the agent scenario against this server | medium | complete | 003, 011, 012, 015, 031, 052 |
 
 ## Dependency graph
 
@@ -295,4 +295,4 @@ The map, the order, and the rule for a slice are in 031.
 | [051-environments-and-workers.md](.archive/051-environments-and-workers.md) | complete | The `Environment` kind and its field table, the environment key's mint and revocation, the worker registration and stream, the `remote` driver passing the conformance suite, and the `worker` role; the desired state half landed with 054 |
 | [054-environments-desired-state.md](.archive/054-environments-desired-state.md) | complete | The stored `Environment` object with its apply, read and delete routes, the controller's per-environment driver registry, the phase loop under the environments lease, and a sandbox routed to the worker that serves its environment |
 | [057-scheduling-queue.md](.archive/057-scheduling-queue.md) | complete | The queued mode, capacity by resource with a direct create that does not fit written `Failed NoCapacity`, the queue as the `Queued` rows and the loop that places them, and the scheduling fields |
-| [059-conformance-closure.md](059-conformance-closure.md) | in-progress | The drift seam of the conformance suite, the dispatch job that runs the documented command against an address, and the agent scenario run through the built command against this server |
+| [059-conformance-closure.md](.archive/059-conformance-closure.md) | complete | The drift seam `CELLA_TEST_DRIFT_DEFAULT` and the literal defaults the suite now reads, the dispatch workflow that runs the documented command against an address, and the agent and spawn cases against this server |

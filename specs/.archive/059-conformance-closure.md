@@ -1,6 +1,6 @@
 ---
 title: "Conformance closure: the drift seam, the external run on dispatch, the agent scenario against this server"
-status: in-progress
+status: complete
 track: core
 depends_on:
   - specs/015-conformance-suite.md
@@ -9,7 +9,7 @@ depends_on:
   - specs/012-test-stubs-and-tiers.md
   - specs/031-hosted-sandbox-consolidation.md
   - specs/.archive/052-conformance-suite.md
-affects: [internal/config/, cmd/cellad/, test/conformance/, .github/workflows/, docs/, specs/]
+affects: [internal/config/, cmd/cellad/, test/conformance/, .github/workflows/, release_test.go, docs/, CHANGELOG.md, specs/]
 effort: medium
 created: 2026-09-23
 updated: 2026-09-23
@@ -141,25 +141,99 @@ to the page.
 `TestTheConformanceSuiteHoldsAgainstThisServer` builds `./cmd/cella` into a
 temporary directory and passes it as `Cella`, so `case011AgentScenario`
 applies, execs, reads and deletes through the binary against the node in
-the process on every push, where it skipped before.
+the process on every push, where it skipped before. The skill teaches moving
+files as well, and [[015-conformance-suite]]'s agent group names `cp`, so the
+case writes a file from its exec and copies it out with `cella cp`, and runs
+where the environment declares `files`.
+
+### The spawn case
+
+`case022SpawnBoundary` built its parent and its child with `spec.egress.allow`,
+a field the schema does not have, so against any server that declared `mesh`
+its first apply was `unknown_field`. It passed only against the package's own
+fake, which stored any specification. The fake now refuses a specification
+field outside [[003-manifest-contract]]'s table, as a server does. The case
+gives the parent `mesh.spawn` with a budget of 2 and a depth of 1 and applies,
+through the parent's workload token, a child asking a budget of 5, which is
+`boundary_exceeded` naming `spec.mesh.spawn.budget`. The budget rule is the
+one every environment serves: the egress rule needs a gateway that
+acknowledges the parent's allow list, and on an environment with none the
+parent's create is `driver_unavailable`. Spawn rights need no mesh, so the
+case no longer gates on `mesh`, and the kind runs of both pipelines pass
+`mesh` beside `files` and `pool`, which is every capability the Kubernetes
+driver declares without a desktop image.
 
 ## Not in this slice
 
-The kind half of [[015-conformance-suite]]'s timing row asserts the
-capabilities the pipelines pass, `files` and `pool`; the Kubernetes driver
-also declares `mesh`, and asserting it on kind is the spawn group's to prove
-([[022-mesh-and-spawn]]). The operator defaults as server configuration
-(`CELLA_DEFAULT_CPU` and the rest of [[007-admission]]'s rows) and a suite
-input that states them. A control endpoint in `cella-stubs`
+The capability set [[015-conformance-suite]]'s Time section names for the
+kind tier beyond what the Kubernetes driver declares: the egress modes,
+`volumes`, `display`, `input`, `attach`, `dial` and `resize` join the kind
+run as that driver declares them. The operator defaults as server
+configuration (`CELLA_DEFAULT_CPU` and the rest of [[007-admission]]'s rows)
+and a suite input that states them. A control endpoint in `cella-stubs`
 ([[012-test-stubs-and-tiers]]).
+
+## Outcome
+
+Built on 2026-09-23.
+
+### What landed
+
+| Piece | Where |
+|---|---|
+| `CELLA_TEST_DRIFT_DEFAULT`, its closed set and the native-only rule | `internal/config/drift.go`, `Config.DriftDefault` |
+| The drift applied before the admission step, and the start-up warning | `cmd/cellad/drift.go`, `serve` in `cmd/cellad/main.go` |
+| The literal defaults the defaults case reads | `literalDefaults` and `holdsLiteralDefaults` in `test/conformance/cases_manifest.go` |
+| The drifted node run, the built `cella` in the in-process run | `TestSuiteCatchesADriftedDefault`, `buildCella` and `startStackWith` in `cmd/cellad/conformance_test.go` |
+| The spawn case's schema fields and budget rule, the agent case's copy out | `test/conformance/cases_kinds.go`; the fake resolves the literal defaults, drifts one on request, and refuses an unknown specification field |
+| The dispatch job and the test that holds it to the page | `.github/workflows/conformance.yml`, `TestTheExternalRunIsTheDocumentedCommand` in `release_test.go` |
+| `-count=1 -timeout 30m` in the documented command, the dispatch section, the fixed defaults | `docs/conformance.md`; the tier row of [[012-test-stubs-and-tiers]] carries the same command |
+| `mesh` in the kind runs | `verify.yml`'s install job, `release.yml`'s conformance job |
+
+Against `cellad serve` in the process the suite reports 46 passed, 0 failed
+and 5 skipped in fifteen seconds; with the spawn budget drifted it reports 45
+passed and exactly `case003DefaultsAreReturned` failed, with the disagreement
+`want: spec.mesh.spawn.budget 0 or absent`, `got: spec.mesh.spawn.budget 1`.
+Against the development stack, run locally, the spawn case passes beside the
+rest. Coverage: `internal/config` 91.6%, `cmd/cellad` 90.7%,
+`test/conformance` 90.6% counting the run against the node (88.2% from its
+own tests). `go test -race` is green on every package touched.
+
+### Divergences
+
+1. [[015-conformance-suite]] put the drift inside the defaulting stage. It is
+   applied at the head of stage 3 instead, before the admission step reads
+   the object, because the defaulting stage is the `manifest` package's and a
+   test seam there would ship in every platform that composes it; every later
+   stage reads the same object either way. 015's drift seam section says so.
+2. The spawn case proves the budget rule and not the egress rule it was
+   written for, because an allow list needs a gateway on the environment.
+3. The agent case now needs `files`, since the scenario the skill teaches
+   copies a file out; a server that declares no files skips it with the
+   capability named.
+4. The documented command changed: `-count=1` and `-timeout 30m`, for the
+   reasons in Current state.
+
+### What is left open
+
+The kind half of [[015-conformance-suite]]'s timing row: the kind runs now
+pass `mesh` and run the spawn case, and the first install job after this
+slice is the run that shows both on a cluster; the Time section's larger set
+waits on the Kubernetes driver. No dispatch of the new workflow has run
+against an address yet, which is an operation and not a property of the tree.
+`TestRunConformance` in `test/run` failed locally in two of five runs with
+`bind: address already in use` on the internal port of the pair it chose,
+while other suites held ports on the same machine; it is unchanged by this
+slice and runs on a hosted runner of its own in the pipeline.
 
 ## Acceptance criteria
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| `CELLA_TEST_DRIFT_DEFAULT` accepts only the closed set of fields and only with the native runtime; any other value, or the variable with any other runtime, is a start-up problem naming the variable | `TestTheDriftDefaultIsATestSeam` | open |
-| The drift sets a field still at its literal default one unit off before the admission step reads it, leaves a field the resolve already moved alone, and is the identity when unset | `TestTheDriftMovesOneDefault` | open |
-| The defaults case reads the literal defaults, passes against a server that resolves them, and reports the field against one that drifts | `TestADriftedDefaultIsReportedFailed`, `TestTheConformanceSuiteHoldsAgainstThisServer` | open |
-| A server started with `CELLA_TEST_DRIFT_DEFAULT` fails exactly the resolve group's defaults case | `TestSuiteCatchesADriftedDefault` | open |
-| The dispatch job runs the documented command against the address given, with the token from a repository secret through the environment and never in the script | `TestTheExternalRunIsTheDocumentedCommand` | open |
-| The agent scenario runs through the built `cella` against this server on every push | `TestTheConformanceSuiteHoldsAgainstThisServer` | open |
+| `CELLA_TEST_DRIFT_DEFAULT` accepts only the closed set of fields and only with the native runtime; any other value, or the variable with any other runtime, is a start-up problem naming the variable | `TestTheDriftDefaultIsATestSeam` | passing |
+| The drift sets a field still at its literal default one unit off before the admission step reads it, leaves a field the resolve already moved alone, and is the identity when unset | `TestTheDriftMovesOneDefault` | passing |
+| The defaults case reads the literal defaults, passes against a server that resolves them, and reports the field against one that drifts | `TestTheLiteralDefaultsAreReadOffTheAnswer`, `TestADriftedDefaultIsReportedFailed`, `TestTheConformanceSuiteHoldsAgainstThisServer` | passing |
+| A server started with `CELLA_TEST_DRIFT_DEFAULT` fails exactly the resolve group's defaults case | `TestSuiteCatchesADriftedDefault` | passing: 45 passed, `case003DefaultsAreReturned` failed, 5 skipped |
+| The dispatch job runs the documented command against the address given, with the token from a repository secret through the environment and never in the script | `TestTheExternalRunIsTheDocumentedCommand` | passing; a mutation of the job's flags, of its suite flags, or of the bearer's source fails it |
+| The agent scenario, copy out included, runs through the built `cella` against this server on every push | `TestTheConformanceSuiteHoldsAgainstThisServer`, `TestTheAgentCaseRunsTheBinary` | passing |
+| The spawn case sends only fields the schema knows, needs no mesh, and is refused at the budget it exceeds against this server | `TestAServerThatAgreesPasses`, `TestAServerThatAnswersTheWrongValueIsReportedFailed`, `TestTheConformanceSuiteHoldsAgainstThisServer` | passing |
