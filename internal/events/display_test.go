@@ -5,11 +5,11 @@ package events
 
 import "testing"
 
-// TestOperationRecordsCarryNoContent holds the three computer-use records of
-// design 009 to what they may say. A screenshot names a size, an input batch
-// a count, a screen session a duration and two byte counts, and none of them
-// can hold a frame, a key or a character of typed text: the shapes have no
-// field for one.
+// TestOperationRecordsCarryNoContent holds the computer-use records and the
+// dial session's of design 009 to what they may say. A screenshot names a
+// size, an input batch a count, a screen or dial session a duration and two
+// byte counts, and none of them can hold a frame, a key, a character of typed
+// text or a byte of a connection: the shapes have no field for one.
 func TestOperationRecordsCarryNoContent(t *testing.T) {
 	obj := sandbox()
 	for _, tc := range []struct {
@@ -29,6 +29,10 @@ func TestOperationRecordsCarryNoContent(t *testing.T) {
 		{
 			"screen", TypeScreen, Screen{DurationMS: 4200, BytesIn: 8, BytesOut: 1 << 20},
 			`{"durationMs":4200,"bytesIn":8,"bytesOut":1048576}`,
+		},
+		{
+			"dial", TypeDial, Dial{DurationMS: 900, BytesIn: 64, BytesOut: 512},
+			`{"durationMs":900,"bytesIn":64,"bytesOut":512}`,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

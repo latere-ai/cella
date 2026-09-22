@@ -20,14 +20,22 @@ import (
 // so a rename on either side is not a drift.
 var placeholder = regexp.MustCompile(`\{[^}]+\}`)
 
+// anyMethod is every operation an OpenAPI path item can hold, which is what
+// a pattern that names no method is documented as: the document has no word
+// for any method, and a pattern that answers them all answers each of these.
+var anyMethod = []string{"GET", "PUT", "POST", "DELETE", "OPTIONS", "HEAD", "PATCH", "TRACE"}
+
 // shapes is the set of `METHOD path` a list of routes reaches, with every
-// placeholder reduced to its position and the verb route expanded into the
-// verbs the handler answers.
+// placeholder reduced to its position, the verb route expanded into the verbs
+// the handler answers, and a pattern with no method into every method.
 func shapes(routes []string) map[string]bool {
 	out := map[string]bool{}
 	for _, route := range routes {
 		method, path, ok := strings.Cut(route, " ")
 		if !ok {
+			for _, each := range anyMethod {
+				out[each+" "+placeholder.ReplaceAllString(route, "{}")] = true
+			}
 			continue
 		}
 		path = placeholder.ReplaceAllString(path, "{}")

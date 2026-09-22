@@ -27,5 +27,9 @@ func TestNativeConformance(t *testing.T) {
 	runtimetest.Run(t, open, runtimetest.Options{
 		Down: func() { _ = os.RemoveAll(root) },
 		Up:   func() { _ = os.MkdirAll(root, 0700) },
+		// The test binary serves the port, so the cases need no tool of the
+		// host's.
+		Listen: echoCommand,
+		Echo:   echoCommand,
 	})
 }

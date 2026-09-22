@@ -91,5 +91,27 @@ active processes after a daemon crash: their records become `Lost`, restart
 is refused, and an operator must clean up any surviving host process. Use an
 isolated runtime with the full recovery contract for hosted applications.
 
-Interactive execution streams, PTY, detached recovery, and ports remain to be
-implemented.
+## Ports
+
+A native sandbox is a set of host processes, so a port its main process
+listens on is a port of this machine's loopback. Declare it by name to
+reach it through the control plane:
+
+```json
+"spec": {
+  "command": ["python3", "-m", "http.server", "3000"],
+  "network": {"ports": [{"name": "web", "port": 3000}]}
+}
+```
+
+`GET /v1/sandboxes/demo/ports` reports each declared port as `listening` or
+`closed`. `/v1/sandboxes/demo/ports/web/` forwards any HTTP request to it,
+WebSocket upgrades included, and answers `502` with `upstream_unavailable`
+while nothing listens or the sandbox is stopped. `cella port-forward demo
+8080:3000` carries `127.0.0.1:8080` on your machine to it, one connection at
+a time. The dial socket at `/v1/sandboxes/demo/dial/3000` reaches any port
+of this machine's loopback, declared or not: the native runtime confines
+nothing, and a caller allowed to dial is one already allowed to run a
+command here.
+
+Detached recovery remains to be implemented.

@@ -27,6 +27,9 @@ type record struct {
 	Workdir       string
 	Command, Args []string
 	PID           int
+	// Ports are the ports the sandbox declared, which Inspect probes. The
+	// probe's answer is not stored: it is true of the moment it is read.
+	Ports []driver.Port `json:",omitempty"`
 }
 
 // Driver owns directory-backed environments and all executions it starts.
@@ -40,6 +43,7 @@ type Driver struct {
 
 var _ driver.Driver = (*Driver)(nil)
 var _ driver.Attacher = (*Driver)(nil)
+var _ driver.Dialer = (*Driver)(nil)
 var validID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`)
 
 func New(root string) (*Driver, error) {
@@ -87,9 +91,11 @@ func (d *Driver) Isolation() string { return driver.IsolationNone }
 
 // Capabilities declares what this driver provides. Pool, because a prewarmed
 // entry here is a directory and a record, and adoption is one rewrite of that
-// record under the lock one process already holds over the root.
+// record under the lock one process already holds over the root. Dial, because
+// a sandbox's processes are host processes and a port one of them holds is on
+// the host's own loopback.
 func (d *Driver) Capabilities() driver.Capabilities {
-	return driver.Capabilities{Files: true, Attach: ptySupported, Pool: true}
+	return driver.Capabilities{Files: true, Attach: ptySupported, Pool: true, Dial: true}
 }
 func (d *Driver) Preflight(ctx context.Context) error { return d.Ready(ctx) }
 func (d *Driver) Ready(ctx context.Context) error {
@@ -181,7 +187,7 @@ func (d *Driver) Create(ctx context.Context, s driver.CreateSpec) (driver.Ref, e
 		return driver.Ref{}, err
 	}
 	now := time.Now().UTC()
-	r := record{State: driver.State{ID: s.ID, Name: s.Name, Owner: s.Owner, Phase: driver.Running, Isolation: driver.IsolationNone, Labels: maps.Clone(s.Labels), CreatedAt: now, StartedAt: now, LastActivityAt: now, AutoStop: s.Lifecycle.AutoStop, AutoDelete: s.Lifecycle.AutoDelete, Pool: s.Prewarm}, Env: env, Workdir: s.Workdir, Command: slices.Clone(s.Command), Args: slices.Clone(s.Args)}
+	r := record{State: driver.State{ID: s.ID, Name: s.Name, Owner: s.Owner, Phase: driver.Running, Isolation: driver.IsolationNone, Labels: maps.Clone(s.Labels), CreatedAt: now, StartedAt: now, LastActivityAt: now, AutoStop: s.Lifecycle.AutoStop, AutoDelete: s.Lifecycle.AutoDelete, Pool: s.Prewarm}, Env: env, Workdir: s.Workdir, Command: slices.Clone(s.Command), Args: slices.Clone(s.Args), Ports: slices.Clone(s.Ports)}
 	if s.Lifecycle.TTL > 0 {
 		r.State.ExpiresAt = now.Add(s.Lifecycle.TTL)
 	}
@@ -201,12 +207,20 @@ func (d *Driver) Inspect(ctx context.Context, id string) (driver.State, error) {
 		return driver.State{}, err
 	}
 	d.mu.Lock()
-	defer d.mu.Unlock()
 	r, err := d.load(id)
 	if err == nil {
 		err = d.mainError(id)
 	}
-	return r.State, err
+	d.mu.Unlock()
+	if err != nil {
+		return r.State, err
+	}
+	// The probe dials, so it runs outside the lock every other call on the
+	// root takes.
+	if r.State.Phase == driver.Running {
+		r.State.Ports = probePorts(ctx, r.Ports)
+	}
+	return r.State, nil
 }
 func (d *Driver) List(ctx context.Context, f driver.Filter) ([]driver.State, error) {
 	if err := ctx.Err(); err != nil {

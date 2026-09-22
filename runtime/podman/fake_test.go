@@ -74,6 +74,12 @@ type fakeContainer struct {
 	logs       []fakeLine
 	// released is closed to end a followed log stream.
 	released chan struct{}
+	// ports are the mappings the create asked for, and published the
+	// loopback listener standing for each, keyed by the container port. A
+	// listener echoes what a connection sends, which is a server inside
+	// holding the port.
+	ports     []portMapping
+	published map[uint16]net.Listener
 }
 
 type fakeFile struct {
@@ -136,6 +142,13 @@ func newFake(t *testing.T) *fake {
 	srv := &httptest.Server{Listener: ln, Config: &http.Server{Handler: f, ReadHeaderTimeout: time.Second}}
 	srv.Start()
 	t.Cleanup(srv.Close)
+	t.Cleanup(func() {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		for _, c := range f.containers {
+			c.unpublish()
+		}
+	})
 	return f
 }
 
@@ -384,12 +397,44 @@ func (f *fake) createContainer(w http.ResponseWriter, r *http.Request) {
 		refuse(w, http.StatusConflict, "container "+sg.Name+" already exists")
 		return
 	}
-	f.containers[sg.Name] = &fakeContainer{
+	c := &fakeContainer{
 		labels: maps.Clone(sg.Labels), command: sg.Command, env: maps.Clone(sg.Env),
 		workdir: sg.WorkDir, user: sg.User, volumes: sg.Volumes, limits: sg.ResourceLimits,
 		netns: netnsOf(sg.Netns), state: "created", files: map[string]fakeFile{}, released: make(chan struct{}),
+		ports: sg.PortMappings, published: map[uint16]net.Listener{},
 	}
+	for _, m := range sg.PortMappings {
+		ln, err := net.Listen("tcp", net.JoinHostPort(m.HostIP, "0"))
+		if err != nil {
+			refuse(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		c.published[m.ContainerPort] = ln
+		go echoAll(ln)
+	}
+	f.containers[sg.Name] = c
 	writeJSON(w, map[string]string{"Id": sg.Name})
+}
+
+// echoAll writes back what each connection to a published port sends.
+func echoAll(ln net.Listener) {
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		go func() {
+			defer func() { _ = conn.Close() }()
+			_, _ = io.Copy(conn, conn)
+		}()
+	}
+}
+
+// unpublish closes the listeners a container held.
+func (c *fakeContainer) unpublish() {
+	for _, ln := range c.published {
+		_ = ln.Close()
+	}
 }
 
 func (f *fake) listContainers(w http.ResponseWriter, r *http.Request) {
@@ -429,6 +474,13 @@ func (f *fake) oneContainer(w http.ResponseWriter, r *http.Request, rest string)
 		ci.State.Status, ci.State.ExitCode = c.state, c.exitCode
 		ci.State.StartedAt, ci.State.FinishedAt = c.startedAt, c.finishedAt
 		ci.Config.User = c.user
+		for port, ln := range c.published {
+			if ci.NetworkSettings.Ports == nil {
+				ci.NetworkSettings.Ports = map[string][]hostBinding{}
+			}
+			host, hostPort, _ := net.SplitHostPort(ln.Addr().String())
+			ci.NetworkSettings.Ports[strconv.Itoa(int(port))+"/tcp"] = []hostBinding{{HostIP: host, HostPort: hostPort}}
+		}
 		f.mu.Unlock()
 		writeJSON(w, ci)
 	case verb == "start":
@@ -458,6 +510,7 @@ func (f *fake) oneContainer(w http.ResponseWriter, r *http.Request, rest string)
 		f.mu.Unlock()
 		f.logs(w, r, name)
 	case r.Method == http.MethodDelete:
+		c.unpublish()
 		delete(f.containers, name)
 		f.mu.Unlock()
 		w.WriteHeader(http.StatusNoContent)

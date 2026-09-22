@@ -46,6 +46,7 @@ cp       <ref>:<src> <dest>                      copy a tree out of a sandbox
 cp       <src> <ref>:<dest>                      copy a tree into a sandbox
 files    ls|stat|get|put|mkdir|rm|mv             one file operation inside a sandbox
 egress   <ref> [--limit n]                       the connections the gateway recorded
+port-forward <ref> <local>:<port>                a local port carried to a port inside a sandbox
 version                                          the client's identity, and the server's
 ```
 
@@ -144,6 +145,29 @@ cella version        # this client, and the server when it answers
 
 A stopped sandbox keeps its files and runs nothing. `cella delete` is
 accepted in every phase.
+
+### Reaching a port inside
+
+```sh
+cella port-forward dev 8080:3000
+```
+
+A server the sandbox runs on port 3000 is then at `127.0.0.1:8080` on your
+machine, until you interrupt the command. Each connection you open there is
+carried by its own connection to the control plane, and bytes flow both
+ways as they are written. `0` as the local port lets your system pick a
+free one, and the line the command prints names it. The local port is on
+loopback only, so nothing else on your network reaches it.
+
+A sandbox that is missing, stopped, or on an environment that reaches no
+port is refused at start, with the exit code of the refusal. A port that
+nothing inside listens on yet is not a refusal: the command listens, and
+each connection to it is closed with a line on standard error that says so.
+
+A server that speaks HTTP is also reachable without this command, by the
+name the manifest gave its port: `/v1/sandboxes/dev/ports/web/` on the
+control plane, under your bearer, forwards every method, path and query to
+it, and a WebSocket upgrade as well.
 
 ### Logs, secrets and the boundary
 

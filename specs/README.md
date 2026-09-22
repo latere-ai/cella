@@ -82,6 +82,7 @@ later.
 | [058](.archive/058-preemption.md) | Preemption: a higher head stops preemptible sandboxes, a victim waits again in its place, and the bound on how often | medium | complete | 003, 005, 009, 017, 020, 031, 038, 057 |
 | [062](.archive/062-journal-retention.md) | Journal retention: the reaper prunes finished records and answered operations, and the memory journal keeps a ring per object | small | complete | 005, 009, 010, 031, 042, 043 |
 | [059](.archive/059-conformance-closure.md) | Conformance closure: the drift seam, the external run on dispatch, the agent scenario against this server | medium | complete | 003, 011, 012, 015, 031, 052 |
+| [060](.archive/060-dial-and-port-proxy.md) | Dial and the port proxy: Dialer on native and podman, the dial socket, the port proxy, cella port-forward | medium | complete | 004, 008, 011, 013, 023, 031, 034, 041, 055 |
 
 ## Dependency graph
 
@@ -300,3 +301,4 @@ The map, the order, and the rule for a slice are in 031.
 | [058-preemption.md](.archive/058-preemption.md) | complete | Preemption on a queued environment: victims by priority, cpu and age, the requeue that keeps a victim's place and disk, `status.preemptions` and `CELLA_MAX_PREEMPTIONS`, `cella_preemptions_total`, and the pool proved behind the authorizer |
 | [062-journal-retention.md](.archive/062-journal-retention.md) | complete | `CELLA_JOURNAL_RETENTION` applied on the reaper's tick to finished records and answered operations, and the memory journal's ring of `CELLA_JOURNAL_CAP` per object |
 | [059-conformance-closure.md](.archive/059-conformance-closure.md) | complete | The drift seam `CELLA_TEST_DRIFT_DEFAULT` and the literal defaults the suite now reads, the dispatch workflow that runs the documented command against an address, and the agent and spawn cases against this server |
+| [060-dial-and-port-proxy.md](.archive/060-dial-and-port-proxy.md) | complete | `Dial` on the native and podman drivers, the byte pump behind the dial route, the port proxy confined to the sandbox's declared ports, and `cella port-forward` |

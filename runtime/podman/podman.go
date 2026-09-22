@@ -131,6 +131,7 @@ type Driver struct {
 
 var _ driver.Driver = (*Driver)(nil)
 var _ driver.Attacher = (*Driver)(nil)
+var _ driver.Dialer = (*Driver)(nil)
 
 // New builds a driver over the named socket, or over the default candidates
 // when none is named. It opens no connection: Preflight decides which
@@ -163,9 +164,10 @@ func (d *Driver) Isolation() string { return v1.IsolationContainer }
 // a second volume of one name, which is the compare-and-swap adoption needs.
 // Mesh, because one network per mesh carries the members and their aliases on
 // it. Display and Input, because the desktop runs as a second process in the
-// sandbox's own container and every operation on it is one exec session.
+// sandbox's own container and every operation on it is one exec session. Dial,
+// because every declared port is published on loopback at create.
 func (d *Driver) Capabilities() driver.Capabilities {
-	return driver.Capabilities{Files: true, Detach: true, Attach: true, Pool: true, Mesh: true, Display: true, Input: true}
+	return driver.Capabilities{Files: true, Detach: true, Attach: true, Pool: true, Mesh: true, Display: true, Input: true, Dial: true}
 }
 
 // Socket is the socket the driver last found answering, for the start-up line.
@@ -236,6 +238,7 @@ type specGenerator struct {
 	Volumes        []namedVolume     `json:"volumes,omitempty"`
 	ResourceLimits *resourceLimits   `json:"resource_limits,omitempty"`
 	Netns          *namespace        `json:"netns,omitempty"`
+	PortMappings   []portMapping     `json:"portmappings,omitempty"`
 }
 
 // namespace is libpod's choice of one namespace for a container. The driver
@@ -287,6 +290,9 @@ type containerInspect struct {
 	Config struct {
 		User string `json:"User"`
 	} `json:"Config"`
+	NetworkSettings struct {
+		Ports map[string][]hostBinding `json:"Ports"`
+	} `json:"NetworkSettings"`
 }
 
 type containerListItem struct {
@@ -737,6 +743,7 @@ func (d *Driver) Create(ctx context.Context, s driver.CreateSpec) (driver.Ref, e
 		User: s.User, RestartPolicy: "no", StopTimeout: &grace,
 		Volumes:        []namedVolume{{Name: workspaceVolume(s.ID), Dest: root, Options: []string{"rw"}}},
 		ResourceLimits: limits,
+		PortMappings:   publishedPorts(s.Ports),
 	}
 	if s.Mesh.ID != "" {
 		sg.Netns = &namespace{Mode: bridgeNetns}

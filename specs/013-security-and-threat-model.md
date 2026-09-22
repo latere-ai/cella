@@ -20,7 +20,7 @@ depends_on:
 affects: [internal/auth/, internal/api/, internal/egressd/, internal/worker/, internal/store/, runtime/, egress/, controller/, manifest/, deploy/, test/e2e/, SECURITY.md]
 effort: medium
 created: 2026-09-12
-updated: 2026-09-21
+updated: 2026-09-23
 author: changkun
 ---
 
@@ -165,7 +165,7 @@ their specs own.
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| Every row's `Test` cell names a test function `go test -list` finds in the module, and every test named appears in the acceptance criteria of the spec the row's `Spec` cell names | `TestThreatModelControlsHaveTests`, reading this file, and `TestAcceptanceCriteriaNameRealTests` over every spec's acceptance table | built ([[056-contract-evidence]]): the first half holds, with the controls whose test is not written carried as an exact list in the test, and about a hundred acceptance rows corrected to the tests that run; the second half, that each test is also named by the acceptance criteria of the spec the Spec cell names, is not built |
+| Every row's `Test` cell names a test function `go test -list` finds in the module, and every test named appears in the acceptance criteria of the spec the row's `Spec` cell names | `TestThreatModelControlsHaveTests`, reading this file, and `TestAcceptanceCriteriaNameRealTests` over every spec's acceptance table | built ([[056-contract-evidence]]): the first half holds, with the controls whose test is not written carried as an exact list in the test, which shrinks as each test lands (the port proxy's confinement, `TestPortProxyIsConfined`, left it with [[060-dial-and-port-proxy]]), and about a hundred acceptance rows corrected to the tests that run; the second half, that each test is also named by the acceptance criteria of the spec the Spec cell names, is not built |
 | Every commitment in `SECURITY.md` maps to a control row | `TestSecurityPolicyMatchesTheModel`, reading both files | built ([[056-contract-evidence]]): the policy carries the four commitments as a list and an asset table whose every test exists and is a control of this file |
 | A Pod the k8s driver creates has every field of the baseline, `shareProcessNamespace: false` included | `TestPodSecurityFields`, `TestClusterPodIsConfined` running `id`, `cat /proc/1/status`, and a mount attempt | not built |
 | A sandbox cannot reach another sandbox's IP or the Pod network except a mesh peer's `mesh` port | `TestClusterNoLateralMovement` | not built |

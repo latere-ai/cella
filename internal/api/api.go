@@ -153,6 +153,9 @@ func New(o Options) (http.Handler, error) {
 	h.stream("GET /v1/sandboxes/{id}/exec", h.execSocket)
 	h.stream("GET /v1/sandboxes/{id}/attach", h.attachSocket)
 	h.stream("GET /v1/sandboxes/{id}/dial/{port}", h.dial)
+	// The port proxy answers every method: what the server inside accepts is
+	// the server's, so the pattern names none.
+	h.stream(portProxyPattern, h.portProxy)
 	h.stream("GET /v1/sandboxes/{id}/screenshot", h.screenshot)
 	h.stream("GET /v1/sandboxes/{id}/screen", h.screen)
 	// The three routes an environment key reaches are answered before the
@@ -887,6 +890,9 @@ func errorEnvelope(err error, requestID string) (int, httpjson.Error) {
 	case "spawn_budget_exhausted":
 		status = 422
 		message = "The sandbox has no spawn budget left."
+	case "upstream_unavailable":
+		status = 502
+		message = "Nothing is listening on that port."
 	}
 	details := map[string]any{"request_id": requestID, "detail": fmt.Sprint(err)}
 	// Design 008 carries paths as a list for every code that names fields.

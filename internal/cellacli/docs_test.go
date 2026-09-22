@@ -51,6 +51,7 @@ func TestTheDocumentCarriesTheCommandsHelp(t *testing.T) {
 	// Every command the binary has is in the document.
 	for _, name := range []string{
 		"apply", "get", "delete", "start", "stop", "exec", "attach", "logs", "cp", "files", "egress", "version",
+		"port-forward",
 	} {
 		if !strings.Contains(body, "cella "+name) {
 			t.Errorf("docs/cli.md does not show `cella %s`", name)

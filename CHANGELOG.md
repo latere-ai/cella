@@ -47,6 +47,22 @@ refused before it is pushed.
   that does. It takes `spec.mesh.spawn.budget` or `spec.mesh.spawn.depth`, and
   `cellad` refuses to start with it unless `CELLA_RUNTIME=native`, so an
   installation that isolates its sandboxes cannot run with it.
+- A server running inside a sandbox can be reached from outside it. Declare
+  the port by name under `spec.network.ports`, and
+  `/v1/sandboxes/{id}/ports/{name}/` forwards any HTTP request to it under
+  your bearer: every method, the path, the query, the body and a WebSocket
+  upgrade, with your bearer itself never passed on. A port nothing listens
+  on, or a stopped sandbox, answers `502` with the new code
+  `upstream_unavailable`. `GET /v1/sandboxes/{id}/dial/{port}` is now a live
+  byte stream to a port inside rather than a refusal, and
+  `cella port-forward <ref> <local>:<port>` carries a loopback port on your
+  machine to it, one connection at a time. The `native` and `podman`
+  runtimes both provide this: `native` reaches the port on the host's own
+  loopback, and `podman` publishes every declared port on `127.0.0.1` when
+  the sandbox is created. A manifest that declares ports is no longer
+  served from a prewarmed pool entry, because an entry's published ports
+  are fixed when it is made. Each dial session writes a `sandbox.dial`
+  event with its duration and the bytes each way.
 - An environment can hold what it cannot fit yet. Apply one with
   `scheduling.mode: queued`, or start `cellad` with
   `CELLA_SCHEDULING_MODE=queued`, and a create past its capacity answers

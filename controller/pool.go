@@ -331,6 +331,11 @@ func matchesPool(pool v1.PoolSpec, obj v1.Sandbox) bool {
 		// up, and a running desktop cannot be resized into another, so an
 		// entry is adopted only into the geometry it already has.
 		return false
+	case len(spec.Network.Ports) > 0:
+		// A driver that reaches a port through the engine's publishing fixes
+		// the published set when the container is created, and the entry
+		// was created with none.
+		return false
 	case len(spec.Command) > 0 || len(spec.Args) > 0:
 		// The entry is already running what the driver starts for a
 		// sandbox with no command, and a process cannot be replaced
