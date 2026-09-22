@@ -65,6 +65,8 @@ and mixing the two makes the histogram unreadable.
 | `cella_tokens_reminted_total` | none |
 | `cella_pool_size` | `environment`, `state` (`ready`, `filling`) |
 | `cella_pool_adoptions_total` | `outcome` (`adopted`, `miss`) |
+| `cella_queue_depth` | `environment`, `queue` |
+| `cella_capacity` | `environment`, `resource` (`cpu`, `memory`, `disk`, `sandboxes`), `kind` (`declared`, `used`) |
 
 ### Decisions, records and state
 
@@ -76,7 +78,7 @@ and mixing the two makes the histogram unreadable.
 | `cella_events_delivered_total` | `outcome` (`acknowledged`, `deferred`, `dropped`) |
 | `cella_event_delivery_duration_seconds` | none |
 | `cella_store_query_duration_seconds` | `op` |
-| `cella_lease_held` | `name` (`reaper`, `journal`, `pool`) |
+| `cella_lease_held` | `name` (`reaper`, `journal`, `pool`, `environments`, `scheduler`) |
 
 `cella_decisions_total{endpoint="authorizer"}` counts every authorization
 question, whether your endpoint or the built-in owner policy answered it.

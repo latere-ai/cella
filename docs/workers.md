@@ -66,7 +66,9 @@ and a write that raced yours is refused with `version_conflict` rather
 than overwriting what moved.
 
 The environment is `Pending` until a worker registers on it. Nothing is
-placed there until it is `Ready`.
+placed there until it is `Ready`. What happens to a create it cannot fit,
+and how to make it wait in a queue instead, is in
+[Capacity and queues](scheduling.md).
 
 ## Mint the key
 
