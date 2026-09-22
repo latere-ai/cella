@@ -30,10 +30,13 @@ const (
 // Scheduling is the default environment's placement: the mode, the pool, and
 // the two bounds of the refill loop (spec 020).
 type Scheduling struct {
-	// Mode is direct here. Queued is accepted vocabulary and refused until
-	// the queue lands, so an operator learns at start-up rather than
-	// watching sandboxes never start.
+	// Mode is direct or queued: start a sandbox now or fail it, or hold one
+	// the environment cannot fit yet until it can. It seeds the default
+	// environment's object at first start and is not read afterwards.
 	Mode string
+	// ScheduleInterval is how often the scheduler loop passes over the
+	// queued environments when nothing wakes it sooner.
+	ScheduleInterval time.Duration
 	// Pool is what the environment keeps prewarmed. Size zero is no pool.
 	Pool v1.PoolSpec
 	// PoolInFlight is how many entries one tick prewarms and PoolGrace how
@@ -55,14 +58,12 @@ func loadScheduling(getenv Getenv, problems *[]string) Scheduling {
 		PoolGrace:    controller.DefaultPoolGrace,
 	}
 	switch s.Mode {
-	case v1.SchedulingDirect:
-	case v1.SchedulingQueued:
-		*problems = append(*problems, "CELLA_SCHEDULING_MODE=queued is not served yet; this control plane starts a sandbox now or fails it")
-		s.Mode = DefaultSchedulingMode
+	case v1.SchedulingDirect, v1.SchedulingQueued:
 	default:
-		*problems = append(*problems, fmt.Sprintf("CELLA_SCHEDULING_MODE is %q; %s", s.Mode, v1.SchedulingDirect))
+		*problems = append(*problems, fmt.Sprintf("CELLA_SCHEDULING_MODE is %q; %s or %s", s.Mode, v1.SchedulingDirect, v1.SchedulingQueued))
 		s.Mode = DefaultSchedulingMode
 	}
+	s.ScheduleInterval = interval(getenv, "CELLA_SCHEDULE_INTERVAL", controller.DefaultScheduleInterval, problems)
 	s.Pool = v1.PoolSpec{
 		Size:  count(getenv, "CELLA_POOL_SIZE", 0, 0, MaxPoolSize, problems),
 		Image: strings.TrimSpace(getenv("CELLA_POOL_IMAGE")),
