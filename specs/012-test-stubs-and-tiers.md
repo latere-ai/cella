@@ -14,7 +14,7 @@ depends_on:
 affects: [test/stubs/, test/e2e/, test/conformance/, Makefile, Dockerfile.stubs, .github/workflows/, deploy/examples/kind/, internal/config/]
 effort: medium
 created: 2026-09-12
-updated: 2026-09-20
+updated: 2026-09-23
 author: changkun
 ---
 
@@ -114,7 +114,7 @@ kubeconfig, socket, or sandbox runtime configuration, and removes the
 | worker | `go test -tags=e2e -v -run '^TestWorker' ./test/e2e/...` | Go | every push; `cellad worker` with `native` against the tier's `cellad`; the tier asserts the worker opens no listening socket and `cellad` opens no connection toward the worker's address for the tier's duration |
 | podman | `go test -tags=podman -v -run '^TestPodman' ./test/e2e/... ./runtime/podman/...` | a rootless Podman socket the job starts with `podman system service --time=0` | every push on `ubuntu-latest`, which ships Podman |
 | kind | `go test -tags=e2e -v -run '^TestCluster' ./test/e2e/... ./runtime/k8s/...` | kind, kubectl, the overlay's images | tags and dispatch |
-| conformance | `go test -tags=e2e -v -run '^TestContract$' ./test/conformance -args -url $CELLA_TEST_URL -issuer $CELLA_TEST_ISSUER -known test/conformance/known.json` | a server URL | against every tier's server ([[015-conformance-suite]]); the tag is the one `TestContract` is behind |
+| conformance | `go test -tags=e2e -count=1 -timeout 30m -v -run '^TestContract$' ./test/conformance -args -url $CELLA_TEST_URL -issuer $CELLA_TEST_ISSUER -known known.json` | a server URL | against every tier's server ([[015-conformance-suite]]); the tag is the one `TestContract` is behind |
 
 The `e2e` and `podman` tags sit on the files under `test/e2e/` and on
 each driver's conformance test file; the native driver's conformance

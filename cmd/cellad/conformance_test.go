@@ -10,16 +10,20 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
 	"net/url"
+	osexec "os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"latere.ai/x/cella/internal/config"
 	"latere.ai/x/cella/internal/stubs"
 	"latere.ai/x/cella/runtime/native"
 	"latere.ai/x/cella/test/conformance"
@@ -39,21 +43,10 @@ import (
 // passes fails it too.
 func TestTheConformanceSuiteHoldsAgainstThisServer(t *testing.T) {
 	stack := startStack(t)
-	known, err := conformance.LoadDeclaration(filepath.Join("..", "..", "test", "conformance", "known.json"))
-	if err != nil {
-		t.Fatal(err)
+	report := conformance.Run(t, stack.suite(t))
+	if !slices.Contains(report.Passed, "case011AgentScenario") {
+		t.Error("the agent scenario did not run through the built command; the run carries the binary so it does")
 	}
-	report := conformance.Run(t, conformance.Config{
-		URL:               stack.url,
-		Token:             stack.mint,
-		Admin:             "",
-		Capabilities:      stack.capabilities,
-		AuthorizerControl: stack.authorizer.URL,
-		AdmissionControl:  stack.admission.URL,
-		SinkControl:       stack.sink,
-		WorkerEnvironment: stack.workerEnvironment,
-		Known:             known,
-	})
 	if report.Marker.Server == "" {
 		t.Error("the report carries no server version; the marker of design 015 names both versions")
 	}
@@ -73,6 +66,73 @@ func TestTheConformanceSuiteHoldsAgainstThisServer(t *testing.T) {
 	}
 }
 
+// TestSuiteCatchesADriftedDefault is the drift seam of design 015: the same
+// node, started with CELLA_TEST_DRIFT_DEFAULT naming the spawn budget, resolves
+// that one default one unit off and answers everything else as before, and
+// the whole suite against it fails exactly the resolve group's defaults case.
+// A suite that only compared an apply's answer with a read of it would pass
+// here, because a server that drifts drifts in both.
+func TestSuiteCatchesADriftedDefault(t *testing.T) {
+	stack := startStackWith(t, map[string]string{"CELLA_TEST_DRIFT_DEFAULT": config.DriftSpawnBudget})
+	report, err := conformance.Execute(t.Context(), stack.suite(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Log("\n" + report.String())
+	if want := []string{"case003DefaultsAreReturned"}; !slices.Equal(report.Failed, want) {
+		t.Fatalf("the drifted server failed %v, want exactly %v", report.Failed, want)
+	}
+	if len(report.Undeclared) > 0 || len(report.Known) > 0 {
+		t.Errorf("the drift moved a declaration: known %v, undeclared %v", report.Known, report.Undeclared)
+	}
+	for _, res := range report.Results {
+		if res.Name == "case003DefaultsAreReturned" && !strings.Contains(fmt.Sprint(res.Err), "spec.mesh.spawn.budget 1") {
+			t.Errorf("the failure does not name the drifted field and its value:\n%v", res.Err)
+		}
+	}
+}
+
+// suite is the configuration one run against this stack takes: every input
+// the stack serves, the built agent command, and the gaps this server
+// declares in test/conformance/known.json.
+func (s *stack) suite(t *testing.T) conformance.Config {
+	t.Helper()
+	known, err := conformance.LoadDeclaration(filepath.Join("..", "..", "test", "conformance", "known.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return conformance.Config{
+		URL:               s.url,
+		Token:             s.mint,
+		Admin:             "",
+		Capabilities:      s.capabilities,
+		AuthorizerControl: s.authorizer.URL,
+		AdmissionControl:  s.admission.URL,
+		SinkControl:       s.sink,
+		WorkerEnvironment: s.workerEnvironment,
+		Cella:             buildCella(t),
+		Known:             known,
+	}
+}
+
+// buildCella builds the agent command of design 011 into a temporary
+// directory, so the agent case runs the binary an agent's image carries
+// against this node rather than a client in this process.
+func buildCella(t *testing.T) string {
+	t.Helper()
+	goBin, err := osexec.LookPath("go")
+	if err != nil {
+		t.Fatalf("the Go toolchain is not on PATH, so the agent command cannot be built: %v", err)
+	}
+	binary := filepath.Join(t.TempDir(), "cella")
+	build := osexec.CommandContext(t.Context(), goBin, "build", "-o", binary, "./cmd/cella")
+	build.Dir = filepath.Join("..", "..")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("building the agent command: %v\n%s", err, out)
+	}
+	return binary
+}
+
 // stack is the node and the stubs one suite run drives.
 type stack struct {
 	url          string
@@ -90,6 +150,13 @@ type stack struct {
 // startStack brings up the stubs, the two control shims and `cellad serve`,
 // and tears each down with the test.
 func startStack(t *testing.T) *stack {
+	t.Helper()
+	return startStackWith(t, nil)
+}
+
+// startStackWith is startStack with extra variables for `cellad serve`,
+// which win over the stack's own.
+func startStackWith(t *testing.T, extra map[string]string) *stack {
 	t.Helper()
 	ctx, cancel := context.WithCancel(t.Context())
 	t.Cleanup(cancel)
@@ -145,26 +212,26 @@ func startStack(t *testing.T) *stack {
 	var out syncBuffer
 	var errOut bytes.Buffer
 	codec := make(chan int, 1)
-	go func() {
-		codec <- run(ctx, nil, env(map[string]string{
-			"CELLA_DATA_DIR":            t.TempDir(),
-			"CELLA_PUBLIC_ADDR":         "127.0.0.1:0",
-			"CELLA_INTERNAL_ADDR":       "127.0.0.1:0",
-			"CELLA_PUBLIC_URL":          "http://127.0.0.1:0",
-			"CELLA_RUNTIME":             "native",
-			"CELLA_ALLOW_UNSAFE_NATIVE": "true",
-			"CELLA_TOKEN_KEY":           signingKeyPEM(t, 1),
-			"CELLA_SECRET_KEY":          base64.StdEncoding.EncodeToString([]byte(eventsSecret)),
-			"CELLA_OIDC_ISSUERS":        s.issuer,
-			"CELLA_ADMIN_SUBJECTS":      s.issuer + "|admin",
-			"CELLA_AUTHORIZER_URL":      s.authorizer.URL,
-			"CELLA_AUTHORIZER_TOKEN":    authorizerToken,
-			"CELLA_ADMISSION_URL":       s.admission.URL,
-			"CELLA_ADMISSION_TOKEN":     admissionToken,
-			"CELLA_EVENTS_URL":          s.sink,
-			"CELLA_EVENTS_SECRET":       eventsSecret,
-		}), &out, &errOut)
-	}()
+	vars := map[string]string{
+		"CELLA_DATA_DIR":            t.TempDir(),
+		"CELLA_PUBLIC_ADDR":         "127.0.0.1:0",
+		"CELLA_INTERNAL_ADDR":       "127.0.0.1:0",
+		"CELLA_PUBLIC_URL":          "http://127.0.0.1:0",
+		"CELLA_RUNTIME":             "native",
+		"CELLA_ALLOW_UNSAFE_NATIVE": "true",
+		"CELLA_TOKEN_KEY":           signingKeyPEM(t, 1),
+		"CELLA_SECRET_KEY":          base64.StdEncoding.EncodeToString([]byte(eventsSecret)),
+		"CELLA_OIDC_ISSUERS":        s.issuer,
+		"CELLA_ADMIN_SUBJECTS":      s.issuer + "|admin",
+		"CELLA_AUTHORIZER_URL":      s.authorizer.URL,
+		"CELLA_AUTHORIZER_TOKEN":    authorizerToken,
+		"CELLA_ADMISSION_URL":       s.admission.URL,
+		"CELLA_ADMISSION_TOKEN":     admissionToken,
+		"CELLA_EVENTS_URL":          s.sink,
+		"CELLA_EVENTS_SECRET":       eventsSecret,
+	}
+	maps.Copy(vars, extra)
+	go func() { codec <- run(ctx, nil, env(vars), &out, &errOut) }()
 	deadline := time.Now().Add(30 * time.Second)
 	for s.url == "" {
 		if m := listening.FindStringSubmatch(out.String()); m != nil {

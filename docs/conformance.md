@@ -11,11 +11,16 @@ that serves the same API.
 ## Run it against an installation
 
 ```sh
-go test -tags=e2e -v -run '^TestContract$' ./test/conformance -args \
+go test -tags=e2e -count=1 -timeout 30m -v -run '^TestContract$' ./test/conformance -args \
   -url https://cella.example.com \
   -token "$CELLA_TOKEN" \
   -capabilities files,attach
 ```
+
+`-count=1` makes every run ask the server: without it, `go test` may replay
+an earlier pass from its build cache. `-timeout 30m` leaves room for a run
+against a cluster, which can take longer than the ten minutes `go test` allows
+by default.
 
 The run creates objects named `conformance-<run>-<n>`, records every id it
 made, and deletes those ids and only those. It never deletes by name pattern
@@ -106,6 +111,23 @@ A capability you do not pass is a group that skips. Declaring one the server
 does not honour is a failure, which is the point: the declaration is what a
 caller reads before it writes a manifest.
 
+## Run it from GitHub Actions
+
+The repository carries a workflow, `conformance`, that runs the command above
+from a clean checkout against an address you give it. In your fork, or in this
+repository if you maintain it:
+
+1. Add a repository secret `CONFORMANCE_TOKEN` holding a bearer the server
+   accepts, and optionally `CONFORMANCE_ADMIN_TOKEN` holding an administrator's
+   bearer, which the environment cases need.
+2. Run the workflow from the Actions tab, or with
+   `gh workflow run conformance.yml -f url=https://cella.example.com -f capabilities=files,attach`.
+   The `image` input names the image every case creates from.
+
+The bearer is a secret and never an input, because the inputs of a run are
+shown to anyone who can read it. The run fails before the suite starts when
+`CONFORMANCE_TOKEN` is not set, and otherwise passes or fails with the suite.
+
 ## Against a server you wrote
 
 The suite reads the wire and nothing else: the routes, the status codes, the
@@ -113,6 +135,14 @@ error envelope with its fixed sentences, the list envelope, the stream
 framing. It shares no type with any implementation, so a server written from
 the API documentation alone passes it. Run it from a checkout of this
 repository against your own address, with your own tokens.
+
+Some defaults are part of the contract and some are yours. A sandbox applied
+with no workspace, working directory, egress or spawn fields has to come back
+with the fixed values the manifest contract states: the workspace at
+`/workspace`, starting empty and used as the working directory, egress `open`,
+and no mesh or spawn rights. The defaults an operator chooses, such as the
+resources, the lifetimes and the image, differ between installations, and the
+suite does not read them.
 
 Two parts are not a black box and no case covers them: the generated API
 document matching the served one, and a rate limit across replicas. Their

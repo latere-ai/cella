@@ -19,7 +19,7 @@ depends_on:
 affects: [test/conformance/, test/e2e/, internal/config/, .github/workflows/]
 effort: large
 created: 2026-09-12
-updated: 2026-09-21
+updated: 2026-09-23
 author: changkun
 ---
 
@@ -40,7 +40,14 @@ criterion that cites `runtimetest` is not a conformance case here.
 
 ## Current state
 
-Not built.
+Built as `test/conformance` by [[052-conformance-suite]]: 51 cases in the
+eighteen groups below, the report with its marker, the declared gaps, the
+marker test, and the suite in both pipelines. [[059-conformance-closure]]
+added the drift seam, the literal defaults the defaults case reads, the
+dispatch job that runs the documented command against an address, and the
+agent and spawn cases against this repository's own server. What is open is
+the kind half of the timing row against the whole capability set the Time
+section names, which the Kubernetes driver does not declare yet.
 
 ## Design
 
@@ -137,7 +144,11 @@ run against every tier's server; the release pipeline runs it from the
 published images before publishing ([[014-release-and-installation]]);
 a platform puts the same command in its own CI with its own tokens
 ([[016-building-a-plane]]). A CI job, not a Go test, proves the
-external form: a clean checkout runs the command against a URL.
+external form: `.github/workflows/conformance.yml`'s `conformance-external`
+job runs on dispatch only, takes the URL, the capabilities and the image as
+inputs and the bearer from a repository secret through the step's
+environment, and runs from a clean checkout the command
+`docs/conformance.md` documents, which a test holds it equal to.
 
 ### The marker
 
@@ -150,12 +161,33 @@ such marker, and fails on a marker with no function of that name in
 
 ### The drift seam
 
-`CELLA_TEST_DRIFT_DEFAULT=<field>`, read by `internal/config` and
-applied in the defaulting stage, makes `cellad` resolve one default
-one unit off; it is empty in every deployment and exists so a test can
-prove the suite notices: `TestSuiteCatchesADriftedDefault` starts
-`cellad` with it set and asserts exactly the resolve group's defaults
-case fails.
+A server that resolves a default wrongly resolves it wrongly in the apply
+and in every read, so a case that only compared the two would pass it. The
+resolve group's defaults case therefore also holds the answer to the
+defaults [[003-manifest-contract]] states as literals, which every
+conforming server resolves the same whatever its operator configured: for a
+manifest that names none of them, `spec.workspace.path` is `/workspace`,
+`spec.workspace.source` is `empty`, `spec.workdir` is the workspace path,
+`spec.network.egress.mode` is `open`, and `spec.mesh.enabled` and
+`spec.mesh.spawn` are zero or absent. The operator's defaults (resources,
+lifecycle, image) are an installation's choice and no case reads them.
+
+`CELLA_TEST_DRIFT_DEFAULT=<field>`, read by `internal/config`, makes
+`cellad` resolve one of those literals one unit off, so a test can prove the
+suite notices. It is built so a deployment cannot carry it by accident:
+
+| Rule | Why |
+|---|---|
+| The field is `spec.mesh.spawn.budget` or `spec.mesh.spawn.depth`, and any other value is a start-up problem | a misspelled value fails loudly; either drift alone admits no child, so the drifted server answers every other case as the honest one does |
+| It is accepted only with `CELLA_RUNTIME=native`, which itself needs `CELLA_ALLOW_UNSAFE_NATIVE=true`; with any other runtime it is a start-up problem | no installation that isolates anything starts with it set |
+| A server started with it logs a warning naming the field | the log of a node that answers wrongly says why |
+
+The drift is applied by `cellad` to the defaulted object before the
+admission step reads it, so the admission step and every later stage read
+the drifted value as the defaulting stage's output; it lives in the command
+and not in the `manifest` package, so the package a platform composes
+carries no test seam. `TestSuiteCatchesADriftedDefault` starts `cellad` with
+it set and asserts exactly the resolve group's defaults case fails.
 
 ### What the suite does not prove
 
@@ -173,9 +205,9 @@ driver-level suite ([[004-runtime-contract]]).
 | Criterion | Test that proves it | State |
 |---|---|---|
 | Every marker in the specs has a case and every case a marker | `TestEveryCriterionHasACase` reading `specs/` and `specs/.archive/` | passing, [[052-conformance-suite]] |
-| Every group in the table exists with the scope named, and skips with its reason when its input is empty | `TestGroupsAndSkips` | passing for the eighteen groups, with 51 cases in them ([[052-conformance-suite]]); the groups whose kind this API does not serve hold one case each, gated on the capability or the input they need |
-| The suite passes against `cellad` on the native tier in under five minutes and against the kind tier with the declared capability set in under fifteen | the conformance tier of [[012-test-stubs-and-tiers]] | the native half passes in ten seconds, against an in-process `cellad serve` with the stubs on every push, and against the development stack in the install job ([[052-conformance-suite]]); the kind half is wired into that job and into the release pipeline and reports on the first run. The tier's command carries `-tags=e2e`, which [[015-conformance-suite]] puts `TestContract` behind |
+| Every group in the table exists with the scope named, and skips with its reason when its input is empty | `TestGroupsAndSkips` | passing for the eighteen groups, with 51 cases in them ([[052-conformance-suite]]); the groups whose kind this API does not serve hold one case each, gated on the capability or the input they need. The agent case copies a file out as the skill does, and the spawn case sends fields the schema knows and needs no mesh, so both run against this server ([[059-conformance-closure]]) |
+| The suite passes against `cellad` on the native tier in under five minutes and against the kind tier with the declared capability set in under fifteen | `TestTheConformanceSuiteHoldsAgainstThisServer`, and `TestContract` in `verify.yml`'s install job and `release.yml`'s conformance job | partial: the native half passes in fifteen seconds against an in-process `cellad serve` with the stubs on every push, 46 passed and 5 skipped ([[059-conformance-closure]]), and against the development stack in the install job. The kind half passed in the install job on 2026-09-22 in four minutes 46 seconds, 33 passed and 18 skipped, with `files` and `pool`; the runs now also pass `mesh`, which completes the set the Kubernetes driver declares, and the first install job after [[059-conformance-closure]] is the run that shows it. The set this spec's Time section names (the egress modes, `volumes`, `display`, `input`, `attach`, `dial`, `resize`) is more than that driver declares, so the kind run cannot assert it yet |
 | A run leaves nothing behind and two concurrent runs against one server touch none of each other's objects | `TestRunCleansUp`, over one run's own objects and over two runs at once | passing as `TestRunCleansUp`, which asserts every created id deleted, nothing else deleted, and two runs naming their objects apart ([[052-conformance-suite]]) |
-| A server started with `CELLA_TEST_DRIFT_DEFAULT` fails exactly the resolve group's defaults case | `TestSuiteCatchesADriftedDefault` | not built: the drift default is a change to `internal/config` and [[052-conformance-suite]] changed no server package. The same property holds against a server that answers one field wrong, `TestAServerThatAnswersTheWrongValueIsReportedFailed` |
+| A server started with `CELLA_TEST_DRIFT_DEFAULT` fails exactly the resolve group's defaults case | `TestSuiteCatchesADriftedDefault` | built ([[059-conformance-closure]]): `cellad serve` in the process with the spawn budget drifted fails `case003DefaultsAreReturned` and nothing else, and the disagreement names the field and the value |
 | A server declaring a capability it does not honour fails the capability group | `TestSuiteCatchesAFalseCapability` against a lying server | passing, [[052-conformance-suite]] |
-| A clean checkout runs the documented command against an external URL | the `conformance-external` CI job on dispatch | the documented command runs against the development stack and against the kind stack in `verify.yml`'s install job and in the release pipeline ([[052-conformance-suite]]); a job that takes an address of somebody else's on dispatch is not built |
+| A clean checkout runs the documented command against an external URL | the `conformance-external` job of `.github/workflows/conformance.yml` on dispatch, held to the documented command by `TestTheExternalRunIsTheDocumentedCommand` | built ([[059-conformance-closure]]): the job runs on dispatch only, from a clean checkout, the command `docs/conformance.md` documents, with the URL as an input and the bearer from a repository secret; the test holds its command equal to the page's and the bearer out of the inputs and the script. A dispatch against a given address is the run of that job and not a property of the tree |

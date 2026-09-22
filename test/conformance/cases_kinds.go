@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -146,15 +147,20 @@ func case021EnvironmentRead(ctx context.Context, e *Env) error {
 	return nil
 }
 
-// case022SpawnBoundary: a sandbox that applies a child with one more allowed
-// host than its own is refused, which is the rule a boundary never moves by.
+// case022SpawnBoundary: a sandbox given spawn rights applies a child through
+// its own workload token, and a child that asks for more spawn budget than its
+// parent has left is refused at that field, which is the rule a boundary never
+// moves by. The parent holds a budget of two and a depth of one, so the budget
+// is the only rule the child breaks. The budget axis needs neither a mesh nor
+// an egress gateway, so the case runs on every environment a workload token
+// reaches the API from.
 func case022SpawnBoundary(ctx context.Context, e *Env) error {
-	if err := e.need("mesh"); err != nil {
-		return err
+	spawn := func(budget, depth int) map[string]any {
+		return map[string]any{"spawn": map[string]any{"budget": budget, "depth": depth}}
 	}
 	parent, err := e.sandbox(ctx, e.caller, func(body map[string]any) {
 		spec, _ := body["spec"].(map[string]any)
-		spec["egress"] = map[string]any{"mode": "allowlist", "allow": []string{"api.example.com"}}
+		spec["mesh"] = spawn(2, 1)
 	})
 	if err != nil {
 		return err
@@ -169,22 +175,37 @@ func case022SpawnBoundary(ctx context.Context, e *Env) error {
 	}
 	child := e.manifest(e.name(), func(body map[string]any) {
 		spec, _ := body["spec"].(map[string]any)
-		spec["egress"] = map[string]any{"mode": "allowlist", "allow": []string{"api.example.com", "other.example.com"}}
+		spec["mesh"] = spawn(5, 0)
 	})
 	workload := newClient(e.caller.base, token)
 	refused, err := workload.post(ctx, "/v1/sandboxes", child)
 	if err != nil {
 		return err
 	}
-	return refused.refusal("boundary_exceeded")
+	// A server that created the child it had to refuse has made an object
+	// this run deletes, whatever the case concludes.
+	if obj, decodeErr := refused.object(); decodeErr == nil && obj.Status.ID != "" {
+		e.record(e.caller, "/v1/sandboxes", obj.Status.ID)
+	}
+	if err := refused.refusal("boundary_exceeded"); err != nil {
+		return err
+	}
+	if paths := refused.paths(); !slices.Contains(paths, "spec.mesh.spawn.budget") {
+		return refused.disagree("details.paths naming spec.mesh.spawn.budget", fmt.Sprintf("paths %v", paths))
+	}
+	return nil
 }
 
 // case011AgentScenario: the scenario an agent runs from the skill alone,
 // through the built command: apply, exec, copy out, read, delete, each with
-// the exit code the scheme names.
+// the exit code the scheme names. Copying out is the files capability, so the
+// case runs where the environment declares it.
 func case011AgentScenario(ctx context.Context, e *Env) error {
 	if e.cfg.Cella == "" {
 		return skipf("no agent binary: set Cella to the built command")
+	}
+	if err := e.need("files"); err != nil {
+		return err
 	}
 	dir, err := os.MkdirTemp("", "conformance-agent-")
 	if err != nil {
@@ -208,12 +229,25 @@ func case011AgentScenario(ctx context.Context, e *Env) error {
 	if _, err := run("apply", "-f", file, "-w"); err != nil {
 		return err
 	}
-	out, err := run("exec", name, "--", "/bin/sh", "-c", "echo scenario")
+	// The working directory is the workspace, so a relative path is a file
+	// the files routes answer at /workspace on every environment.
+	out, err := run("exec", name, "--", "/bin/sh", "-c", "echo scenario | tee scenario.txt")
 	if err != nil {
 		return err
 	}
 	if !strings.Contains(out, "scenario") {
 		return fmt.Errorf("the command's exec printed %q", out)
+	}
+	copied := filepath.Join(dir, "out")
+	if _, err := run("cp", name+":/workspace/scenario.txt", copied); err != nil {
+		return err
+	}
+	found, err := holdsFile(copied, "scenario.txt", "scenario\n")
+	if err != nil {
+		return fmt.Errorf("reading what cp wrote under %s: %w", copied, err)
+	}
+	if !found {
+		return fmt.Errorf("cp wrote no scenario.txt holding the bytes the sandbox wrote under %s", copied)
 	}
 	if _, err := run("get", "sandbox", name, "-o", "json"); err != nil {
 		return err
@@ -222,6 +256,28 @@ func case011AgentScenario(ctx context.Context, e *Env) error {
 		return err
 	}
 	return nil
+}
+
+// holdsFile reports whether a file of that name holding those bytes is
+// anywhere under dir. An archive carries a path relative to what was asked
+// for, so where below the destination it lands is the client's business.
+func holdsFile(dir, name, content string) (bool, error) {
+	found := false
+	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || d.Name() != name {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		found = found || string(data) == content
+		return nil
+	})
+	return found, err
 }
 
 // case023BrowserReady: a sandbox with a desktop reaches DisplayReady, its

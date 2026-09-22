@@ -435,6 +435,11 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	if err != nil {
 		return fail(stderr, err)
 	}
+	if cfg.DriftDefault != "" {
+		tel.log.Warn("CELLA_TEST_DRIFT_DEFAULT is set: this server resolves one default one unit off and does not conform",
+			"field", cfg.DriftDefault)
+		admit = driftDefault(cfg.DriftDefault, admit)
+	}
 	spool := filepath.Join(cfg.DataDir, "spool")
 	if err := os.MkdirAll(spool, 0o750); err != nil {
 		return fail(stderr, fmt.Errorf("creating the upload spool directory: %w", err))

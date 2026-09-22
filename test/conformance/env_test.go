@@ -5,7 +5,9 @@ package conformance
 
 import (
 	"context"
+	"errors"
 	"net/http"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -186,6 +188,7 @@ func TestAServerThatAnswersTheWrongValueIsReportedFailed(t *testing.T) {
 		"case008FilesTar", "case008FileRoutes", "case008Logs", "case008ListSelectors",
 		"case018SecretWriteOnly", "case018CanarySecret", "case009ObjectFeed",
 		"case009DeliveredInOrder", "case023BrowserReady", "case008PublicDocuments",
+		"case022SpawnBoundary",
 	} {
 		if !slices.Contains(report.Failed, name) {
 			t.Errorf("%s did not fail against a server that answers the wrong value", name)
@@ -194,11 +197,13 @@ func TestAServerThatAnswersTheWrongValueIsReportedFailed(t *testing.T) {
 }
 
 // TestTheAgentCaseRunsTheBinary: the one case that reaches a command rather
-// than a server, over a command that answers every call and one that answers
-// none.
+// than a server, over a command that answers every call, one that answers
+// every call and copies nothing out, one that answers none, one that is not
+// there, and an environment that declares no files to copy.
 func TestTheAgentCaseRunsTheBinary(t *testing.T) {
 	f := newFake(t)
 	cfg := f.config()
+	cfg.Capabilities = []string{"files"}
 	e, err := newEnv(t.Context(), cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -206,9 +211,20 @@ func TestTheAgentCaseRunsTheBinary(t *testing.T) {
 	if err := case011AgentScenario(t.Context(), e); err == nil {
 		t.Error("the case ran with no binary configured")
 	}
-	e.cfg.Cella = "/bin/echo"
+	// A command that answers every call the way the built one does: the
+	// exec's output on standard output, and cp's file under its destination.
+	agent := filepath.Join(t.TempDir(), "agent")
+	script := "#!/bin/sh\nif [ \"$1\" = cp ]; then mkdir -p \"$3\" && printf 'scenario\\n' > \"$3/scenario.txt\"; exit; fi\necho \"$@\"\n"
+	if err := os.WriteFile(agent, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	e.cfg.Cella = agent
 	if err := case011AgentScenario(t.Context(), e); err != nil {
 		t.Errorf("a command that answers every call failed the case: %v", err)
+	}
+	e.cfg.Cella = "/bin/echo"
+	if err := case011AgentScenario(t.Context(), e); err == nil || !strings.Contains(err.Error(), "reading what cp wrote") {
+		t.Errorf("a command that copies nothing out passed the case: %v", err)
 	}
 	e.cfg.Cella = "/usr/bin/false"
 	if err := case011AgentScenario(t.Context(), e); err == nil {
@@ -217,6 +233,11 @@ func TestTheAgentCaseRunsTheBinary(t *testing.T) {
 	e.cfg.Cella = filepath.Join(t.TempDir(), "nothing")
 	if err := case011AgentScenario(t.Context(), e); err == nil {
 		t.Error("a command that is not there passed the case")
+	}
+	e.caps = map[string]bool{"attach": true}
+	var skip *Skip
+	if err := case011AgentScenario(t.Context(), e); !errors.As(err, &skip) {
+		t.Errorf("an environment with no files did not skip the case: %v", err)
 	}
 }
 

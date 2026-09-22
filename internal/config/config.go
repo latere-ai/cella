@@ -133,6 +133,11 @@ type Config struct {
 	// in-process driver not ready, before an environment is Offline (spec
 	// 021). CELLA_ENVIRONMENT_OFFLINE sets it.
 	EnvironmentOffline time.Duration
+	// DriftDefault is CELLA_TEST_DRIFT_DEFAULT, one of DriftFields or
+	// empty: the field a test server resolves one unit off its default, so
+	// a test proves the conformance suite notices (spec 015). It is empty in
+	// every deployment and accepted only with the native runtime.
+	DriftDefault string
 	// Identity is spec 006's half: the issuers, the audience, the signing
 	// keys, the authorizer, and the owner policy's admins.
 	Identity
@@ -179,6 +184,7 @@ func Load(getenv Getenv) (Config, error) {
 	if c.Runtime == RuntimeK8s {
 		c.K8s = loadK8s(getenv, &problems)
 	}
+	c.DriftDefault = loadDriftDefault(getenv, c.Runtime, &problems)
 	if c.Runtime == RuntimeNative && !c.AllowUnsafeNative {
 		problems = append(problems, "CELLA_RUNTIME=native requires CELLA_ALLOW_UNSAFE_NATIVE=true; native execution has no isolation")
 	}

@@ -56,6 +56,33 @@ func TestTheBodyHelpers(t *testing.T) {
 	}
 }
 
+// TestTheLiteralDefaultsAreReadOffTheAnswer: each literal default is read at
+// its path, a zero one may be left out, and an answer that moves one, leaves
+// out one that is not zero, or is no object at all is a disagreement naming
+// what arrived.
+func TestTheLiteralDefaultsAreReadOffTheAnswer(t *testing.T) {
+	honest := `{"workdir":"/workspace","workspace":{"path":"/workspace","source":"empty"},"network":{"egress":{"mode":"open"}}}`
+	if err := holdsLiteralDefaults(json.RawMessage(honest)); err != nil {
+		t.Fatalf("an answer with every literal default: %v", err)
+	}
+	zeros := `{"workdir":"/workspace","workspace":{"path":"/workspace","source":"empty"},"network":{"egress":{"mode":"open"}},"mesh":{"enabled":false,"spawn":{"budget":0,"depth":0}}}`
+	if err := holdsLiteralDefaults(json.RawMessage(zeros)); err != nil {
+		t.Fatalf("an answer that writes the zero defaults out: %v", err)
+	}
+	for _, tc := range []struct{ spec, want string }{
+		{`{"workdir":"/workspace","workspace":{"source":"empty"},"network":{"egress":{"mode":"open"}}}`, "spec.workspace.path absent"},
+		{`{"workdir":"/","workspace":{"path":"/workspace","source":"empty"},"network":{"egress":{"mode":"open"}}}`, "spec.workdir /"},
+		{`{"workdir":"/workspace","workspace":{"path":"/workspace","source":"empty"},"network":{"egress":{"mode":"open"}},"mesh":{"spawn":{"depth":1}}}`, "spec.mesh.spawn.depth 1"},
+		{`{"workdir":"/workspace","workspace":"/workspace"}`, "spec.workspace.path absent"},
+		{`["no", "object"]`, "a specification that is a JSON object"},
+	} {
+		err := holdsLiteralDefaults(json.RawMessage(tc.spec))
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: got %v, want a disagreement carrying %q", tc.spec, err, tc.want)
+		}
+	}
+}
+
 // TestTheListHelpers: the page readers a list case builds its verdict from.
 func TestTheListHelpers(t *testing.T) {
 	page := listEnvelope{Items: []object{{Status: objectStatus{ID: "sbx_1"}}, {Status: objectStatus{ID: "sbx_2"}}}}

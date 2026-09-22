@@ -81,6 +81,7 @@ later.
 | [057](.archive/057-scheduling-queue.md) | Scheduling queue: the queued mode, capacity by resource, the queue and its loop, the scheduling fields | large | complete | 003, 005, 010, 017, 020, 021, 031, 038, 054 |
 | [058](.archive/058-preemption.md) | Preemption: a higher head stops preemptible sandboxes, a victim waits again in its place, and the bound on how often | medium | complete | 003, 005, 009, 017, 020, 031, 038, 057 |
 | [062](.archive/062-journal-retention.md) | Journal retention: the reaper prunes finished records and answered operations, and the memory journal keeps a ring per object | small | complete | 005, 009, 010, 031, 042, 043 |
+| [059](.archive/059-conformance-closure.md) | Conformance closure: the drift seam, the external run on dispatch, the agent scenario against this server | medium | complete | 003, 011, 012, 015, 031, 052 |
 
 ## Dependency graph
 
@@ -298,3 +299,4 @@ The map, the order, and the rule for a slice are in 031.
 | [057-scheduling-queue.md](.archive/057-scheduling-queue.md) | complete | The queued mode, capacity by resource with a direct create that does not fit written `Failed NoCapacity`, the queue as the `Queued` rows and the loop that places them, and the scheduling fields |
 | [058-preemption.md](.archive/058-preemption.md) | complete | Preemption on a queued environment: victims by priority, cpu and age, the requeue that keeps a victim's place and disk, `status.preemptions` and `CELLA_MAX_PREEMPTIONS`, `cella_preemptions_total`, and the pool proved behind the authorizer |
 | [062-journal-retention.md](.archive/062-journal-retention.md) | complete | `CELLA_JOURNAL_RETENTION` applied on the reaper's tick to finished records and answered operations, and the memory journal's ring of `CELLA_JOURNAL_CAP` per object |
+| [059-conformance-closure.md](.archive/059-conformance-closure.md) | complete | The drift seam `CELLA_TEST_DRIFT_DEFAULT` and the literal defaults the suite now reads, the dispatch workflow that runs the documented command against an address, and the agent and spawn cases against this server |
