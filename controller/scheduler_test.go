@@ -695,3 +695,28 @@ func TestSchedulerMetrics(t *testing.T) {
 		t.Fatalf("a capacity that does not parse published %+v", got)
 	}
 }
+
+// TestTheLoopPassesAtStart: a control plane that restarts with a sandbox
+// waiting and room free places it on the loop's first pass, with no tick and
+// no wake.
+func TestTheLoopPassesAtStart(t *testing.T) {
+	dir := t.TempDir()
+	c, d, clock := scheduled(t, v1.SchedulingQueued, v1.Capacity{Sandboxes: 1}, Options{DataDir: dir})
+	a, owner := asking("a", "alice", "1", 0)
+	first := mustCreate(t, c, a, owner)
+	obj, owner := asking("b", "alice", "1", 0)
+	b := mustCreate(t, c, obj, owner)
+	deleteSandbox(t, c, first.Status.ID)
+	if err := c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	again, _, _ := newFakeOver(t, Options{DataDir: dir, SchedulingMode: v1.SchedulingQueued, Capacity: 1}, d, clock)
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() { defer close(done); again.RunScheduler(ctx) }()
+	defer func() { cancel(); <-done }()
+	waitFor(t, "the first pass to place what waited", func() bool {
+		p, _ := sandboxPhase(t, again, b.Status.ID)
+		return p == driver.Running
+	})
+}

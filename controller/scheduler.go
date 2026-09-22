@@ -184,12 +184,16 @@ func releases(before v1.Sandbox, after *v1.Sandbox) bool {
 		(holdsDisk(before) && !holdsDisk(*after))
 }
 
-// RunScheduler ticks the scheduler loop until ctx ends: once every
-// ScheduleInterval and once on every wake. Each pass runs only while this
+// RunScheduler ticks the scheduler loop until ctx ends: once at start, once
+// every ScheduleInterval and once on every wake. Each pass runs only while this
 // replica holds the scheduler lease.
 func (c *Controller) RunScheduler(ctx context.Context) {
 	ticks, stop := c.clock.Ticker(c.scheduleInterval)
 	defer stop()
+	// The first pass runs at once, as the reaper's does: a process that
+	// restarts with sandboxes waiting and room free places them before the
+	// first interval ends.
+	c.scheduleTick(ctx)
 	for {
 		select {
 		case <-ctx.Done():
