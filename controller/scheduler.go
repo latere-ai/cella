@@ -347,3 +347,35 @@ func (c *Controller) placeQueued(ctx context.Context, obj v1.Sandbox) error {
 	c.observeCreate(out, PoolMiss, started)
 	return err
 }
+
+// QueueDepth is how many sandboxes wait in one queue of one environment.
+type QueueDepth struct {
+	Environment, Queue string
+	Waiting            int
+}
+
+// QueueDepths is every queue of every queued environment, an empty one
+// included, beside any queue an operator removed while sandboxes still wait in
+// it. It is what cella_queue_depth publishes, so a queue that drained reads
+// zero rather than disappearing.
+func (c *Controller) QueueDepths() []QueueDepth {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var out []QueueDepth
+	for _, environment := range c.environmentsHeld() {
+		env, _ := c.environmentOf(environment)
+		queues := c.queues(environment)
+		if manifest.Queued(env) {
+			for _, q := range manifest.QueuesOf(env) {
+				if !slices.Contains(queues, q) {
+					queues = append(queues, q)
+				}
+			}
+		}
+		slices.Sort(queues)
+		for _, q := range queues {
+			out = append(out, QueueDepth{Environment: environment, Queue: q, Waiting: c.waiting(environment, q)})
+		}
+	}
+	return out
+}

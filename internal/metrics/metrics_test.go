@@ -25,6 +25,15 @@ func full() *metrics.Registry {
 		Sandboxes:   func() map[string]int { return map[string]int{"Running": 2, "Stopped": 1} },
 		Gateways:    func() int { return 3 },
 		Pending:     func() (int, bool) { return 7, true },
+		Queues: func() []metrics.Series {
+			return []metrics.Series{{Labels: map[string]string{"environment": "default", "queue": "rollouts"}, Value: 4}}
+		},
+		Capacity: func() []metrics.Series {
+			return []metrics.Series{
+				{Labels: map[string]string{"environment": "default", "resource": "cpu", "kind": "declared"}, Value: 8},
+				{Labels: map[string]string{"environment": "default", "resource": "cpu", "kind": "used"}, Value: 2.5},
+			}
+		},
 	})
 }
 
@@ -126,6 +135,9 @@ func TestPullGaugesReadTheirIndex(t *testing.T) {
 		`cella_sandboxes{driver="native",environment="default",phase="Stopped"} 1`,
 		`cella_gateways_connected{environment="default"} 3`,
 		`cella_events_pending 7`,
+		`cella_queue_depth{environment="default",queue="rollouts"} 4`,
+		`cella_capacity{environment="default",kind="declared",resource="cpu"} 8`,
+		`cella_capacity{environment="default",kind="used",resource="cpu"} 2.5`,
 	} {
 		if !series(t, r, want) {
 			t.Errorf("the exposition has no series %q", want)
@@ -138,7 +150,7 @@ func TestPullGaugesReadTheirIndex(t *testing.T) {
 // zero an alert would read as an answer.
 func TestGaugesWithoutAnIndexPublishNothing(t *testing.T) {
 	out := exposition(t, metrics.New(metrics.Options{Environment: "default"}))
-	for _, name := range []string{"cella_sandboxes", "cella_gateways_connected", "cella_events_pending", "cella_lease_held", "cella_pool_size"} {
+	for _, name := range []string{"cella_sandboxes", "cella_gateways_connected", "cella_events_pending", "cella_lease_held", "cella_pool_size", "cella_queue_depth", "cella_capacity"} {
 		if strings.Contains(out, "\n"+name) || strings.HasPrefix(out, name) {
 			t.Errorf("a registry with no index published %s", name)
 		}

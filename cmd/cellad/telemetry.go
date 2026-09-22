@@ -12,6 +12,7 @@ import (
 
 	"latere.ai/x/pkg/otel"
 
+	"latere.ai/x/cella/controller"
 	"latere.ai/x/cella/internal/metrics"
 	"latere.ai/x/cella/internal/version"
 )
@@ -95,4 +96,36 @@ func phaseCounts(phases []string) map[string]int {
 		counts[phase]++
 	}
 	return counts
+}
+
+// queueSeries is the scrape-time answer for cella_queue_depth: every queue of
+// every queued environment with how many wait in it.
+func queueSeries(depths []controller.QueueDepth) []metrics.Series {
+	out := make([]metrics.Series, 0, len(depths))
+	for _, d := range depths {
+		out = append(out, metrics.Series{
+			Labels: map[string]string{"environment": d.Environment, "queue": d.Queue},
+			Value:  float64(d.Waiting),
+		})
+	}
+	return out
+}
+
+// capacitySeries is the scrape-time answer for cella_capacity: each declared
+// quantity as two series, what the environment declares and what its
+// sandboxes hold.
+func capacitySeries(figures []controller.CapacityFigure) []metrics.Series {
+	out := make([]metrics.Series, 0, 2*len(figures))
+	for _, f := range figures {
+		for _, s := range []struct {
+			kind  string
+			value float64
+		}{{"declared", f.Declared}, {"used", f.Used}} {
+			out = append(out, metrics.Series{
+				Labels: map[string]string{"environment": f.Environment, "resource": f.Resource, "kind": s.kind},
+				Value:  s.value,
+			})
+		}
+	}
+	return out
 }

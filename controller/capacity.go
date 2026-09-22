@@ -195,3 +195,55 @@ func (c *Controller) makeRoom(ctx context.Context, environment string, obj v1.Sa
 	}
 	return true, nil
 }
+
+// CapacityFigure is one quantity an environment declares beside what its
+// sandboxes hold of it, in the quantity's own unit: cores, bytes, or
+// sandboxes.
+type CapacityFigure struct {
+	Environment, Resource string
+	Declared, Used        float64
+}
+
+// CapacityFigures is every declared quantity of every environment, which is
+// what cella_capacity publishes. A quantity an environment does not declare,
+// and every quantity of one that declares auto, bounds nothing and has no
+// figure.
+func (c *Controller) CapacityFigures(ctx context.Context) []CapacityFigure {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var out []CapacityFigure
+	for _, environment := range c.environmentsHeld() {
+		declared, err := ceilingOf(c.capacityOf(environment))
+		if err == nil {
+			var used usage
+			if used, err = c.usageOn(environment); err == nil {
+				out = append(out, figures(environment, declared, used)...)
+				continue
+			}
+		}
+		c.log.WarnContext(ctx, "the capacity of an environment could not be read", "environment", environment, "err", err)
+	}
+	return out
+}
+
+func figures(environment string, declared ceiling, used usage) []CapacityFigure {
+	var out []CapacityFigure
+	for _, f := range []struct {
+		resource string
+		declared int64
+		used     int64
+		scale    float64
+	}{
+		{"cpu", declared.cpu, used.cpu, 1000},
+		{"memory", declared.memory, used.memory, 1000},
+		{"disk", declared.disk, used.disk, 1000},
+		{"sandboxes", int64(declared.sandboxes), int64(used.sandboxes), 1},
+	} {
+		if f.declared < 0 {
+			continue
+		}
+		out = append(out, CapacityFigure{Environment: environment, Resource: f.resource,
+			Declared: float64(f.declared) / f.scale, Used: float64(f.used) / f.scale})
+	}
+	return out
+}

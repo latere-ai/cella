@@ -290,6 +290,18 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 			}
 			return phaseCounts(phases)
 		},
+		Queues: func() []metrics.Series {
+			if control == nil {
+				return nil
+			}
+			return queueSeries(control.QueueDepths())
+		},
+		Capacity: func() []metrics.Series {
+			if control == nil {
+				return nil
+			}
+			return capacitySeries(control.CapacityFigures(ctx))
+		},
 		Pending: func() (int, bool) {
 			// A scrape is bounded like the probes of design 002 and
 			// outlives the drain: a store that has stopped answering must
@@ -378,7 +390,8 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		Egress: hub, Gateway: controller.GatewayAddresses{Proxy: cfg.Gateway.ProxyAddr, Reverse: cfg.Gateway.ReverseAddr},
 		Pool: cfg.Scheduling.Pool, PoolInFlight: cfg.Scheduling.PoolInFlight, PoolGrace: cfg.Scheduling.PoolGrace,
 		Capacity: cfg.Scheduling.Capacity.Sandboxes, CapacityQuantities: cfg.Scheduling.Capacity,
-		SchedulingMode: cfg.Scheduling.Mode, EnvironmentOffline: cfg.EnvironmentOffline,
+		SchedulingMode: cfg.Scheduling.Mode, ScheduleInterval: cfg.Scheduling.ScheduleInterval,
+		EnvironmentOffline: cfg.EnvironmentOffline,
 		// The driver of an environment a worker serves is the remote driver
 		// over the stream that worker opened. The controller holds no
 		// transport of its own, which is what keeps it from dialing one.
@@ -410,6 +423,7 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		loops.Go(func() { control.RunReaper(loopCtx) })
 		loops.Go(func() { control.RunPool(loopCtx) })
 		loops.Go(func() { control.RunEnvironments(loopCtx) })
+		loops.Go(func() { control.RunScheduler(loopCtx) })
 		loops.Wait()
 	}()
 	stopLoops := sync.OnceFunc(func() { cancelLoops(); <-loopsDone })

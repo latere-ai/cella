@@ -46,6 +46,19 @@ type Options struct {
 	// where the store could not answer. A scrape publishes no series rather
 	// than a zero, because a zero is what an alert reads as an empty queue.
 	Pending func() (int, bool)
+	// Queues is how many sandboxes wait in each queue, labelled environment
+	// and queue, and Capacity each declared quantity beside its sum in use,
+	// labelled environment, resource and kind. Both read the controller's
+	// desired state.
+	Queues   func() []Series
+	Capacity func() []Series
+}
+
+// Series is one labelled value a pull gauge reads from an index its caller
+// holds.
+type Series struct {
+	Labels map[string]string
+	Value  float64
 }
 
 // Registry is design 017's table, instantiated.
@@ -159,6 +172,19 @@ func (r *Registry) gauges(o Options) {
 				Labels: map[string]string{"environment": r.environment},
 				Value:  float64(o.Gateways()),
 			}}
+		})
+	}
+	for name, read := range map[string]func() []Series{"cella_queue_depth": o.Queues, "cella_capacity": o.Capacity} {
+		if read == nil {
+			continue
+		}
+		r.reg.Gauge(name, help[name], func() []pkgmetrics.LabeledValue {
+			series := read()
+			out := make([]pkgmetrics.LabeledValue, 0, len(series))
+			for _, s := range series {
+				out = append(out, pkgmetrics.LabeledValue{Labels: s.Labels, Value: s.Value})
+			}
+			return out
 		})
 	}
 	if o.Pending != nil {

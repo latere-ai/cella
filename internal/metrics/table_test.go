@@ -151,6 +151,12 @@ func TestEveryRegisteredRowHasHelp(t *testing.T) {
 		Sandboxes: func() map[string]int { return map[string]int{"Running": 1} },
 		Gateways:  func() int { return 0 },
 		Pending:   func() (int, bool) { return 0, true },
+		Queues: func() []metrics.Series {
+			return []metrics.Series{{Labels: map[string]string{"environment": "default", "queue": "default"}}}
+		},
+		Capacity: func() []metrics.Series {
+			return []metrics.Series{{Labels: map[string]string{"environment": "default", "resource": "cpu", "kind": "used"}}}
+		},
 	})
 	r.LeaseHeld(metrics.LeaseReaper, true)
 	r.PoolSize(0, 0)

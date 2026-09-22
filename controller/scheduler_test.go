@@ -657,3 +657,41 @@ func TestAQuantityThatDoesNotParseStopsThePlacement(t *testing.T) {
 		t.Fatal("a pool shape that does not parse was read")
 	}
 }
+
+// TestSchedulerMetrics: the two gauges read the queues and the capacity from
+// desired state, an empty declared queue reads zero, and a quantity the
+// environment does not declare has no figure.
+func TestSchedulerMetrics(t *testing.T) {
+	c, _, _ := scheduled(t, v1.SchedulingQueued, v1.Capacity{CPU: "2", Sandboxes: 1}, Options{})
+	c.envMu.Lock()
+	env := c.environments["default"]
+	env.Spec.Scheduling.Queues = []string{"default", "batch"}
+	c.environments["default"] = env
+	c.envMu.Unlock()
+	a, owner := asking("a", "alice", "1500m", 0)
+	mustCreate(t, c, a, owner)
+	for _, name := range []string{"b", "c"} {
+		obj, owner := asking(name, "alice", "1", 0)
+		mustCreate(t, c, obj, owner)
+	}
+	depths := c.QueueDepths()
+	want := []QueueDepth{{"default", "batch", 0}, {"default", "default", 2}}
+	if !slices.Equal(depths, want) {
+		t.Fatalf("the queues read %+v, want %+v", depths, want)
+	}
+	got := c.CapacityFigures(t.Context())
+	wantFigures := []CapacityFigure{
+		{Environment: "default", Resource: "cpu", Declared: 2, Used: 1.5},
+		{Environment: "default", Resource: "sandboxes", Declared: 1, Used: 1},
+	}
+	if !slices.Equal(got, wantFigures) {
+		t.Fatalf("the capacity reads %+v, want %+v", got, wantFigures)
+	}
+	c.envMu.Lock()
+	env.Spec.Capacity.Memory = "a lot"
+	c.environments["default"] = env
+	c.envMu.Unlock()
+	if got := c.CapacityFigures(t.Context()); len(got) != 0 {
+		t.Fatalf("a capacity that does not parse published %+v", got)
+	}
+}
