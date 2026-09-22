@@ -135,7 +135,7 @@ func startStack(t *testing.T) *stack {
 	_ = driver.Close()
 	for name, declared := range map[string]bool{
 		"files": caps.Files, "attach": caps.Attach, "display": caps.Display,
-		"input": caps.Input, "pool": caps.Pool,
+		"input": caps.Input, "pool": caps.Pool, "dial": caps.Dial,
 	} {
 		if declared {
 			s.capabilities = append(s.capabilities, name)
