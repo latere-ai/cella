@@ -458,17 +458,32 @@ func (c *Controller) create(ctx context.Context, obj v1.Sandbox, owner string, m
 	if c.waiting(environment, obj.Spec.Scheduling.Queue) > 0 {
 		entry = nil
 	}
-	c.countAdoption(pool, entry)
 	out, err := c.createLocked(ctx, obj, owner, max, warnings, lifecycle, entries, entry, parent)
 	if entry != nil && err != nil && adoptionLost(err) {
 		c.log.InfoContext(ctx, "the pool entry could not be adopted; this create takes the slow path",
 			"entry", entry.ID, "err", err)
-		out, err = c.createLocked(ctx, obj, owner, max, warnings, lifecycle, without(entries, entry.ID), nil, parent)
-		c.observeCreate(out, PoolMiss, started)
+		remaining := without(entries, entry.ID)
+		entry = nil
+		out, err = c.createLocked(ctx, obj, owner, max, warnings, lifecycle, remaining, nil, parent)
+	}
+	// The pool is counted once the outcome is known. A create refused before
+	// step 1 of the create order, for its owner's count, a name already
+	// taken or a spent spawn budget, asked nothing of the pool or of a
+	// driver, so it is neither an adoption nor a miss and has no duration;
+	// one whose adoption was lost took the slow path and is a miss.
+	if refused(err) {
 		return out, err
 	}
+	c.countAdoption(pool, entry)
 	c.observeCreate(out, poolResult(entry), started)
 	return out, err
+}
+
+// refused reports whether a create ended before step 1 of the create order
+// wrote anything: the owner's count, a name already taken, or a spawn budget
+// already spent.
+func refused(err error) bool {
+	return errors.Is(err, ErrQuota) || errors.Is(err, ErrNameTaken) || errors.Is(err, ErrBudgetExhausted)
 }
 
 // observeCreate records one create's duration where the driver was asked for

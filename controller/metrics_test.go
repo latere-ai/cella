@@ -113,6 +113,61 @@ func TestPoolCreateIsMeasured(t *testing.T) {
 	}
 }
 
+// TestARefusedCreateIsNoAdoption: a create refused for its owner's count or a
+// name already taken asked nothing of the pool, so it counts neither an
+// adoption nor a miss and observes no duration, and the entry it matched is
+// still prewarmed for the next create. One whose adoption was lost to another
+// adopter took the slow path and counts a miss.
+func TestARefusedCreateIsNoAdoption(t *testing.T) {
+	rec := &recorder{}
+	c, d, _ := newPool(t, Options{Pool: v1.PoolSpec{Size: 1}, Metrics: rec})
+	refill := func() {
+		t.Helper()
+		if _, err := c.Refill(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	refill()
+	created(t, c, "first")
+	refill()
+	second := workspace()
+	second.Metadata.Name = "second"
+	if _, err := c.Create(t.Context(), second, "alice", 1); !errors.Is(err, ErrQuota) {
+		t.Fatalf("a create past the owner's count is %v", err)
+	}
+	taken := workspace()
+	taken.Metadata.Name = "first"
+	if _, err := c.Create(t.Context(), taken, "alice", 0); !errors.Is(err, ErrNameTaken) {
+		t.Fatalf("a create of a name taken is %v", err)
+	}
+	if got := rec.createLabels(); !slices.Equal(got, []string{PoolHit}) {
+		t.Errorf("create labels %v, want the first create's hit alone", got)
+	}
+	if !slices.Equal(rec.adoptions, []string{MetricAdopted}) {
+		t.Errorf("adoptions %v, want the first create's alone", rec.adoptions)
+	}
+	if d.adopted() != 1 || len(d.entries()) != 1 {
+		t.Fatalf("the refused creates took %d adoptions and left %d entries", d.adopted()-1, len(d.entries()))
+	}
+	d.set(func(f *fakeDriver) {
+		f.onAdopt = func(id string) {
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			f.onAdopt = nil
+			s := f.states[id]
+			s.Pool, s.Owner = false, "bob"
+			f.states[id] = s
+		}
+	})
+	created(t, c, "lost")
+	if !slices.Equal(rec.adoptions, []string{MetricAdopted, MetricMiss}) {
+		t.Errorf("adoptions %v, want the lost adoption read as a miss", rec.adoptions)
+	}
+	if got := rec.createLabels(); !slices.Equal(got, []string{PoolHit, PoolMiss}) {
+		t.Errorf("create labels %v, want the lost adoption observed as a miss", got)
+	}
+}
+
 // TestRefillReportsThePoolSize is the pushed gauge: a scrape cannot list the
 // driver, so the loop reports what it found on its own tick.
 func TestRefillReportsThePoolSize(t *testing.T) {
