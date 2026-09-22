@@ -452,11 +452,21 @@ func case008Dial(ctx context.Context, e *Env) error {
 		"Sec-WebSocket-Key":      "dGhlIHNhbXBsZSBub25jZQ==",
 		"Sec-WebSocket-Protocol": "cella.dial.v1",
 	}
-	x, err := e.caller.send(ctx, http.MethodGet, "/v1/sandboxes/"+obj.Status.ID+"/dial/8080", request{Header: upgrade})
+	path := "/v1/sandboxes/" + obj.Status.ID + "/dial/8080"
+	resp, err := e.caller.open(ctx, http.MethodGet, path, request{Header: upgrade})
 	if err != nil {
 		return err
 	}
-	if x.Status != http.StatusSwitchingProtocols {
+	// An open socket lasts as long as the port inside does, which on a host
+	// where something holds 8080 is until the server's idle bound. The case
+	// reads the status and closes, rather than reading the socket to its end.
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusSwitchingProtocols {
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
+		if err != nil {
+			return fmt.Errorf("GET %s: reading the answer: %w", path, err)
+		}
+		x := &exchange{Method: http.MethodGet, Path: path, Status: resp.StatusCode, Header: resp.Header, Body: body}
 		return x.disagree("status 101 and the dial socket", fmt.Sprintf("status %d", x.Status))
 	}
 	return nil
