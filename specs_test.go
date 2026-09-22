@@ -57,7 +57,6 @@ var pendingControls = []string{
 	"TestMeshReachability",                 // spec 022, two peers on the cluster tier
 	"TestNoInboundToTheDataPlane",          // spec 021, no connection toward a worker
 	"TestNoSecretLeaks",                    // spec 018, the placeholder's confinement
-	"TestPortProxyIsConfined",              // spec 023, the port proxy's confinement
 	"TestRateLimits",                       // spec 008, the token buckets
 	"TestReadAuthorizeAct",                 // spec 008, the handler order
 	"TestRefusedReferencesLookMissing",     // spec 006, a refusal that reads as missing
