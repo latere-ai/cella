@@ -413,3 +413,54 @@ func TestTheFeedReadsAnyEnvironment(t *testing.T) {
 		t.Fatalf("the environment feed was decided under another action: %q", body)
 	}
 }
+
+// TestSchedulingOverHTTP is spec 057 through the routes: a create a direct
+// environment cannot fit answers 201 with the sandbox Failed NoCapacity, a
+// queued one answers 201 Queued with its place, a queued sandbox refuses exec,
+// and the scheduling fields are refused where the environment's mode says.
+func TestSchedulingOverHTTP(t *testing.T) {
+	k := setupEnvironments(t)
+	apply := func(name, scheduling string) {
+		t.Helper()
+		body := `{"apiVersion":"cella.latere.ai/v1beta1","kind":"Environment","metadata":{"name":"` + name + `"},` +
+			`"spec":{"mode":"worker","isolation":"none","capacity":{"sandboxes":1},"scheduling":` + scheduling + `}}`
+		k.send(http.MethodPut, "/v1/environments/"+name, k.alice, body, nil, http.StatusCreated)
+	}
+	apply("direct", `{"mode":"direct"}`)
+	apply("queued", `{"mode":"queued","queues":["default","batch"]}`)
+	k.arrive(t)
+	create := func(name, environment, scheduling string, status int) v1.Sandbox {
+		t.Helper()
+		body := `{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox","metadata":{"name":"` + name + `"},` +
+			`"spec":{"environment":"` + environment + `","command":["sh","-c","sleep 60"]` + scheduling + `}}`
+		out, _ := k.send(http.MethodPost, "/v1/sandboxes", k.alice, body, nil, status)
+		var obj v1.Sandbox
+		if status == http.StatusCreated {
+			if err := json.Unmarshal(out, &obj); err != nil {
+				t.Fatal(err)
+			}
+		} else if !strings.Contains(string(out), "capability_unsupported") && !strings.Contains(string(out), "invalid_field") {
+			t.Fatalf("the refusal of %s is %s", name, out)
+		}
+		return obj
+	}
+
+	create("d1", "direct", "", http.StatusCreated)
+	full := create("d2", "direct", "", http.StatusCreated)
+	if full.Status.Phase != "Failed" || full.Status.Reason != "NoCapacity" {
+		t.Fatalf("a create past a direct environment's capacity is %s %s", full.Status.Phase, full.Status.Reason)
+	}
+	create("d3", "direct", `,"scheduling":{"priority":1}`, http.StatusUnprocessableEntity)
+
+	create("q1", "queued", "", http.StatusCreated)
+	waiting := create("q2", "queued", `,"scheduling":{"priority":2}`, http.StatusCreated)
+	if waiting.Status.Phase != "Queued" || waiting.Spec.Scheduling.Queue != "default" {
+		t.Fatalf("a create past a queued environment's capacity is %s in %q", waiting.Status.Phase, waiting.Spec.Scheduling.Queue)
+	}
+	out, _ := k.send(http.MethodGet, "/v1/sandboxes/"+waiting.Status.ID, k.alice, "", nil, http.StatusOK)
+	if !strings.Contains(string(out), "Position 1 of 1 in the queue default.") {
+		t.Fatalf("the queued sandbox reads %s", out)
+	}
+	k.send(http.MethodPost, "/v1/sandboxes/"+waiting.Status.ID+"/exec?wait=1", k.alice, `{"command":["true"]}`, nil, http.StatusConflict)
+	create("q3", "queued", `,"scheduling":{"queue":"rollouts"}`, http.StatusBadRequest)
+}
