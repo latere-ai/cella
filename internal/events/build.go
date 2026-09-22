@@ -189,6 +189,16 @@ type Screen struct {
 	BytesOut   int64 `json:"bytesOut"`
 }
 
+// Dial is the data of sandbox.dial, written when the socket closes: how long
+// it ran and how many bytes moved each way. What the bytes were is not here,
+// because the port inside may be anything from a database to a browser's
+// debugging endpoint.
+type Dial struct {
+	DurationMS int64 `json:"durationMs"`
+	BytesIn    int64 `json:"bytesIn"`
+	BytesOut   int64 `json:"bytesOut"`
+}
+
 // Created is the data of sandbox.created: the manifest as the resolver left
 // it, with every environment value dropped to its key and every mounted
 // secret dropped to its name. A value belongs to the sandbox and never to a

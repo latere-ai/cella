@@ -92,6 +92,7 @@ const (
 	TypeScreenshot Type = "sandbox.screenshot"
 	TypeInput      Type = "sandbox.input"
 	TypeScreen     Type = "sandbox.screen"
+	TypeDial       Type = "sandbox.dial"
 )
 
 // Types is every type this slice emits, in the order design 009's table
@@ -99,7 +100,7 @@ const (
 var Types = []Type{
 	TypeCreated, TypeUpdated, TypeStarted, TypeStopped, TypeDeleted,
 	TypeFailed, TypeLost, TypeRecovering, TypeRecovered, TypeSpawned,
-	TypeExec, TypeFiles, TypeScreenshot, TypeInput, TypeScreen,
+	TypeExec, TypeDial, TypeFiles, TypeScreenshot, TypeInput, TypeScreen,
 	TypeSecretCreated, TypeSecretUpdated, TypeSecretDeleted,
 	TypeEnvironmentCreated, TypeEnvironmentUpdated, TypeEnvironmentRegistered,
 	TypeEnvironmentOffline, TypeEnvironmentKeyed, TypeEnvironmentKeyRevoked,
