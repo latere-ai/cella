@@ -67,6 +67,7 @@ and mixing the two makes the histogram unreadable.
 | `cella_pool_adoptions_total` | `outcome` (`adopted`, `miss`) |
 | `cella_queue_depth` | `environment`, `queue` |
 | `cella_capacity` | `environment`, `resource` (`cpu`, `memory`, `disk`, `sandboxes`), `kind` (`declared`, `used`) |
+| `cella_preemptions_total` | none: sandboxes stopped to make room for one of higher priority |
 
 ### Decisions, records and state
 

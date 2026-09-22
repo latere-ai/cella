@@ -6,6 +6,23 @@ refused before it is pushed.
 
 ## Unreleased
 
+- A sandbox that sets `scheduling.preemptible: true` on a queued
+  environment can now be stopped to make room for one of higher priority.
+  When the front of a queue does not fit, the lowest priority preemptible
+  sandboxes are stopped first, the largest and then the newest among
+  equals, and only as many as it takes; if stopping all of them would not
+  be enough, none is stopped. A preempted sandbox keeps its workspace,
+  waits in its queue again at its original place with the `Scheduled`
+  reason `Preempted`, and is started with its files once there is room.
+  `status.preemptions` counts how often that happened, and after
+  `CELLA_MAX_PREEMPTIONS` (default `3`; `0` turns preemption off) it is no
+  longer stopped for anyone. `cella_preemptions_total` counts the stops,
+  and each one is a `sandbox.stopped` event with the reason `Preempted`.
+  The `sandbox.failed` event of a create that did not fit, or that waited
+  past its `startDeadline`, now carries `NoCapacity` or `StartDeadline`
+  rather than `DriverFailed`, and `cella_pool_adoptions_total` no longer
+  counts a create refused for your sandbox limit or a name already taken.
+  [Capacity and queues](docs/scheduling.md) has the whole of it.
 - An environment can hold what it cannot fit yet. Apply one with
   `scheduling.mode: queued`, or start `cellad` with
   `CELLA_SCHEDULING_MODE=queued`, and a create past its capacity answers
