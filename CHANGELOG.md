@@ -6,6 +6,13 @@ refused before it is pushed.
 
 ## Unreleased
 
+- The event journal no longer grows for as long as the process or the
+  database lives. Delivered and dropped records, and answered worker
+  operations, older than `CELLA_JOURNAL_RETENTION` (default `720h`, at
+  least `1h`) are forgotten on the reaper's tick; a record still waiting
+  for your sink is kept whatever its age. Without a database the journal
+  keeps the newest `CELLA_JOURNAL_CAP` records per object (default
+  `1000`), and the per-object feed reads that many.
 - An environment can hold what it cannot fit yet. Apply one with
   `scheduling.mode: queued`, or start `cellad` with
   `CELLA_SCHEDULING_MODE=queued`, and a create past its capacity answers
