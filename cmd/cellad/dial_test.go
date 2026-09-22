@@ -5,12 +5,14 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -18,6 +20,8 @@ import (
 
 	"github.com/gorilla/websocket"
 	"latere.ai/x/pkg/authkit/issuertest"
+
+	"latere.ai/x/cella/internal/cellacli"
 )
 
 // serveArg turns this test binary into the HTTP server a native sandbox runs
@@ -131,6 +135,8 @@ func TestDialAndPortProxy(t *testing.T) {
 		t.Fatalf("the dial socket carried back %d %q", res.StatusCode, body)
 	}
 
+	forwardThroughTheCommand(t, base, alice, obj.Status.ID, port)
+
 	if status, body := call(t, http.MethodPost, base+"/v1/sandboxes/"+obj.Status.ID+"/stop", alice); status != http.StatusOK {
 		t.Fatalf("stop answered %d %s", status, body)
 	}
@@ -161,4 +167,50 @@ func call(t *testing.T, method, url, token string) (int, string) {
 		t.Fatal(err)
 	}
 	return resp.StatusCode, string(data)
+}
+
+// forwardThroughTheCommand runs `cella port-forward` against the node and
+// reads the server inside through the loopback port it listens on, which is
+// the client's own WebSocket against the server's.
+func forwardThroughTheCommand(t *testing.T, base, token, id string, port int) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(t.Context())
+	var out, errOut syncBuffer
+	codes := make(chan int, 1)
+	go func() {
+		codes <- cellacli.Run(ctx, cellacli.Env{
+			Args: []string{"port-forward", id, "0:" + strconv.Itoa(port)}, Stdin: strings.NewReader(""),
+			Stdout: &out, Stderr: &errOut, Version: "v0.0.0-test",
+			Getenv: func(k string) string {
+				return map[string]string{"CELLA_URL": base, "CELLA_TOKEN": token}[k]
+			},
+		})
+	}()
+	defer func() {
+		cancel()
+		if code := <-codes; code != 0 {
+			t.Errorf("port-forward exited %d: %s", code, errOut.String())
+		}
+	}()
+	line := regexp.MustCompile(`Forwarding (127\.0\.0\.1:\d+) `)
+	var local string
+	waitFor(t, "port-forward to listen", func() bool {
+		m := line.FindStringSubmatch(out.String())
+		if m != nil {
+			local = m[1]
+		}
+		return m != nil
+	})
+	res, err := (&http.Client{Timeout: 10 * time.Second}).Get("http://" + local + "/forwarded")
+	if err != nil {
+		t.Fatalf("no answer through port-forward: %v; %s", err, errOut.String())
+	}
+	defer func() { _ = res.Body.Close() }()
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != http.StatusOK || string(body) != servedBody+"/forwarded" {
+		t.Fatalf("port-forward carried back %d %q", res.StatusCode, body)
+	}
 }
