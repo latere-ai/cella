@@ -25,12 +25,13 @@ reports about a sandbox: phase, timestamps, the shape granted, the
 labels the driver stamped. It is the driver's, and the store keeps a
 copy as an index, rebuilt from the driver at start and after a lost
 watch. Beside them the store keeps secret values encrypted, the
-revocation list for tokens, the spawn ledger, the event journal, the
-scheduler's queue, and the worker operation queue. Everything lives in
+revocation list for tokens, the spawn ledger, the event journal, and
+the worker operation queue. Everything lives in
 memory by default and in Postgres when `CELLA_DB_URL` is set. A
 durable store is what lets a sandbox the data plane lost be recreated
 rather than forgotten, and what lets several control plane replicas
-share one queue and one set of workers; an in-memory store is what
+share one set of desired sandboxes, one queue of them and one set of
+workers; an in-memory store is what
 lets one binary run on a laptop with nothing beside it.
 
 This spec is `internal/store`'s implementation contract. The narrow
@@ -67,7 +68,6 @@ type Tx interface {
 	Revocations() Revocations
 	Ledger() Ledger
 	Journal() Journal
-	Queue() Queue
 	Operations() Operations
 	Records() Records
 	Leases() Leases
@@ -123,13 +123,6 @@ type Journal interface {
 	Prune(ctx context.Context, before time.Time) (n int, err error)
 }
 
-type Queue interface {
-	Enqueue(ctx context.Context, item QueueItem) error
-	Dequeue(ctx context.Context, environment, queue string) (*QueueItem, error) // highest priority, then fair share, then arrival (020)
-	Remove(ctx context.Context, sandboxID string) error
-	Position(ctx context.Context, sandboxID string) (int, error)
-}
-
 type Operations interface { // the worker operation queue (021)
 	Enqueue(ctx context.Context, op Operation) error
 	Claim(ctx context.Context, environment, worker string, n int) ([]Operation, error) // unclaimed or claimed by a worker whose lease lapsed
@@ -152,8 +145,8 @@ type Leases interface {
 
 `Filter` here is the store's, distinct from `runtime.Filter`: `Owner`,
 `Phase`, `Environment`, `Root`, `Parent`, `Labels map[string]string`,
-`Queue`, `IDs`. `Page` is `Limit` and `Cursor`; a list returns the next
-cursor or empty. `Event`, `QueueItem`, `Operation`, and `Worker` carry
+`IDs`. `Page` is `Limit` and `Cursor`; a list returns the next
+cursor or empty. `Event`, `Operation`, and `Worker` carry
 the fields their tables below name.
 
 ### Desired state and status
@@ -220,10 +213,14 @@ events at process end, which the start-up log says.
 
 ### The scheduler's queue and capacity
 
-`queue` rows are `sandbox_id`, `environment`, `queue`, `priority`,
-`subject`, `enqueued_at`. `Dequeue` orders as
-[[020-scheduling-and-sets]] says and runs under the `scheduler`
-lease. Capacity in use is never stored: `cpu`, `memory`, and `sandboxes` are
+The queue is the desired sandboxes whose phase is `Queued`, with their
+`spec.scheduling` and their `createdAt` as the arrival; it has no table
+of its own. The controller orders it on each pass of the loop that
+holds the `scheduler` lease ([[057-scheduling-queue]]). A second row
+per waiting sandbox would be written in step with the desired row on
+every create, placement, deadline and delete, and a restart would
+reconcile the two; migration 4 drops the `queue` table migration 1
+created. Capacity in use is never stored: `cpu`, `memory`, and `sandboxes` are
 the sum over desired sandboxes on the environment whose status phase
 is `Pending`, `Starting`, `Running`, `Stopping`, or `Recovering`, and
 `disk` the sum over those and `Stopped` and `Failed` as well, since a
@@ -255,7 +252,7 @@ replica; two in-memory replicas cannot detect each other.
 
 Selected by `CELLA_DB_URL`, a `postgres://` URL. Tables: `objects`,
 `observed`, `secret_values`, `revocations`, `ledger`, `events`,
-`egress_records`, `queue`, `operations`, `workers`, `leases`. Migrations are embedded
+`egress_records`, `operations`, `workers`, `leases`. Migrations are embedded
 under `migrations/` and applied at start through
 `latere.ai/x/pkg/pgxmigrate.Up`, which imports no driver, so
 `internal/store` blank-imports golang-migrate's `pgx/v5` driver and
@@ -274,8 +271,7 @@ deleted_at is null`; `objects (kind, owner, phase)` for lists and the
 count; `objects (kind, environment)`; `objects (kind, root)`; a GIN
 index on `objects.labels` for `?label=`; `observed (environment)`;
 `events (object_id, seq)` and `events (next_attempt_at) where acked_at
-is null`; `revocations (exp)`; `egress_records (sandbox_id, at desc)`; `queue
-(environment, queue, priority desc, enqueued_at)`; `operations (environment, state, created_at)`;
+is null`; `revocations (exp)`; `egress_records (sandbox_id, at desc)`; `operations (environment, state, created_at)`;
 `workers (environment, last_heartbeat)`.
 
 ### Leases
@@ -300,7 +296,7 @@ running from labels either way.
 
 Backups and restores of the Postgres tables
 ([[014-release-and-installation]]); the queue's ordering rule
-([[020-scheduling-and-sets]]); the worker protocol over the operations
+([[020-scheduling-and-sets]], built by [[057-scheduling-queue]]); the worker protocol over the operations
 table ([[021-data-plane-workers]]); the `v1.Object` interface
 ([[003-manifest-contract]]).
 
@@ -317,7 +313,7 @@ table ([[021-data-plane-workers]]); the `v1.Object` interface
 | A plaintext value is returned by `Open` alone; its only caller in the tree is the control plane's compile path; both stores hold ciphertext; `Rewrap` under a new key leaves every ciphertext byte unchanged and `Open` still works | `TestValuesAreConfined`, `TestRewrapRotatesTheKey` | built ([[043-postgres-store]], [[046-secret-kind]]); the confinement test parses every non-test file and holds `Values.Open` and `Controlled.OpenValue` to one caller each |
 | `Debit` at one remaining unit under contention yields one success; `Credit` restores it | the `Ledger` case of `TestSuiteHoldsTheMemoryAdapter` and `TestPostgresStore` | built ([[040-mesh-and-spawn]]), with the budget carried by the debit rather than held in the row: `Debit(parentID, budget)`, `Credit`, `Used` and `Forget`, and the count under eight racing debits |
 | `Pending` returns one event per object, oldest first, and holds later events behind a deferred one; `Drop` after the retry window; `ByObject` pages newest first; `Prune` respects retention | the `Journal` case of `TestSuiteHoldsTheMemoryAdapter` and `TestPostgresStore` | `Append`, `ByObject` and `Prune` built ([[043-postgres-store]]); delivery waits for [[009-events]] |
-| `Dequeue` orders by priority, fair share, arrival; capacity in use equals the sum over the named phases after a restart | `TestQueueOrder`, `TestCapacityIsDerived` | not built |
+| The queue orders by priority, fair share, arrival; capacity in use equals the sum over the named phases after a restart; no table holds the queue | `TestSchedulerHonoursQueueOrder`, `TestCapacitySurvivesARestart`, `TestTheQueueTableIsGone` | built ([[057-scheduling-queue]]), with the order read by the controller from the `Queued` rows rather than by a `Dequeue` over a table of its own |
 | `Claim` redelivers an operation whose claimer's heartbeat lapsed, exactly once to a live worker | `TestOperationsRedeliver` | not built |
 | A schema ahead of the binary and a dirty migration each refuse to start naming the version | `TestSchemaGuards` | built ([[043-postgres-store]]) |
 | Every list and count query in the index list uses its index | `TestQueriesUseIndexes` with `EXPLAIN` | not built |

@@ -34,10 +34,15 @@ capacity, the queue and its loop, preemption, pools, and the set.
 
 ## Current state
 
-Not built. The hosted platform has a warm pool and nothing else: a
-create either hits it or runs the slow path. A pool assumes a common
-shape, and the environments a reinforcement learning rollout or an
-evaluation matrix asks for are diverse by design.
+[[038-environment-pools]] built the pool: the refill loop, the match
+rule, adoption, and capacity in its count form. [[057-scheduling-queue]]
+built the modes: capacity by resource, a direct create that does not
+fit written `Failed NoCapacity`, the queued mode with its loop, its
+order and `startDeadline`, the scheduling fields of a manifest, and the
+two gauges. Preemption, `capacity: auto` with its headroom, a recovery
+that queues on a full environment, `Options.Scheduler` as a seam a
+platform replaces, the `SandboxSet` kind and results collection are
+not built.
 
 ## Design
 
@@ -103,11 +108,14 @@ per environment and is checked at placement; both hold.
 
 ### The queue and its loop
 
-One queue per name per environment. Ordering, computed by
-[[010-state]]'s `Dequeue` per call: `priority` descending; then fair
+One queue per name per environment. The queue is the desired
+sandboxes in `Queued` on that environment with that
+`spec.scheduling.queue`, and has no table of its own
+([[057-scheduling-queue]]). Ordering, computed by the loop on each
+pass: `priority` descending; then fair
 share, the subject whose sum of requested CPU in millicores over the
 counted phases on that environment is smallest goes first; then
-`enqueued_at`. The loop runs on the replica holding the `scheduler`
+`enqueued_at`, which is the sandbox's `createdAt`. The loop runs on the replica holding the `scheduler`
 lease, one tick per `CELLA_SCHEDULE_INTERVAL` (default `5s`) and on
 every `Release`: for every `queued` environment and every queue, it
 dequeues while the head fits the remaining capacity, moves the
@@ -274,17 +282,16 @@ platform importing the package supplies its own.
 
 The phase machine of one sandbox ([[005-lifecycle-controller]]); the
 routes for sets ([[008-api]]); the `Environment` fields
-([[021-data-plane-workers]]); the store's `Dequeue` ordering test,
-which [[010-state]] owns.
+([[021-data-plane-workers]]).
 
 ## Acceptance criteria
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| A `direct` environment fails at once without capacity; a `queued` one waits and starts when capacity frees; `startDeadline` fails it with the reason; a `scheduling` field on a `direct` environment is `capability_unsupported`; an unknown queue is `invalid_field` | `TestModes` under a fake clock | not built |
-| The loop runs only on the lease holder, on the tick and on `Release`, and resumes a dequeued sandbox at create step 3 | `TestSchedulerLoop` | not built |
-| The scheduler admits in priority, then smallest CPU sum per subject, then arrival, with three subjects and mixed priorities | `TestSchedulerHonoursQueueOrder` | not built |
-| Capacity in use follows the two derivations, `Lost` frees, `Recovering` re-takes or queues, a pool entry counts, `auto` keeps the headroom, and a restart does not double count | `TestCapacityCountsThePhases`, `TestPoolYieldsCapacity` | the count form is built, with a pool entry counting and the oldest entries giving up their slots ([[038-environment-pools]]); the resource form waits on drivers reporting granted resources |
+| A `direct` environment fails at once without capacity; a `queued` one waits and starts when capacity frees; `startDeadline` fails it with the reason; a `scheduling` field on a `direct` environment is `capability_unsupported`; an unknown queue is `invalid_field` | `TestDirectFailsWhatDoesNotFit`, `TestQueuedCreateWaits`, `TestStartDeadline`, `TestSchedulingFields`, `TestSchedulingOverHTTP` | built ([[057-scheduling-queue]]): a direct create that does not fit is written `Failed NoCapacity` and answered 201, a queued one waits with its place and starts when capacity frees, `StartDeadline` fails it, and each scheduling field is refused on a direct environment and an unknown queue on a queued one, in the resolver and through the routes |
+| The loop runs only on the lease holder, on the tick and on `Release`, and resumes a dequeued sandbox at create step 3 | `TestSchedulerLoop`, `TestPlacementResumesAtTheBoundary`, `TestQueuedEnvironmentEndToEnd` | built ([[057-scheduling-queue]]): a release is the wake a sandbox leaving a phase that holds capacity sends, and the placement mints the token and pushes the boundary only when it happens |
+| The scheduler admits in priority, then smallest CPU sum per subject, then arrival, with three subjects and mixed priorities | `TestSchedulerHonoursQueueOrder`, `TestAHeadThatDoesNotFitBlocks` | built ([[057-scheduling-queue]]) |
+| Capacity in use follows the two derivations, `Lost` frees, `Recovering` re-takes or queues, a pool entry counts, `auto` keeps the headroom, and a restart does not double count | `TestCapacityCountsThePhases`, `TestCapacityInUse`, `TestCapacitySurvivesARestart`, `TestPoolYieldsCapacity`, `TestPoolYieldsCapacityByResource` | partial: both derivations, `Lost` freeing, a pool entry counting at its resources and a restart holding the same sum are built ([[038-environment-pools]], [[057-scheduling-queue]]); `auto` bounds nothing rather than keeping a headroom of the cluster's allocatable, and a recovery on a full queued environment re-takes capacity rather than queueing |
 | Victims are chosen lowest priority, largest CPU, newest; a victim is `Stopped`, requeued with its `enqueued_at`, and after the cap is no longer a victim | `TestPreemption`, `TestPreemptionIsBounded` | not built |
 | Two concurrent creates matching one pool entry yield one adoption and one slow path; the adopted sandbox has its own credential, map, token, and `createdAt`; a create with a `command` or `ports` does not adopt; oldest entries are deleted when a create does not fit | `TestPoolAdoption`, `TestPoolYieldsCapacity` | built ([[038-environment-pools]]), with `PrewarmAndAdoptIsExclusive` proving the race in the driver on `native`, on `podman` against a real engine and on `k8s`; the `ports` half of the match rule lands with the field |
 | The refill loop keeps `spec.pool.size` entries of the environment's shape under the `pool:<environment>` lease, deletes what the pool no longer wants, and `direct` starts a sandbox now or fails it | `TestPoolRefill`, `TestPoolDrift`, `TestPoolRefillHoldsTheLease` | built ([[038-environment-pools]]) |

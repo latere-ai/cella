@@ -1,6 +1,6 @@
 ---
 title: "Scheduling queue: the queued mode, capacity by resource, the queue and its loop, the scheduling fields"
-status: in-progress
+status: complete
 track: core
 depends_on:
   - specs/020-scheduling-and-sets.md
@@ -15,7 +15,7 @@ depends_on:
 affects: [manifest/, manifest/v1/, controller/, internal/config/, internal/metrics/, cmd/cellad/, docs/, CHANGELOG.md]
 effort: large
 created: 2026-09-22
-updated: 2026-09-22
+updated: 2026-09-23
 author: changkun
 ---
 
@@ -196,17 +196,65 @@ belongs with the pool rows of [[020-scheduling-and-sets]].
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| Every row of the scheduling field table has a refusing case, a queued environment defaults the queue, and each field is immutable on an update | `TestSchedulingFields`, `TestSchedulingIsImmutable` | not built |
-| The golden corpus sets every scheduling field on an accepted entry and refuses an unknown queue | `TestGoldenCorpus`, `TestCorpusCoversTheSchema` | not built |
-| An environment applied with `mode: queued` is accepted, and `CELLA_SCHEDULING_MODE=queued` seeds the default in that mode | `TestEnvironmentAcceptsTheQueuedMode`, `TestLoadScheduling` | not built |
-| In use follows the phases above per quantity, a pool entry counts at its resources, an undeclared quantity bounds nothing, and a restart does not count twice | `TestCapacityInUse`, `TestCapacitySurvivesARestart` | not built |
-| A direct environment writes a create that does not fit by any quantity, the count included, `Failed` with reason `NoCapacity` and pushes no map, mints no token and calls no driver; a queued one answers 201 `Queued` with the position | `TestDirectFailsWhatDoesNotFit`, `TestQueuedCreateWaits` | not built |
-| The `queue` table is dropped by a migration with its reverse, and a migrated database holds no such table | `TestEveryMigrationIsReversible`, `TestTheQueueTableIsGone` | not built |
-| The loop acts only under the `scheduler` lease, on the tick and on a wake, and a placed sandbox receives its boundary and token at placement and not before | `TestSchedulerLoop`, `TestPlacementResumesAtTheBoundary` | not built |
-| The loop admits by priority, then the subject with the smallest CPU sum, then arrival, across three subjects and mixed priorities, and a head that does not fit blocks its queue | `TestSchedulerHonoursQueueOrder`, `TestAHeadThatDoesNotFitBlocks` | not built |
-| A sandbox waiting past its `startDeadline` is `Failed` with reason `StartDeadline` | `TestStartDeadline` | not built |
-| A queued sandbox is read without a driver, is never lost or reaped, refuses `start`, `stop` and `exec` with `phase_conflict`, and deletes | `TestAQueuedSandboxIsDesiredStateOnly` | not built |
-| A queued sandbox survives a restart and is placed by the loop afterwards | `TestTheQueueSurvivesARestart` | not built |
-| `cella_queue_depth` and `cella_capacity` are registered and report the queue and the sums | `TestSchedulerMetrics` | not built |
-| `cellad serve` with `CELLA_SCHEDULING_MODE=queued` and a capacity of one sandbox: a second create is `Queued`, and it runs once the first is deleted | `TestQueuedEnvironmentEndToEnd` | not built |
-| No file this slice adds names a Latere host, image, pool or namespace | `TestNoLatereCoordinates` | not built |
+| Every row of the scheduling field table has a refusing case, a queued environment defaults the queue, and each field is immutable on an update | `TestSchedulingFields`, `TestSchedulingIsImmutable` | built |
+| The golden corpus sets every scheduling field on an accepted entry and refuses an unknown queue | `TestGoldenCorpus`, `TestCorpusCoversTheSchema` | built |
+| An environment applied with `mode: queued` is accepted, and `CELLA_SCHEDULING_MODE=queued` seeds the default in that mode | `TestEnvironmentAcceptsTheQueuedMode`, `TestLoadScheduling` | built |
+| In use follows the phases above per quantity, a pool entry counts at its resources, an undeclared quantity bounds nothing, and a restart does not count twice | `TestCapacityCountsThePhases`, `TestCapacityInUse`, `TestPoolYieldsCapacityByResource`, `TestCapacitySurvivesARestart` | built |
+| A direct environment writes a create that does not fit by any quantity, the count included, `Failed` with reason `NoCapacity` and pushes no map, mints no token and calls no driver; a queued one answers 201 `Queued` with the position | `TestDirectFailsWhatDoesNotFit`, `TestQueuedCreateWaits`, `TestSchedulingOverHTTP` | built |
+| The `queue` table is dropped by a migration with its reverse, and a migrated database holds no such table | `TestEveryMigrationIsReversible`, `TestTheQueueTableIsGone` | built |
+| The loop acts only under the `scheduler` lease, on the tick and on a wake, and a placed sandbox receives its boundary and token at placement and not before | `TestSchedulerLoop`, `TestPlacementResumesAtTheBoundary`, `TestSchedulerHoldsWhatItCannotPlace` | built |
+| The loop admits by priority, then the subject with the smallest CPU sum, then arrival, across three subjects and mixed priorities, and a head that does not fit blocks its queue | `TestSchedulerHonoursQueueOrder`, `TestAHeadThatDoesNotFitBlocks` | built |
+| A sandbox waiting past its `startDeadline` is `Failed` with reason `StartDeadline` | `TestStartDeadline`, `TestADeadlineIsReadAsResolveLeftIt` | built |
+| A queued sandbox is read without a driver, is never lost or reaped, refuses `start`, `stop` and `exec` with `phase_conflict`, and deletes | `TestAQueuedSandboxIsDesiredStateOnly`, `TestSchedulingOverHTTP` | built |
+| A queued sandbox survives a restart and is placed by the loop afterwards | `TestTheQueueSurvivesARestart` | built |
+| `cella_queue_depth` and `cella_capacity` are registered and report the queue and the sums | `TestSchedulerMetrics`, `TestPullGaugesReadTheirIndex`, `TestQueuedEnvironmentEndToEnd` | built |
+| `cellad serve` with `CELLA_SCHEDULING_MODE=queued` and a capacity of one sandbox: a second create is `Queued`, and it runs once the first is deleted | `TestQueuedEnvironmentEndToEnd` | built |
+| No file this slice adds names a Latere host, image, pool or namespace | `TestNoLatereCoordinates` | built |
+
+## Outcome
+
+The queued mode, capacity by resource and the scheduling fields are
+built, and the queue is desired state.
+
+| Piece | Where |
+|---|---|
+| `spec.scheduling`, its four rules, the queue default and the priority ceiling | `manifest/v1/sandbox.go`, `manifest/scheduling.go` |
+| The queued mode accepted on the `Environment` kind and from `CELLA_SCHEDULING_MODE`, and `CELLA_SCHEDULE_INTERVAL` | `manifest/environment.go`, `internal/config/pool.go` |
+| Capacity in use per quantity, the fit, and the pool entries that give way | `controller/capacity.go` |
+| Step 2 of the create order, the split at step 3, the loop, the order, the deadline, the wake and the position | `controller/scheduler.go`, `controller/controller.go` |
+| A queued sandbox kept from every driver path | `controller/controller.go` (read), `controller/registry.go` (operations), `controller/recovery.go` (lost rule) |
+| `cella_queue_depth`, `cella_capacity` and the `scheduler` lease label | `internal/metrics/`, `cmd/cellad/telemetry.go` |
+| The loop beside the reaper, the pool and the phase loop | `cmd/cellad/main.go` |
+| The `queue` table and `store.Queue` removed | `internal/store/store.go`, migration `000004_drop_queue` |
+| The operator's page | `docs/scheduling.md` |
+
+Coverage on `go test -cover`: `manifest` 95.8%, `controller` 90.9%,
+`internal/config` 91.5%, `internal/metrics` 100%, `internal/store`
+90.3% with memory 93.2%, postgres 91.8% and the migrations 94.1%,
+`internal/api` 91.8%, `cmd/cellad` 90.4%. `go test -race` is clean
+over all of them. The end-to-end that ran is `TestQueuedEnvironmentEndToEnd`:
+`cellad serve` on the native driver, queued with room for one sandbox,
+a second create answered `Queued` with its place and read back from the
+scrape, and placed by the wake the first one's delete sent, well inside
+one tick.
+
+### What diverges from the specs above
+
+| Spec | What it said | What was built | Why |
+|---|---|---|---|
+| [[010-state]], [[020-scheduling-and-sets]] | a `queue` table read by `Store.Queue.Dequeue`, which orders | the `Queued` desired rows, ordered by the controller on each pass; the table dropped | one record per waiting sandbox; the two specs are amended |
+| [[038-environment-pools]] | a direct create past the count refused `quota_exceeded` | written `Failed NoCapacity` and answered 201, in both forms | [[005-lifecycle-controller]]'s machine names the transition, and `quota_exceeded` reads as the caller's own limit |
+| [[020-scheduling-and-sets]] | disk held by every `Stopped` and `Failed` sandbox | not by one that failed before any driver held it (`NoCapacity`, `StartDeadline`) | nothing of it is on the substrate |
+| [[020-scheduling-and-sets]] | `Place` may answer `Adopt` for a dequeued head | a placement from the loop takes the slow path | the adoption stays under the create's own lock and its retry on a lost entry |
+
+### What this leaves open
+
+| Open | Why |
+|---|---|
+| Preemption, `CELLA_MAX_PREEMPTIONS`, and reading `preemptible` | its own slice; the field is resolved and stored |
+| `capacity: auto` with `CELLA_CAPACITY_HEADROOM` | needs the k8s driver to report allocatable; `auto` bounds nothing |
+| A recovery that queues on a full queued environment | `Recovering` re-takes capacity as the count form did |
+| The refill loop's target by resource | it sizes by the count, so entries past a resource ceiling are prewarmed and then given up to the first create that needs the room |
+| `controller.Options.Scheduler` as a seam a platform replaces | the built-in scheduler is the controller's own |
+| The lesser of `spec.capacity` and what a worker environment's live workers report | [[021-data-plane-workers]]; `spec.capacity` alone is read |
+| The `SandboxSet` kind and results collection | the next slice of [[020-scheduling-and-sets]], after [[019-volumes]] |
