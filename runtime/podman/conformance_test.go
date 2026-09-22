@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"testing"
 
 	driver "latere.ai/x/cella/runtime"
@@ -49,6 +50,11 @@ func TestPodmanConformance(t *testing.T) {
 		// own image has.
 		Listen: func(port int) []string {
 			return []string{"sh", "-c", fmt.Sprintf("nc -l -p %d || sleep 600", port)}
+		},
+		// The suite's image's netcat serves every connection with its own
+		// cat, which is an echo to two connections at once.
+		Echo: func(port int) []string {
+			return []string{"nc", "-lk", "-p", strconv.Itoa(port), "-e", "cat"}
 		},
 	})
 }
