@@ -252,7 +252,7 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	// the controller hands each act to the emitter instead.
 	var controllerEvents controller.Events
 	if journal == nil {
-		journal, err = memory.Open(memory.Options{})
+		journal, err = memory.Open(memory.Options{JournalCap: cfg.Events.JournalCap})
 		if err != nil {
 			return fail(stderr, fmt.Errorf("event journal: %w", err))
 		}
@@ -387,7 +387,8 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		Store: desired, Driver: runtimeDriver, Environment: cfg.DefaultEnvironment,
 		Lease: lease, ReapInterval: cfg.ReapInterval, TouchInterval: cfg.TouchInterval,
 		LostGrace: cfg.LostGrace, Events: controllerEvents, Tokens: tokens,
-		Egress: hub, Gateway: controller.GatewayAddresses{Proxy: cfg.Gateway.ProxyAddr, Reverse: cfg.Gateway.ReverseAddr},
+		Retention: store.NewRetention(journal, cfg.Events.Retention),
+		Egress:    hub, Gateway: controller.GatewayAddresses{Proxy: cfg.Gateway.ProxyAddr, Reverse: cfg.Gateway.ReverseAddr},
 		Pool: cfg.Scheduling.Pool, PoolInFlight: cfg.Scheduling.PoolInFlight, PoolGrace: cfg.Scheduling.PoolGrace,
 		Capacity: cfg.Scheduling.Capacity.Sandboxes, CapacityQuantities: cfg.Scheduling.Capacity,
 		SchedulingMode: cfg.Scheduling.Mode, ScheduleInterval: cfg.Scheduling.ScheduleInterval,

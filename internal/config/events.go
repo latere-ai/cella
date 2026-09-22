@@ -29,7 +29,24 @@ type Events struct {
 	// is retried before it is dropped.
 	Timeout     time.Duration
 	RetryWindow time.Duration
+	// Retention is how long a finished record, and an answered worker
+	// operation, stays in the store before the reaper's tick forgets it;
+	// JournalCap is how many records the memory journal keeps per object
+	// (spec 010).
+	Retention  time.Duration
+	JournalCap int
 }
+
+// The journal's bounds of spec 010. A retention under an hour forgets a
+// record a reader of the per-object feed is still likely to ask for, and a
+// cap past a million per object is a store that holds the process's memory
+// rather than a history.
+const (
+	DefaultJournalRetention = 720 * time.Hour
+	MinJournalRetention     = time.Hour
+	DefaultJournalCap       = 1000
+	MaxJournalCap           = 1000000
+)
 
 // Enabled reports whether cellad delivers.
 func (e Events) Enabled() bool { return e.URL != "" }
@@ -47,6 +64,12 @@ func (c *Config) loadEvents(getenv Getenv, problems *[]string) {
 	}
 	c.Events.Timeout = duration(getenv, "CELLA_EVENTS_TIMEOUT", events.DefaultTimeout, problems)
 	c.Events.RetryWindow = duration(getenv, "CELLA_EVENTS_RETRY_WINDOW", events.DefaultRetryWindow, problems)
+	c.Events.Retention = duration(getenv, "CELLA_JOURNAL_RETENTION", DefaultJournalRetention, problems)
+	if c.Events.Retention < MinJournalRetention {
+		*problems = append(*problems, fmt.Sprintf("CELLA_JOURNAL_RETENTION is %s; at least %s", c.Events.Retention, MinJournalRetention))
+		c.Events.Retention = DefaultJournalRetention
+	}
+	c.Events.JournalCap = count(getenv, "CELLA_JOURNAL_CAP", DefaultJournalCap, 1, MaxJournalCap, problems)
 	switch {
 	case raw == "" && len(c.Events.Secrets) > 0:
 		*problems = append(*problems, "CELLA_EVENTS_SECRET is set without CELLA_EVENTS_URL; nothing is delivered")

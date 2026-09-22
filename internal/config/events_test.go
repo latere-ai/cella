@@ -174,3 +174,33 @@ func TestSinkDefaults(t *testing.T) {
 		t.Errorf("the set values are %s and %s", set.Events.Timeout, set.Events.RetryWindow)
 	}
 }
+
+// TestLoadJournalBounds: the journal's retention and its memory ring are read
+// with their defaults whether or not a sink is configured, and a value outside
+// either bound is a start-up problem naming the variable.
+func TestLoadJournalBounds(t *testing.T) {
+	cfg, err := Load(env(identity(t, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Events.Retention != DefaultJournalRetention || cfg.Events.JournalCap != DefaultJournalCap {
+		t.Fatalf("the defaults are %s and %d", cfg.Events.Retention, cfg.Events.JournalCap)
+	}
+	set, err := Load(env(identity(t, map[string]string{"CELLA_JOURNAL_RETENTION": "48h", "CELLA_JOURNAL_CAP": "50"})))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if set.Events.Retention != 48*time.Hour || set.Events.JournalCap != 50 {
+		t.Fatalf("the set values are %s and %d", set.Events.Retention, set.Events.JournalCap)
+	}
+	for _, tc := range []struct{ name, value string }{
+		{"CELLA_JOURNAL_RETENTION", "10m"},
+		{"CELLA_JOURNAL_RETENTION", "soon"},
+		{"CELLA_JOURNAL_CAP", "0"},
+		{"CELLA_JOURNAL_CAP", "2000000"},
+	} {
+		if _, err := Load(env(identity(t, map[string]string{tc.name: tc.value}))); err == nil || !strings.Contains(err.Error(), tc.name) {
+			t.Errorf("%s=%s answered %v", tc.name, tc.value, err)
+		}
+	}
+}

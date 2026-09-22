@@ -69,6 +69,12 @@ func (wallClock) Ticker(d time.Duration) (<-chan time.Time, func()) {
 	return t.C, t.Stop
 }
 
+// Retention is the store's sweep of what it keeps only for a window, which
+// design 010 runs on the reaper's tick. Prune reports how many rows went.
+type Retention interface {
+	Prune(ctx context.Context, now time.Time) (int, error)
+}
+
 // Lease is the single-writer seam of design 010: the reaper acts only on the
 // replica that holds the named lease.
 type Lease interface {
@@ -165,6 +171,14 @@ func (c *Controller) Reap(ctx context.Context) (int, error) {
 	// (spec 010).
 	if err := c.sweepRevocations(ctx, c.clock.Now()); err != nil {
 		failed = errors.Join(failed, fmt.Errorf("reaper: %w", err))
+	}
+	// Retention is the store's own sweep and runs once a tick for the same
+	// reason: its rows belong to the control plane, whichever environment
+	// wrote them (spec 010).
+	if c.retention != nil {
+		if _, err := c.retention.Prune(ctx, c.clock.Now()); err != nil {
+			failed = errors.Join(failed, fmt.Errorf("reaper: %w", err))
+		}
 	}
 	return acted, failed
 }

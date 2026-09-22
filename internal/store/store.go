@@ -68,9 +68,9 @@ type Store interface {
 
 // Tx is every method set of the store, inside one transaction.
 //
-// Design 010 names three more: Queue (slice 038), Operations (design 021) and
-// Records (design 018); Ledger (design 022) joined them. Each is declared below with its table in the schema
-// and has no accessor here until a caller exists.
+// Design 010 names one more, Records (design 018): neither the interface nor
+// its table exists until a caller does. The scheduler's queue has no table:
+// it is the Queued rows of desired state.
 type Tx interface {
 	Desired() Desired
 	Observed() Observed
