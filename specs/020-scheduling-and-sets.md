@@ -12,7 +12,7 @@ depends_on:
 affects: [controller/, manifest/v1/, internal/api/, internal/config/]
 effort: large
 created: 2026-09-12
-updated: 2026-09-21
+updated: 2026-09-23
 author: changkun
 ---
 
@@ -39,10 +39,13 @@ rule, adoption, and capacity in its count form. [[057-scheduling-queue]]
 built the modes: capacity by resource, a direct create that does not
 fit written `Failed NoCapacity`, the queued mode with its loop, its
 order and `startDeadline`, the scheduling fields of a manifest, and the
-two gauges. Preemption, `capacity: auto` with its headroom, a recovery
-that queues on a full environment, `Options.Scheduler` as a seam a
-platform replaces, the `SandboxSet` kind and results collection are
-not built.
+two gauges. [[058-preemption]] built preemption with
+`status.preemptions` and `CELLA_MAX_PREEMPTIONS`, a pass that reads an
+environment's queues as one line, `cella_preemptions_total`, and the
+proof that a pool is behind the authorizer. `capacity: auto` with its
+headroom, a recovery that queues on a full environment,
+`Options.Scheduler` as a seam a platform replaces, the `SandboxSet`
+kind and results collection are not built.
 
 ## Design
 
@@ -97,7 +100,9 @@ free. Capacity in use is derived, never stored: `cpu`, `memory`, and
 `Running`, `Stopping`, and `Recovering` on the environment; `disk` is
 summed over those and over `Stopped` and `Failed` as well, because a
 stopped sandbox's managed workspace and attached volumes stay on the
-substrate until `Delete` ([[005-lifecycle-controller]], [[010-state]]).
+substrate until `Delete` ([[005-lifecycle-controller]], [[010-state]]),
+and over a `Queued` sandbox the loop preempted, which its driver keeps
+stopped the same way ([[058-preemption]]).
 `Lost` frees everything; `Recovering` re-takes it, and a recovery on a
 full environment queues on a `queued` one at the sandbox's priority
 and is `Failed NoCapacity` on a `direct` one. A pool entry counts. The
@@ -116,24 +121,37 @@ pass: `priority` descending; then fair
 share, the subject whose sum of requested CPU in millicores over the
 counted phases on that environment is smallest goes first; then
 `enqueued_at`, which is the sandbox's `createdAt`. The loop runs on the replica holding the `scheduler`
-lease, one tick per `CELLA_SCHEDULE_INTERVAL` (default `5s`) and on
-every `Release`: for every `queued` environment and every queue, it
-dequeues while the head fits the remaining capacity, moves the
-sandbox `Queued` to `Pending`, and resumes its create at step 3
-([[005-lifecycle-controller]]). A head that does not fit blocks its
+lease, one tick per `CELLA_SCHEDULE_INTERVAL` (default `5s`), on
+every `Release`, and on every create written `Queued`: for every
+`queued` environment it reads the queues as one line, each step trying
+the head that ranks first among the heads of the queues still open by
+the order above, dequeues while the head fits the remaining capacity,
+moves the sandbox `Queued` to `Pending`, and resumes its create at step
+3 ([[005-lifecycle-controller]]). A head that does not fit blocks its
 queue, so a large request is not starved by small ones behind it;
-`startDeadline` bounds how long it may block.
+`startDeadline` bounds how long it may block. Because the priorities
+one pass tries never rise, a pass never preempts a sandbox it placed
+([[058-preemption]]).
 
 ### Preemption
 
 When the head does not fit and is of higher priority than a running
 `preemptible` sandbox, the loop stops victims until it fits: lowest
-priority first, then largest requested CPU, then newest. A victim is
-`Stopped` with `Scheduled: Preempted`, requeued with its original
-`enqueued_at` so it keeps its place among equals, and its disk stays
-counted. After `CELLA_MAX_PREEMPTIONS` (default `3`) a sandbox is no
-longer a victim, which bounds starvation. `Limits.MaxPriority` from
-the authorizer caps what a subject may ask ([[006-identity]]).
+priority first, then largest requested CPU, then newest. The pool's
+entries give way first, and only as many victims are stopped as the
+head needs; where every candidate stopped would still not make it fit,
+none is. A victim is stopped through its driver and requeued with its
+original `enqueued_at`, so it keeps its place among equals, in one
+write: `Queued` with `Scheduled: Preempted` and `status.preemptions`
+one higher ([[058-preemption]]). Its disk stays counted, since its
+driver keeps it stopped with its workspace, and it is placed again by
+`Start` rather than by a create. While it waits, `startDeadline` does
+not apply and the reaper's `autoDelete` does not fire; its `ttl` does.
+After `CELLA_MAX_PREEMPTIONS` (default `3`, `0` preempts none) a
+sandbox is no longer a victim, which bounds starvation; the count is
+status so that the bound survives a restart and a new lease holder.
+`Limits.MaxPriority` from the authorizer caps what a subject may ask
+([[006-identity]]).
 
 ### Pools
 
@@ -268,7 +286,7 @@ exist, be `Available`, and be in the set's environment, else
 | `CELLA_SCHEDULING_MODE`, `CELLA_POOL_SIZE`, `CELLA_POOL_IMAGE` | `direct`, `0`, unset | the default environment's `spec.scheduling.mode`, `spec.pool.size`, `spec.pool.image` |
 | `CELLA_SCHEDULE_INTERVAL` | `5s` | the scheduler loop's tick |
 | `CELLA_CAPACITY_HEADROOM` | `0.1` | the fraction of allocatable an `auto` capacity keeps free |
-| `CELLA_MAX_PREEMPTIONS` | `3` | how many times one sandbox may be preempted |
+| `CELLA_MAX_PREEMPTIONS` | `3` | how many times one sandbox may be preempted, `0` to `100`; `0` preempts none |
 | `CELLA_MAX_SET_REPLICAS` | `4096` | the largest `replicas` |
 
 ### Package layout
@@ -292,10 +310,10 @@ routes for sets ([[008-api]]); the `Environment` fields
 | The loop runs only on the lease holder, on the tick and on `Release`, and resumes a dequeued sandbox at create step 3 | `TestSchedulerLoop`, `TestPlacementResumesAtTheBoundary`, `TestQueuedEnvironmentEndToEnd` | built ([[057-scheduling-queue]]): a release is the wake a sandbox leaving a phase that holds capacity sends, and the placement mints the token and pushes the boundary only when it happens |
 | The scheduler admits in priority, then smallest CPU sum per subject, then arrival, with three subjects and mixed priorities | `TestSchedulerHonoursQueueOrder`, `TestAHeadThatDoesNotFitBlocks` | built ([[057-scheduling-queue]]) |
 | Capacity in use follows the two derivations, `Lost` frees, `Recovering` re-takes or queues, a pool entry counts, `auto` keeps the headroom, and a restart does not double count | `TestCapacityCountsThePhases`, `TestCapacityInUse`, `TestCapacitySurvivesARestart`, `TestPoolYieldsCapacity`, `TestPoolYieldsCapacityByResource` | partial: both derivations, `Lost` freeing, a pool entry counting at its resources and a restart holding the same sum are built ([[038-environment-pools]], [[057-scheduling-queue]]); `auto` bounds nothing rather than keeping a headroom of the cluster's allocatable, and a recovery on a full queued environment re-takes capacity rather than queueing |
-| Victims are chosen lowest priority, largest CPU, newest; a victim is `Stopped`, requeued with its `enqueued_at`, and after the cap is no longer a victim | `TestPreemption`, `TestPreemptionIsBounded` | not built |
+| Victims are chosen lowest priority, largest CPU, newest; a victim is `Stopped`, requeued with its `enqueued_at`, and after the cap is no longer a victim | `TestPreemption`, `TestPreemptionStopsOnlyWhatTheHeadNeeds`, `TestPreemptionIsBounded`, `TestPreemptionSurvivesARestart`, `TestARequeuedSandboxResumes`, `TestARequeuedSandboxKeepsItsDeadlines`, `TestAPassNeverPreemptsWhatItPlaced`, `TestPreemptionEndToEnd` | built ([[058-preemption]]): a victim is stopped through its driver and written `Queued` with `Scheduled Preempted` in the one write that records its stop, keeps its disk counted and its `createdAt`, and is placed again by `Start` with its workspace; the count is `status.preemptions` |
 | Two concurrent creates matching one pool entry yield one adoption and one slow path; the adopted sandbox has its own credential, map, token, and `createdAt`; a create with a `command` or `ports` does not adopt; oldest entries are deleted when a create does not fit | `TestPoolAdoption`, `TestPoolYieldsCapacity` | built ([[038-environment-pools]]), with `PrewarmAndAdoptIsExclusive` proving the race in the driver on `native`, on `podman` against a real engine and on `k8s`; the `ports` half of the match rule lands with the field |
 | The refill loop keeps `spec.pool.size` entries of the environment's shape under the `pool:<environment>` lease, deletes what the pool no longer wants, and `direct` starts a sandbox now or fails it | `TestPoolRefill`, `TestPoolDrift`, `TestPoolRefillHoldsTheLease` | built ([[038-environment-pools]]) |
-| A pool never serves a create the authorizer refused | `TestPoolIsBehindTheAuthorizer` | not built |
+| A pool never serves a create the authorizer refused | `TestPoolIsBehindTheAuthorizer`, `TestARefusedCreateIsNoAdoption` | built ([[058-preemption]]): a create refused at `sandbox.create`, at `environment.use`, or at the owner's `max_sandboxes` leaves the entry prewarmed and unowned, and the same manifest allowed adopts it; a refused create moves no adoption counter |
 | Every field rule in the set table has a refusing case; `parallelism` and `onFailure` change mid-run and nothing else does | `TestSetFieldRules`, `TestSetUpdate` | not built |
 | A set of 64 with parallelism 8 runs at most 8 at once, collects every replica's paths under its index, deletes replicas after collection, and ends `Succeeded` with the counts | `TestSetRunsToCompletion` on the native driver | not built |
 | A replica with no command whose process exits 0 is `Succeeded`; exit 3 is `Failed`; `onFailure: stop` admits no more and lets running ones finish; `POST .../stop` stops them | `TestReplicaPhases`, `TestOnFailure`, `TestSetStop` | not built |
