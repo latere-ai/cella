@@ -153,6 +153,9 @@ func New(o Options) (http.Handler, error) {
 	h.stream("GET /v1/sandboxes/{id}/exec", h.execSocket)
 	h.stream("GET /v1/sandboxes/{id}/attach", h.attachSocket)
 	h.stream("GET /v1/sandboxes/{id}/dial/{port}", h.dial)
+	// The port proxy answers every method: what the server inside accepts is
+	// the server's, so the pattern names none.
+	h.stream(portProxyPattern, h.portProxy)
 	h.stream("GET /v1/sandboxes/{id}/screenshot", h.screenshot)
 	h.stream("GET /v1/sandboxes/{id}/screen", h.screen)
 	// The three routes an environment key reaches are answered before the

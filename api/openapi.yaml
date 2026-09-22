@@ -179,10 +179,14 @@ paths:
     get:
       operationId: dialSandbox
       summary: Open a raw byte stream to a port inside the sandbox.
-      description: Authorized as `sandbox.exec`.
+      description: >-
+        A WebSocket, subprotocol `cella.dial.v1`, whose binary frames are the
+        connection's bytes both ways. It closes with 1000 when the inside
+        closes and with 1011 and the error's code when the dial fails. Needs
+        `Dial`. Authorized as `sandbox.exec`.
       responses:
-        "200":
-          description: The answer this route serves.
+        "101":
+          description: The socket is open.
         default:
           $ref: "#/components/responses/Error"
   /v1/sandboxes/{id}/files:
@@ -422,6 +426,105 @@ paths:
       responses:
         "200":
           description: The answer this route serves.
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/sandboxes/{id}/ports/{name}/{path}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The object's prefixed identifier, or a name among the caller's own.
+        schema:
+          type: string
+      - name: name
+        in: path
+        required: true
+        description: The name of a port the sandbox declares.
+        schema:
+          type: string
+      - name: path
+        in: path
+        required: true
+        description: The path the server inside receives, which may hold several segments.
+        schema:
+          type: string
+    get:
+      operationId: proxyPortGet
+      summary: Forward a GET request to a declared port.
+      description: &proxyDescription >-
+        An HTTP proxy to the port the sandbox declares under `name`, reached
+        through the driver's `Dial`. The path suffix, the query, the headers
+        but the hop-by-hop set and `Authorization`, and the body are
+        forwarded, and a WebSocket upgrade passes through. An undeclared name
+        is `not_found`; a port nothing listens on, or a sandbox that is not
+        running, is 502 `upstream_unavailable`. Needs `Dial`. Authorized as
+        `sandbox.exec`.
+      responses:
+        "200":
+          description: The answer the server inside the sandbox gave.
+        default:
+          $ref: "#/components/responses/Error"
+    put:
+      operationId: proxyPortPut
+      summary: Forward a PUT request to a declared port.
+      description: *proxyDescription
+      responses:
+        "200":
+          description: The answer the server inside the sandbox gave.
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      operationId: proxyPortPost
+      summary: Forward a POST request to a declared port.
+      description: *proxyDescription
+      responses:
+        "200":
+          description: The answer the server inside the sandbox gave.
+        default:
+          $ref: "#/components/responses/Error"
+    delete:
+      operationId: proxyPortDelete
+      summary: Forward a DELETE request to a declared port.
+      description: *proxyDescription
+      responses:
+        "200":
+          description: The answer the server inside the sandbox gave.
+        default:
+          $ref: "#/components/responses/Error"
+    options:
+      operationId: proxyPortOptions
+      summary: Forward a OPTIONS request to a declared port.
+      description: *proxyDescription
+      responses:
+        "200":
+          description: The answer the server inside the sandbox gave.
+        default:
+          $ref: "#/components/responses/Error"
+    head:
+      operationId: proxyPortHead
+      summary: Forward a HEAD request to a declared port.
+      description: *proxyDescription
+      responses:
+        "200":
+          description: The answer the server inside the sandbox gave.
+        default:
+          $ref: "#/components/responses/Error"
+    patch:
+      operationId: proxyPortPatch
+      summary: Forward a PATCH request to a declared port.
+      description: *proxyDescription
+      responses:
+        "200":
+          description: The answer the server inside the sandbox gave.
+        default:
+          $ref: "#/components/responses/Error"
+    trace:
+      operationId: proxyPortTrace
+      summary: Forward a TRACE request to a declared port.
+      description: *proxyDescription
+      responses:
+        "200":
+          description: The answer the server inside the sandbox gave.
         default:
           $ref: "#/components/responses/Error"
   /v1/events:
