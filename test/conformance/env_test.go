@@ -186,6 +186,7 @@ func TestAServerThatAnswersTheWrongValueIsReportedFailed(t *testing.T) {
 		"case008FilesTar", "case008FileRoutes", "case008Logs", "case008ListSelectors",
 		"case018SecretWriteOnly", "case018CanarySecret", "case009ObjectFeed",
 		"case009DeliveredInOrder", "case023BrowserReady", "case008PublicDocuments",
+		"case022SpawnBoundary",
 	} {
 		if !slices.Contains(report.Failed, name) {
 			t.Errorf("%s did not fail against a server that answers the wrong value", name)

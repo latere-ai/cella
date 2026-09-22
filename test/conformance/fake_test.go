@@ -250,7 +250,24 @@ func (f *fake) decode(w http.ResponseWriter, r *http.Request, kind string) (map[
 			}
 		}
 	}
+	if spec, ok := body["spec"].(map[string]any); ok && kind == "Sandbox" {
+		for key := range spec {
+			if !slices.Contains(sandboxSpecFields, key) {
+				f.refuse(w, "unknown_field")
+				return nil, false
+			}
+		}
+	}
 	return body, true
+}
+
+// sandboxSpecFields are the fields of a sandbox's specification in design
+// 003's field table, so a manifest a case builds with a field the schema does
+// not know is refused here as a real server refuses it, and not stored.
+var sandboxSpecFields = []string{
+	"environment", "image", "command", "args", "workdir", "user", "resources",
+	"workspace", "volumes", "env", "secrets", "network", "mesh", "scheduling",
+	"lifecycle", "display",
 }
 
 // record files one event for an object, which is what the feed and the sink
@@ -270,8 +287,13 @@ func (f *fake) create(w http.ResponseWriter, r *http.Request) {
 	}
 	if bearer, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); bearer == workloadToken {
 		// A sandbox applying a child may not widen what it holds, which is
-		// the one answer this fake gives a workload's apply.
-		f.refuse(w, "boundary_exceeded")
+		// the one answer this fake gives a workload's apply, at the field
+		// the one child a case applies widens.
+		widened := []string{"spec.mesh.spawn.budget"}
+		if f.wrongValues {
+			widened = []string{"spec.resources.cpu"}
+		}
+		f.refuse(w, "boundary_exceeded", widened...)
 		return
 	}
 	metadata, _ := body["metadata"].(map[string]any)

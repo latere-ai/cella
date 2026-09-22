@@ -5,6 +5,7 @@ package conformance
 
 import (
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -55,11 +56,21 @@ func TestAServerThatAgreesPasses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"case008NameTaken", "case003DefaultsAreReturned", "case006Unauthenticated"} {
+	for _, name := range []string{"case008NameTaken", "case003DefaultsAreReturned", "case006Unauthenticated", "case022SpawnBoundary"} {
 		if !slices.Contains(report.Passed, name) {
-			t.Errorf("%s did not pass against a server that answers it", name)
+			t.Errorf("%s did not pass against a server that answers it: %v", name, reasonOf(report, name))
 		}
 	}
+}
+
+// reasonOf is what a report says about one case, for a failure message.
+func reasonOf(report Report, name string) any {
+	for _, res := range report.Results {
+		if res.Name == name {
+			return fmt.Sprint(res.Status, " ", res.Reason, " ", res.Err)
+		}
+	}
+	return "not run"
 }
 
 // TestADriftedDefaultIsReportedFailed: the same fake, resolving the spawn
