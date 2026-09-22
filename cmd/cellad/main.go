@@ -388,7 +388,7 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		Lease: lease, ReapInterval: cfg.ReapInterval, TouchInterval: cfg.TouchInterval,
 		LostGrace: cfg.LostGrace, Events: controllerEvents, Tokens: tokens,
 		Retention: store.NewRetention(journal, cfg.Events.Retention),
-		Egress: hub, Gateway: controller.GatewayAddresses{Proxy: cfg.Gateway.ProxyAddr, Reverse: cfg.Gateway.ReverseAddr},
+		Egress:    hub, Gateway: controller.GatewayAddresses{Proxy: cfg.Gateway.ProxyAddr, Reverse: cfg.Gateway.ReverseAddr},
 		Pool: cfg.Scheduling.Pool, PoolInFlight: cfg.Scheduling.PoolInFlight, PoolGrace: cfg.Scheduling.PoolGrace,
 		Capacity: cfg.Scheduling.Capacity.Sandboxes, CapacityQuantities: cfg.Scheduling.Capacity,
 		SchedulingMode: cfg.Scheduling.Mode, ScheduleInterval: cfg.Scheduling.ScheduleInterval,
