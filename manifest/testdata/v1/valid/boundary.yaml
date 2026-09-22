@@ -1,0 +1,19 @@
+# A sandbox that declares its own boundary: where it may reach out, and the
+# children it may create. A workload cannot widen either of these.
+apiVersion: cella.latere.ai/v1beta1
+kind: Sandbox
+metadata:
+  name: agent
+spec:
+  image: registry.example/base:1
+  network:
+    egress:
+      mode: allowlist
+      allowedHosts: ["pypi.org", "*.pythonhosted.org"]
+  mesh:
+    enabled: true
+    spawn:
+      budget: 4
+      depth: 2
+  lifecycle:
+    ttl: 72h

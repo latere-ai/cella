@@ -280,9 +280,10 @@ func lifecycleFields(l *v1.Lifecycle) []struct {
 	}{{"spec.lifecycle.autoStop", &l.AutoStop}, {"spec.lifecycle.ttl", &l.TTL}, {"spec.lifecycle.autoDelete", &l.AutoDelete}}
 }
 
-// sortedKeys orders a map's keys so a validation failure is the same one on
-// every run.
-func sortedKeys(m map[string]string) []string {
+// sortedKeys orders a map's keys so a refusal is the same one on every run.
+// It takes any value type: a validation failure reads a map of strings and
+// the unknown-field walk of design 003 reads a decoded document.
+func sortedKeys[V any](m map[string]V) []string {
 	keys := slices.Collect(maps.Keys(m))
 	slices.Sort(keys)
 	return keys

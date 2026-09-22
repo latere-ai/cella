@@ -19,6 +19,12 @@ import (
 // commit together or not at all.
 type Journal interface {
 	Append(ctx context.Context, r Record) error
+	// ByObject reads one object's records, newest first, one page at a time.
+	// The cursor is what the previous page returned and an empty one starts
+	// at the newest; an empty next cursor is the end. It is the read half of
+	// the per-object feed, and a row's columns are authoritative over its
+	// payload, so a record comes back with the sequence the journal assigned.
+	ByObject(ctx context.Context, objectID, cursor string, limit int) ([]Record, string, error)
 	// Pending returns at most limit records, at most one per object, each
 	// the lowest unacknowledged sequence of its object and due at now. A
 	// deferred record holds the records behind it for that object and no
@@ -71,4 +77,15 @@ func (e *Emitter) Write(ctx context.Context, r Record) {
 		e.log.WarnContext(ctx, "the event was not journaled",
 			"type", r.Type, "object", r.Object.ID, "error", err)
 	}
+}
+
+// Feed is the per-object feed of design 009: one page of one object's
+// records, newest first. An emitter over no journal answers an empty page,
+// which is the control plane that journals nothing rather than an error a
+// caller can do nothing about.
+func (e *Emitter) Feed(ctx context.Context, objectID, cursor string, limit int) ([]Record, string, error) {
+	if e == nil || e.journal == nil {
+		return nil, "", nil
+	}
+	return e.journal.ByObject(ctx, objectID, cursor, limit)
 }

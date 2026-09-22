@@ -21,14 +21,18 @@ import (
 const (
 	outputColumns = ""
 	outputJSON    = "json"
+	outputYAML    = "yaml"
 	outputWide    = "wide"
 	outputName    = "name"
 )
 
-// outputs is every form -o takes here. YAML is not among them: no handler of
-// this API reads Accept, so a caller asking for YAML would be handed JSON
-// under another name.
-var outputs = []string{outputJSON, outputWide, outputName}
+// yamlAccept is the type -o yaml asks the server with. Design 008 renders one
+// object or one page as YAML where the request names it, so the syntax is the
+// server's and this command writes the bytes through.
+const yamlAccept = "application/yaml"
+
+// outputs is every form -o takes.
+var outputs = []string{outputJSON, outputYAML, outputWide, outputName}
 
 // writeRaw writes a response's own bytes, which is what -o json promises:
 // never decoded and re-encoded, so the field order is the API's.

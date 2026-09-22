@@ -1,0 +1,653 @@
+# The /v1 surface of cellad, as design 008 states it.
+#
+# This document is carried in the repository and served at /openapi.yaml under
+# no bearer. internal/api holds it to the routes the server registers, in both
+# directions: a route with no operation here and an operation with no route
+# both fail the build. The field schemas of each kind are generated from the Go
+# types by the generator design 008 names, which is not built; what this
+# document fixes today is the surface, the parameters and the error envelope.
+openapi: 3.1.0
+info:
+  title: Cella control plane
+  summary: The declarative API that creates, drives and observes sandboxes.
+  version: v1beta1
+  license:
+    name: Apache-2.0
+    identifier: Apache-2.0
+servers:
+  - url: /
+    description: The control plane this document was served from.
+security:
+  - bearer: []
+paths:
+  /v1/sandboxes:
+    post:
+      operationId: createSandbox
+      summary: Create a sandbox from a manifest.
+      description: Authorized as `sandbox.create`.
+      responses:
+        "200":
+          description: The answer this route serves.
+        default:
+          $ref: "#/components/responses/Error"
+    get:
+      operationId: listSandboxes
+      summary: List the caller's sandboxes.
+      description: Authorized as `sandbox.list`.
+      responses:
+        "200":
+          description: The answer this route serves.
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/sandboxes/{name}:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        description: The object's name, which the apply writes under.
+        schema:
+          type: string
+    put:
+      operationId: applySandbox
+      summary: Apply a sandbox by name.
+      description: >-
+        A create when the name is free and an update when the caller holds it.
+        A body naming another object is refused at metadata.name.
+        Authorized as `sandbox.create` or `sandbox.update`.
+      responses:
+        "200":
+          description: The answer this route serves.
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/sandboxes/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The object's prefixed identifier, or a name among the caller's own.
+        schema:
+          type: string
+    get:
+      operationId: readSandbox
+      summary: Read one sandbox with its status.
+      description: Authorized as `sandbox.read`.
+      responses:
+        "200":
+          description: The answer this route serves.
+        default:
+          $ref: "#/components/responses/Error"
+    delete:
+      operationId: deleteSandbox
+      summary: Delete one sandbox; accepted in every phase.
+      description: Authorized as `sandbox.delete`.
+      responses:
+        "200":
+          description: The answer this route serves.
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/sandboxes/{id}/start:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The object's prefixed identifier, or a name among the caller's own.
+        schema:
+          type: string
+    post:
+      operationId: startSandbox
+      summary: Start a stopped sandbox.
+      description: Authorized as `sandbox.update`.
+      responses:
+        "200":
+          description: The answer this route serves.
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/sandboxes/{id}/stop:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The object's prefixed identifier, or a name among the caller's own.
+        schema:
+          type: string
+    post:
+      operationId: stopSandbox
+      summary: Stop a running sandbox and keep its workspace.
+      description: Authorized as `sandbox.update`.
+      responses:
+        "200":
+          description: The answer this route serves.
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/sandboxes/{id}/exec:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The object's prefixed identifier, or a name among the caller's own.
+        schema:
+          type: string
+    post:
+      operationId: execSandbox
+      summary: "Run a command: the framed exec stream, or one JSON result with wait=1."
+      description: Authorized as `sandbox.exec`.
+      responses:
+        "200":
+          description: The answer this route serves.
+        default:
+          $ref: "#/components/responses/Error"
+    get:
+      operationId: execSocket
+      summary: Open the exec WebSocket, for a command with input or a terminal.
+      description: Authorized as `sandbox.exec`.
+      responses:
+        "200":
+          description: The answer this route serves.
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/sandboxes/{id}/attach:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The object's prefixed identifier, or a name among the caller's own.
+        schema:
+          type: string
+    get:
+      operationId: attachSandbox
+      summary: Open the attach WebSocket, which carries a pseudo-terminal.
+      description: Authorized as `sandbox.exec`.
+      responses:
+        "200":
+          description: The answer this route serves.
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/sandboxes/{id}/dial/{port}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The object's prefixed identifier, or a name among the caller's own.
+        schema:
+          type: string
+      - name: port
+        in: path
+        required: true
+        description: The port inside the sandbox.
+        schema:
+          type: integer
+    get:
+      operationId: dialSandbox
+      summary: Open a raw byte stream to a port inside the sandbox.
+      description: Authorized as `sandbox.exec`.
+      responses:
+        "200":
+          description: The answer this route serves.
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/sandboxes/{id}/files:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The object's prefixed identifier, or a name among the caller's own.
+        schema:
+          type: string
+    get:
+      operationId: exportFiles
+      summary: Read the named paths as one tar stream.
+      description: Authorized as `sandbox.exec`.
+      responses:
+        "200":
+          description: The answer this route serves.
+        default:
+          $ref: "#/components/responses/Error"
+    put:
+      operationId: importFiles
+      summary: Write one file, or extract a tar archive under a destination.
+      description: Authorized as `sandbox.exec`.
+      responses:
+        "200":
+          description: The answer this route serves.
+        default:
+          $ref: "#/components/responses/Error"
+    delete:
+      operationId: removeFile
+      summary: Remove a file or a directory tree.
+      description: Authorized as `sandbox.exec`.
+      responses:
+        "200":
+          description: The answer this route serves.
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/sandboxes/{id}/files/content:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The object's prefixed identifier, or a name among the caller's own.
+        schema:
+          type: string
+    get:
+      operationId: readFile
+      summary: Read one file's body.
+      description: Authorized as `sandbox.exec`.
+      responses:
+        "200":
+          description: The answer this route serves.
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/sandboxes/{id}/files/stat:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The object's prefixed identifier, or a name among the caller's own.
+        schema:
+          type: string
+    get:
+      operationId: statFile
+      summary: Read one entry.
+      description: Authorized as `sandbox.exec`.
+      responses:
+        "200":
+          description: The answer this route serves.
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/sandboxes/{id}/files/list:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The object's prefixed identifier, or a name among the caller's own.
+        schema:
+          type: string
+    get:
+      operationId: listFiles
+      summary: List a directory's immediate entries, sorted by name.
+      description: Authorized as `sandbox.exec`.
+      responses:
+        "200":
+          description: The answer this route serves.
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/sandboxes/{id}/files/mkdir:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The object's prefixed identifier, or a name among the caller's own.
+        schema:
+          type: string
+    post:
+      operationId: makeDirectory
+      summary: Make a directory and its missing parents.
+      description: Authorized as `sandbox.exec`.
+      responses:
+        "200":
+          description: The answer this route serves.
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/sandboxes/{id}/files/move:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The object's prefixed identifier, or a name among the caller's own.
+        schema:
+          type: string
+    post:
+      operationId: moveFile
+      summary: Move a file or a directory to an exact destination.
+      description: Authorized as `sandbox.exec`.
+      responses:
+        "200":
+          description: The answer this route serves.
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/sandboxes/{id}/logs:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The object's prefixed identifier, or a name among the caller's own.
+        schema:
+          type: string
+    get:
+      operationId: sandboxLogs
+      summary: Read the main process output, following it with follow=1.
+      description: Authorized as `sandbox.read`.
+      responses:
+        "200":
+          description: The answer this route serves.
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/sandboxes/{id}/egress:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The object's prefixed identifier, or a name among the caller's own.
+        schema:
+          type: string
+    get:
+      operationId: sandboxEgress
+      summary: List the connections the gateway reported for this sandbox.
+      description: Authorized as `sandbox.read`.
+      responses:
+        "200":
+          description: The answer this route serves.
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/sandboxes/{id}/display:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The object's prefixed identifier, or a name among the caller's own.
+        schema:
+          type: string
+    get:
+      operationId: sandboxDisplay
+      summary: Read the desktop geometry and whether it is up.
+      description: Authorized as `sandbox.read`.
+      responses:
+        "200":
+          description: The answer this route serves.
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/sandboxes/{id}/screenshot:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The object's prefixed identifier, or a name among the caller's own.
+        schema:
+          type: string
+    get:
+      operationId: sandboxScreenshot
+      summary: Read one frame of the desktop.
+      description: Authorized as `sandbox.exec`.
+      responses:
+        "200":
+          description: The answer this route serves.
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/sandboxes/{id}/screen:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The object's prefixed identifier, or a name among the caller's own.
+        schema:
+          type: string
+    get:
+      operationId: sandboxScreen
+      summary: Open the screen WebSocket, which carries frames.
+      description: Authorized as `sandbox.exec`.
+      responses:
+        "200":
+          description: The answer this route serves.
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/sandboxes/{id}/input:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The object's prefixed identifier, or a name among the caller's own.
+        schema:
+          type: string
+    post:
+      operationId: sandboxInput
+      summary: Run one batch of input events on the desktop.
+      description: Authorized as `sandbox.exec`.
+      responses:
+        "200":
+          description: The answer this route serves.
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/sandboxes/{id}/ports:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The object's prefixed identifier, or a name among the caller's own.
+        schema:
+          type: string
+    get:
+      operationId: sandboxPorts
+      summary: List each declared port with the driver's probe of it.
+      description: Authorized as `sandbox.read`.
+      responses:
+        "200":
+          description: The answer this route serves.
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/events:
+    get:
+      operationId: objectEvents
+      summary: Read one object's events, newest first.
+      description: Authorized as `the object's kind read`.
+      responses:
+        "200":
+          description: The answer this route serves.
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/secrets:
+    post:
+      operationId: createSecret
+      summary: Create a secret from a manifest.
+      description: Authorized as `secret.create`.
+      responses:
+        "200":
+          description: The answer this route serves.
+        default:
+          $ref: "#/components/responses/Error"
+    get:
+      operationId: listSecrets
+      summary: List the caller's secrets; no answer carries a value.
+      description: Authorized as `secret.list`.
+      responses:
+        "200":
+          description: The answer this route serves.
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/secrets/{name}:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        description: The object's name, which the apply takes as the object it writes.
+        schema:
+          type: string
+    put:
+      operationId: applySecret
+      summary: Apply a secret by name; a second apply rotates the value in place.
+      description: Authorized as `secret.create or secret.update`.
+      responses:
+        "200":
+          description: The answer this route serves.
+        default:
+          $ref: "#/components/responses/Error"
+    get:
+      operationId: readSecret
+      summary: Read one secret without its value.
+      description: Authorized as `secret.read`.
+      responses:
+        "200":
+          description: The answer this route serves.
+        default:
+          $ref: "#/components/responses/Error"
+    delete:
+      operationId: deleteSecret
+      summary: Delete one secret.
+      description: Authorized as `secret.delete`.
+      responses:
+        "200":
+          description: The answer this route serves.
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/environments:
+    get:
+      operationId: listEnvironments
+      summary: List the environments this control plane holds.
+      description: Authorized as `environment.list`.
+      responses:
+        "200":
+          description: The answer this route serves.
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/environments/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The object's prefixed identifier, or a name among the caller's own.
+        schema:
+          type: string
+    get:
+      operationId: readEnvironment
+      summary: Read one environment with its capabilities.
+      description: Authorized as `environment.read`.
+      responses:
+        "200":
+          description: The answer this route serves.
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/environments/{id}/keys:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The object's prefixed identifier, or a name among the caller's own.
+        schema:
+          type: string
+    post:
+      operationId: mintEnvironmentKey
+      summary: Mint an environment key, shown once.
+      description: Authorized as `environment.key`.
+      responses:
+        "200":
+          description: The answer this route serves.
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/environments/{id}/keys/{jti}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The object's prefixed identifier, or a name among the caller's own.
+        schema:
+          type: string
+      - name: jti
+        in: path
+        required: true
+        description: The key's identifier, as the mint returned it.
+        schema:
+          type: string
+    delete:
+      operationId: revokeEnvironmentKey
+      summary: Revoke one environment key by its identifier.
+      description: Authorized as `environment.key`.
+      responses:
+        "200":
+          description: The answer this route serves.
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/environments/{id}/workers:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The object's prefixed identifier, or a name among the caller's own.
+        schema:
+          type: string
+    post:
+      operationId: registerWorker
+      summary: Register a worker for an environment; environment key only.
+      description: Authorized as `none beyond the key`.
+      responses:
+        "200":
+          description: The answer this route serves.
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/environments/{id}/operations:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The object's prefixed identifier, or a name among the caller's own.
+        schema:
+          type: string
+    get:
+      operationId: workerOperations
+      summary: Open the worker operations WebSocket; environment key only.
+      description: Authorized as `none beyond the key`.
+      responses:
+        "200":
+          description: The answer this route serves.
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/environments/{id}/egress:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The object's prefixed identifier, or a name among the caller's own.
+        schema:
+          type: string
+    get:
+      operationId: gatewaySync
+      summary: Open the gateway sync WebSocket; environment key only.
+      description: Authorized as `none beyond the key`.
+      responses:
+        "200":
+          description: The answer this route serves.
+        default:
+          $ref: "#/components/responses/Error"
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >-
+        A token from a configured issuer, a sandbox's own workload token, or,
+        on the worker routes alone, an environment key.
+  responses:
+    Error:
+      description: "The refusal envelope of design 008: one code, one fixed sentence."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, details]
+          properties:
+            code:
+              type: string
+              description: The row of the error table this refusal is.
+            message:
+              type: string
+              description: The fixed sentence that row carries, for the person who asked.
+            details:
+              type: object
+              description: >-
+                The developer half: request_id on every refusal, paths where the
+                code names fields, and detail for the developer sentence.
+              properties:
+                request_id:
+                  type: string
+                detail:
+                  type: string
+                paths:
+                  type: array
+                  items:
+                    type: string

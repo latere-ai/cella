@@ -139,7 +139,10 @@ depcheck:
         github.com/modern-go/concurrent: a dependency of the Kubernetes client's schema
         github.com/modern-go/reflect2: a dependency of the Kubernetes client's schema
         github.com/munnerz/goautoneg: the content negotiation of the Kubernetes client
-        go.yaml.in/yaml: the YAML parser the Kubernetes decoders are built on
+        go.yaml.in/yaml: >-
+          the YAML parser design 003's decoder reads a manifest body with and
+          design 008's handlers render an answer with, and the one the
+          Kubernetes decoders are built on
         gopkg.in/evanphx/json-patch.v4: the JSON patch the k8s driver's compare-and-swap is written as
         gopkg.in/inf.v0: the arbitrary-precision arithmetic behind a Kubernetes quantity
     latere.ai/x/cella/internal/check:
@@ -210,7 +213,10 @@ depcheck:
         github.com/modern-go/concurrent: a dependency of the Kubernetes client's schema
         github.com/modern-go/reflect2: a dependency of the Kubernetes client's schema
         github.com/munnerz/goautoneg: the content negotiation of the Kubernetes client
-        go.yaml.in/yaml: the YAML parser the Kubernetes decoders are built on
+        go.yaml.in/yaml: >-
+          the YAML parser design 003's decoder reads a manifest body with and
+          design 008's handlers render an answer with, and the one the
+          Kubernetes decoders are built on
         gopkg.in/evanphx/json-patch.v4: the JSON patch the k8s driver's compare-and-swap is written as
         gopkg.in/inf.v0: the arbitrary-precision arithmetic behind a Kubernetes quantity
     latere.ai/x/cella/cmd/cella-stubs:

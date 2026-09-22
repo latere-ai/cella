@@ -265,3 +265,32 @@ func TestSubtestNames(t *testing.T) {
 func asDisagreement(err error, into **Disagreement) bool {
 	return errors.As(err, into)
 }
+
+// TestTheExecStreamCaseReadsEveryFrame: every way design 008's framed stream
+// can be wrong is a disagreement the case reports, and not a pass. The case
+// is what proves a server serves the frames; this is what proves the case
+// reads them.
+func TestTheExecStreamCaseReadsEveryFrame(t *testing.T) {
+	for _, mode := range []string{"status", "type", "oversize", "short", "channel", "truncated", "error", "exit", "wrongexit", "wrongoutput"} {
+		t.Run(mode, func(t *testing.T) {
+			f := newFake(t)
+			f.execStream = mode
+			e, err := newEnv(t.Context(), f.config())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := case008ExecStream(t.Context(), e); err == nil {
+				t.Fatalf("a stream that is %s was read as design 008's", mode)
+			}
+		})
+	}
+	// The stream the design states is read as one.
+	f := newFake(t)
+	e, err := newEnv(t.Context(), f.config())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := case008ExecStream(t.Context(), e); err != nil {
+		t.Fatalf("the stream design 008 states was read as a disagreement: %v", err)
+	}
+}

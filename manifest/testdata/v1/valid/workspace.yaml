@@ -1,0 +1,32 @@
+# A workspace a person would write by hand: what runs, what it is given, and
+# how long it lives.
+apiVersion: cella.latere.ai/v1beta1
+kind: Sandbox
+metadata:
+  name: research
+  labels:
+    team: research
+  annotations:
+    example.com/ticket: "1234"
+spec:
+  environment: default
+  image: registry.example/base:1
+  command: ["/bin/bash", "-l"]
+  args: ["-c", "sleep 300"]
+  workdir: /workspace
+  user: "1000:1000"
+  resources:
+    cpu: "1"
+    memory: 2Gi
+    disk: 10Gi
+  workspace:
+    path: /workspace
+  env:
+    LOG_LEVEL: debug
+  lifecycle:
+    autoStop: 15m
+    ttl: 24h
+    autoDelete: 72h
+  display:
+    width: 1280
+    height: 800

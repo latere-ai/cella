@@ -181,22 +181,68 @@ func compareGolden(t *testing.T, input string, got []byte) {
 	}
 }
 
+// yamlTwinAgrees holds the YAML form of an accepted entry, where one is
+// written beside it, to the object its JSON form decodes to: the two syntaxes
+// carry one object, and an anchor or an alias is the document's and not the
+// object's.
+func yamlTwinAgrees(t *testing.T, input string, fromJSON v1.Sandbox) {
+	t.Helper()
+	body, err := os.ReadFile(strings.TrimSuffix(input, ".json") + ".yaml")
+	if errors.Is(err, os.ErrNotExist) {
+		return
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	fromYAML, err := Decode(body, MediaYAML)
+	if err != nil {
+		t.Fatalf("the YAML form was refused: %v", err)
+	}
+	left, err := json.Marshal(fromYAML)
+	if err != nil {
+		t.Fatal(err)
+	}
+	right, err := json.Marshal(fromJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(left) != string(right) {
+		t.Fatalf("the two syntaxes decode to two objects:\n%s\n%s", left, right)
+	}
+}
+
 // TestGoldenCorpus is the schema's snapshot of spec 003: every manifest under
 // testdata/v1/valid resolves to its golden object under one fixed set of
-// options, and every manifest under testdata/v1/invalid is refused with the
-// code and the paths its golden names. A change that alters a golden file is
-// a schema change.
+// options, and decodes from its YAML form to the same object where one is
+// written beside it; every manifest under testdata/v1/invalid is refused with
+// the code and the paths its golden names. A change that alters a golden file
+// is a schema change.
 func TestGoldenCorpus(t *testing.T) {
+	// A YAML form without its JSON form would never be read, so the corpus
+	// refuses one rather than carry a row that proves nothing.
+	twins, err := filepath.Glob(filepath.Join(corpusValid, "*.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(twins) == 0 {
+		t.Fatalf("%s holds no YAML form, so the corpus reads one syntax", corpusValid)
+	}
+	for _, twin := range twins {
+		if _, err := os.Stat(strings.TrimSuffix(twin, ".yaml") + ".json"); err != nil {
+			t.Errorf("%s has no JSON form: %v", twin, err)
+		}
+	}
 	for _, input := range corpusEntries(t, corpusValid) {
 		t.Run(filepath.Base(input), func(t *testing.T) {
 			body, err := os.ReadFile(input)
 			if err != nil {
 				t.Fatal(err)
 			}
-			obj, err := Decode(body, "application/json")
+			obj, err := Decode(body, MediaJSON)
 			if err != nil {
 				t.Fatalf("Decode: %v", err)
 			}
+			yamlTwinAgrees(t, input, obj)
 			resolved, err := Resolve(t.Context(), &obj, corpusOptions())
 			if err != nil {
 				t.Fatalf("Resolve: %v", err)
@@ -216,7 +262,7 @@ func TestGoldenCorpus(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			obj, decodeErr := Decode(body, "application/json")
+			obj, decodeErr := Decode(body, MediaJSON)
 			err = decodeErr
 			if err == nil {
 				_, err = Resolve(t.Context(), &obj, corpusOptions())

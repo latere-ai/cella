@@ -246,6 +246,9 @@ func (r *refusing) Undelivered(context.Context) (int, error)    { return len(r.r
 func (r *refusing) Pending(context.Context, int, time.Time) ([]events.Pending, error) {
 	return r.rows, r.err
 }
+func (r *refusing) ByObject(context.Context, string, string, int) ([]events.Record, string, error) {
+	return nil, "", r.err
+}
 func (r *refusing) Acknowledge(context.Context, string, time.Time) error { return r.err }
 func (r *refusing) Defer(context.Context, string, time.Time) error       { return r.err }
 func (r *refusing) Drop(context.Context, string, time.Time) error        { return r.err }
@@ -341,6 +344,9 @@ func (h *halfRefusing) Append(context.Context, events.Record) error { return nil
 func (h *halfRefusing) Undelivered(context.Context) (int, error)    { return len(h.rows), nil }
 func (h *halfRefusing) Pending(context.Context, int, time.Time) ([]events.Pending, error) {
 	return h.rows, nil
+}
+func (h *halfRefusing) ByObject(context.Context, string, string, int) ([]events.Record, string, error) {
+	return nil, "", nil
 }
 func (h *halfRefusing) Acknowledge(context.Context, string, time.Time) error {
 	return errors.New("the row is gone")

@@ -35,7 +35,7 @@ objects its owner holds, and nothing else.
 
 ```
 apply    -f <file> [-w]                          apply a Sandbox or a Secret manifest
-get      <kind> [<ref>] [-o json|wide|name]      read one object or list a kind
+get      <kind> [<ref>] [-o json|yaml|wide|name] read one object or list a kind
 delete   <kind> <ref>                            delete one object
 start    <ref>                                   start a stopped sandbox
 stop     <ref>                                   stop a running sandbox
@@ -83,7 +83,11 @@ cella get sandbox dev --json
 `cella get` lists by default and follows the server's pages to the end;
 `--limit` stops it earlier. `-o name` prints `sandbox/<name>` per line, for
 a shell loop. `--json` and `-o json` write the API's own bytes, so what you
-pipe into `jq` is exactly what the server sent.
+pipe into `jq` is exactly what the server sent. `-o yaml` asks the server for
+the same object as YAML and writes that through; a list under `-o yaml` is
+the one page the server answered, with its cursor, because the pages are
+joined by re-encoding an envelope and the command does not re-encode what the
+server rendered.
 
 ### Running something inside
 

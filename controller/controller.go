@@ -863,3 +863,37 @@ func crockfordULID(b [16]byte) string {
 	}
 	return string(out[:])
 }
+
+// Update replaces one sandbox's desired state with what an apply resolved.
+// The status is the controller's and is carried over whole: an apply writes
+// the specification and never the record of what the sandbox is.
+//
+// The boundary reaches a gateway before desired state claims it, which is the
+// order design 018 fixes for a create and holds for an update: a map no
+// gateway will hold is a refusal, and the boundary the object already had is
+// put back so that every map a gateway holds is a map desired state has. The
+// driver is not called, because design 003 marks every field a running
+// sandbox would have to be recreated for immutable.
+func (c *Controller) Update(ctx context.Context, obj v1.Sandbox) (v1.Sandbox, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	held, ok := c.objects[obj.Status.ID]
+	if !ok {
+		return v1.Sandbox{}, ErrNotFound
+	}
+	obj.Status = held.Status
+	boundary, err := c.pushEgress(ctx, &obj)
+	if err != nil {
+		previous := clone(held)
+		if _, restore := c.pushEgress(ctx, &previous); restore != nil {
+			err = errors.Join(err, restore)
+		}
+		return v1.Sandbox{}, err
+	}
+	obj.Status.Secrets = boundary.Secrets
+	obj.Status.Conditions = setCondition(obj.Status.Conditions, c.egressCondition(boundary.Map, boundary.Held, time.Now().UTC()))
+	if err := c.persist(ctx, obj, MutationUpdated); err != nil {
+		return v1.Sandbox{}, err
+	}
+	return export(obj), nil
+}

@@ -52,6 +52,32 @@ func (j eventJournal) Append(ctx context.Context, r events.Record) error {
 	})
 }
 
+// ByObject reads one object's page of the journal and rebuilds each row into
+// the record it was written from. The columns carry the id, the sequence, the
+// type and the time, which Payload cleared on the way in, so a record read
+// straight from the payload would reach a caller with no sequence at all.
+func (j eventJournal) ByObject(ctx context.Context, objectID, cursor string, limit int) ([]events.Record, string, error) {
+	out := []events.Record{}
+	var next string
+	err := j.store.Tx(ctx, func(tx Tx) error {
+		rows, more, err := tx.Journal().ByObject(ctx, objectID, Page{Limit: limit, Cursor: cursor})
+		if err != nil {
+			return err
+		}
+		out = make([]events.Record, 0, len(rows))
+		for _, row := range rows {
+			record, err := events.Rebuild(row.Payload, row.ID, row.Seq, row.Type, row.At)
+			if err != nil {
+				return fmt.Errorf("store: rebuilding the event %s: %w", row.ID, err)
+			}
+			out = append(out, record)
+		}
+		next = more
+		return nil
+	})
+	return out, next, err
+}
+
 func (j eventJournal) Pending(ctx context.Context, limit int, now time.Time) ([]events.Pending, error) {
 	var out []events.Pending
 	err := j.store.Tx(ctx, func(tx Tx) error {

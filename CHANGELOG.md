@@ -15,7 +15,22 @@ refused before it is pushed.
   it: the four commitments, one row per asset with the control that answers
   it and the tests that hold the control to its word, and what is out of
   scope.
-
+- The `/v1` API answers every rule its own conformance suite reads. A manifest
+  may now be written in YAML and sent as `application/yaml`,
+  `application/x-yaml` or `text/yaml`, and a field the schema does not know is
+  refused with the path it sits at rather than only its name. `Accept` decides
+  the syntax of an answer: JSON by default, YAML where you ask for it, and a
+  406 where you ask for neither; `cella get -o yaml` reads that. A sandbox is
+  applied by name with `PUT /v1/sandboxes/{name}`, which creates the object
+  when the name is free and updates it when you already hold it, and refuses a
+  body naming another object instead of quietly renaming it. `POST
+  /v1/sandboxes/{id}/exec` without `?wait=1` now streams the command's output
+  as it is produced and ends with its exit code, so a long run no longer waits
+  for the whole answer. `GET /v1/events?object=<id>` reads any object's event
+  history, newest first and paged. `GET /openapi.yaml` serves the API
+  description beside the key set, with no credential, for a client generator
+  to build from. A request id is `req_` and a sortable identifier, and your own
+  `X-Request-Id` is carried through the answer, the events and the logs.
 - The API is now an executable contract. `test/conformance` runs one case per
   rule the `/v1` API states against any server that claims to serve it, and
   prints what held, what failed with the request and the answer that

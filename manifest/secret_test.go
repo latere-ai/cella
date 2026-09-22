@@ -233,7 +233,7 @@ func TestDecodeSecret(t *testing.T) {
 	for _, tc := range []struct {
 		name, body, contentType, code string
 	}{
-		{"a content type this server does not read", `{}`, "application/yaml", "unsupported_media_type"},
+		{"a content type this server does not read", `{}`, "text/plain", "unsupported_media_type"},
 		{"a content type that is not one", `{}`, "not a type", "unsupported_media_type"},
 		{"a field the schema does not have", `{"apiVersion":"` + v1.APIVersion + `","kind":"Secret","nope":1}`, "application/json", "unknown_field"},
 		{"a body that is not JSON", `{`, "application/json", "bad_request"},

@@ -61,11 +61,9 @@ var pendingControls = []string{
 	"TestRateLimits",                       // spec 008, the token buckets
 	"TestReadAuthorizeAct",                 // spec 008, the handler order
 	"TestRefusedReferencesLookMissing",     // spec 006, a refusal that reads as missing
-	"TestRequestId",                        // spec 008, the client request id rule
 	"TestRouteTableActions",                // spec 008, the action per route
 	"TestSecretValueIsWriteOnly",           // spec 018, a value never read back
 	"TestTiersAreIsolated",                 // spec 012, every tier off the developer's own state
-	"TestYAMLLimits",                       // spec 003, the alias and nesting limits of Decode
 }
 
 // declaredTests is every test function of the module, which is the set

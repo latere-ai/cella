@@ -61,8 +61,19 @@ func setupRecordedDriver(t *testing.T, wrap func(runtime.Driver) runtime.Driver)
 	}
 	t.Cleanup(func() { _ = s.Close() })
 	emitter := events.NewEmitter(store.EventJournal(s, store.Delivered), slog.New(slog.DiscardHandler))
+	// The desired store is the sealed one, so a record about a Secret can be
+	// made here and the canary that no record carries a value is asserted
+	// against a value that was really stored.
+	envelope, err := store.NewEnvelope(sealedKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	desired, err := controller.OpenSealedFileStore(t.TempDir(), envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
 	c, err := controller.Open(controller.Options{
-		DataDir: t.TempDir(), Driver: runtimeDriver, Environment: "default", Events: emitter,
+		Store: desired, Driver: runtimeDriver, Environment: "default", Events: emitter,
 		TouchInterval: time.Millisecond,
 	})
 	if err != nil {

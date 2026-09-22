@@ -12,6 +12,7 @@ import (
 	"latere.ai/x/cella/controller"
 	"latere.ai/x/cella/internal/events"
 	"latere.ai/x/cella/internal/store"
+	"latere.ai/x/cella/internal/store/memory"
 	v1 "latere.ai/x/cella/manifest/v1"
 	driver "latere.ai/x/cella/runtime"
 )
@@ -309,5 +310,50 @@ func TestAMutationOutsideTheEnumIsRefused(t *testing.T) {
 	}
 	if err := journal.Drop(t.Context(), "evt_nothing", time.Now().UTC()); err == nil {
 		t.Error("dropping an event no row holds passed")
+	}
+}
+
+// TestByObjectRebuildsTheRecord: the read half of the journal hands back the
+// record as it was written, with the columns authoritative. A row whose
+// payload cannot be read is the error the caller sees and never a page with a
+// record missing from it.
+func TestByObjectRebuildsTheRecord(t *testing.T) {
+	s, err := memory.Open(memory.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	j := store.EventJournal(s, store.Delivered)
+	at := time.Date(2026, 9, 21, 0, 0, 0, 0, time.UTC)
+	record, err := events.Mutation(events.TypeCreated, "", events.Object{
+		Kind: events.KindSandbox, ID: "sbx_a", Name: "work", Owner: "alice",
+	}, events.Phase{Phase: "Running"}, events.Actor{Subject: "alice"}, at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := j.Append(t.Context(), record); err != nil {
+		t.Fatal(err)
+	}
+	page, next, err := j.ByObject(t.Context(), "sbx_a", "", 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page) != 1 || next != "" {
+		t.Fatalf("the page holds %d record(s) and the cursor %q", len(page), next)
+	}
+	if page[0].Seq != 1 || page[0].Type != events.TypeCreated || page[0].Object.ID != "sbx_a" {
+		t.Fatalf("the record came back as %+v", page[0])
+	}
+	if !page[0].Time.Equal(at) {
+		t.Errorf("the record's time is %s", page[0].Time)
+	}
+	// An object with no records is an empty page and not a refusal.
+	page, next, err = j.ByObject(t.Context(), "sbx_nothing", "", 50)
+	if err != nil || len(page) != 0 || next != "" {
+		t.Fatalf("an object with no records answered %d record(s), %q, %v", len(page), next, err)
+	}
+	// A cursor the journal cannot read is the journal's refusal.
+	if _, _, err := j.ByObject(t.Context(), "sbx_a", "not a sequence", 50); err == nil {
+		t.Error("a cursor that is not a sequence was read as one")
 	}
 }

@@ -20,7 +20,7 @@ func TestDecode(t *testing.T) {
 	if err != nil || obj.Kind != "Sandbox" {
 		t.Fatal(obj, err)
 	}
-	for _, tc := range []struct{ body, media string }{{string(b), "text/yaml"}, {"{", "application/json"}, {string(b) + " {}", "application/json"}, {`{"unknown":1}`, "application/json"}, {`{"apiVersion":"other"}`, "application/json"}, {`{"apiVersion":"cella.latere.ai/v1beta1","kind":"Secret"}`, "application/json"}, {`null`, "application/json"}} {
+	for _, tc := range []struct{ body, media string }{{string(b), "text/plain"}, {"{", "application/json"}, {string(b) + " {}", "application/json"}, {`{"unknown":1}`, "application/json"}, {`{"apiVersion":"other"}`, "application/json"}, {`{"apiVersion":"cella.latere.ai/v1beta1","kind":"Secret"}`, "application/json"}, {`null`, "application/json"}} {
 		if _, err := Decode([]byte(tc.body), tc.media); err == nil {
 			t.Errorf("accepted %s", tc.body)
 		}

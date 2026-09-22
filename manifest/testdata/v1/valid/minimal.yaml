@@ -1,0 +1,4 @@
+# The smallest manifest this schema accepts: the version and the kind. The
+# name is generated and every other field is the operator's default.
+apiVersion: cella.latere.ai/v1beta1
+kind: Sandbox

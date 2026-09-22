@@ -24,14 +24,16 @@ import (
 const module = "latere.ai/x/cella"
 
 // shared is what any role package may reach: the contract types, the driver
-// interface, the boundary compiler, and the host-pattern grammar the
-// contract's host rule names (spec 003), which the manifest carries into
-// everything that imports it. Each is itself held to this rule, so importing
-// one opens no connection.
+// interface, the boundary compiler, the host-pattern grammar the contract's
+// host rule names (spec 003), and the YAML parser its decoder reads a body
+// with, each of which the manifest carries into everything that imports it.
+// Every entry is itself held to this rule: a parser and a pattern matcher
+// compute over bytes, so importing one opens no connection.
 var shared = []string{
 	module + "/manifest", module + "/manifest/v1", module + "/runtime",
 	module + "/runtime/display", module + "/egress",
 	"latere.ai/x/pkg/hostmatch", "latere.ai/x/pkg/egress/placeholder",
+	"go.yaml.in/yaml/v3",
 }
 
 // engines is the client each package may reach beyond shared, one entry per

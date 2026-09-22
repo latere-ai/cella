@@ -4,12 +4,8 @@
 package manifest
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
-	"io"
 	"maps"
-	"mime"
 	"net/url"
 	"regexp"
 	"slices"
@@ -53,36 +49,16 @@ const (
 	pathSecretValue    = "spec.value"
 )
 
-// DecodeSecret accepts exactly one JSON Secret manifest, refuses unknown
-// fields, and discards client status. It is Decode for the kind the value
+// DecodeSecret reads one Secret manifest, in any syntax design 003 admits,
+// and discards the status a client sent. It is Decode for the kind the value
 // belongs to; the two are separate functions because every caller of either
 // knows which kind its route serves.
 func DecodeSecret(body []byte, contentType string) (v1.Secret, error) {
 	var obj v1.Secret
-	media, _, err := mime.ParseMediaType(contentType)
-	if err != nil || media != "application/json" {
-		return obj, fail("unsupported_media_type", "expected application/json")
-	}
-	dec := json.NewDecoder(bytes.NewReader(body))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&obj); err != nil {
-		code := "bad_request"
-		if strings.Contains(err.Error(), "unknown field") {
-			code = "unknown_field"
-		}
-		return obj, fail(code, err.Error())
-	}
-	var extra any
-	if err := dec.Decode(&extra); err != io.EOF {
-		return obj, fail("multi_document", "expected exactly one JSON object")
+	if err := decode(body, contentType, v1.KindSecret, &obj); err != nil {
+		return v1.Secret{}, err
 	}
 	obj.Status = v1.SecretStatus{}
-	if obj.APIVersion != v1.APIVersion {
-		return obj, fail("unsupported_version", "apiVersion must be "+v1.APIVersion)
-	}
-	if obj.Kind != v1.KindSecret {
-		return obj, fail("unsupported_kind", "kind must be "+v1.KindSecret)
-	}
 	return obj, nil
 }
 

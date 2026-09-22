@@ -6,9 +6,9 @@ package api
 
 import (
 	"archive/tar"
+	"bytes"
 	"cmp"
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -89,6 +89,11 @@ type handler struct {
 	mux     *http.ServeMux
 	metrics Metrics
 	log     *slog.Logger
+	// patterns is every route this handler registered, in registration
+	// order. It is the half of design 008's document that the server knows;
+	// TestTheDocumentAndTheMuxAgree reads it against api/openapi.yaml, so a
+	// route added here and left out of the document fails the build.
+	patterns []string
 }
 
 func New(o Options) (http.Handler, error) {
@@ -106,28 +111,24 @@ func New(o Options) (http.Handler, error) {
 		metrics: cmp.Or(o.Metrics, Metrics(nopMetrics{})),
 		log:     cmp.Or(o.Log, slog.Default()),
 	}
-	h.handle("GET /v1/sandboxes/{id}/files", h.files)
-	h.handle("PUT /v1/sandboxes/{id}/files", h.filesPut)
+	// The routes whose answer is one object or one page, in the syntax the
+	// request negotiated.
 	h.handle("DELETE /v1/sandboxes/{id}/files", h.fileRemove)
-	h.handle("GET /v1/sandboxes/{id}/files/content", h.fileContent)
 	h.handle("GET /v1/sandboxes/{id}/files/stat", h.fileStat)
 	h.handle("GET /v1/sandboxes/{id}/files/list", h.fileList)
 	h.handle("POST /v1/sandboxes/{id}/files/mkdir", h.fileMkdir)
 	h.handle("POST /v1/sandboxes/{id}/files/move", h.fileMove)
-	h.handle("GET /v1/sandboxes/{id}/logs", h.logs)
 	h.handle("GET /v1/sandboxes/{id}/egress", h.egressRecords)
 	h.handle("POST /v1/sandboxes", h.create)
 	h.handle("GET /v1/sandboxes", h.list)
+	h.handle("PUT /v1/sandboxes/{name}", h.apply)
 	h.handle("GET /v1/sandboxes/{id}", h.item)
 	h.handle("DELETE /v1/sandboxes/{id}", h.item)
 	h.handle("POST /v1/sandboxes/{id}/{verb}", h.item)
-	h.handle("GET /v1/sandboxes/{id}/exec", h.execSocket)
-	h.handle("GET /v1/sandboxes/{id}/attach", h.attachSocket)
 	h.handle("GET /v1/sandboxes/{id}/display", h.display)
-	h.handle("GET /v1/sandboxes/{id}/screenshot", h.screenshot)
-	h.handle("GET /v1/sandboxes/{id}/screen", h.screen)
 	h.handle("POST /v1/sandboxes/{id}/input", h.input)
 	h.handle("GET /v1/sandboxes/{id}/ports", h.ports)
+	h.handle("GET /v1/events", h.eventFeed)
 	h.handle("POST /v1/secrets", h.createSecret)
 	h.handle("GET /v1/secrets", h.listSecrets)
 	h.handle("PUT /v1/secrets/{key}", h.applySecret)
@@ -137,6 +138,30 @@ func New(o Options) (http.Handler, error) {
 	h.handle("GET /v1/environments/{id}", h.environmentItem)
 	h.handle("POST /v1/environments/{id}/keys", h.environmentKeyMint)
 	h.handle("DELETE /v1/environments/{id}/keys/{jti}", h.environmentKeyRevoke)
+	// The routes whose content type is the route's own: an archive, a file
+	// body, a frame, a log, a framed stream and the four sockets. A caller
+	// asking for one of those asks for the route and not for a syntax, so
+	// there is nothing to negotiate.
+	h.stream("GET /v1/sandboxes/{id}/files", h.files)
+	h.stream("PUT /v1/sandboxes/{id}/files", h.filesPut)
+	h.stream("GET /v1/sandboxes/{id}/files/content", h.fileContent)
+	h.stream("GET /v1/sandboxes/{id}/logs", h.logs)
+	h.stream("POST /v1/sandboxes/{id}/exec", h.execRoute)
+	h.stream("GET /v1/sandboxes/{id}/exec", h.execSocket)
+	h.stream("GET /v1/sandboxes/{id}/attach", h.attachSocket)
+	h.stream("GET /v1/sandboxes/{id}/dial/{port}", h.dial)
+	h.stream("GET /v1/sandboxes/{id}/screenshot", h.screenshot)
+	h.stream("GET /v1/sandboxes/{id}/screen", h.screen)
+	// The three routes an environment key reaches are answered before the
+	// mux, because the key names an environment and no route that decides on
+	// a subject may be reached with one. They are recorded here all the same:
+	// the record is what this server serves, and the API document is held to
+	// it whichever side of the mux answers.
+	h.patterns = append(h.patterns,
+		"GET /v1/environments/{id}/operations",
+		"GET /v1/environments/{id}/egress",
+		"POST /v1/environments/{id}/workers",
+	)
 	return h, nil
 }
 
@@ -150,7 +175,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	rw := &observed{ResponseWriter: w}
 	defer h.observe(r.Context(), slot, rw, time.Now())
 	w = rw
-	w.Header().Set("X-Request-ID", rand.Text())
+	w.Header().Set(RequestIDHeader, requestID(r))
 	token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 	if !ok || strings.TrimSpace(token) == "" {
 		respondError(w, &auth.Error{Code: auth.CodeUnauthenticated, Detail: "missing bearer"})
@@ -185,7 +210,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		respondError(w, &auth.Error{Code: auth.CodeForbidden, Detail: "environment keys authorize data plane streams only"})
 		return
 	}
-	slot.subject, slot.requestID = caller.Subject, w.Header().Get("X-Request-ID")
+	slot.subject, slot.requestID = caller.Subject, w.Header().Get(RequestIDHeader)
 	stampSpan(r.Context(), caller.Subject, slot.requestID)
 	ctx := context.WithValue(r.Context(), callerKey{}, caller)
 	// The slot rides the context from here, so the wrapper behind the mux
@@ -249,7 +274,7 @@ func (h *handler) resolveOptions(w http.ResponseWriter, r *http.Request) (manife
 	o.Claims = c.Claims
 	o.Defaults = h.Defaults
 	o.Admit = h.Admit
-	o.RequestID = w.Header().Get("X-Request-ID")
+	o.RequestID = w.Header().Get(RequestIDHeader)
 	id, workload := c.Sandbox()
 	if !workload {
 		return o, nil
@@ -270,15 +295,105 @@ func (h *handler) resolveOptions(w http.ResponseWriter, r *http.Request) (manife
 	return o, nil
 }
 
+// create serves POST /v1/sandboxes: a create whose name the body carries or
+// the server generates.
 func (h *handler) create(w http.ResponseWriter, r *http.Request) {
-	body, err := h.readBody(w, r)
+	h.createNamed(w, r, "")
+}
+
+// apply serves PUT /v1/sandboxes/{name}: a create when the name is free and
+// an update when the caller already holds it, which is the grammar every kind
+// of this API shares. The name is the caller's own namespace, so a name
+// another subject holds is free here.
+func (h *handler) apply(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	existing, err := h.Controller.Get(r.Context(), name, caller(r).Subject)
+	if errors.Is(err, controller.ErrNotFound) {
+		h.createNamed(w, r, name)
+		return
+	}
 	if err != nil {
 		respondError(w, err)
 		return
 	}
+	h.update(w, r, existing)
+}
+
+// update is the update half of an apply. The manifest is resolved against the
+// object that exists, which is what refuses an immutable field and holds a
+// workload to the boundary it was given, and the accepted result becomes
+// desired state.
+func (h *handler) update(w http.ResponseWriter, r *http.Request, existing v1.Sandbox) {
+	obj, ok := h.applyBody(w, r, existing.Metadata.Name)
+	if !ok {
+		return
+	}
+	options, err := h.resolveOptions(w, r)
+	if err != nil {
+		respondError(w, err)
+		return
+	}
+	options.Existing = &existing
+	// A workload applying a name its owner already holds is updating that
+	// object and not spawning a child, which is what design 008 says of an
+	// existing name.
+	options.Parent = nil
+	obj, _, err = manifest.ResolveNativeWith(r.Context(), obj, options)
+	if err != nil {
+		respondError(w, err)
+		return
+	}
+	obj.Status = existing.Status
+	res := resource(obj)
+	res.Fields["proposed"] = map[string]any{"owner": obj.Status.Owner, "metadata": obj.Metadata, "spec": obj.Spec}
+	if _, err = h.decide(r, authorizer.ActionSandboxUpdate, res); err != nil {
+		respondError(w, err)
+		return
+	}
+	stored, err := h.Controller.Update(r.Context(), obj)
+	if err != nil {
+		respondError(w, err)
+		return
+	}
+	respond(w, http.StatusOK, stored)
+}
+
+// applyBody reads one manifest and holds it to the name the route named. A
+// body that names another object is refused at the field, never renamed, so
+// an apply writes the object the path says and no other. An empty name on a
+// named route takes the path's, which is what lets one manifest be applied
+// under several names.
+func (h *handler) applyBody(w http.ResponseWriter, r *http.Request, name string) (v1.Sandbox, bool) {
+	body, err := h.readBody(w, r)
+	if err != nil {
+		respondError(w, err)
+		return v1.Sandbox{}, false
+	}
 	obj, err := manifest.Decode(body, r.Header.Get("Content-Type"))
 	if err != nil {
 		respondError(w, err)
+		return v1.Sandbox{}, false
+	}
+	if name == "" {
+		return obj, true
+	}
+	if obj.Metadata.Name == "" {
+		obj.Metadata.Name = name
+	}
+	if obj.Metadata.Name != name {
+		respondError(w, &manifest.Error{Code: "invalid_field", Path: "metadata.name",
+			Detail: "the path names " + name + " and the body names " + obj.Metadata.Name})
+		return v1.Sandbox{}, false
+	}
+	return obj, true
+}
+
+// createNamed is the create half of both routes. The name is the route's
+// where it named one and empty on the collection, where the body carries it
+// or the server generates one.
+func (h *handler) createNamed(w http.ResponseWriter, r *http.Request, name string) {
+	obj, ok := h.applyBody(w, r, name)
+	if !ok {
 		return
 	}
 	options, err := h.resolveOptions(w, r)
@@ -334,6 +449,20 @@ func (h *handler) create(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Location", "/v1/sandboxes/"+obj.Status.ID)
 	respond(w, http.StatusCreated, obj)
 }
+
+// execRoute serves POST /v1/sandboxes/{id}/exec. It is its own pattern rather
+// than a verb of the item route because its two forms answer in two ways: a
+// JSON result under ?wait=1, in the syntax the request negotiates, and the
+// framed stream of design 008 otherwise, whose content type is the route's.
+func (h *handler) execRoute(w http.ResponseWriter, r *http.Request) {
+	obj, err := h.authorizedObject(r, authorizer.ActionSandboxExec)
+	if err != nil {
+		respondError(w, err)
+		return
+	}
+	h.exec(w, r, obj)
+}
+
 func (h *handler) item(w http.ResponseWriter, r *http.Request) {
 	verb := r.PathValue("verb")
 	action := authorizer.ActionSandboxRead
@@ -345,8 +474,6 @@ func (h *handler) item(w http.ResponseWriter, r *http.Request) {
 		switch verb {
 		case "start", "stop":
 			action = authorizer.ActionSandboxUpdate
-		case "exec":
-			action = authorizer.ActionSandboxExec
 		default:
 			respondError(w, controller.ErrNotFound)
 			return
@@ -366,9 +493,6 @@ func (h *handler) item(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch verb {
-	case "exec":
-		h.exec(w, r, obj)
-		return
 	case "start", "stop", "delete":
 		obj, err = h.Controller.Act(r.Context(), obj.Status.ID, verb)
 	default:
@@ -480,18 +604,41 @@ type execResult struct {
 	DurationMS int64  `json:"durationMs"`
 }
 
+// exec is both forms of POST /v1/sandboxes/{id}/exec. The body, the command
+// rule and the timeout are read once, and the query decides which answer the
+// request gets: one JSON result under ?wait=1, or the framed stream of design
+// 008.
 func (h *handler) exec(w http.ResponseWriter, r *http.Request, obj v1.Sandbox) {
-	if r.URL.Query().Get("wait") != "1" {
-		respondError(w, &manifest.Error{Code: "capability_unsupported", Detail: "only exec?wait=1 is currently supported"})
+	bounded := r.URL.Query().Get("wait") == "1"
+	// The bounded form answers one object, so it reads Accept like every
+	// other object route. The framed form answers the route's own content
+	// type and negotiates nothing.
+	if bounded && !acceptable(w, r) {
 		return
 	}
+	req, timeout, ok := h.execRequest(w, r)
+	if !ok {
+		return
+	}
+	if !bounded {
+		h.execStream(w, r, obj, req, timeout)
+		return
+	}
+	h.execWait(w, r, obj, req, timeout)
+}
+
+// execRequest reads one exec body and the timeout it names. The rules are
+// design 008's and are the same for both forms: one JSON object with no field
+// the schema does not know, a command the runtime contract accepts, and a
+// timeout that is positive and at most an hour.
+func (h *handler) execRequest(w http.ResponseWriter, r *http.Request) (execRequest, time.Duration, bool) {
+	var req execRequest
 	body, err := h.readBody(w, r)
 	if err != nil {
 		respondError(w, err)
-		return
+		return req, 0, false
 	}
-	var req execRequest
-	dec := json.NewDecoder(strings.NewReader(string(body)))
+	dec := json.NewDecoder(bytes.NewReader(body))
 	dec.DisallowUnknownFields()
 	if err = dec.Decode(&req); err == nil {
 		var tail any
@@ -501,20 +648,26 @@ func (h *handler) exec(w http.ResponseWriter, r *http.Request, obj v1.Sandbox) {
 	}
 	if err != nil {
 		respondError(w, &manifest.Error{Code: "invalid_field", Detail: err.Error()})
-		return
+		return req, 0, false
 	}
 	if err = manifest.ValidateExec(req.Command, req.Env, req.Workdir); err != nil {
 		respondError(w, err)
-		return
+		return req, 0, false
 	}
 	timeout := 10 * time.Minute
 	if req.Timeout != "" {
 		timeout, err = time.ParseDuration(req.Timeout)
 		if err != nil || timeout <= 0 || timeout > time.Hour {
 			respondError(w, &manifest.Error{Code: "invalid_field", Detail: "timeout must be positive and at most 1h"})
-			return
+			return req, 0, false
 		}
 	}
+	return req, timeout, true
+}
+
+// execWait serves the bounded form: one JSON result with the exit code and
+// both output channels, each capped at a mebibyte with the head kept.
+func (h *handler) execWait(w http.ResponseWriter, r *http.Request, obj v1.Sandbox, req execRequest, timeout time.Duration) {
 	h.touch(r, obj)
 	started := time.Now()
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
@@ -569,11 +722,20 @@ func (b *cappedBuffer) Write(p []byte) (int, error) {
 	b.data = append(b.data, p...)
 	return n, nil
 }
+
+// respond writes one object in the syntax this request negotiated: JSON in
+// the Go type's own order, or YAML where the caller named one of design 003's
+// three types. An error is always JSON, because an envelope a client cannot
+// parse says less than one in the syntax it did not ask for.
 func respond(w http.ResponseWriter, status int, body any) {
+	if wantsYAML(w) {
+		respondYAML(w, status, body)
+		return
+	}
 	httpjson.Write(w, status, body)
 }
 func respondError(w http.ResponseWriter, err error) {
-	status, envelope := errorEnvelope(err, w.Header().Get("X-Request-ID"))
+	status, envelope := errorEnvelope(err, w.Header().Get(RequestIDHeader))
 	noteCode(w, envelope.Code)
 	httpjson.WriteError(w, status, envelope)
 }
@@ -644,6 +806,9 @@ func errorEnvelope(err error, requestID string) (int, httpjson.Error) {
 	case "unsupported_media_type":
 		status = 415
 		message = "Send the manifest as JSON or YAML."
+	case "not_acceptable":
+		status = 406
+		message = "This endpoint answers in JSON or YAML."
 	case "capability_unsupported":
 		status = 422
 		message = "The environment cannot provide this."
@@ -706,8 +871,14 @@ func errorEnvelope(err error, requestID string) (int, httpjson.Error) {
 		message = "The sandbox has no spawn budget left."
 	}
 	details := map[string]any{"request_id": requestID, "detail": fmt.Sprint(err)}
-	if me != nil && len(me.Paths) > 0 {
+	// Design 008 carries paths as a list for every code that names fields.
+	// A refusal naming one field names it in the same member as a refusal
+	// naming several, so a client reads one shape.
+	switch {
+	case me != nil && len(me.Paths) > 0:
 		details["paths"] = me.Paths
+	case me != nil && me.Path != "":
+		details["paths"] = []string{me.Path}
 	}
 	return status, httpjson.Error{Code: code, Message: message, Details: details}
 }
