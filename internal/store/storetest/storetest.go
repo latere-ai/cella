@@ -549,35 +549,30 @@ func follow(t TB, open Opener) {
 		return err
 	})
 
-	after := func(object string, seq int64, limit int) []store.Event {
-		var rows []store.Event
-		with(t, s, func(tx store.Tx) error {
-			var err error
-			rows, err = tx.Journal().After(ctx, object, seq, limit)
-			return err
-		})
-		return rows
-	}
+	var all, second, past, none []store.Event
+	with(t, s, func(tx store.Tx) error {
+		var errs [4]error
+		all, errs[0] = tx.Journal().After(ctx, "sbx_a", 0, 10)
+		second, errs[1] = tx.Journal().After(ctx, "sbx_a", 1, 1)
+		past, errs[2] = tx.Journal().After(ctx, "sbx_a", 3, 10)
+		none, errs[3] = tx.Journal().After(ctx, "sbx_none", 0, 10)
+		return errors.Join(errs[:]...)
+	})
 	// A failed read is reported and the case goes on, so an adapter that
 	// reads nothing is also held to the subscriptions below.
-	if rows := after("sbx_a", 0, 10); !slices.Equal(seqs(rows), []int64{1, 2, 3}) {
-		t.Errorf("After(0) read the sequences %v, want 1, 2, 3", seqs(rows))
+	if !slices.Equal(seqs(all), []int64{1, 2, 3}) {
+		t.Errorf("After(0) read the sequences %v, want 1, 2, 3", seqs(all))
 	} else {
-		if rows[2].Type != "sandbox.stopped" || rows[2].ID == "" || rows[2].At.IsZero() {
-			t.Errorf("After read the newest row as %+v", rows[2])
+		if all[2].Type != "sandbox.stopped" || all[2].ID == "" || all[2].At.IsZero() {
+			t.Errorf("After read the newest row as %+v", all[2])
 		}
-		sameJSON(t, rows[2].Payload, []byte(`{"phase":"Stopped"}`), "the row After read")
+		sameJSON(t, all[2].Payload, []byte(`{"phase":"Stopped"}`), "the row After read")
 	}
-	if got := seqs(after("sbx_a", 1, 1)); !slices.Equal(got, []int64{2}) {
+	if got := seqs(second); !slices.Equal(got, []int64{2}) {
 		t.Errorf("After(1) with a limit of one read %v, want 2", got)
 	}
-	for _, tc := range []struct {
-		object string
-		after  int64
-	}{{"sbx_a", 3}, {"sbx_none", 0}} {
-		if got := seqs(after(tc.object, tc.after, 10)); len(got) != 0 {
-			t.Errorf("After(%s, %d) read %v, want nothing", tc.object, tc.after, got)
-		}
+	if len(past) != 0 || len(none) != 0 {
+		t.Errorf("After past the newest read %v and of an object with no rows %v, want nothing", seqs(past), seqs(none))
 	}
 
 	type seen struct {
