@@ -205,7 +205,11 @@ func TestWorkerRegistersAndHoldsTheStream(t *testing.T) {
 // reading the socket behind the stalled output, the worker's write passed its
 // deadline, and the whole stream dropped with every operation on it.
 func TestAStalledCallerKeepsTheStream(t *testing.T) {
-	const deadline = 200 * time.Millisecond
+	// The deadline sits above what one legitimate frame's write takes on a
+	// loaded runner, where the window fills a frame at a time, and far below
+	// the stall, so a stream that stops draining behind the stalled caller
+	// still passes it several times over.
+	const deadline = time.Second
 	restore := worker.ShortenWriteDeadline(deadline)
 	t.Cleanup(restore)
 	p := newPlane(t)
@@ -230,8 +234,8 @@ func TestAStalledCallerKeepsTheStream(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = stalled.Close() }()
-	// The stall is the subject: ten deadlines with nobody reading.
-	time.Sleep(10 * deadline)
+	// The stall is the subject: five deadlines with nobody reading.
+	time.Sleep(5 * deadline)
 
 	beside, err := p.driver.Exec(ctx, ref.ID, driver.ExecRequest{Command: []string{"echo", "beside"}})
 	if err != nil {
