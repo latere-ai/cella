@@ -55,6 +55,7 @@ var table = []struct {
 	{"boundary_exceeded", 422, 3},
 	{"spawn_budget_exhausted", 422, 3},
 	{"rate_limited", 429, 3},
+	{"cursor_expired", 410, 3},
 	{"admission_unavailable", 503, 1},
 	{"authorizer_unavailable", 503, 1},
 	{"driver_unavailable", 503, 1},

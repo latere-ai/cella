@@ -530,11 +530,79 @@ paths:
   /v1/events:
     get:
       operationId: objectEvents
-      summary: Read one object's events, newest first.
-      description: Authorized as `the object's kind read`.
+      summary: Read one object's events, newest first, or follow them as they happen with follow=1.
+      description: >-
+        Without `follow`, one page of the object's records, newest first, and
+        the cursor of the next older page in `next`. Authorized as the
+        object's own kind's read.
+
+
+        With `follow=1` and `object`, the object's records with a `seq` above
+        `cursor`, oldest first, and then each new one as it is committed, as
+        newline-delimited JSON. `cursor` is the newest `seq` the caller
+        holds, which is `items[0].seq` of a page and not its `next`; without
+        it the feed starts from now. The feed ends after the object's
+        `*.deleted` record. A cursor whose next record the server no longer
+        keeps is 410 `cursor_expired`; one above the newest `seq` is
+        `invalid_field`.
+
+
+        With `follow=1` and no `object`, every record the caller may read,
+        from now, filtered one record at a time as the list routes filter
+        one object at a time. Opened under `sandbox.list`; `cursor` is
+        refused. On a server with more than one replica it carries the
+        records of the replica that serves it.
+
+
+        A following feed writes one record per line, an empty line every 15
+        seconds while it has nothing to send, and, where it ends on a
+        failure, one last line holding the refusal envelope. It ends without
+        a line when the server shuts down; a caller reconnects with the
+        newest `seq` it holds. A process serves at most 256 following feeds
+        at once and refuses the next with 429 `rate_limited`.
+      parameters:
+        - name: object
+          in: query
+          description: The object's prefixed identifier; an environment's name. Required for a page.
+          schema:
+            type: string
+        - name: cursor
+          in: query
+          description: For a page, the `next` of the previous page. For a follow, the newest `seq` the caller holds.
+          schema:
+            type: string
+        - name: limit
+          in: query
+          description: The records one page holds, 1 to 200; 50 when absent. A follow does not read it.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+        - name: follow
+          in: query
+          description: 1 follows the feed; 0 or absent reads a page.
+          schema:
+            type: string
+            enum: ["0", "1"]
       responses:
         "200":
-          description: The answer this route serves.
+          description: A page, or with follow=1 a following feed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                  next:
+                    type: string
+            application/x-ndjson:
+              schema:
+                type: string
+                description: One record per line, an empty line as a heartbeat, and a refusal envelope as the last line of a feed that ended on a failure.
         default:
           $ref: "#/components/responses/Error"
   /v1/secrets:
