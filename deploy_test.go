@@ -232,7 +232,7 @@ func TestBaseIsConfined(t *testing.T) {
 // grants more is access nothing uses.
 var driverVerbs = map[string][]string{
 	"pods":                   {"get", "list", "create", "delete", "patch"},
-	"pods/exec":              {"create"},
+	"pods/exec":              {"create", "get"},
 	"pods/log":               {"get"},
 	"persistentvolumeclaims": {"get", "list", "create", "delete", "patch"},
 	// The mesh of spec 022: one headless Service and one NetworkPolicy per

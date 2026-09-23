@@ -68,17 +68,28 @@ installation that believes it calls an endpoint and does not.
 
 ## The Role
 
-`base/rbac.yaml` grants the twelve accesses the Kubernetes driver uses and
-nothing else: `get`, `list`, `create`, `delete` and `patch` on Pods and
-PersistentVolumeClaims, `create` on `pods/exec`, and `get` on `pods/log`.
-The driver proves each one at start with a `SelfSubjectAccessReview`, so a
-rule you narrow by hand is named in the start-up log, and by
-`cellad check`, rather than found at the first create.
+`base/rbac.yaml` grants the accesses the Kubernetes driver uses and
+nothing else, in the one namespace it writes in:
 
-It grants no `watch` (the driver lists and gets), no `secrets` (a secret
-value is sealed in the store under `CELLA_SECRET_KEY`), no
-`networkpolicies` (the boundary is the gateway's), and nothing
-cluster-wide.
+| Resource | Verbs | What for |
+|---|---|---|
+| Pods, PersistentVolumeClaims | `get`, `list`, `create`, `delete`, `patch` | one claim and one Pod per sandbox |
+| `pods/exec` | `create`, `get` | commands, terminals and file transfers |
+| `pods/log` | `get` | a sandbox's logs |
+| Secrets | `create`, `get`, `update`, `delete` | a sandbox's identity token, never a secret value |
+| Services, NetworkPolicies | `create`, `delete` | a mesh's headless Service and the policy that admits its members |
+
+`pods/exec` needs both verbs. The driver opens each exec over a WebSocket
+and falls back to the older SPDY upgrade when that is refused; the API
+server authorizes the WebSocket's `GET` as `get`, and from Kubernetes 1.35
+as `create` as well, and the SPDY `POST` as `create`. A Role with `create`
+alone still runs commands on a cluster before 1.35, one refused round trip
+later each time.
+
+The driver proves each access at start with a `SelfSubjectAccessReview`,
+so a rule you narrow by hand is named in the start-up log, and by
+`cellad check`, rather than found at the first create. It grants no
+`watch` (the driver lists and gets) and nothing cluster-wide.
 
 The Deployment reads `CELLA_K8S_NAMESPACE` from the downward API, so
 sandbox Pods and claims land in the namespace the overlay set and the Role

@@ -9,7 +9,7 @@ depends_on:
 affects: [.github/workflows/release.yml, .github/workflows/verify.yml, Dockerfile.ci, deploy/, tools/release/, docs/install.md, docs/upgrades/, cmd/cellad/]
 effort: medium
 created: 2026-09-12
-updated: 2026-09-20
+updated: 2026-09-23
 author: changkun
 ---
 
@@ -89,8 +89,11 @@ test.
 `deploy/base` pins no namespace, so an overlay sets it: a Deployment, a
 Service, a ServiceAccount with a Role and a RoleBinding limited to the
 driver's own verb table, which is `get`, `list`, `create`, `delete` and
-`patch` on Pods and PVCs, `create` on `pods/exec` and `get` on
-`pods/log`, in the namespace the overlay set and the Deployment reads
+`patch` on Pods and PVCs, `create` and `get` on `pods/exec` (the exec's
+WebSocket is a `GET`, its SPDY fallback a `POST`, [[063-k8s-attach]]),
+`get` on `pods/log`, `create`, `get`, `update` and `delete` on Secrets,
+and `create` and `delete` on Services and NetworkPolicies, in the
+namespace the overlay set and the Deployment reads
 from the downward API, a NetworkPolicy for `cellad` itself, and a
 PodDisruptionBudget of `maxUnavailable: 1`, since `minAvailable: 1` over
 one replica refuses every node drain. The Deployment runs one replica; a durable store
