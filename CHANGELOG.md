@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.3.0 - 2026-09-23
+
 - On Kubernetes, `cellad` now asks the API server at up to 50 requests a
   second with bursts of 100, instead of the client library's default of 5
   and 10. Under load the old default queued every sandbox read behind the
