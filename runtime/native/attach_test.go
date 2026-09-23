@@ -230,3 +230,16 @@ func TestExecStdinEndsWithTheReader(t *testing.T) {
 		t.Fatalf("Wait: %d %v", code, err)
 	}
 }
+
+// TestAResizeAfterTheSessionEndedIsNotRunning: a window that arrives once the
+// session has closed its terminal answers ErrNotRunning, which is what the
+// session is, and never reaches a descriptor the close has taken away.
+func TestAResizeAfterTheSessionEndedIsNotRunning(t *testing.T) {
+	_, s := attached(t, driver.AttachRequest{Cols: 80, Rows: 24})
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Resize(100, 30); !errors.Is(err, driver.ErrNotRunning) {
+		t.Fatalf("a resize after the session ended answered %v, want ErrNotRunning", err)
+	}
+}

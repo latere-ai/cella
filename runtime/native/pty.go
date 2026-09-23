@@ -7,10 +7,13 @@ package native
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"syscall"
 	"unsafe"
+
+	driver "latere.ai/x/cella/runtime"
 )
 
 // ptySupported says whether this build can open a pseudo-terminal, which is
@@ -35,12 +38,28 @@ func ioctl(fd, request, arg uintptr) error {
 
 // setWinsize sets the window on the controlling end of a pair. The process
 // inside reads the new size and receives SIGWINCH.
+//
+// The descriptor is held for the ioctl through the file's raw connection
+// rather than read with Fd: a session that ends closes the file while a
+// resize may still be on its way, and Fd reads the descriptor with nothing
+// ordering it against that close. A window for a terminal that has ended is
+// ErrNotRunning, which is what the session is.
 func setWinsize(f *os.File, cols, rows int) error {
 	if cols <= 0 || rows <= 0 || cols > 0xffff || rows > 0xffff {
 		return errInvalidWindow
 	}
 	ws := winsize{rows: uint16(rows), cols: uint16(cols)}
-	return ioctl(f.Fd(), syscall.TIOCSWINSZ, uintptr(unsafe.Pointer(&ws)))
+	conn, err := f.SyscallConn()
+	if err != nil {
+		return fmt.Errorf("%w: the terminal has ended: %v", driver.ErrNotRunning, err)
+	}
+	var set error
+	if err := conn.Control(func(fd uintptr) {
+		set = ioctl(fd, syscall.TIOCSWINSZ, uintptr(unsafe.Pointer(&ws)))
+	}); err != nil {
+		return fmt.Errorf("%w: the terminal has ended: %v", driver.ErrNotRunning, err)
+	}
+	return set
 }
 
 // ptyReader is the controlling end of a pair read as a stream. Linux reports a
