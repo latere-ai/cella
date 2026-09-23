@@ -51,13 +51,13 @@ func setWinsize(f *os.File, cols, rows int) error {
 	ws := winsize{rows: uint16(rows), cols: uint16(cols)}
 	conn, err := f.SyscallConn()
 	if err != nil {
-		return fmt.Errorf("%w: the terminal has ended: %v", driver.ErrNotRunning, err)
+		return fmt.Errorf("%w: the terminal has ended: %w", driver.ErrNotRunning, err)
 	}
 	var set error
 	if err := conn.Control(func(fd uintptr) {
 		set = ioctl(fd, syscall.TIOCSWINSZ, uintptr(unsafe.Pointer(&ws)))
 	}); err != nil {
-		return fmt.Errorf("%w: the terminal has ended: %v", driver.ErrNotRunning, err)
+		return fmt.Errorf("%w: the terminal has ended: %w", driver.ErrNotRunning, err)
 	}
 	return set
 }
