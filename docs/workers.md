@@ -375,7 +375,28 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: cellad-worker
+---
+# The worker's driver uses the accesses the control plane's does, and
+# checks each one when it starts: apply the Role of deploy/base/rbac.yaml
+# in the namespace CELLA_K8S_NAMESPACE names, and bind it here. Without it
+# the worker stops at start with the missing rule named.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cellad-worker
+  namespace: cella-sandboxes
+subjects:
+  - kind: ServiceAccount
+    name: cellad-worker
+    namespace: default
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cellad
 ```
+
+The binding names the namespace the worker's Deployment runs in,
+`default` above; change it with the Deployment's.
 
 ## Running a gateway beside it
 
