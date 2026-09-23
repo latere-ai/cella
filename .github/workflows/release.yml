@@ -376,8 +376,10 @@ jobs:
           docker buildx imagetools create -t "${REGISTRY}/${OWNER}/${IMAGE}:${GITHUB_REF_NAME}" \
             "${REGISTRY}/${OWNER}/${IMAGE}@${{ needs.build.outputs.digest }}"
       # The release is a draft until it holds every file, and it is held to
-      # that count before it is published: a create that attached nothing
-      # once exited zero and left a public release with no assets.
+      # that count before it is published. The count is read from the
+      # release's own assets endpoint: the release object's embedded list,
+      # which gh release view and gh release download read, has come back
+      # empty for a release whose every file was attached and served.
       - name: Create the release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -385,8 +387,9 @@ jobs:
           gh release create "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --verify-tag --draft \
             --title "${GITHUB_REF_NAME}" --notes-file out/notes.md
           gh release upload "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --clobber release/*
+          id=$(gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --json databaseId --jq .databaseId)
           want=$(find release -maxdepth 1 -type f | wc -l)
-          held=$(gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --json assets --jq '.assets | length')
+          held=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases/${id}/assets" --jq '.[].name' | wc -l)
           if [ "${held}" -ne "${want}" ]; then
             echo "the draft holds ${held} of ${want} assets; it stays a draft" >&2
             exit 1
@@ -425,10 +428,17 @@ jobs:
       - name: The published artifacts, and nothing from the checkout
         run: |
           mkdir -p work && cd work
-          gh release download "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" \
-            -p "deploy-${GITHUB_REF_NAME}.tar.gz" \
-            -p "cellad_${GITHUB_REF_NAME}_linux_amd64.tar.gz" \
-            -p "cella_${GITHUB_REF_NAME}_linux_amd64.tar.gz"
+          # Each file by its id from the release's own assets endpoint,
+          # which lists what is attached even when the release object's
+          # embedded list does not.
+          release=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}" --jq .id)
+          for name in "deploy-${GITHUB_REF_NAME}.tar.gz" "cellad_${GITHUB_REF_NAME}_linux_amd64.tar.gz" \
+            "cella_${GITHUB_REF_NAME}_linux_amd64.tar.gz"; do
+            asset=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases/${release}/assets" \
+              --jq ".[] | select(.name == \"${name}\") | .id")
+            test -n "${asset}" || { echo "the release lacks ${name}" >&2; exit 1; }
+            gh api -H 'Accept: application/octet-stream' "repos/${GITHUB_REPOSITORY}/releases/assets/${asset}" > "${name}"
+          done
           tar -xzf "deploy-${GITHUB_REF_NAME}.tar.gz"
           tar -xzf "cellad_${GITHUB_REF_NAME}_linux_amd64.tar.gz"
           tar -xzf "cella_${GITHUB_REF_NAME}_linux_amd64.tar.gz"
@@ -522,7 +532,13 @@ jobs:
       - name: Download every asset in one call
         run: |
           mkdir assets && cd assets
-          gh release download "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}"
+          # Every file the release's own assets endpoint lists, by id; the
+          # embedded list gh release download reads can come back empty.
+          release=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}" --jq .id)
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/releases/${release}/assets" --jq '.[] | "\(.id) \(.name)"' |
+            while read -r asset name; do
+              gh api -H 'Accept: application/octet-stream' "repos/${GITHUB_REPOSITORY}/releases/assets/${asset}" > "${name}"
+            done
           ls -l
           for binary in cellad cella; do
             for os in linux darwin; do
