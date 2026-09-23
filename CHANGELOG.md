@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.3.1 - 2026-09-23
+
 - The binaries, the deploy archive, the checksums and their signature are
   attached to this release. The `v0.3.0` release page was published
   without them, although its image `cellad:v0.3.0` is
