@@ -51,6 +51,7 @@ cella files get work:/workspace/out.txt   # to standard output
 cella files ls work:/workspace
 cella cp ./project work:/workspace        # a whole tree, either direction
 cella logs work --tail 50
+cella port-forward work 8080:3000         # port 3000 inside, at 127.0.0.1:8080
 cella stop work; cella start work
 cella delete sandbox work
 ```
