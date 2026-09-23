@@ -239,7 +239,9 @@ func attach(ctx context.Context, d runtime.Driver, req Request, sink Sink) (Resp
 				resizes = nil
 				continue
 			}
-			if resizeErr := session.Resize(window[0], window[1]); resizeErr != nil {
+			// A window that arrives as the session ends is moot: the
+			// session's own end reports how it went, not the resize.
+			if resizeErr := session.Resize(window[0], window[1]); resizeErr != nil && !errors.Is(resizeErr, runtime.ErrNotRunning) {
 				return Response{}, resizeErr
 			}
 		case <-input:
