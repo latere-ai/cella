@@ -119,11 +119,13 @@ answer before it upgrades a socket or starts a response.
 `GET /v1/sandboxes/{id}/dial/{port}`, subprotocol `cella.dial.v1`:
 
 1. read and authorize `sandbox.exec`; 404 and 403 as every route;
-2. the `Dial` gate on the sandbox's own environment, then the driver's
-   `Dialer`; either missing is 422 `capability_unsupported`;
+2. the `Dial` gate on the sandbox's own environment, else 422
+   `capability_unsupported`;
 3. the port, 1 to 65535, else 400 `invalid_field`;
 4. the stored phase, `Running`, else 409 `phase_conflict`;
-5. upgrade, then `Dial` with a 10 second bound.
+5. the driver's `Dialer`, else 422 `capability_unsupported` naming the
+   driver whose declaration and methods disagree;
+6. upgrade, then `Dial` with a 10 second bound.
 
 A dial that fails after the upgrade closes the socket with 1011 and the
 error's code as the reason: the upgrade has already answered 101, and

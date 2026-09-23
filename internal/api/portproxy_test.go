@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -87,9 +88,7 @@ func (f *fixture) proxied(method, path, token string, body io.Reader, header htt
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	for k, v := range header {
-		req.Header[k] = v
-	}
+	maps.Copy(req.Header, header)
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}

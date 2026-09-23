@@ -137,16 +137,8 @@ func upstreamError(err error) error {
 // closing the socket, or a frame it stops reading, closes the connection
 // inside, which the deferred close in dial does.
 func (h *handler) relay(r *http.Request, conn *websocket.Conn, w *frameWriter, inside net.Conn, obj v1.Sandbox) {
-	started := time.Now()
 	var in, out atomic.Int64
-	defer func() {
-		// The record is written on a context detached from the request's,
-		// because the usual way a session ends is the caller going away,
-		// which cancels it.
-		h.emit(r.WithContext(context.WithoutCancel(r.Context())), obj, events.TypeDial, events.Dial{
-			DurationMS: time.Since(started).Milliseconds(), BytesIn: in.Load(), BytesOut: out.Load(),
-		})
-	}()
+	defer h.emitDial(r, obj, time.Now(), &in, &out)
 	conn.SetReadLimit(sessionFrameBytes)
 	_ = conn.SetReadDeadline(time.Now().Add(idleTimeout))
 	conn.SetPongHandler(func(string) error { return conn.SetReadDeadline(time.Now().Add(idleTimeout)) })
@@ -215,4 +207,14 @@ func (h *handler) relay(r *http.Request, conn *websocket.Conn, w *frameWriter, i
 			}
 		}
 	}
+}
+
+// emitDial writes the session's record: how long it ran and how many bytes
+// moved each way, read when the session ends. The record is written on a
+// context detached from the request's, because the usual way a session ends
+// is the caller going away, which cancels it.
+func (h *handler) emitDial(r *http.Request, obj v1.Sandbox, started time.Time, in, out *atomic.Int64) {
+	h.emit(r.WithContext(context.WithoutCancel(r.Context())), obj, events.TypeDial, events.Dial{
+		DurationMS: time.Since(started).Milliseconds(), BytesIn: in.Load(), BytesOut: out.Load(),
+	})
 }
