@@ -644,14 +644,14 @@ jobs:
           # the extracted section opens blank, and the reader that wrote
           # the body trims it. Trimming one side alone reads that blank
           # line as a difference.
-          normalise() {
+          normalize() {
             tr -d '\r' | sed -e '/./,$!d' | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}'
           }
           gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --json body --jq .body > body.md
           gh api "repos/${GITHUB_REPOSITORY}/contents/CHANGELOG.md?ref=${GITHUB_REF_NAME}" \
             -H 'Accept: application/vnd.github.raw+json' > CHANGELOG.md
-          awk -v tag="${GITHUB_REF_NAME}" '/^## /{p = ($2 == tag)} p' CHANGELOG.md | tail -n +2 | normalise > section.md
+          awk -v tag="${GITHUB_REF_NAME}" '/^## /{p = ($2 == tag)} p' CHANGELOG.md | tail -n +2 | normalize > section.md
           test -s section.md
-          if ! diff <(normalise < body.md) section.md; then
+          if ! diff <(normalize < body.md) section.md; then
             echo "the release body differs from the CHANGELOG section" >&2; exit 1
           fi
