@@ -4,6 +4,7 @@
 package conformance
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 func eventCases() []Case {
 	return []Case{
 		{"events", "case009ObjectFeed", case009ObjectFeed},
+		{"events", "case009FollowFeed", case009FollowFeed},
 		{"events", "case009DeliveredInOrder", case009DeliveredInOrder},
 		{"events", "case018CanarySecret", case018CanarySecret},
 	}
@@ -87,6 +89,90 @@ func case009ObjectFeed(ctx context.Context, e *Env) error {
 		}
 	}
 	return nil
+}
+
+// case009FollowFeed: follow=1 on an object answers newline-delimited JSON,
+// replays the records after the cursor oldest first, and then carries the
+// record of an exec committed after the feed opened, while it is still open.
+// The cursor is the newest seq the caller holds, so a cursor one below the
+// newest replays the newest.
+func case009FollowFeed(ctx context.Context, e *Env) error {
+	obj, err := e.sandbox(ctx, e.caller)
+	if err != nil {
+		return err
+	}
+	x, err := e.caller.get(ctx, "/v1/events?object="+obj.Status.ID+"&limit=1")
+	if err != nil {
+		return err
+	}
+	if err := x.status(http.StatusOK); err != nil {
+		return err
+	}
+	var page struct {
+		Items []record `json:"items"`
+	}
+	if err := json.Unmarshal(x.Body, &page); err != nil || len(page.Items) == 0 {
+		return x.disagree("a page holding the newest record of a created sandbox", string(x.Body))
+	}
+	newest := page.Items[0].Seq
+	follow, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	path := fmt.Sprintf("/v1/events?follow=1&object=%s&cursor=%d", obj.Status.ID, newest-1)
+	resp, err := e.caller.open(follow, http.MethodGet, path, request{})
+	if err != nil {
+		return fmt.Errorf("following the feed: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("GET %s answered %d, want 200", path, resp.StatusCode)
+	}
+	if got := resp.Header.Get("Content-Type"); !strings.HasPrefix(got, "application/x-ndjson") {
+		return fmt.Errorf("GET %s answered Content-Type %q, want application/x-ndjson", path, got)
+	}
+	lines := bufio.NewReader(resp.Body)
+	next := func() (record, error) {
+		for {
+			line, err := lines.ReadString('\n')
+			if err != nil {
+				return record{}, fmt.Errorf("the followed feed ended before a record: %w", err)
+			}
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
+			var r record
+			if err := json.Unmarshal([]byte(line), &r); err != nil || r.ID == "" {
+				return record{}, fmt.Errorf("the followed feed wrote %q where a record was due", line)
+			}
+			if r.Object.ID != obj.Status.ID {
+				return record{}, fmt.Errorf("the feed of %s carries a record of %s", obj.Status.ID, r.Object.ID)
+			}
+			return r, nil
+		}
+	}
+	first, err := next()
+	if err != nil {
+		return err
+	}
+	if first.Seq != newest {
+		return fmt.Errorf("a feed from cursor %d opened with seq %d, want the newest, %d", newest-1, first.Seq, newest)
+	}
+	if _, _, err := e.exec(ctx, e.caller, obj.Status.ID, "/bin/sh", "-c", "true"); err != nil {
+		return err
+	}
+	last := first.Seq
+	for {
+		r, err := next()
+		if err != nil {
+			return err
+		}
+		if r.Seq <= last {
+			return fmt.Errorf("the followed feed sent seq %d after %d", r.Seq, last)
+		}
+		last = r.Seq
+		if r.Type == "sandbox.exec" {
+			return nil
+		}
+	}
 }
 
 // case009DeliveredInOrder: the operator's sink receives the records of one
