@@ -261,3 +261,38 @@ func TestResourceNaming(t *testing.T) {
 		t.Fatalf("resourceName = %q", got)
 	}
 }
+
+// TestTheClientAsksAtAControlPlanesRate: a kubeconfig carries no rate, and
+// the library's default of five a second queues a control plane behind its own
+// limiter, so the configuration the driver builds names the driver's rate; a
+// configuration that names one keeps it.
+func TestTheClientAsksAtAControlPlanesRate(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "kubeconfig")
+	body := `apiVersion: v1
+kind: Config
+clusters:
+- cluster: {server: https://127.0.0.1:6443}
+  name: c
+contexts:
+- context: {cluster: c, user: u}
+  name: x
+current-context: x
+users:
+- name: u
+  user: {token: t}
+`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := restConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.QPS != ClientQPS || cfg.Burst != ClientBurst {
+		t.Fatalf("the client asks at %v a second with a burst of %d", cfg.QPS, cfg.Burst)
+	}
+	named := withRate(&rest.Config{QPS: 7, Burst: 9})
+	if named.QPS != 7 || named.Burst != 9 {
+		t.Fatalf("an operator's rate became %v and %d", named.QPS, named.Burst)
+	}
+}

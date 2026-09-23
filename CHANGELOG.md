@@ -6,6 +6,12 @@ refused before it is pushed.
 
 ## Unreleased
 
+- On Kubernetes, `cellad` now asks the API server at up to 50 requests a
+  second with bursts of 100, instead of the client library's default of 5
+  and 10. Under load the old default queued every sandbox read behind the
+  control plane's own limiter, and a short exec timeout could fail with
+  `driver_unavailable` before the command ran. A kubeconfig that sets its
+  own rate keeps it.
 - A sandbox that sets `scheduling.preemptible: true` on a queued
   environment can now be stopped to make room for one of higher priority.
   When the front of a queue does not fit, the lowest priority preemptible

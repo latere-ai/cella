@@ -214,13 +214,36 @@ func restConfig(path string) (*rest.Config, error) {
 		if err != nil {
 			return nil, fmt.Errorf("no kubeconfig configured and not running in a cluster: %w", err)
 		}
-		return cfg, nil
+		return withRate(cfg), nil
 	}
 	cfg, err := clientcmd.BuildConfigFromFlags("", path)
 	if err != nil {
 		return nil, fmt.Errorf("kubeconfig %s: %w", path, err)
 	}
-	return cfg, nil
+	return withRate(cfg), nil
+}
+
+// ClientQPS and ClientBurst are the rate the driver's client asks the API
+// server at. The library's own default, five a second with a burst of ten, is
+// a command-line tool's: every read of a sandbox is a pod get, so a control
+// plane serving a few dozen callers queues behind its own limiter, and a call
+// that carries a short deadline, an exec's timeout among them, fails waiting
+// for a token rather than for the cluster.
+const (
+	ClientQPS   = 50
+	ClientBurst = 100
+)
+
+// withRate gives a configuration that names no rate the driver's own. One
+// that names a rate is the operator's and is kept.
+func withRate(cfg *rest.Config) *rest.Config {
+	if cfg.QPS == 0 {
+		cfg.QPS = ClientQPS
+	}
+	if cfg.Burst == 0 {
+		cfg.Burst = ClientBurst
+	}
+	return cfg
 }
 
 func (d *Driver) Name() string      { return "k8s" }
