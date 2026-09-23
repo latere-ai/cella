@@ -6,6 +6,19 @@ refused before it is pushed.
 
 ## Unreleased
 
+- On Kubernetes, a sandbox's declared ports are now reachable: the port
+  listing, the HTTP proxy at `/v1/sandboxes/{id}/ports/{name}/`, the dial
+  socket and `cella port-forward` work there as they do on the native and
+  podman runtimes, where before each answered `capability_unsupported`.
+  The connection goes through the API server's port forwarding, so no
+  NetworkPolicy has to admit the control plane, a server that listens only
+  on loopback inside the sandbox is reached too, and a port the manifest
+  does not declare stays unreachable.
+- Upgrading on Kubernetes: the control plane's Role needs `get` and
+  `create` on `pods/portforward`. `cellad serve`, `cellad worker` on the
+  Kubernetes runtime, and `cellad check` name the rule when it is missing,
+  and `cellad serve` does not start without it, so add it before moving to
+  this release. The Role in `deploy/base` carries it.
 - The release pipeline reads a release's files from the release's assets
   endpoint, by id, rather than from the list the release object carries,
   which GitHub has answered empty for a release whose every file was

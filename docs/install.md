@@ -218,6 +218,8 @@ Each line is a requirement:
 - [deploy/README.md](../deploy/README.md) is the reference for the
   manifests: what each Secret turns on, why the Role grants what it does,
   and how to run the egress gateway beside the control plane.
+- [Sandboxes on Kubernetes](kubernetes.md) is what a sandbox on this
+  installation can do, and how to reach a server running inside one.
 - `deploy/examples/generic` is the same installation with desired state in
   Postgres, an authorization endpoint, an event sink and a gateway. Every
   one is a Secret you apply and nothing else.
