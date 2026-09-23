@@ -195,9 +195,10 @@ and 5 skipped in fifteen seconds; with the spawn budget drifted it reports 45
 passed and exactly `case003DefaultsAreReturned` failed, with the disagreement
 `want: spec.mesh.spawn.budget 0 or absent`, `got: spec.mesh.spawn.budget 1`.
 Against the development stack, run locally, the spawn case passes beside the
-rest. Coverage: `internal/config` 91.6%, `cmd/cellad` 90.7%,
-`test/conformance` 90.6% counting the run against the node (88.2% from its
-own tests). `go test -race` is green on every package touched.
+rest. Coverage as the bar collects it: `internal/config` 96.2% (91.6% from
+its own tests), `cmd/cellad` 90.7%, `test/conformance` 90.6% (88.2% from its
+own tests, the rest from the run against the node). `go test -race` is green
+on every package touched, and the whole bar passes, 16 gates.
 
 ### Divergences
 
