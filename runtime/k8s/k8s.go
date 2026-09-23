@@ -234,8 +234,10 @@ const (
 	ClientBurst = 100
 )
 
-// withRate gives a configuration that names no rate the driver's own. One
-// that names a rate is the operator's and is kept.
+// withRate gives a configuration that names no rate the driver's own. A
+// kubeconfig carries no rate, so this is every configuration the driver
+// builds; one handed in through Options.REST is the caller's and is not
+// passed through here.
 func withRate(cfg *rest.Config) *rest.Config {
 	if cfg.QPS == 0 {
 		cfg.QPS = ClientQPS
