@@ -86,7 +86,9 @@ schema does not have is a refusal and not a surprise three steps later.
 mutation and per operation, ordered per object. That is your audit log and
 your usage meter. Verify the signature with the secret you configured, and
 answer 2xx once you have the record; the control plane retries what you did
-not acknowledge.
+not acknowledge. A console that shows sandboxes changing as they change
+follows the same records over the API instead of polling
+([Following events](events.md)).
 
 ## Door two: import the packages
 

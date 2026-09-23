@@ -31,6 +31,7 @@ the stub issuer that makes `make run` self-contained is the
 | Manifest reference | the schema in the [manifest contract spec](../specs/003-manifest-contract.md) |
 | API | the endpoints and error codes in the [API spec](../specs/008-api.md), and the webhooks an operator writes in the [identity](../specs/006-identity.md) and [admission](../specs/007-admission.md) specs |
 | The packages | the [architecture spec](../specs/001-architecture.md) names the exported packages and what each promises |
+| [Following events](events.md) | An object's history, following it live from where you left off, following everything you can see, and what a proxy in front of the server must do |
 | [Building a plane](plane.md) | Selling sandboxes on top of Cella: the two doors, the three endpoints you write, the packages in your own binary, and a running example |
 | [Conformance](conformance.md) | The suite that checks a server against the API: what to give it, what the report says, and how to declare what you do not serve yet |
 
