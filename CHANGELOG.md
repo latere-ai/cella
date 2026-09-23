@@ -6,14 +6,19 @@ refused before it is pushed.
 
 ## Unreleased
 
+- The release pipeline reads a release's files from the release's assets
+  endpoint, by id, rather than from the list the release object carries,
+  which GitHub has answered empty for a release whose every file was
+  attached and served.
+
 ## v0.3.1 - 2026-09-23
 
-- The binaries, the deploy archive, the checksums and their signature are
-  attached to this release. The `v0.3.0` release page was published
-  without them, although its image `cellad:v0.3.0` is
-  complete; this release carries the same code as `v0.3.0` with every file.
-  A release is now published only once it holds every file it was built
-  with.
+- `v0.3.1` carries the same code as `v0.3.0`. Both releases hold every
+  file: the binaries, the deploy archive, the checksums and their
+  signature. When they were published, GitHub's API answered each release
+  with an empty list of files, which is what `gh release download` reads,
+  so the pipeline's last check could not find them. A release now stays a
+  draft until it holds every file it was built with.
 
 ## v0.3.0 - 2026-09-23
 
