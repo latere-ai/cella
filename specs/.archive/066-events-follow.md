@@ -1,6 +1,6 @@
 ---
 title: "Following the events feed: one object's records from a cursor and then live, and every readable record from now, as newline-delimited JSON"
-status: in-progress
+status: complete
 track: core
 depends_on:
   - specs/008-api.md
@@ -223,18 +223,64 @@ the cap, the heartbeat or the read interval. A follow flag on the
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| Both adapters publish the rows a transaction appended once it commits, with the sequence each took, nothing from a transaction that failed, only an object's rows to that object's subscription, and end every subscription at close; a read after a sequence is ascending and bounded | the `Follow` case of `TestSuiteHoldsTheMemoryAdapter` and `TestPostgresStore` | not built |
-| A subscription whose buffer is full is closed as behind and never blocks the publisher | `TestBroadcastDropsASlowSubscriber` | not built |
-| The retention keeps each object's newest record, and the next append continues the sequence | the `Sequence` case of `TestSuiteHoldsTheMemoryAdapter` and `TestPostgresStore`, `TestRetentionPrunesWhatIsDone` | not built |
-| A follower replays the records after its cursor and then the live ones, loses none appended during the replay, sends none twice, and starts from now without a cursor | `TestFollowReplaysThenStaysLive`, `TestFollowFromNow` | not built |
-| A follower sends records in sequence when they arrive out of order, and reads the store again after its subscription fell behind | `TestFollowRestoresTheSequence`, `TestFollowResubscribesWhenBehind` | not built |
-| A cursor whose next record was pruned is refused as expired, a cursor above the newest is refused as ahead, and a follower that falls behind the ring mid-stream ends as expired | `TestFollowRefusesAPositionItCannotServe` | not built |
-| The every-object follower sends each object's records from now and ends when it falls behind | `TestFollowAllFromNow` | not built |
-| A follower on a Postgres store reads a record another replica appended | `TestAFollowerReadsAnotherReplicasAppend` | not built |
-| `follow=1&object=` answers newline-delimited JSON with the headers above, flushed, replays from the cursor, and carries a live record before the stream ends | `TestFollowedFeed` | not built |
-| The refusals: a bad `follow`, a malformed cursor, a cursor above the newest, an expired cursor with 410 `cursor_expired`, a cursor without an object, no emitter, and the cap with 429 `rate_limited` | `TestFollowedFeedRefusals` | not built |
-| An idle stream carries a heartbeat line | `TestFollowedFeedHeartbeat` | not built |
-| The stream ends on the drain, on the caller's disconnect, at the bearer's expiry with an `unauthenticated` line, and after the object's deleted record | `TestFollowedFeedEnds` | not built |
-| The every-object stream carries the caller's records and not another owner's, and is refused without `sandbox.list` | `TestFollowedFeedOfEveryObject` | not built |
-| On a running node, a followed feed carries an exec's record, and a stop ends the stream and the node before the grace period | `TestFollowedFeedEndToEnd` | not built |
-| The contract holds over HTTP against this server | conformance case `case009FollowFeed`, run by `TestTheConformanceSuiteHoldsAgainstThisServer` | not built |
+| Both adapters publish the rows a transaction appended once it commits, with the sequence each took, nothing from a transaction that failed, only an object's rows to that object's subscription, and end every subscription at close; a read after a sequence is ascending and bounded | the `Follow` case of `TestSuiteHoldsTheMemoryAdapter` and `TestPostgresStore`, `TestTheJournalFollowsWhatCommits` | built |
+| A subscription whose buffer is full is closed as behind and never blocks the publisher | `TestBroadcastDropsASlowSubscriber` | built |
+| The retention keeps each object's newest record, and the next append continues the sequence | the `Sequence` case of `TestSuiteHoldsTheMemoryAdapter` and `TestPostgresStore`, `TestRetentionPrunesWhatIsDone` | built |
+| A follower replays the records after its cursor and then the live ones, loses none appended during the replay, sends none twice, and starts from now without a cursor | `TestFollowReplaysThenStaysLive`, `TestFollowFromNow` | built |
+| A follower sends records in sequence when they arrive out of order, and reads the store again after its subscription fell behind | `TestFollowRestoresTheSequence`, `TestFollowResubscribesWhenBehind` | built |
+| A cursor whose next record was pruned is refused as expired, a cursor above the newest is refused as ahead, and a follower that falls behind the ring mid-stream ends as expired | `TestFollowRefusesAPositionItCannotServe` | built |
+| The every-object follower sends each object's records from now and ends when it falls behind | `TestFollowAllFromNow` | built |
+| A follower on a store another replica shares reads a record that replica appended | `TestAFollowerReadsAnotherReplicasAppend`, `TestFollowReadsASharedJournal` | built |
+| `follow=1&object=` answers newline-delimited JSON with the headers above, flushed, replays from the cursor, and carries a live record before the stream ends | `TestFollowedFeed` | built |
+| The refusals: a bad `follow`, a malformed cursor, a cursor above the newest, an expired cursor with 410 `cursor_expired`, a cursor without an object, no emitter, and the cap with 429 `rate_limited` | `TestFollowedFeedRefusals` | built |
+| An idle stream carries a heartbeat line | `TestFollowedFeedHeartbeat` | built |
+| The stream ends on the drain, on the caller's disconnect, at the bearer's expiry with an `unauthenticated` line, and after the object's deleted record | `TestFollowedFeedEnds`, `TestExpiryReadsEveryNumberForm` | built |
+| The every-object stream carries the caller's records and not another owner's, and is refused without `sandbox.list`; each record passes the kind's list filter and the read on its own object, asked once per object, and an authorizer that fails ends the stream | `TestFollowedFeedOfEveryObject`, `TestRecordGateDecidesEachRecord` | built |
+| On a running node, a followed feed carries an exec's record, and a stop ends the stream and the node before the grace period | `TestFollowedFeedEndToEnd` | built |
+| The contract holds over HTTP against this server | conformance case `case009FollowFeed`, run by `TestTheConformanceSuiteHoldsAgainstThisServer` | built |
+
+## Outcome
+
+Both forms of the following feed are served, and the retention no longer
+lets a Postgres object's sequence start over.
+
+| Piece | Where |
+|---|---|
+| `Broadcast` and `Subscription`, published at commit | `internal/store/broadcast.go`; `memory.Store.Tx` under its lock, `postgres.Store.Tx` after `Commit` |
+| `Store.Watch`, `Journal.After`, and `Prune` keeping each object's newest row | `internal/store/store.go`, both adapters |
+| The journal's follow half: `After`, `Watch`, `Shared` | `internal/store/events.go`, declared on `events.Journal` |
+| `Follower`, `Emitter.Follow`, `Emitter.FollowAll`, `Ends` | `internal/events/follow.go` |
+| The route, the stream, the gate of every object's feed, `cursor_expired` and `rate_limited` in the error table | `internal/api/follow.go`, `internal/api/events.go`, `internal/api/api.go` |
+| The public server's shutdown ending every feed | `cmd/cellad/main.go` (`Options.Draining`, `RegisterOnShutdown`) |
+| `case009FollowFeed`, and `cursor_expired` in the suite's table | `test/conformance/` |
+| The route's parameters and its two answers | `api/openapi.yaml` |
+| The page for a caller | `docs/events.md` |
+
+Coverage on `go test -cover`: `internal/store` 91.1%, memory 93.3%,
+postgres 91.6%, `internal/events` 96.4%, `internal/api` 92.1%,
+`cmd/cellad` 90.7%. The end-to-end that ran is
+`TestFollowedFeedEndToEnd`: a node, a feed on a sandbox, an exec whose
+record arrives on the open feed, and a stop that ends the feed and the
+node in the drain delay rather than the 60 second grace period, which
+the same test measured at 63 seconds without the shutdown hook. The
+sequence case fails on Postgres without the retention change: the
+append after a prune took the sequence 1.
+
+### What diverges from the specs above
+
+| Spec | What it said | What was built | Why |
+|---|---|---|---|
+| [[009-events]] | the API serves any object's events, or follows with `follow=1` | `follow=1` without `object` also follows every record the caller may read, from now | a console that keeps a live list follows one feed rather than one per object; it has no cursor because the journal orders nothing across objects |
+| [[010-state]], [[062-journal-retention]] | the retention prunes finished records older than the window | it keeps each object's newest record whatever its age | Postgres takes an object's next `seq` from the rows it holds, so pruning every row restarted the object at 1 and reused numbers a reader held |
+| [[008-api]] | the error table | `cursor_expired` (410) joins it | a position whose records are gone is neither the caller's malformed field nor a missing object, and the caller acts on it differently: it reads a page again and accepts the gap |
+
+### What this leaves open
+
+| Open | Why |
+|---|---|
+| The every-object feed across replicas | the journal has no position ordered across processes; Postgres `LISTEN`/`NOTIFY` on a session connection, with a reconnect that ends what it could not keep whole, would carry it. `deploy/` ships one replica, where it is complete |
+| The history of the every-object feed | the same missing position |
+| The memory journal after a restart | it starts every object's `seq` again at 1, as it loses every record; a cursor above the new newest is refused, and one below it is not told apart from a record of the same number |
+| `GET /v1/sandboxes/{id}/events` | [[008-api]] names it and no handler serves it; `GET /v1/events?object=` serves the same records |
+| A follow flag on the `cella` command | the command has no events subcommand |
+| A workload token's every-object feed carrying its children | a record carries no parent or root; a workload follows a child by `object` |

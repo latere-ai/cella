@@ -205,9 +205,14 @@ lease: `Pending` returns at most one event per object, the lowest
 unacknowledged `seq`, so a failing event holds the ones behind it for
 that object and no other; `Defer` records the backoff; `Drop` after 24
 hours of attempts. `ByObject` serves [[008-api]]'s `GET .../events`
-newest first, paged by `seq`. Postgres retention is
+newest first, paged by `seq`, and `After` the following feed's replay,
+oldest first above a `seq`. `Store.Watch` hands a subscriber the rows
+each transaction appended once it committed, in this process only.
+Postgres retention is
 `CELLA_JOURNAL_RETENTION` (default `720h`), applied by `Prune` on the
-reaper's tick to acknowledged or dropped rows; the memory store keeps
+reaper's tick to acknowledged or dropped rows, keeping each object's
+newest row so its `seq` never starts over ([[066-events-follow]]); the
+memory store keeps
 a ring of `CELLA_JOURNAL_CAP` per object and loses unacknowledged
 events at process end, which the start-up log says.
 
@@ -312,7 +317,7 @@ table ([[021-data-plane-workers]]); the `v1.Object` interface
 | `Count` excludes `Deleting` and deleted rows | the `Count` case of `TestSuiteHoldsTheMemoryAdapter` and `TestPostgresStore` | built ([[043-postgres-store]]) |
 | A plaintext value is returned by `Open` alone; its only caller in the tree is the control plane's compile path; both stores hold ciphertext; `Rewrap` under a new key leaves every ciphertext byte unchanged and `Open` still works | `TestValuesAreConfined`, `TestRewrapRotatesTheKey` | built ([[043-postgres-store]], [[046-secret-kind]]); the confinement test parses every non-test file and holds `Values.Open` and `Controlled.OpenValue` to one caller each |
 | `Debit` at one remaining unit under contention yields one success; `Credit` restores it | the `Ledger` case of `TestSuiteHoldsTheMemoryAdapter` and `TestPostgresStore` | built ([[040-mesh-and-spawn]]), with the budget carried by the debit rather than held in the row: `Debit(parentID, budget)`, `Credit`, `Used` and `Forget`, and the count under eight racing debits |
-| `Pending` returns one event per object, oldest first, and holds later events behind a deferred one; `Drop` after the retry window; `ByObject` pages newest first; `Prune` respects retention | the `Journal` case of `TestSuiteHoldsTheMemoryAdapter` and `TestPostgresStore` | `Append`, `ByObject` and `Prune` built ([[043-postgres-store]]); `Prune` runs on the reaper's tick over `CELLA_JOURNAL_RETENTION`, `TestRetentionPrunesWhatIsDone` and `TestReapPrunesTheJournal`, and the memory journal keeps a ring of `CELLA_JOURNAL_CAP` per object, `TestTheMemoryJournalKeepsARing` ([[062-journal-retention]]); delivery waits for [[009-events]] |
+| `Pending` returns one event per object, oldest first, and holds later events behind a deferred one; `Drop` after the retry window; `ByObject` pages newest first; `Prune` respects retention | the `Journal` case of `TestSuiteHoldsTheMemoryAdapter` and `TestPostgresStore` | `Append`, `ByObject` and `Prune` built ([[043-postgres-store]]); `Prune` runs on the reaper's tick over `CELLA_JOURNAL_RETENTION`, `TestRetentionPrunesWhatIsDone` and `TestReapPrunesTheJournal`, and the memory journal keeps a ring of `CELLA_JOURNAL_CAP` per object, `TestTheMemoryJournalKeepsARing` ([[062-journal-retention]]); `Prune` keeps each object's newest row so its `seq` counts on, the `Sequence` case, and `After` and `Watch` serve the following feed, the `Follow` case and `TestBroadcastDropsASlowSubscriber` ([[066-events-follow]]); delivery waits for [[009-events]] |
 | The queue orders by priority, fair share, arrival; capacity in use equals the sum over the named phases after a restart; no table holds the queue | `TestSchedulerHonorsQueueOrder`, `TestCapacitySurvivesARestart`, `TestTheQueueTableIsGone` | built ([[057-scheduling-queue]]), with the order read by the controller from the `Queued` rows rather than by a `Dequeue` over a table of its own |
 | `Claim` redelivers an operation whose claimer's heartbeat lapsed, exactly once to a live worker | `TestOperationsRedeliver` | not built |
 | A schema ahead of the binary and a dirty migration each refuse to start naming the version | `TestSchemaGuards` | built ([[043-postgres-store]]) |

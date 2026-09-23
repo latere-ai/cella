@@ -84,7 +84,7 @@ later.
 | [060](.archive/060-dial-and-port-proxy.md) | Dial and the port proxy: Dialer on native and podman, the dial socket, the port proxy, cella port-forward | medium | complete | 004, 008, 011, 013, 023, 031, 034, 041, 055 |
 | [061](.archive/061-worker-stream-credit.md) | Worker stream credit: the per sub-stream window, its negotiation in the hello, and Watch across the seam | medium | complete | 004, 021, 031, 051 |
 | [062](.archive/062-journal-retention.md) | Journal retention: the reaper prunes finished records and answered operations, and the memory journal keeps a ring per object | small | complete | 005, 009, 010, 031, 042, 043 |
-| [066](066-events-follow.md) | Following the events feed: one object's records from a cursor and then live, and every readable record from now | medium | in-progress | 008, 009, 010, 031, 055, 062 |
+| [066](.archive/066-events-follow.md) | Following the events feed: one object's records from a cursor and then live, and every readable record from now | medium | complete | 008, 009, 010, 031, 055, 062 |
 
 ## Dependency graph
 
@@ -305,4 +305,4 @@ The map, the order, and the rule for a slice are in 031.
 | [059-conformance-closure.md](.archive/059-conformance-closure.md) | complete | The drift seam `CELLA_TEST_DRIFT_DEFAULT` and the literal defaults the suite now reads, the dispatch workflow that runs the documented command against an address, and the agent and spawn cases against this server |
 | [060-dial-and-port-proxy.md](.archive/060-dial-and-port-proxy.md) | complete | `Dial` on the native and podman drivers, the byte pump behind the dial route, the port proxy confined to the sandbox's declared ports, and `cella port-forward` |
 | [061-worker-stream-credit.md](.archive/061-worker-stream-credit.md) | complete | The `credit` window per sub-stream on the worker stream, measured at the window on both sides and agreed in the hello so two releases keep working, `Watch` across the seam with the `relist` that issues a `List`, and the race that let an operation reach a released worker link |
-| [066-events-follow.md](066-events-follow.md) | in-progress | `follow=1` on `GET /v1/events`: one object's records after a cursor and then live, every record the caller may read from now, the journal's subscription and the retention that keeps each object's newest record |
+| [066-events-follow.md](.archive/066-events-follow.md) | complete | `follow=1` on `GET /v1/events`: one object's records after a cursor and then live, every record the caller may read from now, the journal's subscription and the retention that keeps each object's newest record |

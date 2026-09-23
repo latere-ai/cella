@@ -194,9 +194,12 @@ operator's choice made knowing that.
 
 `GET /v1/events?object=<id>&cursor=&limit=&follow=1` ([[008-api]])
 serves any object's events from the journal, newest first and paged by
-`seq`, or from now on as newline-delimited JSON with `follow=1`; the
-handler reads the object by id, derives its kind, and authorizes
-`<kind>.read`. `GET /v1/sandboxes/{id}/events` is the same for a
+`seq`, or with `follow=1` as newline-delimited JSON: the records after
+`cursor`, the newest `seq` the caller holds, and then each one as it
+commits, or from now without a cursor; the handler reads the object by
+id, derives its kind, and authorizes `<kind>.read`. `follow=1` without
+`object` carries every record the caller may read from now, each decided
+as the list route decides a row ([[066-events-follow]]). `GET /v1/sandboxes/{id}/events` is the same for a
 sandbox. Without a store the history is the last `CELLA_JOURNAL_CAP`
 events per object.
 
@@ -218,4 +221,4 @@ journal's columns ([[010-state]]); the routes' envelope ([[008-api]]).
 | The record commits with the mutation it explains, and one object's records keep their order under concurrent mutations | `TestRecordCommitsWithTheMutation`, `TestOrderUnderConcurrentMutations` | built ([[042-events]]) |
 | A restart with Postgres resumes delivery of an unacknowledged event; without, the ring holds the cap and unacknowledged events are gone | the `Delivery` case of `TestSuiteHoldsTheMemoryAdapter` and `TestPostgresStore`; the memory ring's cap | the Postgres row survives a restart and the delivery columns are proved over both adapters by the store suite; the memory ring's cap is not built ([[042-events]]) |
 | A URL without a secret, a secret without a URL, and a non-loopback `http://` sink are start-up failures; the escape hatch admits the stub | `TestSinkStartupRules` | built ([[042-events]]) |
-| `GET /v1/events?object=` serves each kind's events newest first, authorizes the kind's read, pages by `seq`, and follows | `TestObjectFeed`, `TestObjectFeedRefusals`, `TestObjectFeedAuthorizesTheObjectsKind`, `TestTheFeedReadsAnyEnvironment` | partial: the route serves one object's records newest first, pages by the sequence the journal assigned, and authorizes the kind the id names, `TestObjectFeed`, `TestObjectFeedRefusals` and `TestObjectFeedAuthorizesTheObjectsKind`, with every environment the control plane holds read by its name, `TestTheFeedReadsAnyEnvironment` with the read half of the journal as `TestFeedReadsOneObjectNewestFirst` and `TestByObjectRebuildsTheRecord`, and over HTTP as conformance case `case009ObjectFeed` ([[055-api-contract-gaps]]). `follow=1` is refused rather than served |
+| `GET /v1/events?object=` serves each kind's events newest first, authorizes the kind's read, pages by `seq`, and follows | `TestObjectFeed`, `TestObjectFeedRefusals`, `TestObjectFeedAuthorizesTheObjectsKind`, `TestTheFeedReadsAnyEnvironment`, `TestFollowedFeed`, `TestFollowedFeedRefusals` | built: the route serves one object's records newest first, pages by the sequence the journal assigned, and authorizes the kind the id names, `TestObjectFeed`, `TestObjectFeedRefusals` and `TestObjectFeedAuthorizesTheObjectsKind`, with every environment the control plane holds read by its name, `TestTheFeedReadsAnyEnvironment` with the read half of the journal as `TestFeedReadsOneObjectNewestFirst` and `TestByObjectRebuildsTheRecord`, and over HTTP as conformance case `case009ObjectFeed` ([[055-api-contract-gaps]]). `follow=1` replays from the cursor and stays open, `TestFollowedFeed`, `TestFollowedFeedRefusals`, `TestFollowedFeedHeartbeat`, `TestFollowedFeedEnds` and `TestFollowReplaysThenStaysLive`, follows every readable object from now, `TestFollowedFeedOfEveryObject`, ends at a stop, `TestFollowedFeedEndToEnd`, and holds over HTTP as conformance case `case009FollowFeed` ([[066-events-follow]]) |
