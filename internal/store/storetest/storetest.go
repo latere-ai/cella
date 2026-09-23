@@ -59,6 +59,7 @@ var cases = []struct {
 	{"Transactions", transactions},
 	{"Observed", observed},
 	{"Journal", journal},
+	{"Sequence", sequence},
 	{"Delivery", delivery},
 	{"Leases", leases},
 	{"Revocations", revocations},
@@ -470,13 +471,16 @@ func journal(t TB, open Opener) {
 	}
 	// Retention forgets a finished row and keeps one the sink has not taken:
 	// an event older than the window is not an event that may be lost, and
-	// design 009 decides when one is given up.
+	// design 009 decides when one is given up. sbx_old's second row is its
+	// newest, which the retention keeps whatever its age.
 	old := time.Now().UTC().Add(-48 * time.Hour)
 	with(t, s, func(tx store.Tx) error {
-		if _, err := tx.Journal().Append(ctx, store.Event{
-			ObjectID: "sbx_old", Type: "sandbox.created", At: old, AckedAt: old,
-		}); err != nil {
-			return err
+		for _, kind := range []string{"sandbox.created", "sandbox.deleted"} {
+			if _, err := tx.Journal().Append(ctx, store.Event{
+				ObjectID: "sbx_old", Type: kind, At: old, AckedAt: old,
+			}); err != nil {
+				return err
+			}
 		}
 		_, err := tx.Journal().Append(ctx, store.Event{ObjectID: "sbx_waiting", Type: "sandbox.created", At: old})
 		return err
@@ -505,6 +509,59 @@ func journal(t TB, open Opener) {
 		}
 		return nil
 	})
+}
+
+// sequence: the retention keeps each object's newest row whatever its age,
+// so the object's next append continues its sequence and a reader never sees
+// a number twice.
+func sequence(t TB, open Opener) {
+	s := opened(t, open, Key)
+	ctx := context.Background()
+	old := time.Now().UTC().Add(-48 * time.Hour)
+	with(t, s, func(tx store.Tx) error {
+		for _, kind := range []string{"sandbox.created", "sandbox.started"} {
+			if _, err := tx.Journal().Append(ctx, store.Event{ObjectID: "sbx_a", Type: kind, At: old, AckedAt: old}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	with(t, s, func(tx store.Tx) error {
+		n, err := tx.Journal().Prune(ctx, time.Now().UTC().Add(-24*time.Hour))
+		if err != nil {
+			return err
+		}
+		if n != 1 {
+			t.Errorf("pruning two finished rows of one object dropped %d, want the older one", n)
+		}
+		return nil
+	})
+	with(t, s, func(tx store.Tx) error {
+		rows, _, err := tx.Journal().ByObject(ctx, "sbx_a", store.Page{})
+		if err != nil {
+			return err
+		}
+		if got := seqs(rows); !slices.Equal(got, []int64{2}) {
+			t.Errorf("the pruned object holds %v, want its newest row, 2", got)
+		}
+		seq, err := tx.Journal().Append(ctx, store.Event{ObjectID: "sbx_a", Type: "sandbox.stopped"})
+		if err != nil {
+			return err
+		}
+		if seq != 3 {
+			t.Errorf("the append after a prune took the sequence %d, want 3", seq)
+		}
+		return nil
+	})
+}
+
+// seqs is the sequence of each row, in order.
+func seqs(rows []store.Event) []int64 {
+	out := make([]int64, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, r.Seq)
+	}
+	return out
 }
 
 // delivery: design 009's half of the journal. One event per object, the

@@ -257,7 +257,10 @@ type Journal interface {
 	Append(ctx context.Context, e Event) (int64, error)
 	// ByObject reads one object's events, newest first, one page at a time.
 	ByObject(ctx context.Context, objectID string, p Page) ([]Event, string, error)
-	// Prune drops events older than before and reports how many went.
+	// Prune drops the finished events older than before and reports how
+	// many went. It keeps each object's newest event whatever its age:
+	// the next sequence an object takes counts on from it, so a number is
+	// never handed out twice.
 	Prune(ctx context.Context, before time.Time) (int, error)
 	// Pending returns at most limit unfinished events, at most one per
 	// object: each object's lowest sequence, and only where its next attempt

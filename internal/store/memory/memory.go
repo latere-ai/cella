@@ -563,25 +563,27 @@ func (x journal) ByObject(ctx context.Context, objectID string, p store.Page) ([
 
 // Prune forgets finished rows only. An event still waiting for the sink is
 // older than the retention long before it is undeliverable, and design 009
-// decides when it is given up, not the retention.
+// decides when it is given up, not the retention. Each object's newest row
+// stays, which is the contract both adapters share: Postgres counts an
+// object's next sequence from the rows it holds.
 func (x journal) Prune(ctx context.Context, before time.Time) (int, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
 	n := 0
 	for id, events := range x.d.events {
+		newest := int64(0)
+		for _, e := range events {
+			newest = max(newest, e.Seq)
+		}
 		kept := events[:0]
 		for _, e := range events {
 			finished := !e.AckedAt.IsZero() || !e.DroppedAt.IsZero()
-			if e.At.Before(before) && finished {
+			if e.At.Before(before) && finished && e.Seq != newest {
 				n++
 				continue
 			}
 			kept = append(kept, e)
-		}
-		if len(kept) == 0 {
-			delete(x.d.events, id)
-			continue
 		}
 		x.d.events[id] = kept
 	}

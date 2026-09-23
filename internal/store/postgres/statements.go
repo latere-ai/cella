@@ -419,9 +419,15 @@ func (x journal) ByObject(ctx context.Context, objectID string, p store.Page) ([
 // Prune forgets finished rows only. An event still waiting for the sink is
 // older than the retention long before it is undeliverable, and design 009
 // decides when it is given up, not the retention.
+//
+// Each object's newest row stays whatever its age. Append takes an object's
+// next sequence from the rows this table holds, so a prune that took every
+// row of an object would start it again at one and hand a reader a number it
+// has already seen.
 func (x journal) Prune(ctx context.Context, before time.Time) (int, error) {
-	tag, err := x.q.Exec(ctx, `delete from events
-		where at < $1 and (acked_at is not null or dropped_at is not null)`, before)
+	tag, err := x.q.Exec(ctx, `delete from events e
+		where e.at < $1 and (e.acked_at is not null or e.dropped_at is not null)
+			and e.seq < (select max(m.seq) from events m where m.object_id = e.object_id)`, before)
 	if err != nil {
 		return 0, fmt.Errorf("store: pruning the journal: %w", err)
 	}
