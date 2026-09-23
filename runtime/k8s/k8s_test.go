@@ -35,12 +35,17 @@ func TestDeclarations(t *testing.T) {
 		t.Fatalf("Isolation = %q", h.Isolation())
 	}
 	got := h.Capabilities()
-	if !reflect.DeepEqual(got, driver.Capabilities{Files: true, Pool: true, Mesh: true}) {
-		t.Fatalf("Capabilities = %+v, want Files, Pool and Mesh", got)
+	if !reflect.DeepEqual(got, driver.Capabilities{Files: true, Pool: true, Mesh: true, Attach: true}) {
+		t.Fatalf("Capabilities = %+v, want Files, Pool, Mesh and Attach", got)
 	}
-	// Every capability with an optional interface behind it is undeclared,
-	// because none of them is implemented here.
-	if got.Attach || got.Dial || got.Display || got.Input || got.Volumes || got.Snapshots || got.Resize || got.Ingress || len(got.Egress) > 0 {
+	// Attach is declared and its interface implemented; every other
+	// capability with an optional interface behind it is undeclared, because
+	// none of them is implemented here.
+	var d driver.Driver = h.Driver
+	if _, ok := d.(driver.Attacher); !ok {
+		t.Fatal("the driver declares Attach and does not implement runtime.Attacher")
+	}
+	if got.Dial || got.Display || got.Input || got.Volumes || got.Snapshots || got.Resize || got.Ingress || len(got.Egress) > 0 {
 		t.Fatalf("a capability is declared without its behavior: %+v", got)
 	}
 }
@@ -150,8 +155,8 @@ func TestPreflightNamesWhatIsMissing(t *testing.T) {
 		return true, review, nil
 	})
 	err := denied.Preflight(t.Context())
-	if err == nil || !strings.Contains(err.Error(), "create pods/exec") {
-		t.Fatalf("Preflight = %v, want the missing rule named", err)
+	if err == nil || !strings.Contains(err.Error(), "create pods/exec") || !strings.Contains(err.Error(), "get pods/exec") {
+		t.Fatalf("Preflight = %v, want both missing rules named", err)
 	}
 	// A cluster that refuses the review itself is a different failure.
 	broken := newHarness(t)
