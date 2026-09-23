@@ -84,6 +84,7 @@ later.
 | [060](.archive/060-dial-and-port-proxy.md) | Dial and the port proxy: Dialer on native and podman, the dial socket, the port proxy, cella port-forward | medium | complete | 004, 008, 011, 013, 023, 031, 034, 041, 055 |
 | [061](.archive/061-worker-stream-credit.md) | Worker stream credit: the per sub-stream window, its negotiation in the hello, and Watch across the seam | medium | complete | 004, 021, 031, 051 |
 | [062](.archive/062-journal-retention.md) | Journal retention: the reaper prunes finished records and answered operations, and the memory journal keeps a ring per object | small | complete | 005, 009, 010, 031, 042, 043 |
+| [064](.archive/064-k8s-display.md) | The desktop on k8s: CELLA_K8S_DISPLAY_IMAGE, the published cella-display image, and the kind tier's computer-use run | small | complete | 004, 014, 015, 023, 031, 036, 041 |
 
 ## Dependency graph
 
@@ -304,3 +305,4 @@ The map, the order, and the rule for a slice are in 031.
 | [059-conformance-closure.md](.archive/059-conformance-closure.md) | complete | The drift seam `CELLA_TEST_DRIFT_DEFAULT` and the literal defaults the suite now reads, the dispatch workflow that runs the documented command against an address, and the agent and spawn cases against this server |
 | [060-dial-and-port-proxy.md](.archive/060-dial-and-port-proxy.md) | complete | `Dial` on the native and podman drivers, the byte pump behind the dial route, the port proxy confined to the sandbox's declared ports, and `cella port-forward` |
 | [061-worker-stream-credit.md](.archive/061-worker-stream-credit.md) | complete | The `credit` window per sub-stream on the worker stream, measured at the window on both sides and agreed in the hello so two releases keep working, `Watch` across the seam with the `relist` that issues a `List`, and the race that let an operation reach a released worker link |
+| [064-k8s-display.md](.archive/064-k8s-display.md) | complete | `CELLA_K8S_DISPLAY_IMAGE` and the desktop's limits read at start with every k8s quantity, the display image published by digest beside `cellad` and verified by tag, and the kind stack running the computer-use case |

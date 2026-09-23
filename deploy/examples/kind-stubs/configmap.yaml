@@ -1,7 +1,8 @@
 # SPDX-FileCopyrightText: 2026 Latere AI
 # SPDX-License-Identifier: Apache-2.0
 #
-# What this installation verifies against: the stub issuer inside the Pod.
+# What this installation verifies against, the stub issuer inside the Pod,
+# and the desktop image its sandboxes run.
 # The URL is loopback, which is the address the control plane dials and the
 # iss of every token the stub signs; a caller outside the cluster mints at
 # the node port of service-stubs.yaml and the token it gets carries this
@@ -13,3 +14,6 @@ metadata:
 data:
   CELLA_OIDC_ISSUERS: "http://127.0.0.1:9080"
   CELLA_ADMIN_SUBJECTS: "http://127.0.0.1:9080|dev"
+  # The desktop of a sandbox that names `display`: the image up.sh built and
+  # loaded under this name, so the node pulls nothing.
+  CELLA_K8S_DISPLAY_IMAGE: "cella-display:dev"

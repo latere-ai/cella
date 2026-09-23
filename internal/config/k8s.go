@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	driver "latere.ai/x/cella/runtime"
 	"latere.ai/x/cella/runtime/k8s"
 )
 
@@ -21,9 +22,9 @@ func loadK8s(getenv Getenv, problems *[]string) k8s.Options {
 		Kubeconfig:         strings.TrimSpace(getenv("CELLA_K8S_KUBECONFIG")),
 		StorageClass:       strings.TrimSpace(getenv("CELLA_K8S_STORAGE_CLASS")),
 		ImagePullSecrets:   splitList(getenv("CELLA_K8S_IMAGE_PULL_SECRETS")),
-		DefaultCPU:         withDefault(getenv("CELLA_K8S_DEFAULT_CPU"), k8s.DefaultCPU),
-		DefaultMemory:      withDefault(getenv("CELLA_K8S_DEFAULT_MEMORY"), k8s.DefaultMemory),
-		DefaultDisk:        withDefault(getenv("CELLA_K8S_DEFAULT_DISK"), k8s.DefaultDisk),
+		DefaultCPU:         sized(getenv, "CELLA_K8S_DEFAULT_CPU", k8s.DefaultCPU, problems),
+		DefaultMemory:      sized(getenv, "CELLA_K8S_DEFAULT_MEMORY", k8s.DefaultMemory, problems),
+		DefaultDisk:        sized(getenv, "CELLA_K8S_DEFAULT_DISK", k8s.DefaultDisk, problems),
 		NodeSelector:       pairs(getenv, "CELLA_K8S_NODE_SELECTOR", problems),
 		Tolerations:        tolerations(getenv, "CELLA_K8S_TOLERATIONS", problems),
 		RunAsUser:          id(getenv, "CELLA_K8S_RUN_AS_USER", k8s.DefaultRunAsUser, problems),
@@ -32,8 +33,26 @@ func loadK8s(getenv Getenv, problems *[]string) k8s.Options {
 		MemoryRequestRatio: ratio(getenv, "CELLA_K8S_MEMORY_REQUEST_RATIO", k8s.DefaultMemoryRequestRatio, problems),
 		ReadyTimeout:       duration(getenv, "CELLA_K8S_READY_TIMEOUT", k8s.DefaultReadyTimeout, problems),
 		GracePeriod:        duration(getenv, "CELLA_K8S_GRACE_PERIOD", k8s.DefaultGracePeriod, problems),
+		// The desktop is the operator's image or none: a reference names a
+		// registry, so no default fits every installation, and empty is the
+		// driver declaring no Display and no Input.
+		DisplayImage: strings.TrimSpace(getenv("CELLA_K8S_DISPLAY_IMAGE")),
+		DisplayResources: driver.Resources{
+			CPU:    sized(getenv, "CELLA_K8S_DISPLAY_CPU", "", problems),
+			Memory: sized(getenv, "CELLA_K8S_DISPLAY_MEMORY", "", problems),
+		},
 	}
 	return o
+}
+
+// sized reads one of the driver's compute amounts through quantity, the
+// manifest's own syntax, so a value the driver would refuse at every create
+// is a start-up problem naming the variable. Empty is the fallback.
+func sized(getenv Getenv, name, fallback string, problems *[]string) string {
+	if q := quantity(getenv, name, problems); q != "" {
+		return string(q)
+	}
+	return fallback
 }
 
 // pairs reads "key=value,key=value" into a map, which is how an operator

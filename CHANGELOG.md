@@ -6,6 +6,17 @@ refused before it is pushed.
 
 ## Unreleased
 
+- A desktop on Kubernetes. Each release publishes
+  `ghcr.io/<owner>/cella-display:<tag>` beside `cellad`, built for amd64
+  and arm64, signed, and with its bill of materials attached to the
+  release. Set `CELLA_K8S_DISPLAY_IMAGE` to it and a sandbox whose
+  manifest names `display` gets a screen, screenshots and input;
+  `CELLA_K8S_DISPLAY_CPU` and `CELLA_K8S_DISPLAY_MEMORY` size the desktop
+  container. Unset, the environment declares no desktop, as before.
+- `CELLA_K8S_DEFAULT_CPU`, `CELLA_K8S_DEFAULT_MEMORY` and
+  `CELLA_K8S_DEFAULT_DISK` are checked when `cellad` starts. A value that
+  is not a quantity used to start cleanly and fail every create that
+  relied on it; it now stops the start with the variable named.
 - The release pipeline reads a release's files from the release's assets
   endpoint, by id, rather than from the list the release object carries,
   which GitHub has answered empty for a release whose every file was
