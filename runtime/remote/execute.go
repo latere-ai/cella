@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"time"
 
 	"latere.ai/x/cella/runtime"
 )
@@ -34,6 +35,8 @@ type Sink interface {
 	// operation that must answer before it writes a sub-stream calls it
 	// itself and the caller's later answer is the no-op it should be.
 	Answer(res Response, err error) error
+	// Event sends one change the driver observed, on the Watch operation.
+	Event(e Event) error
 }
 
 // Execute runs one operation with the worker's own driver and returns its
@@ -88,6 +91,8 @@ func Execute(ctx context.Context, d runtime.Driver, opType string, req Request, 
 		return attach(ctx, d, req, sink)
 	case OpStat, OpReadDir, OpOpen, OpWrite, OpMkdir, OpRemove, OpMove:
 		return files(ctx, d, opType, req, sink)
+	case OpWatch:
+		return watch(ctx, d, sink)
 	}
 	return Response{}, fmt.Errorf("%w: this worker does not run the operation %q", runtime.ErrUnsupported, opType)
 }
@@ -299,26 +304,80 @@ func files(ctx context.Context, d runtime.Driver, opType string, req Request, si
 // sub-stream at all.
 //
 // The answer is sent here rather than by the caller, and before the copy
-// starts. The far side waits for the result before it reads the bytes, and
-// one connection carries both: a byte frame queued ahead of the result would
-// reach a reader nobody is draining yet and hold the whole connection behind
-// it. Sending the answer first is what keeps that order, and the caller's
-// later answer is the no-op one operation answering once makes it.
+// starts, because the far side waits for the result before it reads the
+// bytes. On a connection without credit one sub-stream's bytes can hold the
+// whole connection, and a result queued behind bytes nobody is draining yet
+// would never arrive. The caller's later answer is the no-op one operation
+// answering once makes it.
+//
+// The copy runs inside the operation rather than after it returned. The
+// credit for its bytes arrives on the operation's channel, and a cancel from
+// the caller who stopped reading does too, and both reach only an operation
+// still running.
 func open(ctx context.Context, store runtime.FileStore, req Request, sink Sink) (Response, error) {
 	reader, info, err := store.Open(ctx, req.ID, req.Path)
 	if err != nil {
 		return Response{}, err
 	}
+	defer func() { _ = reader.Close() }()
 	answer := Response{Info: &info}
 	if sendErr := sink.Answer(answer, nil); sendErr != nil {
-		_ = reader.Close()
 		return Response{}, sendErr
 	}
 	out := sink.Writer(StreamBytes)
-	go func() {
-		defer func() { _ = reader.Close() }()
-		_, _ = io.Copy(out, reader)
-		_ = out.Close()
-	}()
+	// The answer is already sent, so a copy that ends early is what the
+	// caller reads against the size the entry reported.
+	_, _ = io.Copy(out, reader)
+	_ = out.Close()
 	return answer, nil
+}
+
+// rewatchDelay is how long a worker waits before it watches again after its
+// driver's channel closed, so a driver that closes at once does not turn the
+// watch into a loop.
+const rewatchDelay = time.Second
+
+// watch relays what the driver observes for as long as the connection lasts.
+// A channel the driver closes is followed by a relist, which is design 004's
+// rule: the worker watches again first and sends the relist after, so the
+// List the control plane issues on it covers everything the gap missed.
+func watch(ctx context.Context, d runtime.Driver, sink Sink) (Response, error) {
+	watcher, ok := d.(Watcher)
+	if !ok {
+		if err := sink.Accept(runtime.ErrUnsupported); err != nil {
+			return Response{}, err
+		}
+		return Response{}, fmt.Errorf("%w: this worker's driver does not watch", runtime.ErrUnsupported)
+	}
+	events, err := watcher.Watch(ctx)
+	if acceptErr := sink.Accept(err); acceptErr != nil {
+		return Response{}, acceptErr
+	}
+	if err != nil {
+		return Response{}, err
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return Response{}, ctx.Err()
+		case e, open := <-events:
+			if open {
+				if err = sink.Event(e); err != nil {
+					return Response{}, err
+				}
+				continue
+			}
+			select {
+			case <-ctx.Done():
+				return Response{}, ctx.Err()
+			case <-time.After(rewatchDelay):
+			}
+			if events, err = watcher.Watch(ctx); err != nil {
+				return Response{}, err
+			}
+			if err = sink.Event(Event{Type: EventRelist}); err != nil {
+				return Response{}, err
+			}
+		}
+	}
 }

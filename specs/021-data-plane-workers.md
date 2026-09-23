@@ -10,7 +10,7 @@ depends_on:
 affects: [manifest/v1/, runtime/remote/, internal/worker/, internal/api/, internal/auth/, internal/config/, controller/, internal/store/]
 effort: large
 created: 2026-09-12
-updated: 2026-09-21
+updated: 2026-09-23
 author: changkun
 ---
 
@@ -183,13 +183,14 @@ Control frames are JSON:
 
 | Message | Direction | Meaning |
 |---|---|---|
-| `hello {worker, versions}` | up, first | the registered worker id and the highest operation id it has acknowledged |
+| `hello {worker, versions, window, watch}` | up, first | the registered worker id, the highest operation id it has acknowledged, the window it grants per sub-stream, and whether its driver watches |
+| `hello {window}` | down, in answer | the window the control plane grants, sent only to a worker that announced one; it turns credit on for the connection, and a side that neither announces nor answers one keeps the stream without credit, so two releases interoperate |
 | `heartbeat` | both | every 15 seconds |
 | `operation {id, type, sandbox, payload, desiredVersion, traceparent}` | down | one driver call, carrying the W3C trace context the worker continues ([[017-observability]]); the worker answers with a conflict when its observed state's version is not `desiredVersion` |
 | `result {id, ok, value, error}` | up | the call's non-stream return, or a driver error in the driver's vocabulary |
 | `cancel {id}` | down | the caller went away; the worker cancels the operation's context |
-| `credit {id, bytes}` | both | flow control per operation: a side sends at most 8 MiB on an operation's sub-streams beyond what the other side has credited |
-| `event {environment, state}` | up | one `runtime.Event` from the worker's `Watch`, for the long-lived `Watch` operation |
+| `credit {id, stream, bytes}` | both | flow control per sub-stream: a side sends at most the window the other announced, 8 MiB by default, of one sub-stream beyond what the other side has credited; per sub-stream rather than per operation, so an exec's stdout and stderr never wait on each other |
+| `event {event: {type, state}}` | up | one `Event` from the worker's `Watch`, for the long-lived `Watch` operation |
 
 An operation type is the `Driver` or optional-interface method name;
 its payload is the method's arguments less the context, JSON-encoded
@@ -258,9 +259,9 @@ connection ([[012-test-stubs-and-tiers]]).
 | A worker with a valid key registers and receives a `wrk_` id; a revoked key, a mismatched isolation, and a mismatched driver are refused with their codes; a failed `Preflight` exits 1 without registering | `TestWorkerRegistrationRoute`, `TestRegistrationMismatch`, `TestRevokedKeyIsRefusedOnTheWorkerRoutes`, `TestWorkerRefusals` | built as `TestWorkerRegistrationRoute`, `TestRegistrationMismatch`, `TestRevokedKeyIsRefusedOnTheWorkerRoutes` and `TestWorkerRefusals`, [[051-environments-and-workers]] |
 | Placement admits against the lesser of `spec.capacity` and the live workers' reports; `capabilities` is the intersection | `TestRegistrationMismatch`, `TestCapacityInUse`, `TestSchedulingOverHTTP` | the intersection is built as `TestRegistrationMismatch`, [[051-environments-and-workers]]; placement admits against `spec.capacity` by every quantity it declares, `TestCapacityInUse` and `TestSchedulingOverHTTP` ([[057-scheduling-queue]]), and the lesser of that and what the live workers report is not read |
 | Every driver method and optional-interface method, issued through `runtime/remote`, executes on a worker running `native` and returns the same result as the direct call; the framing per row holds | `TestWorkerConformance` in `runtimetest`, `TestStreamFraming` | built, [[051-environments-and-workers]] |
-| An exec of 64 MiB output, an attach with resize, a dial, a screen, and a tar both ways stream through one connection under credit without buffering more than the window | `TestRemoteStreams` | not built |
+| An exec of 64 MiB output, an attach with resize, a dial, a screen, and a tar both ways stream through one connection under credit without buffering more than the window | `TestRemoteStreams` | partial: the exec of 64 MiB, the attach with resize, the tar both ways and a file read past the window are built as `TestRemoteStreams`, measured at the window on both sides, with a stalled reader holding only its own stream as `TestAStalledReaderHoldsOnlyItsOwnStream` and over the WebSocket as `TestAStalledCallerKeepsTheStream` ([[061-worker-stream-credit]]); the dial and the screen are not built, because the remote driver implements neither `Dialer` nor `DisplayDriver` |
 | A caller's disconnect cancels the operation on the worker within one heartbeat | `TestCancelCrossesTheSeam` | built, [[051-environments-and-workers]] |
-| `Watch` events cross the seam and a `relist` triggers a `List` | `TestRemoteWatch` | not built |
+| `Watch` events cross the seam and a `relist` triggers a `List` | `TestRemoteWatch` | built over a fake driver, with `TestAWatchThatFallsBehindRelists` and `TestAClosedWatchRelists` ([[061-worker-stream-credit]]): the runtime contract declares no `Watch` and no driver implements one, so the seam declares `Watcher` in `runtime/remote` |
 | A dropped connection redelivers unacknowledged operations exactly once to a live worker after the lease | the `Redelivery` case of `TestSuiteHoldsTheMemoryAdapter` and `TestPostgresStore` | built at the store as `storetest`'s `Redelivery` case over both adapters; the hub reads the live registrations from memory and a fleet reads them from the table, [[051-environments-and-workers]] |
 | An environment with no heartbeat goes `Offline`, its running sandboxes are held `Lost`, and recover when a worker returns | `TestCreateOnAnEnvironmentBelowReady`, `TestWorkerEnvironmentEndToEnd` | built for the transition and the return as `TestCreateOnAnEnvironmentBelowReady` and `TestWorkerEnvironmentEndToEnd`, which also holds that the sandboxes already placed survive it ([[054-environments-desired-state]]); the `Lost` hold is [[005-lifecycle-controller]]'s and is not built |
 | The control plane makes no outbound connection to a worker's host during the whole worker and kind tiers | `TestNoInboundToTheDataPlane`, run as [[012-test-stubs-and-tiers]]'s `TestWorkerNoInbound` and `TestClusterWorkerNoInbound` | not built |

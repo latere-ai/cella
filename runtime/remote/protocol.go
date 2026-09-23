@@ -46,6 +46,14 @@ const (
 	HeartbeatTimeout  = 45 * time.Second
 )
 
+// DefaultWindow is the credit a side grants per sub-stream: how many bytes of
+// one sub-stream the far side may have sent and not had credited back, and so
+// the most the receiver ever holds of it. Eight frames keep a sub-stream
+// moving at the window per round trip, 80 MiB/s at 100 ms, and bound what a
+// reader that stopped reading pins to 8 MiB. Each side announces its own in
+// its hello, so the figure is not one both sides must assume.
+const DefaultWindow = 8 * MaxFrameBytes
+
 // OperationIDLen is the fixed width of the operation id every frame opens
 // with, and OperationIDPrefix the kind prefix the row in the operations table
 // carries. The frame's id is fixed width so a frame is parsed without a
@@ -77,7 +85,11 @@ const NoOperation = "00000000000000000000000000"
 // one belonging the other way closes the connection.
 const (
 	// MessageHello is the worker's first frame: which registration this
-	// connection is.
+	// connection is, the window it grants, and whether its driver watches.
+	// The control plane answers a hello that announced a window with its own,
+	// which is what turns credit on for the connection; a worker that
+	// announced none, and a control plane that answers none, keep the stream
+	// as it was before credit.
 	MessageHello = "hello"
 	// MessageHeartbeat keeps an idle stream alive, both ways.
 	MessageHeartbeat = "heartbeat"
@@ -99,6 +111,12 @@ const (
 	// MessageState is what the worker's driver observes, up. It is how the
 	// control plane reads a sandbox without waking the worker.
 	MessageState = "state"
+	// MessageCredit says the receiver took more of one sub-stream and the
+	// sender may send as many more bytes of it, both ways.
+	MessageCredit = "credit"
+	// MessageEvent is one change the worker's driver observed, up, on the
+	// connection's Watch operation.
+	MessageEvent = "event"
 )
 
 // The operation types. Each is a Driver or optional-interface method name, so
@@ -124,6 +142,10 @@ const (
 	OpMkdir     = "Mkdir"
 	OpRemove    = "Remove"
 	OpMove      = "Move"
+	// OpWatch is the connection's own long-lived operation, opened by the
+	// control plane on a worker whose driver watches. It is not a row of the
+	// operations table and it ends with the connection.
+	OpWatch = "Watch"
 )
 
 // Registration is what a worker declares about itself and the driver it runs.
@@ -300,6 +322,18 @@ type Message struct {
 	// control plane to read the whole environment again.
 	States []runtime.State `json:"states,omitempty"`
 	Relist bool            `json:"relist,omitempty"`
+	// Window is the credit the side saying hello grants per sub-stream, and
+	// Watch says the worker's driver watches. A hello from a release before
+	// credit carries neither, which is how the other side knows to keep the
+	// stream as it was.
+	Window int  `json:"window,omitempty"`
+	Watch  bool `json:"watch,omitempty"`
+	// Stream and Bytes are a credit: the sub-stream, never control, and how
+	// many more bytes of it the far side may send.
+	Stream int   `json:"stream,omitempty"`
+	Bytes  int64 `json:"bytes,omitempty"`
+	// Event is one change a worker's driver observed.
+	Event *Event `json:"event,omitempty"`
 }
 
 // ErrFrame is a frame this protocol cannot read. Every one of them closes the
@@ -362,7 +396,7 @@ func DecodeMessage(payload []byte) (Message, error) {
 // reconstruct, and running the command again would run it twice.
 func Streaming(opType string) bool {
 	switch opType {
-	case OpExec, OpAttach, OpLogs, OpExportTar, OpImportTar, OpOpen, OpWrite:
+	case OpExec, OpAttach, OpLogs, OpExportTar, OpImportTar, OpOpen, OpWrite, OpWatch:
 		return true
 	}
 	return false

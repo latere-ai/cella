@@ -66,8 +66,12 @@ type seam struct {
 	hub    *remote.Hub
 	driver *remote.Driver
 	worker driver.Driver
+	server *remote.Server
 	cancel context.CancelFunc
 	done   chan struct{}
+	// control and workerSide are the two ends of the connection, which a
+	// test closes to take the stream away.
+	control, workerSide net.Conn
 }
 
 // openSeam stands one worker up against one hub over a pipe and returns the
@@ -81,6 +85,28 @@ func openSeam(t *testing.T, host driver.Driver) *seam {
 // are about what the hub records rather than what the driver does.
 func openSeamWith(t *testing.T, host driver.Driver, o remote.HubOptions) *seam {
 	t.Helper()
+	return openSeamOver(t, host, o, remote.ServerOptions{ReportInterval: 50 * time.Millisecond}, seamWrap{})
+}
+
+// seamWrap puts something between each side and its end of the connection,
+// which is how a test watches what crosses it or stands in for a peer of
+// another release. A nil field leaves that side's end as it is.
+type seamWrap struct {
+	control, worker func(remote.FrameConn) remote.FrameConn
+}
+
+func (w seamWrap) apply(wrap func(remote.FrameConn) remote.FrameConn, conn remote.FrameConn) remote.FrameConn {
+	if wrap == nil {
+		return conn
+	}
+	return wrap(conn)
+}
+
+// openSeamOver is openSeam over the options of both sides, for the rows about
+// the stream itself: its window on either side, and how often the worker
+// reports. The worker's id and driver are filled in here.
+func openSeamOver(t *testing.T, host driver.Driver, o remote.HubOptions, so remote.ServerOptions, wrap seamWrap) *seam {
+	t.Helper()
 	hub := remote.NewHub(o)
 	registered, err := hub.Register("env_test", remote.Registration{
 		Driver: host.Name(), Isolation: host.Isolation(), Capabilities: host.Capabilities(),
@@ -90,17 +116,17 @@ func openSeamWith(t *testing.T, host driver.Driver, o remote.HubOptions) *seam {
 	}
 	control, workerSide := net.Pipe()
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &seam{hub: hub, worker: host, cancel: cancel, done: make(chan struct{}, 2)}
+	s := &seam{hub: hub, worker: host, cancel: cancel, done: make(chan struct{}, 2),
+		control: control, workerSide: workerSide}
+	so.Worker, so.Driver = registered.Worker, host
+	s.server = remote.NewServer(wrap.apply(wrap.worker, &pipeConn{conn: workerSide}), so)
 	go func() {
 		defer func() { s.done <- struct{}{} }()
-		_ = hub.Serve(ctx, "env_test", &pipeConn{conn: control})
+		_ = hub.Serve(ctx, "env_test", wrap.apply(wrap.control, &pipeConn{conn: control}))
 	}()
 	go func() {
 		defer func() { s.done <- struct{}{} }()
-		server := remote.NewServer(&pipeConn{conn: workerSide}, remote.ServerOptions{
-			Worker: registered.Worker, Driver: host, ReportInterval: 50 * time.Millisecond,
-		})
-		_ = server.Run(ctx)
+		_ = s.server.Run(ctx)
 	}()
 	s.driver, err = remote.New(remote.Options{Environment: "env_test", Transport: hub.Transport("env_test")})
 	if err != nil {

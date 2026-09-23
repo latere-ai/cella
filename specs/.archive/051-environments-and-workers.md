@@ -13,7 +13,7 @@ depends_on:
 affects: [manifest/v1/, manifest/, internal/store/, internal/api/, internal/auth/, internal/events/, internal/worker/, runtime/remote/, cmd/cellad/, internal/config/, controller/, arch_test.go, docs/, CHANGELOG.md]
 effort: large
 created: 2026-09-20
-updated: 2026-09-22
+updated: 2026-09-23
 author: changkun
 ---
 
@@ -360,5 +360,5 @@ rows of [[021-data-plane-workers]]:
 
 | Open | Why |
 |---|---|
-| The `credit` control message of 021's flow control | The framing reserves it. Until it lands the only back pressure is the sub-stream's own pipe, which blocks the connection's read pump: an operation that answers and then streams must send its answer first, which `TestReadAnswersBeforeItStreams` holds, and the window is what would make the ordering unnecessary |
+| The `credit` control message of 021's flow control | Closed by [[061-worker-stream-credit]], which credits each sub-stream and agrees the window in the hello. Until then the only back pressure was the sub-stream's own pipe, which blocked the connection's read pump: an operation that answers and then streams had to send its answer first, which `TestReadAnswersBeforeItStreams` holds and which a connection whose peer predates the window still needs |
 | The `workers` and `operations` rows read back by the hub for redelivery | `Claim`, `Register`, `Heartbeat`, `Forget` and `Workers` are built and proved at the store; the hub writes the row and the answer and keeps the live registrations in memory, which is one replica's view. A fleet reads them from the table |

@@ -56,6 +56,15 @@ func (s *stubTransport) ObservedList() ([]driver.State, bool) {
 	return out, true
 }
 
+func (s *stubTransport) Watch(context.Context) (<-chan remote.Event, error) {
+	if s.openErr != nil {
+		return nil, s.openErr
+	}
+	events := make(chan remote.Event)
+	close(events)
+	return events, nil
+}
+
 func (s *stubTransport) Open(_ context.Context, opType string, _ remote.Request) (remote.Stream, error) {
 	if s.openErr != nil {
 		return nil, s.openErr
@@ -240,6 +249,9 @@ func TestDriverRefusesAnEndedContext(t *testing.T) {
 	}
 	if err := d.Ready(ctx); !errors.Is(err, context.Canceled) {
 		t.Errorf("ready under an ended context is %v", err)
+	}
+	if _, err := d.Watch(ctx); !errors.Is(err, context.Canceled) {
+		t.Errorf("a watch under an ended context is %v", err)
 	}
 }
 

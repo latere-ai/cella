@@ -7,8 +7,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -191,6 +193,71 @@ func TestWorkerRegistersAndHoldsTheStream(t *testing.T) {
 	}
 	if err = p.driver.Delete(t.Context(), ref.ID); err != nil {
 		t.Errorf("the delete over the stream failed: %v", err)
+	}
+}
+
+// TestAStalledCallerKeepsTheStream holds the credit window over the WebSocket
+// a worker actually holds. A caller that stops reading an exec's output for
+// longer than a frame's write deadline costs that exec time and nothing else:
+// the control plane keeps reading the socket, the worker waits for credit
+// rather than writing into a socket nobody drains, the stream stays up, and
+// another exec runs meanwhile. Before the window, the control plane stopped
+// reading the socket behind the stalled output, the worker's write passed its
+// deadline, and the whole stream dropped with every operation on it.
+func TestAStalledCallerKeepsTheStream(t *testing.T) {
+	const deadline = 200 * time.Millisecond
+	t.Cleanup(worker.ShortenWriteDeadline(deadline))
+	p := newPlane(t)
+	host := nativeDriver(t)
+	w, _ := p.start(t, host)
+	p.waitWorkers(t, 1, "after the worker started")
+	registration := w.ID()
+	ctx := t.Context()
+	ref, err := p.driver.Create(ctx, driver.CreateSpec{
+		ID: "sbx_stalled", Name: "stalled", Owner: "ops", Command: []string{"sleep", "60"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = p.driver.Delete(context.Background(), ref.ID) })
+
+	const size = 4 * remote.DefaultWindow
+	stalled, err := p.driver.Exec(ctx, ref.ID, driver.ExecRequest{
+		Command: []string{"head", "-c", strconv.Itoa(size), "/dev/zero"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = stalled.Close() }()
+	// The stall is the subject: ten deadlines with nobody reading.
+	time.Sleep(10 * deadline)
+
+	beside, err := p.driver.Exec(ctx, ref.ID, driver.ExecRequest{Command: []string{"echo", "beside"}})
+	if err != nil {
+		t.Fatalf("an exec beside the stalled caller failed: %v", err)
+	}
+	out, err := io.ReadAll(beside.Stdout())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code, waitErr := beside.Wait(ctx); waitErr != nil || code != 0 || strings.TrimSpace(string(out)) != "beside" {
+		t.Errorf("the exec beside answered %q with exit %d, err %v", out, code, waitErr)
+	}
+	_ = beside.Close()
+
+	n, err := io.Copy(io.Discard, stalled.Stdout())
+	if err != nil || n != size {
+		t.Fatalf("the stalled exec carried %d of %d bytes once read: %v", n, size, err)
+	}
+	if code, waitErr := stalled.Wait(ctx); waitErr != nil || code != 0 {
+		t.Errorf("the stalled exec ended with exit %d, err %v", code, waitErr)
+	}
+	p.mu.Lock()
+	registrations := p.registered
+	p.mu.Unlock()
+	if w.ID() != registration || registrations != 1 {
+		t.Errorf("the stream dropped under the stalled caller: %d registrations, the worker now %s, was %s",
+			registrations, w.ID(), registration)
 	}
 }
 
