@@ -1,6 +1,6 @@
 ---
 title: "Dial on the k8s driver: the port forwarding subresource, the declared-port rule, the Role, and the kind tier"
-status: in-progress
+status: complete
 track: core
 depends_on:
   - specs/004-runtime-contract.md
@@ -15,7 +15,7 @@ depends_on:
 affects: [runtime/k8s/, deploy/, deploy_test.go, test/kind/, .github/workflows/, docs/, CHANGELOG.md, specs/]
 effort: medium
 created: 2026-09-23
-updated: 2026-09-23
+updated: 2026-09-24
 author: changkun
 ---
 
@@ -166,13 +166,58 @@ session across dials.
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| The driver declares `Dial` beside `Files`, `Pool` and `Mesh`, and implements `runtime.Dialer` | `TestDeclarations` | not built |
-| `Dial` refuses a port outside 1 to 65535 with `ErrInvalid`, an absent sandbox with `ErrNotFound`, a stopped, pending or starting one with `ErrNotRunning`, an undeclared port with `ErrNotFound`, and a driver with no cluster connection with `ErrUnsupported`, before any session opens | `TestDialRefusals` | not built |
-| A dial opens one session to the sandbox's own Pod and port, and pairs one error and one data stream in it with the port and the request id | `TestDialForwardsTheDeclaredPort`, `TestPortForwardCarriesBytesBothWays` | not built |
-| The session is negotiated over the WebSocket tunnel where the API server serves it and over the SPDY upgrade where it refuses the WebSocket, carries bytes both ways on two connections at once, and outlives the context it was dialed with | `TestPortForwardCarriesBytesBothWays`, `TestPortForwardFallsBackToTheUpgrade`, `TestPortForwardOutlivesTheDialContext` | not built |
-| A port nothing listens on reads as a connection whose `Read` returns the kubelet's reason; a refused session is an error from `Dial`; a negotiation that does not answer ends with the dial's context | `TestPortForwardReportsTheKubeletsReason`, `TestPortForwardRefused`, `TestPortForwardHonorsTheDialContext` | not built |
-| Every request the dial makes is one the verbs table reviews, and the Role of `deploy/base` grants exactly the table | `TestEveryDialRequestIsInTheVerbTable`, `TestRoleMatchesTheDriversVerbs` | not built |
-| The driver passes `DialReachesAPort` and `PortsReportListening` against a kind cluster | `TestClusterConformance` | not built |
-| The `cellad` the kind stack deploys reaches a declared port through the dial socket, two sockets at once, and closes a socket to an undeclared port with 1011 `not_found` | `TestClusterDial` | not built |
-| Both kind conformance runs declare `dial`, and the install job runs the dial and port cases of the driver suite | `TestKindRunsDeclareDial` | not built |
-| No file this slice adds names a Latere host, image, pool or namespace | `TestNoLatereCoordinates`, `TestNoLatereCoordinatesInReleasedArtifacts` | not built |
+| The driver declares `Dial` beside `Files`, `Pool` and `Mesh`, and implements `runtime.Dialer` | `TestDeclarations` | passing |
+| `Dial` refuses a port outside 1 to 65535 with `ErrInvalid`, an absent sandbox with `ErrNotFound`, a stopped, pending or starting one with `ErrNotRunning`, an undeclared port with `ErrNotFound`, a claim with no spec with `ErrInvalid`, and a driver with no cluster connection with `ErrUnsupported`, before any session opens | `TestDialRefusals`, `TestDialRefusesAClaimWithoutASpec` | passing |
+| A dial opens one session to the sandbox's own Pod and port, and pairs one error and one data stream in it with the port and the request id | `TestDialForwardsTheDeclaredPort`, `TestPortForwardCarriesBytesBothWays` | passing |
+| The session is negotiated over the WebSocket tunnel where the API server serves it and over the SPDY upgrade where it refuses the WebSocket, carries bytes both ways on two connections at once, and outlives the context it was dialed with | `TestPortForwardCarriesBytesBothWays`, `TestPortForwardFallsBackToTheUpgrade`, `TestPortForwardOutlivesTheDialContext` | passing |
+| A port nothing listens on reads as a connection whose `Read` returns the kubelet's reason; a refused session and an API server that does not answer are errors from `Dial`; a negotiation that does not answer ends with the dial's context; closing the connection ends the session | `TestPortForwardReportsTheKubeletsReason`, `TestPortForwardRefused`, `TestPortForwardDials`, `TestPortForwardHonorsTheDialContext`, `TestPortForwardCloseEndsTheSession` | passing |
+| A configuration the session cannot build its address from is refused at `New` | `TestNewRefusesAConfigurationThePortForwardCannotUse` | passing |
+| Every request the dial makes is one the verbs table reviews, and the Role of `deploy/base` grants exactly the table | `TestEveryDialRequestIsInTheVerbTable`, `TestRoleMatchesTheDriversVerbs` | passing |
+| The driver passes `DialReachesAPort` and `PortsReportListening` against a kind cluster | `TestClusterConformance` | built: `Echo` is passed, and `verify.yml`'s install job runs the two cases against its kind cluster; skipped here, where no cluster is reachable |
+| The `cellad` the kind stack deploys reaches a declared port through the dial socket, two sockets at once, reports the port listening, and closes a socket to an undeclared port with 1011 `not_found` | `TestClusterDial` | built: both kind jobs run it and require its pass; skipped here, where no cluster is reachable |
+| Both kind conformance runs declare `dial`, both kind jobs require `TestClusterDial`, and the install job runs the dial and port cases of the driver suite | `TestKindRunsDeclareDial` | passing |
+| No file this slice adds names a Latere host, image, pool or namespace | `TestNoLatereCoordinates`, `TestNoLatereCoordinatesInReleasedArtifacts` | passing |
+
+## Outcome
+
+`runtime/k8s` implements `runtime.Dialer` through the `pods/portforward`
+subresource and declares `Dial`, so the port listing, the proxy, the dial
+socket and `cella port-forward` work on the Kubernetes environment for
+every port a manifest declares. The Role of `deploy/base` grants `get` and
+`create` on the subresource, and no NetworkPolicy changes.
+
+| Piece | Where |
+|---|---|
+| `Dial`, the session negotiated WebSocket first with the SPDY fallback, the stream pair, the connection pumped through an in-memory pipe with the kubelet's reason as the read error | `runtime/k8s/dial.go` |
+| `Dial: true`, the forwarder built at `New` from `Options.REST`, `pods/portforward` `get` and `create` in the verbs table | `runtime/k8s/k8s.go` |
+| The fake API server that answers the WebSocket tunnel and the SPDY upgrade with the stream protocol and serves a pair as the kubelet does | `runtime/k8s/dial_test.go` |
+| `Echo` in the cluster conformance run | `runtime/k8s/conformance_test.go` |
+| The Role, its table, the operator's reference | `deploy/base/rbac.yaml`, `deploy_test.go`, `deploy/README.md` |
+| The dial through the deployed control plane, and the stack brought up once per package in local mode | `test/kind/dial_test.go`, `test/kind/kind_test.go` |
+| `dial` declared to both kind conformance runs, `TestClusterDial` required in both kind jobs, the driver's dial and port cases in the install job | `.github/workflows/verify.yml`, `.github/workflows/release.yml`, `dial_test.go` |
+| The operator's and caller's page | `docs/kubernetes.md`, `docs/README.md`, `docs/install.md`, `CHANGELOG.md` |
+
+`go tool lateregate` passes with `runtime/k8s` at 92.5%. The session code
+is exercised against a fake API server built from the same client-go and
+apimachinery stream libraries the kubelet and the API server use, over
+both transports. No kind cluster was reachable on the machine this was
+built on, so `TestClusterConformance` and `TestClusterDial` did not run
+against a real API server and kubelet here; the first `verify` run of the
+install job is that proof.
+
+### What diverges from the specs above
+
+| Spec | What it said | What was built | Why |
+|---|---|---|---|
+| [[004-runtime-contract]] | k8s `Dial` is "yes: port forwarding", with no word on which ports | a declared port only, `ErrNotFound` otherwise | the subresource reaches any port of the Pod, the desktop container's included, and podman reaches only a declared port |
+| This spec's Access | the choice between one verb and two | `get` and `create` on `pods/portforward`, both reviewed at start | with `create` alone every dial pays a refused WebSocket handshake and an audit denial before the fallback, and the proxy dials per request |
+| [[008-api]] | a port nothing listens on closes the dial socket 1011 `upstream_unavailable` | holds on k8s: the kubelet's reason is the connection's read error; podman behind a user-space forwarder still reads it as a clean close | the kubelet writes its reason on the error stream before it closes both streams, and the pump waits for it |
+
+### What this leaves open
+
+| Open | Why |
+|---|---|
+| `Dial` on the `remote` driver | the worker stream carries no dial; a k8s worker environment still answers 422 on both routes |
+| The exec path's WebSocket attempt | `pods/exec` is granted `create` alone, so every exec on a real cluster is refused over the WebSocket before the SPDY fallback; the attach slice owns that path |
+| The whole driver suite against a cluster | only `DialReachesAPort` and `PortsReportListening` run in the install job; the other cases belong to the slices that build each capability |
+| Reuse of one session across dials | one session per connection is the simplest correct shape; the proxy's per-request dial makes it the first thing to measure |
