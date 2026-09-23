@@ -10,6 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"k8s.io/client-go/kubernetes/fake"
+
+	driver "latere.ai/x/cella/runtime"
 	"latere.ai/x/cella/runtime/k8s"
 )
 
@@ -147,5 +150,62 @@ func TestK8sVariablesAreReadOnlyForItsOwnRuntime(t *testing.T) {
 	}
 	if c.K8s.Namespace != "" {
 		t.Fatalf("the cluster options were read for another runtime: %+v", c.K8s)
+	}
+}
+
+// TestLoadK8sDisplay: the desktop reaches the driver from three variables,
+// and the driver built from the loaded options declares Display and Input
+// exactly when an image is named.
+func TestLoadK8sDisplay(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		env     map[string]string
+		image   string
+		limits  driver.Resources
+		desktop bool
+	}{
+		{"none", nil, "", driver.Resources{}, false},
+		{"image", map[string]string{"CELLA_K8S_DISPLAY_IMAGE": " registry.example/cella-display:v1 "},
+			"registry.example/cella-display:v1", driver.Resources{}, true},
+		{"image and limits", map[string]string{
+			"CELLA_K8S_DISPLAY_IMAGE":  "cella-display:dev",
+			"CELLA_K8S_DISPLAY_CPU":    "500m",
+			"CELLA_K8S_DISPLAY_MEMORY": "1Gi",
+		}, "cella-display:dev", driver.Resources{CPU: "500m", Memory: "1Gi"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, err := Load(env(k8sEnv(t, tc.env)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if c.K8s.DisplayImage != tc.image || c.K8s.DisplayResources != tc.limits {
+				t.Fatalf("display %q %+v, want %q %+v", c.K8s.DisplayImage, c.K8s.DisplayResources, tc.image, tc.limits)
+			}
+			opts := c.K8s
+			opts.Client = fake.NewClientset()
+			d, err := k8s.New(opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := d.Capabilities(); got.Display != tc.desktop || got.Input != tc.desktop {
+				t.Fatalf("the driver declares Display %v Input %v, want %v", got.Display, got.Input, tc.desktop)
+			}
+		})
+	}
+}
+
+// TestLoadK8sQuantities: a compute amount the driver would refuse at every
+// create is refused at start, naming the variable.
+func TestLoadK8sQuantities(t *testing.T) {
+	for _, name := range []string{
+		"CELLA_K8S_DEFAULT_CPU", "CELLA_K8S_DEFAULT_MEMORY", "CELLA_K8S_DEFAULT_DISK",
+		"CELLA_K8S_DISPLAY_CPU", "CELLA_K8S_DISPLAY_MEMORY",
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := Load(env(k8sEnv(t, map[string]string{name: "lots"})))
+			if err == nil || !strings.Contains(err.Error(), name) || !strings.Contains(err.Error(), "a quantity") {
+				t.Fatalf("Load = %v, want a problem naming %s", err, name)
+			}
+		})
 	}
 }
