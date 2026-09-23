@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -80,6 +81,7 @@ func TestClusterConformance(t *testing.T) {
 		// the sandbox's own image is the same one every other case uses.
 		DisplayImage: cmp.Or(os.Getenv(envDisplayImage), ""),
 		Listen:       listenCommand,
+		Echo:         echoCommand,
 	})
 }
 
@@ -87,6 +89,13 @@ func TestClusterConformance(t *testing.T) {
 // the image, not to the contract, and this is what the suite's own image has.
 func listenCommand(port int) []string {
 	return []string{"sh", "-c", fmt.Sprintf("nc -l -p %d || sleep 600", port)}
+}
+
+// echoCommand serves one port inside a sandbox and writes back every byte
+// each connection sends, two connections at once: busybox's netcat runs its
+// own cat per connection, which is what the suite's image has.
+func echoCommand(port int) []string {
+	return []string{"nc", "-lk", "-p", strconv.Itoa(port), "-e", "cat"}
 }
 
 // sweep removes every object this contract owns in the namespace, so a run
