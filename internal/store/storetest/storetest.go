@@ -908,7 +908,7 @@ func object(id, owner, name string) store.Object {
 	}
 }
 
-// labelled sets the columns the list filters read.
+// labeled sets the columns the list filters read.
 func labelled(o store.Object, tier, phase, environment string) store.Object {
 	o.Labels = map[string]string{"tier": tier}
 	o.Phase = phase
@@ -1162,13 +1162,13 @@ func operations(t TB, open Opener) {
 		t.Errorf("the acknowledged row reads %s, want %s", done.State, store.OperationDone)
 	}
 	sameJSON(t, done.Result, []byte(`{"ok":true}`), "the acknowledged row's result")
-	// An acknowledgement that raced a redelivery never overwrites the answer
+	// An acknowledgment that raced a redelivery never overwrites the answer
 	// the caller was already given.
 	with(t, s, func(tx store.Tx) error {
 		return tx.Operations().Acknowledge(ctx, "op_1", []byte(`{"ok":false}`))
 	})
 	sameJSON(t, operation(t, s, "op_1").Result, []byte(`{"ok":true}`),
-		"the result after a second acknowledgement")
+		"the result after a second acknowledgment")
 	fails(t, s, store.ErrNotFound, "acknowledging an operation nobody enqueued", func(tx store.Tx) error {
 		return tx.Operations().Acknowledge(ctx, "op_absent", nil)
 	})

@@ -40,7 +40,7 @@ var (
 	StoreBuckets = []float64{0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5}
 )
 
-// The closed vocabularies a label takes. A labelled histogram is initialised
+// The closed vocabularies a label takes. A labeled histogram is initialized
 // over its vocabulary at start, so a series exists before its first
 // observation and a rate over a quiet installation is zero rather than
 // absent.

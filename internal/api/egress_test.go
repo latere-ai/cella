@@ -40,7 +40,7 @@ func newHub(t *testing.T, ackTimeout time.Duration, cap int) *hubFixture {
 }
 
 // gatewayStub is one connected gateway: it takes the frames down and answers
-// the acknowledgements a test tells it to.
+// the acknowledgments a test tells it to.
 type gatewayStub struct {
 	conn *websocket.Conn
 

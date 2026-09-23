@@ -85,7 +85,7 @@ func (d *Driver) adopt(ctx context.Context, id string, a driver.Adoption) error 
 // projectAdopted writes the two files the adopted sandbox holds inside itself:
 // the authority its gateway signs with, and its own identity. Both are written
 // into the running container, which is why they follow the claim rather than
-// travelling with it.
+// traveling with it.
 func (d *Driver) projectAdopted(ctx context.Context, id, user string, a driver.Adoption) error {
 	if a.Egress.CAPEM != "" {
 		if err := d.putEgressCA(ctx, id, a.Egress.CAPEM); err != nil {

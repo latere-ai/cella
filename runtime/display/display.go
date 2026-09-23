@@ -39,7 +39,7 @@ const (
 	MaxHeight = 4320
 )
 
-// Depth is the colour depth every desktop runs at.
+// Depth is the color depth every desktop runs at.
 const Depth = 24
 
 // Valid reports whether the geometry is inside the contract's bounds.

@@ -4,7 +4,7 @@
 // Package admission is the client half of spec 007's admission webhook:
 // one POST per Sandbox apply to the endpoint an operator wrote, which
 // returns the manifest to continue with or a refusal. It is where a
-// platform's image catalogue, plan shapes and policy profiles reach the
+// platform's image catalog, plan shapes and policy profiles reach the
 // control plane, and the control plane learns none of them: it learns
 // that a manifest came back or that a refusal did.
 //

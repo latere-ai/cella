@@ -34,7 +34,7 @@ The initial native implementation is in `runtime/native` ([[025-native-runtime-m
 
 Design provenance: The interface descends from one that three container
 drivers have implemented in the hosted platform; the changes are that
-optional behaviour is declared and typed rather than discovered by
+optional behavior is declared and typed rather than discovered by
 assertion alone, that the k8s driver takes decorators instead of
 importing the platform's clients, that volumes, ports, display, and
 snapshots are first class, and that the isolation class is part of the

@@ -66,7 +66,7 @@ func TestWorkloadTokenNeverLeavesItsSandbox(t *testing.T) {
 	}
 
 	t.Run("theTokenIsTheSandboxsOwnIdentity", func(t *testing.T) {
-		// A canary that followed a token the control plane does not honour
+		// A canary that followed a token the control plane does not honor
 		// would prove nothing, so the token is used once before it is
 		// looked for.
 		var read struct {

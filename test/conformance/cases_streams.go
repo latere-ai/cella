@@ -381,7 +381,7 @@ func case008FileRoutes(ctx context.Context, e *Env) error {
 }
 
 // case008Logs: the main process's output is what the log route answers, with
-// tail and follow honoured.
+// tail and follow honored.
 func case008Logs(ctx context.Context, e *Env) error {
 	obj, err := e.sandbox(ctx, e.caller, func(body map[string]any) {
 		spec, _ := body["spec"].(map[string]any)

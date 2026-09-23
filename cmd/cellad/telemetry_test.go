@@ -311,7 +311,7 @@ func TestTheAPIDrawsAServerSpan(t *testing.T) {
 		t.Errorf("the collector received no span named by the route: %d bytes", collected.Len())
 	}
 	// The authorizer call is instrumented, so it exported a client span of
-	// its own naming the endpoint it dialled. The parent link is in the
+	// its own naming the endpoint it dialed. The parent link is in the
 	// span context and not in a string, so this reads the call and not the
 	// linkage.
 	host := strings.TrimPrefix(authorizer.URL, "http://")

@@ -174,7 +174,7 @@ func (d *Driver) Screenshot(ctx context.Context, id string, req driver.Screensho
 
 // Screen opens one paced sequence of frames over a single exec. Ending the
 // context ends the exec, which the cluster turns into the command being
-// signalled; the session's own file is removed as well, so a loop that
+// signaled; the session's own file is removed as well, so a loop that
 // outlives its stream ends at its next turn.
 func (d *Driver) Screen(ctx context.Context, id string, fps int, format string) (<-chan driver.Frame, error) {
 	run, err := d.readyRunner(ctx, id)

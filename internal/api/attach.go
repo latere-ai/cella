@@ -254,7 +254,7 @@ func (s *execStream) Close() error {
 	return nil
 }
 
-// frameWriter serialises every frame: a WebSocket admits one writer at a time,
+// frameWriter serializes every frame: a WebSocket admits one writer at a time,
 // and the output reader, the keepalive and the last frame all write.
 type frameWriter struct {
 	mu   sync.Mutex

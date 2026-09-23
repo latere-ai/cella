@@ -24,7 +24,7 @@ var dialRoundTrip = 2 * time.Second
 // dialReachesAPort is the Dialer of spec 004: a connection to a port a process
 // inside holds carries bytes both ways, two connections are open at once, and
 // a sandbox that is not running or not there is refused with the contract's
-// errors rather than dialled.
+// errors rather than dialed.
 func dialReachesAPort(t tb, open func() runtime.Driver, opts Options) {
 	d := open()
 	if !d.Capabilities().Dial {

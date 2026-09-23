@@ -148,8 +148,8 @@ func TestDialCase(t *testing.T) {
 	}{
 		{"a connection that carries nothing back", func() runtime.Driver { d := newFakeDialer(); d.mute = true; return d }, "no line came back"},
 		{"one connection at a time", func() runtime.Driver { d := newFakeDialer(); d.single = true; return d }, "stopped carrying bytes"},
-		{"a stopped sandbox dialled", func() runtime.Driver { d := newFakeDialer(); d.ignoresPhase = true; return d }, "Dial on a stopped sandbox"},
-		{"an absent sandbox dialled", func() runtime.Driver { d := newFakeDialer(); d.ignoresID = true; return d }, "Dial on an absent sandbox"},
+		{"a stopped sandbox dialed", func() runtime.Driver { d := newFakeDialer(); d.ignoresPhase = true; return d }, "Dial on a stopped sandbox"},
+		{"an absent sandbox dialed", func() runtime.Driver { d := newFakeDialer(); d.ignoresID = true; return d }, "Dial on an absent sandbox"},
 		{"a declaration with no dialer behind it", func() runtime.Driver { return dialLiar{Nop{}} }, "does not implement runtime.Dialer"},
 	} {
 		t.Run("fails/"+tc.name, func(t *testing.T) {

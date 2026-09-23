@@ -381,7 +381,7 @@ func (s *stack) read(t *testing.T, path string) (int, error) {
 
 // control is the contract the suite drives a stub with: POST /fail with a
 // mode, and every other request proxied to the stub that answers it. The
-// modes are the stub's own behaviours, chosen by which upstream answers:
+// modes are the stub's own behaviors, chosen by which upstream answers:
 // nothing for the allowing stub, a refusal from the refusing one, and 503
 // from the control itself where the mode is an outage.
 //

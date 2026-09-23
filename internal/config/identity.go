@@ -127,7 +127,7 @@ func (i *Identity) loadIdentity(getenv Getenv) []string {
 		if u, ok := endpoint(i.AuthorizerURL); !ok {
 			problems = append(problems, "CELLA_AUTHORIZER_URL is "+strconv.Quote(i.AuthorizerURL)+", not an absolute http:// or https:// URL with a host")
 		} else if !isHTTPS(u) && !isLoopback(u) {
-			problems = append(problems, "CELLA_AUTHORIZER_URL is http:// on a host other than loopback; a decision and the bearer that authorises it do not travel in the clear")
+			problems = append(problems, "CELLA_AUTHORIZER_URL is http:// on a host other than loopback; a decision and the bearer that authorizes it do not travel in the clear")
 		}
 		if i.AuthorizerToken == "" {
 			problems = append(problems, "CELLA_AUTHORIZER_TOKEN is unset while CELLA_AUTHORIZER_URL is set; the endpoint requires a bearer")

@@ -115,7 +115,7 @@ func (r *recorder) failed() bool {
 	return len(r.errors) > 0 || r.fatal != ""
 }
 
-// stubStore holds the contract's shape and none of its behaviour: every write
+// stubStore holds the contract's shape and none of its behavior: every write
 // is accepted and forgotten, every read is empty, and every call reports err.
 type stubStore struct{ err error }
 

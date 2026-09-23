@@ -64,7 +64,7 @@ type EgressHubOptions struct {
 	// Environment is the one environment this control plane drives. A
 	// gateway that names another is refused.
 	Environment string
-	// AckTimeout is how long Send waits for one acknowledgement.
+	// AckTimeout is how long Send waits for one acknowledgment.
 	AckTimeout time.Duration
 	// RecordsCap is how many records are kept per sandbox.
 	RecordsCap int
@@ -328,7 +328,7 @@ var ErrEgressEnvironment = errors.New("the key names another environment")
 
 // ServeGateway runs one gateway's stream: the hello it opens with, the
 // snapshot that makes it whole, then the puts and purges down and the
-// acknowledgements and records up until either side stops.
+// acknowledgments and records up until either side stops.
 func (h *EgressHub) ServeGateway(w http.ResponseWriter, r *http.Request, environment string) {
 	if environment != h.environment {
 		respondError(w, &manifest.Error{Code: "not_found", Detail: ErrEgressEnvironment.Error()})
@@ -415,7 +415,7 @@ func readHello(conn *websocket.Conn) (egress.Hello, error) {
 	return *f.Hello, nil
 }
 
-// readPump takes the acknowledgements and records the gateway sends up.
+// readPump takes the acknowledgments and records the gateway sends up.
 func (h *EgressHub) readPump(ctx context.Context, cancel context.CancelFunc, conn *websocket.Conn, c *gatewayConn) {
 	defer cancel()
 	defer c.close()

@@ -182,10 +182,10 @@ func narrowing(existing, obj *v1.Sandbox) error {
 // the manifest is still meaningful there: the gateway substitutes toward a
 // secret's scope whether or not the environment confines the workload.
 //
-// The warning is about what the environment could not honour, so it is
+// The warning is about what the environment could not honor, so it is
 // written only for a manifest that asked for something. A boundary of open
 // with no denied host asks for nothing to be kept out, and an environment
-// that keeps nothing out has honoured it.
+// that keeps nothing out has honored it.
 func egressCapability(obj *v1.Sandbox, env *v1.Environment) ([]string, error) {
 	e := obj.Spec.Network.Egress
 	modes := env.Status.Capabilities.Egress

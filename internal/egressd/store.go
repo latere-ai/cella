@@ -163,7 +163,7 @@ func (s *store) Principals() []string {
 
 // HasSecretFor reports whether this principal has something to substitute
 // toward this host, which is what decides between terminating the connection
-// and tunnelling it untouched.
+// and tunneling it untouched.
 func (s *store) HasSecretFor(principal, host string) bool {
 	s.mu.RLock()
 	registry := s.registry

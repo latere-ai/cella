@@ -222,7 +222,7 @@ consumer names a need; it is not in any phase.
 | the owner policy exists | 006 | a laptop and a small team need no authorizer, and "no authorizer" must still be a policy with tests |
 | identity is the shared libraries', not Cella's: the verifier is `latere.ai/x/pkg/authkit/jwt`, the envelope, client, cache, retry, owner-policy frame, stub and conformance suite are `latere.ai/x/pkg/authz`, and `cellad` adds its action vocabulary and its `resource` shapes and nothing else | 006 | one implementation of the wire across the sibling open cores, so an endpoint written for one answers another; the gate's `verifier` waiver is gone and `identity` passes with none |
 | Postgres optional | 010 | one binary from a laptop to a replicated service; the difference is one variable |
-| Apache-2.0 | LICENSE | a contract others implement wants the patent grant; the sibling open cores carry the same licence |
+| Apache-2.0 | LICENSE | a contract others implement wants the patent grant; the sibling open cores carry the same license |
 
 ### Open
 

@@ -520,7 +520,7 @@ func certPEM(t *testing.T, server *httptest.Server) string {
 // TestAHostWithACredentialIsTerminated is the routing decision the Secret
 // kind rests on: a destination the substitution engine holds an entry for is
 // handed to the engine's own proxy, which terminates it, and every other
-// destination is tunnelled by the gate. The entry is put in the engine
+// destination is tunneled by the gate. The entry is put in the engine
 // directly here, because the compiler carries no value yet.
 func TestAHostWithACredentialIsTerminated(t *testing.T) {
 	h := newHarness(t, "127.0.0.1:1", "", nil)
@@ -535,11 +535,11 @@ func TestAHostWithACredentialIsTerminated(t *testing.T) {
 		t.Fatalf("decide = %+v, want the host with a credential terminated", d)
 	}
 	if d := h.gate.decide("c", "plain.example.com", 443); d.terminate || d.verdict != egress.DecisionPassthrough {
-		t.Fatalf("decide = %+v, want the host without one tunnelled", d)
+		t.Fatalf("decide = %+v, want the host without one tunneled", d)
 	}
 	// The terminated connection goes to the engine's own proxy, which needs
 	// the connection itself; a writer that cannot be hijacked is refused
-	// there and never dialled here.
+	// there and never dialed here.
 	recorder := httptest.NewRecorder()
 	h.gate.ServeProxy(recorder, connectRequest(t, "api.example.com:443", "c"))
 	if recorder.Code != http.StatusInternalServerError {

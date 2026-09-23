@@ -328,7 +328,7 @@ func TestOneLogLinePerStreamAndNonePerFrame(t *testing.T) {
 
 // logSink is where a case reads the lines the handler wrote. The handler
 // writes from the request's own goroutine and a stream's line lands after the
-// client has seen the last frame, so the sink is synchronised and the case
+// client has seen the last frame, so the sink is synchronized and the case
 // waits for the line rather than racing it.
 type logSink struct {
 	mu sync.Mutex

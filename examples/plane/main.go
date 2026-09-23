@@ -8,7 +8,7 @@
 // short enough to read in one sitting and complete enough to run.
 //
 // What a platform supplies is marked in one place each: authenticate,
-// which turns a request into a subject, catalogue, which is the admission
+// which turns a request into a subject, catalog, which is the admission
 // step where plans and images are decided, and ceilings, which is what a
 // plan may not exceed. Everything else is the core's.
 package main
@@ -209,7 +209,7 @@ func (p *plane) delete(w http.ResponseWriter, r *http.Request) {
 
 // options are what this platform resolves every manifest under: who is
 // applying, what an absent field takes, what a plan may not exceed, and
-// the admission step that is this platform's catalogue.
+// the admission step that is this platform's catalog.
 func (p *plane) options(subject string) manifest.Options {
 	plan := ceilings(subject)
 	return manifest.Options{
@@ -218,7 +218,7 @@ func (p *plane) options(subject string) manifest.Options {
 		// No default image: this plane's one environment runs host
 		// processes and refuses an image at all. A plane whose environment
 		// runs images names Defaults.Image here, or lets the admission step
-		// below supply it, which is what an image catalogue is.
+		// below supply it, which is what an image catalog is.
 		Defaults: manifest.Defaults{
 			CPU: "1", Memory: "2Gi", Disk: "10Gi",
 			AutoStop: "15m", TTL: "8h", AutoDelete: "24h",
@@ -244,7 +244,7 @@ func ceilings(subject string) plan {
 	return plan{Sandboxes: 3, CPU: "2", Memory: "4Gi", TTL: "8h"}
 }
 
-// catalogue is this platform's admission step: the image catalogue, the
+// catalog is this platform's admission step: the image catalog, the
 // labels it stamps, and the translation of its own vocabulary into the
 // core's kinds. It runs inside Resolve, and what it returns is validated
 // again, so a step that writes a field the schema does not have is a
@@ -255,7 +255,7 @@ func (p *plane) catalogue(_ context.Context, in *v1.Sandbox, req manifest.AdmitR
 		out.Metadata.Labels = map[string]string{}
 	}
 	out.Metadata.Labels["plane.example.com/account"] = strings.ReplaceAll(req.Actor.Sub, "@", "-at-")
-	// The catalogue applies where the environment runs images. Where it runs
+	// The catalog applies where the environment runs images. Where it runs
 	// none, an image is refused by the contract itself and this platform has
 	// nothing to add.
 	if req.Environment == nil || req.Environment.Status.Isolation == v1.IsolationNone {
@@ -263,18 +263,18 @@ func (p *plane) catalogue(_ context.Context, in *v1.Sandbox, req manifest.AdmitR
 	}
 	// A step that cannot decide says so with the code. A plain error is a
 	// refusal, which is the safe default and the wrong answer when the
-	// catalogue itself is the thing that is down.
+	// catalog itself is the thing that is down.
 	if p.cfg.Image == "" {
 		return nil, nil, &manifest.Error{
 			Code:   manifest.CodeAdmissionUnavailable,
-			Detail: "this plane has no image catalogue configured",
+			Detail: "this plane has no image catalog configured",
 		}
 	}
 	if out.Spec.Image == "" || out.Spec.Image == "default" {
 		out.Spec.Image = p.cfg.Image
 	}
 	if !strings.HasPrefix(out.Spec.Image, "registry.example/") {
-		return nil, nil, errors.New("the image is not in this platform's catalogue")
+		return nil, nil, errors.New("the image is not in this platform's catalog")
 	}
 	return &out, nil, nil
 }

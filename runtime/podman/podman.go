@@ -208,7 +208,7 @@ func recordVolume(id string, n uint64) string {
 	return "cella-rec-" + id + "-" + strconv.FormatUint(n, 10)
 }
 
-// lock serialises the read, write and sweep of one sandbox's record
+// lock serializes the read, write and sweep of one sandbox's record
 // generations, so two mutations of one sandbox cannot both write generation
 // n+1. Mutations of different sandboxes do not wait for each other.
 func (d *Driver) lock(id string) func() {

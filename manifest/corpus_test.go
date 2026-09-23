@@ -130,7 +130,7 @@ func corpusOptions() Options {
 
 // corpusResolved is an accepted entry's golden: the resolved object, the
 // secrets it mounts as the lookup answered them, and the warnings the
-// environment returned, under names a reader of the file recognises.
+// environment returned, under names a reader of the file recognizes.
 type corpusResolved struct {
 	Sandbox  v1.Sandbox  `json:"sandbox"`
 	Secrets  []v1.Secret `json:"secrets,omitempty"`

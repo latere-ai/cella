@@ -39,13 +39,13 @@ overlay `deploy/examples/kind-stubs`, and the two continuous integration
 jobs that walk the install document against that stack. The upstream stub,
 the native, postgres, local and worker tiers, `make run-worker` and the
 Cilium half of the kind tier are not built; each waits on the spec whose
-behaviour it exercises.
+behavior it exercises.
 
 ## Design
 
 ### The stubs
 
-| Stub | Serves | Behaviour |
+| Stub | Serves | Behavior |
 |---|---|---|
 | issuer | `/.well-known/openid-configuration`, `/jwks`, `POST /mint {sub, aud?, exp?}` | a real OIDC issuer over an RS256 key set; mints any subject asked, `sandbox:...` included, since refusing a reserved prefix is `cellad`'s job and the suite needs the token to prove it; `-alg es256` adds a second key and signs with it, for the ES256 acceptance case and the start-up key-set check of [[006-identity]]; a token signed with an algorithm outside `RS256` and `ES256` is built by the verifier test itself, not offered by this stub |
 | authorizer | the contract of [[006-identity]], the stub `latere.ai/x/pkg/authz` ships | allow everything except the probe id `sbx_00000000000000000000000000`, always denied; `X-Stub-Deny: <action>` on the request or `-deny <action>` refuses; `-limits <json>`, `-filter <json>`, and `-ttl <seconds>` are returned on every allow; `-fail-mode timeout|malformed|status:<code>|no-allow` produces each failure 006 names, and `-fail-mode conn-drop` closes the connection before a response line so the one retry is exercised; records every request for the suite to read at `GET /requests`; the modes are start-up flags, so a tier that drives them at run time serves the suite's control route in front of the stub and a control endpoint in the binary is this spec's to add ([[052-conformance-suite]]) |
@@ -69,7 +69,7 @@ Ports derive from the checkout's directory name, so two clones run
 side by side; state lives under `out/run/`; `make run-down` stops
 everything and `make clean` removes the state. The bootstrap, in this
 order, because the gateway needs a key only a running control plane
-can mint and the first create needs the gateway's acknowledgement:
+can mint and the first create needs the gateway's acknowledgment:
 
 1. Build `cellad`, `cella-stubs`, and `cella` when its package exists.
 2. Generate once under `out/run/`: `CELLA_TOKEN_KEY` with `openssl
@@ -167,7 +167,7 @@ conformance tier runs ([[015-conformance-suite]]).
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| Each stub serves its contract and every flag in its row is driven | `TestTheIssuerIsOneTheVerifierAccepts`, `TestTheAuthorizerPassesTheSharedConformanceSuite`, `TestTheAdmissionEndpointAnswersTheEnvelope`, `TestTheSinkVerifiesWhatTheDelivererSigns` and their neighbours in `internal/stubs` | passing for the four roles of `cella-stubs` (049); the upstream stub waits on the egress tiers |
+| Each stub serves its contract and every flag in its row is driven | `TestTheIssuerIsOneTheVerifierAccepts`, `TestTheAuthorizerPassesTheSharedConformanceSuite`, `TestTheAdmissionEndpointAnswersTheEnvelope`, `TestTheSinkVerifiesWhatTheDelivererSigns` and their neighbors in `internal/stubs` | passing for the four roles of `cella-stubs` (049); the upstream stub waits on the egress tiers |
 | The sink refuses a body whose signature does not verify, a stale `t`, and accepts either secret | `TestTheSinkRefusesWhatItCannotVerify`, `TestTheSinkVerifiesWhatTheDelivererSigns` | passing (049) |
 | `make run` on a clean clone completes the bootstrap in order, the environment is `Ready` with the gateway connected, and the printed `curl` apply of the minimal manifest succeeds; `make run-down` stops everything; two clones run side by side | `TestRunBootstrap` and `TestRunConformance` in `test/run`, behind the `e2e` tag | passing for the stubs and `cellad serve` (049): the bootstrap needs no issuer, mints a token and creates a sandbox with it, and an interrupt stops both. The gateway leg, `run-down` and the side-by-side run wait on the egress tier; a second clone runs today with `CELLA_RUN_PORT` |
 | `make run-worker` registers a second environment and a sandbox applied to it runs on the worker | `TestMakeRunWorker` | not built |

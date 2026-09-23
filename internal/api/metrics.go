@@ -193,7 +193,7 @@ func (h *handler) handle(pattern string, fn http.HandlerFunc) { h.route(pattern,
 
 // stream mounts one route whose content type is the route's own: an archive,
 // a file body, a frame, a log, a framed stream or a socket. Nothing about
-// those is negotiable, so an Accept naming the route's own type is honoured
+// those is negotiable, so an Accept naming the route's own type is honored
 // rather than refused.
 func (h *handler) stream(pattern string, fn http.HandlerFunc) { h.route(pattern, fn, false) }
 

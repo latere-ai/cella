@@ -172,7 +172,7 @@ func case004CapabilityGates(ctx context.Context, e *Env) error {
 				"capability_unsupported")
 		case e.caps[g.capability] && missing:
 			// A declared capability whose route is not there is a declaration
-			// the server does not honour, which the gate must not excuse.
+			// the server does not honor, which the gate must not excuse.
 			return x.disagree("the route of "+g.capability+", which this environment declares",
 				fmt.Sprintf("status %d", x.Status))
 		case !e.caps[g.capability] && !refused:

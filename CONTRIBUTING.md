@@ -16,7 +16,7 @@ make       # the quality gate
 `make` needs only the Go toolchain and git. Everything it pins comes from
 public modules, so it runs the same on your machine as in CI.
 
-Install the hooks once with `make hooks`. They run formatting and licence
+Install the hooks once with `make hooks`. They run formatting and license
 checks before a commit and the linter before a push, so you see a finding
 before CI does.
 
@@ -38,7 +38,7 @@ reasoning attached.
 linter, modernization, known vulnerabilities, the suite with and without
 the race detector, per-package coverage at 90% or more, the suite with
 only the toolchain on `PATH`, the suite against an empty temporary
-directory, the licence notice, the dependency allow list, and the spec
+directory, the license notice, the dependency allow list, and the spec
 tree. `go tool lateregate list` names the gates and
 `go tool lateregate <name>` runs one.
 

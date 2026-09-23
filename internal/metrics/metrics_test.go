@@ -105,7 +105,7 @@ func TestScrapeCarriesTheRegisteredTable(t *testing.T) {
 	}
 }
 
-// TestSeriesExistAtStart is design 017's rule for a labelled histogram: a
+// TestSeriesExistAtStart is design 017's rule for a labeled histogram: a
 // series exists before its first observation, so a rate over a quiet
 // installation is zero and not absent.
 func TestSeriesExistAtStart(t *testing.T) {

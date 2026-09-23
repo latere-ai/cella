@@ -389,7 +389,7 @@ func TestAdmissionOutputIsValidated(t *testing.T) {
 			return nil, nil, nil
 		}},
 		{"refusal", func(context.Context, *v1.Sandbox, AdmitRequest) (*v1.Sandbox, []string, error) {
-			return nil, nil, errors.New("this image is not in the catalogue")
+			return nil, nil, errors.New("this image is not in the catalog")
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -672,7 +672,7 @@ func TestAdmissionErrorsKeepTheirCode(t *testing.T) {
 
 // TestImageIsRequiredAfterAdmission is the rule of spec 047: an environment
 // that runs images requires one, and the requirement is checked after the
-// admission step, so an image catalogue may supply it.
+// admission step, so an image catalog may supply it.
 func TestImageIsRequiredAfterAdmission(t *testing.T) {
 	bare := Options{Lookup: FixedEnvironment(container("default"))}
 	if got := refusal(t, sandbox(), bare); got.Code != "missing_field" || got.Path != "spec.image" {
@@ -685,7 +685,7 @@ func TestImageIsRequiredAfterAdmission(t *testing.T) {
 		t.Fatalf("image = %q, want the operator's default", got.Spec.Image)
 	}
 	// An admission step supplies it where the operator's default is unset,
-	// which is the image catalogue of spec 007.
+	// which is the image catalog of spec 007.
 	catalogue := bare
 	catalogue.Admit = func(_ context.Context, in *v1.Sandbox, _ AdmitRequest) (*v1.Sandbox, []string, error) {
 		out := *in
@@ -695,7 +695,7 @@ func TestImageIsRequiredAfterAdmission(t *testing.T) {
 		return &out, nil, nil
 	}
 	if got := resolve(t, sandbox(), catalogue).Sandbox; !strings.HasPrefix(got.Spec.Image, "registry.example/base@sha256:") {
-		t.Fatalf("image = %q, want the catalogue's pinned reference", got.Spec.Image)
+		t.Fatalf("image = %q, want the catalog's pinned reference", got.Spec.Image)
 	}
 	// A caller's image wins over the operator's default, and an environment
 	// that runs none refuses one whoever named it.

@@ -83,7 +83,7 @@ func sinkAt(t *testing.T, status int, secrets ...string) (string, *bool) {
 	return s.URL, verified
 }
 
-// TestSinkReadsEachAnswer is spec 009's acknowledgement rule as the line
+// TestSinkReadsEachAnswer is spec 009's acknowledgment rule as the line
 // reads it: the endpoint answered, and the two ends share a secret.
 func TestSinkReadsEachAnswer(t *testing.T) {
 	for _, tc := range []struct {
@@ -92,7 +92,7 @@ func TestSinkReadsEachAnswer(t *testing.T) {
 		want   State
 		detail string
 	}{
-		{"an acknowledgement", http.StatusNoContent, Ok, "acknowledged"},
+		{"an acknowledgment", http.StatusNoContent, Ok, "acknowledged"},
 		{"a permanent drop", http.StatusBadRequest, Ok, "verified the signature"},
 		{"a refused signature", http.StatusUnauthorized, Failed, "CELLA_EVENTS_SECRET"},
 		{"an endpoint that is down", http.StatusServiceUnavailable, Failed, "503"},

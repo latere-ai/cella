@@ -130,7 +130,7 @@ func TestAttachCloseKillsTheProcessGroup(t *testing.T) {
 }
 
 // TestAttachResizeReachesTheProcess proves the window is not only recorded:
-// the process inside is signalled and reads the new size.
+// the process inside is signaled and reads the new size.
 func TestAttachResizeReachesTheProcess(t *testing.T) {
 	_, s := attached(t, driver.AttachRequest{
 		Command: []string{"sh", "-c", `trap 'stty size' WINCH; printf 'READY\n'; while true; do sleep 0.1; done`},

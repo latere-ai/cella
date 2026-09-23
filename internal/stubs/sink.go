@@ -163,7 +163,7 @@ func (s *sink) verify(header string, body []byte) error {
 }
 
 // owed reports the status a delivery is answered with instead of the
-// acknowledgement: the one-shot status first, then the opening run of
+// acknowledgment: the one-shot status first, then the opening run of
 // failures.
 func (s *sink) owed() (int, bool) {
 	s.mu.Lock()

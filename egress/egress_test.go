@@ -282,7 +282,7 @@ func TestMintPlaceholderIsPerSandbox(t *testing.T) {
 		t.Fatal("two sandboxes mounting one secret got one placeholder")
 	}
 	if !IsPlaceholder(first) || IsPlaceholder("ghp_value") {
-		t.Fatal("the placeholder shape is not recognised")
+		t.Fatal("the placeholder shape is not recognized")
 	}
 }
 

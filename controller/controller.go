@@ -433,7 +433,7 @@ func (c *Controller) create(ctx context.Context, obj v1.Sandbox, owner string, m
 	if owner == "" {
 		return obj, errors.New("sandbox owner is required")
 	}
-	// The resolver's warnings say what this environment could not honour. They
+	// The resolver's warnings say what this environment could not honor. They
 	// are the caller's answer and outlive the status the controller writes.
 	warnings := slices.Clone(obj.Status.Warnings)
 	lifecycle, err := c.lifecycleFor(obj)

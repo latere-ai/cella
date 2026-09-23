@@ -263,7 +263,7 @@ func TestTheEgressSubcommandConnects(t *testing.T) {
 		t.Fatalf("the role did not read its environment out of the key: %q", out.String())
 	}
 	// A boundary that needs a gateway is the assertion: the create waits
-	// for an acknowledgement and fails without one.
+	// for an acknowledgment and fails without one.
 	sandbox := plane.create(t, `{"mode":"allowlist","allowedHosts":["upstream.example.com"]}`)
 	if sandbox == "" {
 		t.Fatal("the create returned no sandbox")

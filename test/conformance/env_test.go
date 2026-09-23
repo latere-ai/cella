@@ -36,7 +36,7 @@ func (f *fake) full() Config {
 }
 
 // TestSuiteCatchesAFalseCapability: an environment that declares a
-// capability its server does not honour fails the capability group and the
+// capability its server does not honor fails the capability group and the
 // cases that capability gates, rather than being excused by the gate.
 func TestSuiteCatchesAFalseCapability(t *testing.T) {
 	f := newFake(t)
@@ -47,7 +47,7 @@ func TestSuiteCatchesAFalseCapability(t *testing.T) {
 	}
 	for _, name := range []string{"case004CapabilityGates", "case008ExecSocket", "case008AttachSocket", "case008Dial"} {
 		if !slices.Contains(report.Failed, name) {
-			t.Errorf("%s did not fail although the environment declares a capability the server does not honour", name)
+			t.Errorf("%s did not fail although the environment declares a capability the server does not honor", name)
 		}
 		if slices.Contains(report.Skipped, name) {
 			t.Errorf("%s was excused as a skip", name)

@@ -234,7 +234,7 @@ stored status into every response.
 | `volumes[]` | `{name, volume, attached}` per mount |
 | `ports[]` | `{name, port, state, url}`; `state` is `listening` or `closed` ([[023-computer-use-operations]]); `url` set for `expose: public` |
 | `createdAt`, `startedAt`, `stoppedAt`, `lastActivityAt`, `expiresAt` | RFC 3339; `expiresAt` is `createdAt` plus `ttl`, written by the controller; absent for `never` |
-| `warnings` | sentences in the user register about what the environment could not honour |
+| `warnings` | sentences in the user register about what the environment could not honor |
 
 A manifest that carries `status` on apply is accepted and the field
 ignored, so a caller may `GET`, edit, and `PUT` without stripping it.
@@ -341,7 +341,7 @@ The stages, in order, each one total before the next begins:
    folded together ([[007-admission]]).
    Stage 3 closes with the image rule, which is why it is here and not
    at stage 1: `spec.image` is required where the environment runs images
-   and refused where it runs none, and an image catalogue is exactly the
+   and refused where it runs none, and an image catalog is exactly the
    admission step that supplies one ([[007-admission]]). A manifest that
    still names none after `Defaults.Image` and the admission step is
    `missing_field`; one that names one on an environment of the `none`
@@ -448,7 +448,7 @@ no budget left at create; `Resolve` never emits it.
 ### Schema evolution
 
 - Within `cella.latere.ai/v1beta1`, a change adds an optional field with a
-  default that preserves the previous behaviour, or adds an enum value.
+  default that preserves the previous behavior, or adds an enum value.
   A field never changes type or meaning, and is never removed.
 - A manifest accepted by stages 1 and 2 of one `v1` build is accepted
   by every later `v1` build and resolves to the same object, defaults

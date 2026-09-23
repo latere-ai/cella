@@ -108,7 +108,7 @@ has to work, and a route whose capability is not declared has to answer *the
 environment cannot provide this* rather than a surprise.
 
 A capability you do not pass is a group that skips. Declaring one the server
-does not honour is a failure, which is the point: the declaration is what a
+does not honor is a failure, which is the point: the declaration is what a
 caller reads before it writes a manifest.
 
 ## Run it from GitHub Actions

@@ -46,15 +46,15 @@ type Options struct {
 	// where the store could not answer. A scrape publishes no series rather
 	// than a zero, because a zero is what an alert reads as an empty queue.
 	Pending func() (int, bool)
-	// Queues is how many sandboxes wait in each queue, labelled environment
+	// Queues is how many sandboxes wait in each queue, labeled environment
 	// and queue, and Capacity each declared quantity beside its sum in use,
-	// labelled environment, resource and kind. Both read the controller's
+	// labeled environment, resource and kind. Both read the controller's
 	// desired state.
 	Queues   func() []Series
 	Capacity func() []Series
 }
 
-// Series is one labelled value a pull gauge reads from an index its caller
+// Series is one labeled value a pull gauge reads from an index its caller
 // holds.
 type Series struct {
 	Labels map[string]string
@@ -100,7 +100,7 @@ type Registry struct {
 }
 
 // New builds the registry: every instrument of the table whose owning spec
-// has landed, with each labelled histogram initialised over its vocabulary so
+// has landed, with each labeled histogram initialized over its vocabulary so
 // a series exists before the first observation.
 func New(o Options) *Registry {
 	reg := pkgmetrics.NewRegistry()
@@ -340,7 +340,7 @@ func (r *Registry) GatewaySnapshot() { r.snapshots.Inc(nil) }
 // What the controller records (design 005, design 020)
 // ---------------------------------------------------------------------------
 
-// SandboxCreated observes one create, labelled by whether it adopted a
+// SandboxCreated observes one create, labeled by whether it adopted a
 // prewarmed entry. The driver label is the registry's, not the caller's.
 func (r *Registry) SandboxCreated(pool string, d time.Duration) {
 	r.createDuration.Observe(map[string]string{"driver": r.driver, "pool": pool}, d.Seconds())

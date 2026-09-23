@@ -58,7 +58,7 @@ type harness struct {
 }
 
 // newHarness builds a driver whose Pods come up ready, whose access reviews
-// pass, and whose exec stream is recorded rather than dialled.
+// pass, and whose exec stream is recorded rather than dialed.
 func newHarness(t *testing.T, objects ...kruntime.Object) *harness {
 	t.Helper()
 	return newHarnessWith(t, nil, objects...)

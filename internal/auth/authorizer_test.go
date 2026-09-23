@@ -349,7 +349,7 @@ func TestAuthorizerRequestShapes(t *testing.T) {
 				t.Errorf("resource.kind = %q, want %q", req.Resource.Kind, action.Kind)
 			}
 			if req.Subject != alice || req.Issuer != issuerURL || req.Sub != "alice" {
-				t.Errorf("the subject travelled as %q with %q and %q apart", req.Subject, req.Issuer, req.Sub)
+				t.Errorf("the subject traveled as %q with %q and %q apart", req.Subject, req.Issuer, req.Sub)
 			}
 			if req.Request != info {
 				t.Errorf("the request member is %+v, want %+v", req.Request, info)

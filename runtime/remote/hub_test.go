@@ -130,7 +130,7 @@ func TestHubRefusesWhenTheRowCannotBeWritten(t *testing.T) {
 	if err = s.driver.Start(t.Context(), "sbx_1"); err == nil || !contains(err.Error(), "the database is gone") {
 		t.Errorf("an operation whose row could not be written answered %v", err)
 	}
-	// An acknowledgement that cannot be written is logged and never returned:
+	// An acknowledgment that cannot be written is logged and never returned:
 	// the operation the caller asked for has already happened.
 	queue.enqueueErr, queue.ackErr = nil, errors.New("the database is gone")
 	ref, err := s.driver.Create(t.Context(), driver.CreateSpec{

@@ -85,7 +85,7 @@ func startAdmission(t *testing.T) *admissionEndpoint {
 
 // decide is the policy: the plan's ceiling over the resolved figures, the
 // plan's defaults into the absent ones, the tenant's egress floor, and the
-// two annotations a catalogue stamps.
+// two annotations a catalog stamps.
 func decide(in *admissionEnvelope) map[string]any {
 	spec, ok := in.Manifest["spec"].(map[string]any)
 	if !ok {

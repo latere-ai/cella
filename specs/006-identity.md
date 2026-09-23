@@ -235,7 +235,7 @@ every request. A request's bearer is accepted when it is a JWS signed
 `nbf` if present is past, and `iat` is present and less than 24 hours
 old (amended 2026-09-17). Every claim of the verified token is handed
 to the authorizer verbatim in `claims`, and none is interpreted by the
-control plane: an issuer's organisation, role, or group claims mean
+control plane: an issuer's organization, role, or group claims mean
 something to the authorizer that reads them and nothing to `cellad`.
 An `http://` issuer is refused unless it is on a
 loopback address or in `CELLA_OIDC_INSECURE_ISSUERS`.
@@ -477,6 +477,6 @@ the HTTP envelope of 401 and 403 ([[008-api]]); the revocation store
 | A deny on an own action is `forbidden`; a deny through `Lookup` is `not_found` and identical to a missing object | `TestDenyMapping` | built: the two codes hold at the guard; the 403 and the 404 they render as are [[008-api]]'s |
 | The cache serves a second identical decision without a call, expires an allow at the answer's `ttl` and at the `600s` cap, a deny at `5s`, never caches unavailability, and keys `create` and `list` without a resource id | `TestDecisionCache` | built |
 | The probe id is denied by the stub authorizer and by the owner policy for every subject and action, and `cellad check` reports an authorizer that allows it | `TestProbeIdIsAlwaysDenied` | built in part: the stub and the owner policy deny it for every subject and action, and the client reads an allow as a misconfiguration; the `cellad check` subcommand is [[014-release-and-installation]]'s |
-| `limits` override the rate limit, the count ceiling, and the priority cap; `filter` narrows a list | `TestLimitsAndFilterReachTheCaller`, `TestCountCeilingCountsEveryDesiredSandbox` | partial: `max_sandboxes` is honoured at create as the count [[007-admission]] defines, and the filter narrows a list; there is still no rate limit ([[008-api]]) and no `Resolve` option carrying `max_priority` ([[003-manifest-contract]]) to override |
+| `limits` override the rate limit, the count ceiling, and the priority cap; `filter` narrows a list | `TestLimitsAndFilterReachTheCaller`, `TestCountCeilingCountsEveryDesiredSandbox` | partial: `max_sandboxes` is honored at create as the count [[007-admission]] defines, and the filter narrows a list; there is still no rate limit ([[008-api]]) and no `Resolve` option carrying `max_priority` ([[003-manifest-contract]]) to override |
 | The owner policy's rules hold for every kind and action, including that only an admin creates an environment and only the default environment is usable by a non-admin | `TestOwnerPolicy`, table-driven | built |
 | A sandbox's token reads and execs itself, reads its descendants, cannot read a sibling or delete itself, and cannot mount a secret its parent did not | `TestWorkloadIsLeastPrivileged`; `TestWorkloadReachesItsOwnSandbox` over the served routes | built, and held over the API as well as over the policy ([[045-workload-tokens]]); a sandbox creating a child is [[040-mesh-and-spawn]]'s `TestSpawnOverTheAPI`, and the secret a child's parent mounts is not reachable through the API yet |

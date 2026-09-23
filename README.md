@@ -152,7 +152,7 @@ at its issuer rather than holding one token for a month. Nothing else about the 
 the issuer and the `sub` claim joined, `https://login.example.com|alice`,
 so two issuers that agree on a `sub` are two different subjects, and
 every claim of the token reaches your authorizer exactly as it arrived.
-An organisation, role, or group claim means whatever your authorizer
+An organization, role, or group claim means whatever your authorizer
 decides it means, and nothing to `cellad`.
 
 **What.** `CELLA_AUTHORIZER_URL` points at an endpoint you write.

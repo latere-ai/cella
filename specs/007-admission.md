@@ -99,8 +99,8 @@ the operator's own second check over whatever the webhook returned. Every
 
 `spec.image` is required by [[003-manifest-contract]]'s field table, and
 the requirement is checked after stage 3 rather than at stage 1: an image
-catalogue is exactly the webhook that supplies one, and a check before
-admission would refuse the manifest the catalogue was going to complete.
+catalog is exactly the webhook that supplies one, and a check before
+admission would refuse the manifest the catalog was going to complete.
 The rule is keyed on the environment's isolation class.
 
 | Environment isolation | `spec.image` absent | `spec.image` present |

@@ -41,7 +41,7 @@ func TestDeclarations(t *testing.T) {
 	// Every capability with an optional interface behind it is undeclared,
 	// because none of them is implemented here.
 	if got.Attach || got.Dial || got.Display || got.Input || got.Volumes || got.Snapshots || got.Resize || got.Ingress || len(got.Egress) > 0 {
-		t.Fatalf("a capability is declared without its behaviour: %+v", got)
+		t.Fatalf("a capability is declared without its behavior: %+v", got)
 	}
 }
 

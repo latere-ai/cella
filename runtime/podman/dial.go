@@ -87,7 +87,7 @@ func (d *Driver) Dial(ctx context.Context, id string, port int) (net.Conn, error
 	var dialer net.Dialer
 	conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(host, bindings[0].HostPort))
 	if err != nil {
-		return nil, fmt.Errorf("podman: dialling port %d of %s: %w", port, id, err)
+		return nil, fmt.Errorf("podman: dialing port %d of %s: %w", port, id, err)
 	}
 	return conn, nil
 }

@@ -126,7 +126,7 @@ func TestPodmanDial(t *testing.T) {
 }
 
 // TestPublishedPortsHostDefault: an engine that reports the wildcard or no
-// host address for a binding is dialled on loopback, where it was asked to
+// host address for a binding is dialed on loopback, where it was asked to
 // publish.
 func TestPublishedPortsHostDefault(t *testing.T) {
 	f := newFake(t)
@@ -149,7 +149,7 @@ func TestPublishedPortsHostDefault(t *testing.T) {
 	go echoAll(ln)
 	conn, err := d.Dial(t.Context(), "sbx_wild", 8080)
 	if err != nil {
-		t.Fatalf("a wildcard binding was not dialled on loopback: %v", err)
+		t.Fatalf("a wildcard binding was not dialed on loopback: %v", err)
 	}
 	_ = conn.Close()
 }

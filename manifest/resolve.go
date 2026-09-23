@@ -16,7 +16,7 @@ import (
 )
 
 // The sentences an environment that confines nothing returns in
-// status.warnings instead of refusing a field it cannot honour.
+// status.warnings instead of refusing a field it cannot honor.
 const (
 	WarningResourcesNotEnforced = "The native environment does not limit cpu, memory or disk; the requested resources are recorded and not enforced."
 	WarningUserNotApplied       = "The native environment runs the workload as the server's own user; spec.user is not applied."
@@ -132,7 +132,7 @@ type Options struct {
 }
 
 // Resolved is a fully defaulted manifest and what the environment could not
-// honour.
+// honor.
 type Resolved struct {
 	Sandbox v1.Sandbox // spec and metadata fully resolved; status empty but warnings
 	// Secrets are the objects spec.secrets names, in the manifest's order

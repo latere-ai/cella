@@ -60,7 +60,7 @@ name, or a path. `route` is the `http.ServeMux` pattern, taken from a
 context value a middleware behind the mux fills, since the OTel route
 template runs before the mux matches. Gauges are scrape-time callbacks
 over the store's cached indexes, never a driver `List`. Every
-histogram names its bounds; labelled histograms are initialised over
+histogram names its bounds; labeled histograms are initialized over
 their closed vocabularies at start so a series exists before its first
 observation.
 
@@ -170,7 +170,7 @@ Dashboards; a platform builds those from the same metrics. The
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| The registry holds exactly the metrics, labels, and buckets in the table, and every labelled histogram has a series at start | `TestMetricsTable` reading this file through `runtime.Caller` | built for the twenty-four rows whose owning spec has landed, as `TestMetricsTable`, `TestAwaitingRowsAreRegisteredByNobody` and `TestSeriesExistAtStart` ([[053-observability]]), `cella_queue_depth` and `cella_capacity` among them ([[057-scheduling-queue]]) and `cella_preemptions_total` ([[058-preemption]]); the five rows of 008's limiter, 020's sets and 021 are declared in the same table and registered by nothing |
+| The registry holds exactly the metrics, labels, and buckets in the table, and every labeled histogram has a series at start | `TestMetricsTable` reading this file through `runtime.Caller` | built for the twenty-four rows whose owning spec has landed, as `TestMetricsTable`, `TestAwaitingRowsAreRegisteredByNobody` and `TestSeriesExistAtStart` ([[053-observability]]), `cella_queue_depth` and `cella_capacity` among them ([[057-scheduling-queue]]) and `cella_preemptions_total` ([[058-preemption]]); the five rows of 008's limiter, 020's sets and 021 are declared in the same table and registered by nothing |
 | No label value is a sandbox id, a subject, a name, or a path over a full e2e run | `TestLabelValuesAreBounded`, `TestObservabilityEndToEnd` | built as `TestLabelValuesAreBounded` and the scrape `TestObservabilityEndToEnd` reads after a create, two execs, a stop and a delete ([[053-observability]]) |
 | The worker and gateway roles open no metrics listener and their telemetry arrives over OTLP | `TestEgressRoleServesNoScrapeSurface` and `TestTelemetryExportsOverOTLP` with an in-memory collector | built for the gateway as `TestEgressRoleServesNoScrapeSurface` and `TestTelemetryExportsOverOTLP` ([[053-observability]]); the worker role lands with [[021-data-plane-workers]] and takes the same seam |
 | A request produces one parent span with the route pattern, the request id and trace id as attributes, and the four child spans under stub webhooks; a remote driver call's child span is continued on the worker | `TestRequestSpans`, `TestTheAPIDrawsAServerSpan` | the parent span, its name and its attributes are built as `TestRequestSpans` and `TestTheAPIDrawsAServerSpan`, which configures a stub authorizer and reads its client span back off the collector; the parent link is in the span context and is not decoded, and the driver and store children are not drawn ([[053-observability]]). The seam has nothing to cross until [[021-data-plane-workers]] |

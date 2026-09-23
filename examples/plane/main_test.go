@@ -186,7 +186,7 @@ func TestThePlaneServesItsOwnAPI(t *testing.T) {
 }
 
 // TestThePlanesOwnRulesRefuse holds the three places a platform fills to
-// their answers: the schema's refusal, the catalogue's, and the plan's.
+// their answers: the schema's refusal, the catalog's, and the plan's.
 func TestThePlanesOwnRulesRefuse(t *testing.T) {
 	base := start(t, config{Image: "registry.example/base:1"})
 	for _, tc := range []struct {
@@ -237,7 +237,7 @@ func TestThePlanesOwnRulesRefuse(t *testing.T) {
 }
 
 // TestTheCatalogueIsTheAdmissionStep drives the seam a platform fills
-// directly, on an environment that runs images: the catalogue supplies what
+// directly, on an environment that runs images: the catalog supplies what
 // a caller left out, refuses what is not in it, and says when it cannot
 // decide at all, which is a 503 and never a no.
 func TestTheCatalogueIsTheAdmissionStep(t *testing.T) {
@@ -249,28 +249,28 @@ func TestTheCatalogueIsTheAdmissionStep(t *testing.T) {
 	p := &plane{cfg: config{Image: "registry.example/base:1"}}
 	out, _, err := p.catalogue(t.Context(), &v1.Sandbox{}, request)
 	if err != nil {
-		t.Fatalf("the catalogue refused a manifest that names no image: %v", err)
+		t.Fatalf("the catalog refused a manifest that names no image: %v", err)
 	}
 	if out.Spec.Image != "registry.example/base:1" {
-		t.Fatalf("the catalogue supplied %q", out.Spec.Image)
+		t.Fatalf("the catalog supplied %q", out.Spec.Image)
 	}
 	elsewhere := &v1.Sandbox{Spec: v1.SandboxSpec{Image: "docker.io/library/alpine"}}
 	if _, _, err = p.catalogue(t.Context(), elsewhere, request); err == nil {
-		t.Fatal("the catalogue took an image that is not in it")
+		t.Fatal("the catalog took an image that is not in it")
 	} else if code := (&manifest.Error{}); errors.As(err, &code) {
 		t.Fatalf("a policy refusal carried the code %s, and a plain error is what the core reads as a refusal", code.Code)
 	}
 	var known *manifest.Error
 	_, _, err = (&plane{}).catalogue(t.Context(), &v1.Sandbox{}, request)
 	if !errors.As(err, &known) || known.Code != manifest.CodeAdmissionUnavailable {
-		t.Fatalf("a plane with no catalogue answered %v, want no decision at all", err)
+		t.Fatalf("a plane with no catalog answered %v, want no decision at all", err)
 	}
-	// Where the environment runs no image, the catalogue has nothing to say
+	// Where the environment runs no image, the catalog has nothing to say
 	// and the contract's own rule is what refuses one.
 	native := manifest.NativeEnvironment("default")
 	out, _, err = p.catalogue(t.Context(), &v1.Sandbox{}, manifest.AdmitRequest{Environment: &native})
 	if err != nil || out.Spec.Image != "" {
-		t.Fatalf("the catalogue wrote %q on an environment that runs none: %v", out.Spec.Image, err)
+		t.Fatalf("the catalog wrote %q on an environment that runs none: %v", out.Spec.Image, err)
 	}
 }
 

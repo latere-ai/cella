@@ -35,7 +35,7 @@ func (e *InputFailure) Unwrap() error { return e.Err }
 
 // Runner runs one command inside a sandbox to its end and writes what it
 // printed to stdout. A command that exits nonzero is an error. Each driver
-// supplies its own, so the desktop's behaviour lives here once and the way
+// supplies its own, so the desktop's behavior lives here once and the way
 // into the sandbox stays the driver's.
 type Runner func(ctx context.Context, argv []string, stdout io.Writer) error
 

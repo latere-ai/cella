@@ -71,7 +71,7 @@ type decision struct {
 	verdict   string
 	reason    string
 	// terminate says the destination has something to substitute, so the
-	// connection is decrypted rather than tunnelled.
+	// connection is decrypted rather than tunneled.
 	terminate bool
 }
 

@@ -76,7 +76,7 @@ const (
 	// DecisionUnknown is a caller the gateway holds no map for.
 	DecisionUnknown = "unknown"
 	// DecisionPassthrough is a host in scope with no credential bound to it,
-	// tunnelled without termination, so the gateway reads none of it.
+	// tunneled without termination, so the gateway reads none of it.
 	DecisionPassthrough = "passthrough"
 )
 
@@ -333,7 +333,7 @@ func (m Map) Admits(host string) bool {
 }
 
 // EntryFor is the injection half: which mounted secret, if any, substitutes
-// toward this host and port. A host with no entry is tunnelled untouched on
+// toward this host and port. A host with no entry is tunneled untouched on
 // the proxy door, so a sandbox's own pinned trust keeps working there.
 func (m Map) EntryFor(host string, port int) *Entry {
 	for i := range m.Entries {
@@ -378,7 +378,7 @@ func MintCredential() (string, error) {
 
 // MintPlaceholder returns a fresh opaque token for one sandbox's copy of one
 // secret. It is the second defect the reference designs had: a placeholder
-// derived from the secret's name is a value a neighbouring sandbox can guess
+// derived from the secret's name is a value a neighboring sandbox can guess
 // and send, so every placeholder is minted per sandbox from 160 bits.
 func MintPlaceholder() string { return placeholder.Mint() }
 

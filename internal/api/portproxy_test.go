@@ -285,7 +285,7 @@ func TestPortProxy(t *testing.T) {
 			t.Errorf("a stopped sandbox answered %d %s", res.StatusCode, code)
 		}
 		if len(d.asked()) != before {
-			t.Error("a stopped sandbox was dialled")
+			t.Error("a stopped sandbox was dialed")
 		}
 	})
 }

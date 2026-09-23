@@ -160,13 +160,13 @@ declares `Pool`, the refill loop, under the `pool:<environment>` lease,
 keeps that many sandboxes prewarmed: `CreateSpec.Prewarm` with
 `spec.pool.image`, `spec.pool.resources`, `spec.pool.display`
 ([[021-data-plane-workers]]), no owner, no map, no credential, no
-token, the image's entrypoint, an empty workspace, `Running`, labelled
+token, the image's entrypoint, an empty workspace, `Running`, labeled
 `cella.latere.ai/pool: "true"`. A create matches an entry when its
 resolved manifest equals the entry on every field `Adoption` cannot
 carry: `image`, `resources`, `display`, `command` and `args` unset,
 `ports` empty, `mesh.enabled` false. Adoption is then create step 3
 onward with the driver call replaced: `Compile` mints the credential,
-`Send` waits for the gateway's acknowledgement, volumes attach, the
+`Send` waits for the gateway's acknowledgment, volumes attach, the
 token is minted, and `Update` with `Adopt{Owner, Name, Labels, Env,
 Workspace, Lifecycle, Volumes, Token, Egress}` turns the entry into
 the caller's sandbox in one exclusive act; the driver performs a git

@@ -108,7 +108,7 @@ rebuilt where the platform already has the equivalent.
 
 ### Porting, not lifting
 
-A slice ports behaviour into the contract the cella spec states and
+A slice ports behavior into the contract the cella spec states and
 strips what the contract does not have: hosted labels, DOKS pool names,
 image registry defaults, billing fields, tenancy assumptions. It never
 copies a package and then refactors. The three prior ports (025, 028,
@@ -121,7 +121,7 @@ over cella's API.
 ### The map
 
 Every package of the sandbox main tree, its destination, and the slice
-that carries it. `drop` means no code moves: the behaviour exists in
+that carries it. `drop` means no code moves: the behavior exists in
 the destination already or is not wanted.
 
 | Sandbox package | Lines | Destination | Slice | Spec it lands under |
@@ -242,7 +242,7 @@ The platform built its event sink (platform slice 59) against
    t=<unix>,v1=<hex>[,v1=<hex>]`, HMAC-SHA256 over `<t>.<body>` under
    each half of `CELLA_EVENTS_SECRET`, five minute freshness, no
    `Authorization` header.
-4. The acknowledgement is any 2xx; 400 is a permanent drop, 401 a bad
+4. The acknowledgment is any 2xx; 400 is a permanent drop, 401 a bad
    signature, 500 a retry.
 
 ### What a slice does

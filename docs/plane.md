@@ -74,7 +74,7 @@ enforcing them in a proxy in front.
 
 `CELLA_ADMISSION_URL` points at an endpoint that sees a resolved manifest
 before it is created and returns the manifest to continue with. It is where
-your image catalogue lives, where you stamp your own labels, and where you
+your image catalog lives, where you stamp your own labels, and where you
 translate a field of your own vocabulary into the kinds the core has. It
 answers with the object, a list of warnings for the caller, or a refusal.
 What it returns is validated again, so an endpoint that writes a field the
@@ -114,15 +114,15 @@ go run ./examples/plane
 ```
 
 and it listens on `127.0.0.1:8080` with its own basic-auth subject, its own
-plans, and its own image catalogue.
+plans, and its own image catalog.
 
 ## Where each concern goes
 
 | Concern | Through the webhooks | Through the packages |
 |---|---|---|
-| accounts and organisations | the claims of your issuer, read by your authorizer | your own middleware, before `Resolve` |
+| accounts and organizations | the claims of your issuer, read by your authorizer | your own middleware, before `Resolve` |
 | plans and quotas | the limits on an allow, and the ceilings your admission endpoint applies | `Options.Ceilings` and the count you pass to `Create` |
-| an image catalogue | admission rewrites the image | an admission function in `Options` |
+| an image catalog | admission rewrites the image | an admission function in `Options` |
 | secrets | the `Secret` kind holds the value; your authorizer decides who may mount one | the same kind through the store you construct |
 | audit and usage | the event sink | your own implementation of the controller's event seam |
 | a console | reads `/v1` | reads your own API |

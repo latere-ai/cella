@@ -19,7 +19,7 @@ const Protocol = "cella.egress.v1"
 
 // The frame types. A gateway connects outbound and the control plane never
 // dials it, so every frame travels on a stream the gateway opened: the maps
-// come down the one it holds open, the acknowledgements and records go up
+// come down the one it holds open, the acknowledgments and records go up
 // the one it posts.
 const (
 	// FrameHello is the gateway's first frame: who it is, what it already

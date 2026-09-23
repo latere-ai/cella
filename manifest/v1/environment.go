@@ -18,7 +18,7 @@ const EnvironmentIDPrefix = "env_"
 // Environment names where sandboxes run and what that place can enforce. A
 // manifest resolves against the environment it names: the isolation class is
 // what the driver actually provides, and the capabilities are what its
-// operations honour.
+// operations honor.
 //
 // One environment is in-process, driven by the driver cellad opened itself.
 // Every other is served by workers that connect outbound with an environment

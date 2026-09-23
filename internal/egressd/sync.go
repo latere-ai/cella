@@ -167,7 +167,7 @@ func (c *syncClient) readLoop(ctx context.Context, cancel context.CancelFunc, co
 	}
 }
 
-// writeLoop is the connection's one writer: the acknowledgements the read
+// writeLoop is the connection's one writer: the acknowledgments the read
 // loop queued, the records the doors produced, and a heartbeat on an idle
 // stream.
 func (c *syncClient) writeLoop(ctx context.Context, conn *websocket.Conn, up <-chan egress.Frame) error {

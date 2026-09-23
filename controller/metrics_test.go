@@ -85,7 +85,7 @@ func (r *recorder) createLabels() []string {
 }
 
 // TestCreateIsMeasured is design 017's create histogram: one observation per
-// create, labelled by where the environment came from, and one adoption count
+// create, labeled by where the environment came from, and one adoption count
 // beside it on an environment that keeps a pool.
 func TestCreateIsMeasured(t *testing.T) {
 	rec := &recorder{}

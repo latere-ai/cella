@@ -62,7 +62,7 @@ key, so a dependency is turned on by applying its Secret and nothing else.
 | `cellad-db` | desired state in Postgres, and sealed secret values | every state is in memory: nothing survives a restart, and a sandbox the backend lost is not recovered |
 | `cellad-egress` | read by the egress gateway, not by the control plane | a sandbox whose manifest declares a boundary is refused at create |
 
-A URL and the bearer that authorises it are in one Secret, because a URL
+A URL and the bearer that authorizes it are in one Secret, because a URL
 with no bearer is a start-up failure and a bearer with no URL is an
 installation that believes it calls an endpoint and does not.
 

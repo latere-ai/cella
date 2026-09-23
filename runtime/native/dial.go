@@ -38,7 +38,7 @@ func (d *Driver) Dial(ctx context.Context, id string, port int) (net.Conn, error
 	var dialer net.Dialer
 	conn, err := dialer.DialContext(ctx, "tcp", loopback(port))
 	if err != nil {
-		return nil, fmt.Errorf("native: dialling port %d of %s: %w", port, id, err)
+		return nil, fmt.Errorf("native: dialing port %d of %s: %w", port, id, err)
 	}
 	return conn, nil
 }

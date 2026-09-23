@@ -175,7 +175,7 @@ func TestTheSinkFailsTheFirstDeliveries(t *testing.T) {
 
 // TestTheSinkRefusesARecordItCannotRead: a signature that verifies over
 // something that is not a record is the 400 spec 009 calls a permanent
-// drop, and not an acknowledgement.
+// drop, and not an acknowledgment.
 func TestTheSinkRefusesARecordItCannotRead(t *testing.T) {
 	s := start(t, stubs.Options{Sink: stubs.SinkOptions{Secrets: []string{"the-secret"}}})
 	if code, _ := deliver(t, s.URL(stubs.RoleSink), []byte("{not json"), time.Now(), "the-secret"); code != http.StatusBadRequest {

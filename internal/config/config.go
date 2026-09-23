@@ -237,7 +237,7 @@ func checkAddr(addr string) error {
 // interval reads an optional duration variable and holds it between
 // MinInterval and MaxInterval. A value outside the range is a start-up
 // problem rather than a silent clamp: an operator who asks for a tick this
-// process will not run gets an answer instead of a different behaviour.
+// process will not run gets an answer instead of a different behavior.
 func interval(getenv Getenv, name string, def time.Duration, problems *[]string) time.Duration {
 	d := duration(getenv, name, def, problems)
 	if d < MinInterval || d > MaxInterval {

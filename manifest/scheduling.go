@@ -50,7 +50,7 @@ func defaultQueue(obj *v1.Sandbox, env *v1.Environment) {
 
 // schedulingCapability holds spec.scheduling to the environment's mode. A
 // direct environment starts a sandbox now or fails it, so every field is one
-// it cannot honour; a queued one reads them all, and the queue must be one it
+// it cannot honor; a queued one reads them all, and the queue must be one it
 // declares.
 func schedulingCapability(obj *v1.Sandbox, env *v1.Environment) error {
 	s := obj.Spec.Scheduling

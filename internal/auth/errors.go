@@ -8,7 +8,7 @@
 // CELLA_OIDC_ISSUERS lists, through latere.ai/x/pkg/authkit/jwt, and
 // becomes a [Caller]: the rendered subject, its two halves apart, and
 // every claim of the token verbatim. No claim is read for meaning here.
-// An issuer's organisation, role or group claim means something to the
+// An issuer's organization, role or group claim means something to the
 // authorizer that reads it and nothing to the control plane.
 //
 // What is the authorizer. cellad asks one endpoint per request through

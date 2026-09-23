@@ -34,7 +34,7 @@ type request struct {
 	actor
 	// Claims are the caller's verified claims, verbatim. The control
 	// plane reads none of them; the endpoint reads whichever its policy
-	// needs, which is where an organisation and a role live.
+	// needs, which is where an organization and a role live.
 	Claims map[string]any `json:"claims"`
 	// Workload is the calling sandbox's status when a workload applies
 	// through its own token, and null otherwise.
@@ -54,7 +54,7 @@ type request struct {
 	Set json.RawMessage `json:"set"`
 	// Manifest is the defaulted object, the output of stage 2. Stage 1
 	// refuses an unknown field before admission runs, so the typed object
-	// is the whole of what the caller wrote and marshalling it loses
+	// is the whole of what the caller wrote and marshaling it loses
 	// nothing an endpoint could have read.
 	Manifest json.RawMessage `json:"manifest"`
 	// Ref carries spec 008's X-Request-Id, which ties a refusal at the

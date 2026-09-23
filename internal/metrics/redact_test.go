@@ -79,7 +79,7 @@ func TestPlaceholdersAreScrubbed(t *testing.T) {
 		t.Errorf("want five redactions, got %d:\n%s", strings.Count(out, metrics.Redacted), out)
 	}
 	// The rest of the value survives: the line still says which host was
-	// dialled, which is what makes it worth keeping.
+	// dialed, which is what makes it worth keeping.
 	if !strings.Contains(out, "https://api.example.com/?k="+metrics.Redacted) {
 		t.Errorf("the placeholder's surroundings were dropped:\n%s", out)
 	}

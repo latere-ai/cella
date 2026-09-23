@@ -610,7 +610,7 @@ func TestEnvelopeThatCannotBeBuilt(t *testing.T) {
 	req := admitRequest()
 	req.Claims = map[string]any{"cycle": make(chan int)}
 	if _, err := envelopeOf(sandbox(), req); err == nil {
-		t.Fatal("a body that cannot be marshalled was built")
+		t.Fatal("a body that cannot be marshaled was built")
 	}
 	c := client(t, serve(t, allow(t, nil)), Options{})
 	_, _, err := c.Admit(t.Context(), sandbox(), req)

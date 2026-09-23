@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package cella_test holds the tests about the module's shape rather than one
-// package's behaviour. It has no source file, so it contributes no statement
+// package's behavior. It has no source file, so it contributes no statement
 // to the coverage gate and no import to any build list.
 package cella_test
 

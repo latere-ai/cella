@@ -17,7 +17,7 @@ import (
 	driver "latere.ai/x/cella/runtime"
 )
 
-// labelled is one sandbox with the labels a plane stamped on it and an
+// labeled is one sandbox with the labels a plane stamped on it and an
 // environment value that must not reach a record.
 func labelled(id, phase, reason string) v1.Sandbox {
 	obj := sandbox(id, "build", phase)

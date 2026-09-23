@@ -74,7 +74,7 @@ reverse-door gateway on it and rejected transparent interception for
 its runtimes, a finding this spec keeps by offering both doors. Two
 defects the reference designs had are fixed here: two secrets on one
 host are refused rather than silently collapsed, and placeholders are
-minted per sandbox rather than derived from names a neighbour could
+minted per sandbox rather than derived from names a neighbor could
 guess.
 
 ## Design
@@ -164,7 +164,7 @@ gateway checks ever rotates under a running process.
 
 | Door | The sandbox uses | For |
 |---|---|---|
-| proxy | `HTTPS_PROXY=http://sandbox:<credential>@<gateway>:<port>`, the same in `HTTP_PROXY`, `NO_PROXY` for loopback and the mesh, and their lowercase forms; the CA projected read-only at `/run/cella/egress-ca.pem` and named by `SSL_CERT_FILE`, `NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`, `GIT_SSL_CAINFO`, `CURL_CA_BUNDLE` | every client that honours proxy variables and the trust variables; stock clients send the URL's userinfo as `Proxy-Authorization: Basic`, which the gateway reads |
+| proxy | `HTTPS_PROXY=http://sandbox:<credential>@<gateway>:<port>`, the same in `HTTP_PROXY`, `NO_PROXY` for loopback and the mesh, and their lowercase forms; the CA projected read-only at `/run/cella/egress-ca.pem` and named by `SSL_CERT_FILE`, `NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`, `GIT_SSL_CAINFO`, `CURL_CA_BUNDLE` | every client that honors proxy variables and the trust variables; stock clients send the URL's userinfo as `Proxy-Authorization: Basic`, which the gateway reads |
 | reverse | `CELLA_GATEWAY_URL=http://<gateway>:<port>` and the convention `$CELLA_GATEWAY_URL/<host>/<path>` over plain HTTP inside the environment, with the header `Cella-Egress-Credential: <credential>`; `CELLA_GATEWAY_CREDENTIAL` carries the value | runtimes that ignore proxy variables or private CAs: Node's built-in fetch, the JVM, Bun; the gateway names the destination from the first path segment, so `Authorization` stays free for the upstream's placeholder |
 
 The keys above are reserved ([[003-manifest-contract]]); `egress`
@@ -273,7 +273,7 @@ handled:
 
 `decision` is `allowed`, `denied` (off the allow list or on the deny
 list), `unknown` (no map for the principal), or `passthrough` (a host
-in scope with no secret, tunnelled without termination). `method`,
+in scope with no secret, tunneled without termination). `method`,
 `path`, and `status` are present only where the gateway saw them, on
 the reverse door and on terminated connections; `path` carries no
 query string. No record carries a header, a body, a value, a
@@ -333,7 +333,7 @@ property:
   `DefaultMaxBodyBytes` and a JSON, form, or text content type. A
   streaming, chunked, larger, or binary body is never read.
 - A host with an entry is terminated and substituted; a host without
-  one is tunnelled untouched on the proxy door, so a sandbox's own
+  one is tunneled untouched on the proxy door, so a sandbox's own
   client certificates and pinned trust keep working there. The reverse
   door always terminates, since the sandbox spoke plain HTTP to it.
 

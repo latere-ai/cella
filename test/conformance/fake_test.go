@@ -74,7 +74,7 @@ type fake struct {
 }
 
 // workloadToken is what this fake hands a sandbox that reads its own token
-// file, and what it recognises as one on the way back in.
+// file, and what it recognizes as one on the way back in.
 const workloadToken = "fake-token-workload"
 
 func newFake(t *testing.T) *fake {

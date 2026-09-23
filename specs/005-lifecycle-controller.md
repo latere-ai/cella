@@ -133,7 +133,7 @@ running workload:
 3. `Egress.Compile` over the manifest and its `Secret` objects: mints
    the placeholders and produces the map ([[018-egress-and-secrets]]).
    `Egress.Send` puts the map on the environment's sync stream and
-   waits for one gateway's acknowledgement ([[018-egress-and-secrets]]).
+   waits for one gateway's acknowledgment ([[018-egress-and-secrets]]).
    Undo: `Purge`, a purge message on the same stream.
 4. Attach every volume, the workspace volume first
    ([[019-volumes]]). Undo: detach in reverse.

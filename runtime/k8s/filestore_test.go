@@ -355,7 +355,7 @@ func TestFileStoreRefusesBeforeItSends(t *testing.T) {
 }
 
 // TestFileStoreNeedsACluster: a driver built without a connection answers the
-// capability it cannot provide rather than dialling nothing.
+// capability it cannot provide rather than dialing nothing.
 func TestFileStoreNeedsACluster(t *testing.T) {
 	h := newHarness(t)
 	const id = "sbx_nostream"

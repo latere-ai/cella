@@ -99,7 +99,7 @@ type forwarder struct {
 	client *cellaclient.Client
 	ref    string
 	port   int
-	// mu serialises the lines connections write to standard error.
+	// mu serializes the lines connections write to standard error.
 	mu sync.Mutex
 }
 

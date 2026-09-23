@@ -32,7 +32,7 @@ type seen struct {
 }
 
 // upstreamEcho answers every request with what it saw, over TLS, so a
-// terminated connection's rewrite is visible and a tunnelled one's is not.
+// terminated connection's rewrite is visible and a tunneled one's is not.
 func upstreamEcho(t *testing.T) (*httptest.Server, *x509.CertPool) {
 	t.Helper()
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

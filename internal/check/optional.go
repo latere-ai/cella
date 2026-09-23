@@ -50,7 +50,7 @@ var probeBody = []byte(`{"probe":"cellad check"}`)
 
 // sink is the event endpoint of spec 009. The line proves the two things an
 // operator can get wrong: the endpoint answers, and the two ends share a
-// secret. A 2xx is the acknowledgement; a 400 passes too, because the
+// secret. A 2xx is the acknowledgment; a 400 passes too, because the
 // signature verified and the body was refused, which spec 009 calls a
 // permanent drop and is the right answer to a probe that is no record; a 401
 // is a signature the sink did not accept.
@@ -180,5 +180,5 @@ func gateway(ctx context.Context, cfg config.Config) Line {
 		return Line{Name: "gateway", State: Failed, Detail: "CELLA_GATEWAY: " + err.Error()}
 	}
 	return Line{Name: "gateway", State: Ok,
-		Detail: fmt.Sprintf("%s resolves to %s; the door is dialled by the sandboxes and not from here", addr, strings.Join(addrs, ", "))}
+		Detail: fmt.Sprintf("%s resolves to %s; the door is dialed by the sandboxes and not from here", addr, strings.Join(addrs, ", "))}
 }

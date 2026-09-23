@@ -135,7 +135,7 @@ func TestRunConformance(t *testing.T) {
 	}
 }
 
-// freePortPair is a port nothing holds whose neighbour is free as well: the
+// freePortPair is a port nothing holds whose neighbor is free as well: the
 // bootstrap binds the public listener on the port it is given and the
 // internal one on the next.
 func freePortPair(t *testing.T) int {

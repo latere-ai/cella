@@ -267,7 +267,7 @@ func (h *handler) readBody(w http.ResponseWriter, r *http.Request) ([]byte, erro
 // this node drives with the capabilities its driver declares, the secrets
 // this caller may mount, the operator's defaults, and the admission step of
 // design 007 with everything that step is told about the caller. The
-// capabilities are what a field asking for an optional behaviour resolves
+// capabilities are what a field asking for an optional behavior resolves
 // against, so a manifest asking for a desktop where the driver declares no
 // Display is refused at the field rather than at create. Defaults and
 // admission run on every apply, whatever the environment declares. The

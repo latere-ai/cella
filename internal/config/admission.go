@@ -37,7 +37,7 @@ type Admission struct {
 	// DefaultImage is CELLA_DEFAULT_IMAGE, the reference a manifest that
 	// names none takes where the environment runs images. It is unset by
 	// default: an installation with an admission step lets that step
-	// supply the image, which is what an image catalogue is.
+	// supply the image, which is what an image catalog is.
 	DefaultImage string
 }
 

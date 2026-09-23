@@ -225,7 +225,7 @@ func relativeTo(p, root string) (string, error) {
 	return strings.TrimPrefix(p, strings.TrimSuffix(root, "/")+"/"), nil
 }
 
-// rewrite copies one archive to another, normalising each name and refusing
+// rewrite copies one archive to another, normalizing each name and refusing
 // what the contract does not carry: a link, a device, a socket.
 func rewrite(src io.Reader, dst io.Writer) error {
 	tr := tar.NewReader(src)
