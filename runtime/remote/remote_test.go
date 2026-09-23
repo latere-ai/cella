@@ -175,7 +175,8 @@ func TestWorkerConformance(t *testing.T) {
 }
 
 // TestRemoteReportsTheWorkersDeclaration holds that the four calls a
-// registration answers never reach the worker, and say what the worker said.
+// registration answers never reach the worker, and say what the worker said,
+// less what the stream cannot carry.
 func TestRemoteReportsTheWorkersDeclaration(t *testing.T) {
 	host, err := native.New(filepath.Join(t.TempDir(), "native"))
 	if err != nil {
@@ -190,8 +191,11 @@ func TestRemoteReportsTheWorkersDeclaration(t *testing.T) {
 	if s.driver.Isolation() != host.Isolation() {
 		t.Errorf("the environment declares %q isolation, want the worker's %q", s.driver.Isolation(), host.Isolation())
 	}
-	if !reflect.DeepEqual(s.driver.Capabilities(), host.Capabilities()) {
-		t.Errorf("the environment declares %+v, want the worker's %+v", s.driver.Capabilities(), host.Capabilities())
+	// The worker's declaration less what no frame of the stream carries.
+	want := host.Capabilities()
+	want.Dial, want.Display, want.Input = false, false, false
+	if !reflect.DeepEqual(s.driver.Capabilities(), want) {
+		t.Errorf("the environment declares %+v, want the worker's less the dial and the desktop, %+v", s.driver.Capabilities(), want)
 	}
 	if err = s.driver.Preflight(context.Background()); err != nil {
 		t.Errorf("a registered environment failed preflight: %v", err)

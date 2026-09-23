@@ -350,3 +350,24 @@ func (c *nopConn) Close() error {
 // runtimeNop is a driver that runs nothing, for the cases that are about the
 // executor's own table rather than about a driver.
 type runtimeNop struct{ driver.Driver }
+
+// TestTheSeamDeclaresWhatItCarries: a worker whose driver dials and drives a
+// desktop declares both, and the remote driver declares neither, because no
+// frame of the worker stream carries them; what it does carry is passed on.
+func TestTheSeamDeclaresWhatItCarries(t *testing.T) {
+	transport := &stubTransport{registered: true, registration: remote.Registration{
+		Driver: "native", Isolation: driver.IsolationNone,
+		Capabilities: driver.Capabilities{Files: true, Attach: true, Dial: true, Display: true, Input: true, Pool: true},
+	}}
+	d, err := remote.New(remote.Options{Environment: "env_a", Transport: transport})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := d.Capabilities()
+	if got.Dial || got.Display || got.Input {
+		t.Fatalf("the remote driver declares %+v, which no frame carries", got)
+	}
+	if !got.Files || !got.Attach || !got.Pool {
+		t.Fatalf("the remote driver dropped what it carries: %+v", got)
+	}
+}

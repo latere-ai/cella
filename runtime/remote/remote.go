@@ -114,14 +114,23 @@ func (d *Driver) Isolation() string {
 	return runtime.IsolationNone
 }
 
-// Capabilities are the worker's own. An environment with no registration
-// declares none, so every capability gate refuses before an operation is
-// enqueued for nobody.
+// Capabilities are the worker's own, less what this driver cannot carry
+// across the seam. An environment with no registration declares none, so
+// every capability gate refuses before an operation is enqueued for nobody.
 func (d *Driver) Capabilities() runtime.Capabilities {
 	if r, held := d.transport.Registration(); held {
-		return r.Capabilities
+		return carried(r.Capabilities)
 	}
 	return runtime.Capabilities{}
+}
+
+// carried is a worker's capabilities less the ones whose operation has no
+// frame on the worker stream: a dial and the desktop's screen and input. A
+// worker whose own driver serves them declares them, and declaring them here
+// would pass a gate for a request this driver has no way to send.
+func carried(c runtime.Capabilities) runtime.Capabilities {
+	c.Dial, c.Display, c.Input = false, false, false
+	return c
 }
 
 // Preflight passes once a worker has registered. What the worker's own
