@@ -279,7 +279,7 @@ func TestKindStackRunsTheDesktop(t *testing.T) {
 	if got := str(dig(config, "data", "CELLA_K8S_DISPLAY_IMAGE")); got != "cella-display:dev" {
 		t.Errorf("the stack's CELLA_K8S_DISPLAY_IMAGE is %q, want the image up.sh loads", got)
 	}
-	const declared = "-capabilities files,pool,mesh,display,input"
+	const declared = "-capabilities files,pool,mesh,attach,display,input"
 	const image = "-display-image cella-display:dev"
 	for _, run := range []struct{ workflow, job string }{
 		{"verify.yml", "install"},

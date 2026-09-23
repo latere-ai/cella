@@ -17,6 +17,20 @@ refused before it is pushed.
   `CELLA_K8S_DEFAULT_DISK` are checked when `cellad` starts. A value that
   is not a quantity used to start cleanly and fail every create that
   relied on it; it now stops the start with the variable named.
+- On Kubernetes, a sandbox now takes a terminal. `cella attach`, the
+  attach and exec sockets, and `cella exec -i` and `-t` work there as they
+  do on Podman and the native runtime, where a Kubernetes environment
+  answered `capability_unsupported` before. The exit code, a resize of
+  your window, and the end of the session when the shell exits or you
+  disconnect all carry through.
+- The Role in `deploy/base` now grants `get` on `pods/exec` beside
+  `create`. The control plane opens each exec over a WebSocket, which the
+  API server authorizes as `get` (and from Kubernetes 1.35 as `create` as
+  well), and falls back to the older SPDY upgrade when that is refused.
+  An installation that wrote its own Role, for the control plane or for a
+  worker that drives Kubernetes, adds `get` on `pods/exec` before it
+  upgrades: `cellad` checks every access its driver uses at start-up and
+  stops with the missing rule named, as `cellad check` does.
 - The release pipeline reads a release's files from the release's assets
   endpoint, by id, rather than from the list the release object carries,
   which GitHub has answered empty for a release whose every file was

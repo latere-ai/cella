@@ -14,6 +14,11 @@
 #   watch          the driver lists and gets; it opens no watch
 #   nodes          nothing schedules by hand
 #
+# pods/exec takes two verbs because the driver's exec, the one a terminal
+# and every command ride on, tries a WebSocket first and falls back to SPDY:
+# the API server authorizes the WebSocket's GET as get (and from Kubernetes
+# 1.35 as create as well) and the SPDY upgrade's POST as create.
+#
 # Two objects the driver does write, and why: a Secret per sandbox holds
 # the workload token (spec 006) and never a secret value, which stays
 # sealed in the store under CELLA_SECRET_KEY; a NetworkPolicy and a
@@ -35,7 +40,7 @@ rules:
     verbs: ["get", "list", "create", "delete", "patch"]
   - apiGroups: [""]
     resources: ["pods/exec"]
-    verbs: ["create"]
+    verbs: ["create", "get"]
   - apiGroups: [""]
     resources: ["pods/log"]
     verbs: ["get"]

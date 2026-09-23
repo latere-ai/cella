@@ -25,9 +25,14 @@ import (
 // execOpts is one command in one container. An empty container is the
 // workload's, so every call that does not name one addresses the sandbox
 // itself and only the desktop's own commands reach the display container.
+// tty runs the command under a terminal, whose one output stream is stdout;
+// window is that terminal's size queue, read by the executor until it
+// answers nil.
 type execOpts struct {
 	argv      []string
 	stdin     bool
+	tty       bool
+	window    remotecommand.TerminalSizeQueue
 	container string
 }
 
@@ -48,7 +53,9 @@ type streamer interface {
 
 // spdy runs the command over the cluster's remote command protocol: a
 // WebSocket stream where the API server offers one, and the older upgrade
-// where it does not.
+// where it does not. The API server authorizes the WebSocket's GET as get on
+// pods/exec, and from Kubernetes 1.35 as create as well, and the upgrade's
+// POST as create, so the verb table names both.
 type spdy struct {
 	cfg       *rest.Config
 	cs        kubernetes.Interface
@@ -60,7 +67,7 @@ func (s *spdy) stream(ctx context.Context, pod string, o execOpts, stdin io.Read
 		Resource("pods").Name(pod).Namespace(s.namespace).SubResource("exec").
 		VersionedParams(&corev1.PodExecOptions{
 			Container: o.name(), Command: o.argv,
-			Stdin: o.stdin, Stdout: stdout != nil, Stderr: stderr != nil,
+			Stdin: o.stdin, Stdout: stdout != nil, Stderr: stderr != nil, TTY: o.tty,
 		}, scheme.ParameterCodec)
 	upgrade, err := remotecommand.NewSPDYExecutor(s.cfg, "POST", req.URL())
 	if err != nil {
@@ -74,11 +81,15 @@ func (s *spdy) stream(ctx context.Context, pod string, o execOpts, stdin io.Read
 	if err != nil {
 		return fmt.Errorf("exec executor: %w", err)
 	}
-	return exec.StreamWithContext(ctx, remotecommand.StreamOptions{Stdin: stdin, Stdout: stdout, Stderr: stderr})
+	return exec.StreamWithContext(ctx, remotecommand.StreamOptions{
+		Stdin: stdin, Stdout: stdout, Stderr: stderr, Tty: o.tty, TerminalSizeQueue: o.window,
+	})
 }
 
 // execution is one running command. Both streams are pipes, so the caller
-// reads the first byte while the command is still writing.
+// reads the first byte while the command is still writing. Under a terminal
+// stderr is at its end from the first read, because a terminal has one
+// stream.
 type execution struct {
 	stdout, stderr *io.PipeReader
 	cancel         context.CancelFunc
@@ -112,6 +123,8 @@ func (e *execution) Close() error {
 // Exec runs one command in the sandbox's container. The exec subresource
 // carries neither an environment nor a working directory, so the sandbox's own
 // environment, the request's, and the directory are wrapped around the argv.
+// Stdin is copied into the command and ends its input where the reader ends;
+// TTY runs the command under a terminal.
 func (d *Driver) Exec(ctx context.Context, id string, req driver.ExecRequest) (driver.Exec, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -119,27 +132,30 @@ func (d *Driver) Exec(ctx context.Context, id string, req driver.ExecRequest) (d
 	if len(req.Command) == 0 || req.Timeout < 0 {
 		return nil, fmt.Errorf("%w: a command is required", driver.ErrInvalid)
 	}
-	if req.TTY || req.Stdin != nil {
-		// Both need a terminal session, which is the Attach capability.
-		return nil, fmt.Errorf("%w: stdin and a tty need Attach", driver.ErrUnsupported)
-	}
 	spec, err := d.runningSpec(ctx, id)
 	if err != nil {
 		return nil, err
 	}
+	o := execOpts{argv: wrapped(spec, req.Command, req.Env, req.Workdir), stdin: req.Stdin != nil, tty: req.TTY}
+	return d.launch(ctx, objectName(id), o, req.Stdin, req.Timeout, nil)
+}
+
+// wrapped is argv as the exec subresource runs it in one sandbox: the
+// sandbox's environment with the request's over it, sorted, and the working
+// directory, the request's or else the sandbox's.
+func wrapped(spec driver.CreateSpec, argv []string, env map[string]string, workdir string) []string {
 	environment := maps.Clone(spec.Env)
 	if environment == nil {
 		environment = map[string]string{}
 	}
-	maps.Copy(environment, req.Env)
-	workdir := req.Workdir
+	maps.Copy(environment, env)
 	if workdir == "" {
 		workdir = spec.Workdir
 	}
 	if workdir == "" {
 		workdir = workspacePath(spec)
 	}
-	return d.start(ctx, objectName(id), execOpts{argv: wrapArgv(req.Command, environment, workdir)}, req.Timeout)
+	return wrapArgv(argv, environment, workdir)
 }
 
 // runningSpec is the read every execution path shares: the sandbox exists, it
@@ -162,10 +178,17 @@ func (d *Driver) runningSpec(ctx context.Context, id string) (driver.CreateSpec,
 	return specOf(pvc)
 }
 
-// start runs one command and hands back its streams. A timeout and the
-// caller's cancellation both reach Wait as the context error, so a caller
-// tells a command that failed from one that never finished.
+// start runs one command with no input and hands back its streams.
 func (d *Driver) start(ctx context.Context, pod string, o execOpts, timeout time.Duration) (driver.Exec, error) {
+	return d.launch(ctx, pod, o, nil, timeout, nil)
+}
+
+// launch runs one command and hands back its streams. A timeout and the
+// caller's cancellation both reach Wait as the context error, so a caller
+// tells a command that failed from one that never finished. ended runs once
+// the exec is over and before Wait answers, so what a caller holds open for
+// the exec (a terminal's input, its size queue) is released with it.
+func (d *Driver) launch(ctx context.Context, pod string, o execOpts, stdin io.Reader, timeout time.Duration, ended func()) (*execution, error) {
 	if d.stream == nil {
 		return nil, fmt.Errorf("%w: this driver was built without a cluster connection", driver.ErrUnsupported)
 	}
@@ -176,10 +199,17 @@ func (d *Driver) start(ctx context.Context, pod string, o execOpts, timeout time
 	}
 	outR, outW := io.Pipe()
 	errR, errW := io.Pipe()
+	var stderr io.Writer = errW
+	if o.tty {
+		// A terminal carries one stream: the exec asks for no stderr, and the
+		// caller's is at its end from the first read.
+		stderr = nil
+		_ = errW.Close()
+	}
 	e := &execution{stdout: outR, stderr: errR, cancel: cancel, done: make(chan struct{})}
 	go func() {
 		defer close(e.done)
-		err := d.stream.stream(runctx, pod, o, nil, outW, errW)
+		err := d.stream.stream(runctx, pod, o, stdin, outW, stderr)
 		switch {
 		case runctx.Err() != nil:
 			e.err = runctx.Err()
@@ -192,6 +222,9 @@ func (d *Driver) start(ctx context.Context, pod string, o execOpts, timeout time
 		}
 		_ = outW.Close()
 		_ = errW.Close()
+		if ended != nil {
+			ended()
+		}
 		cancel()
 	}()
 	return e, nil

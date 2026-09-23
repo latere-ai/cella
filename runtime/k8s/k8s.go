@@ -255,24 +255,28 @@ func (d *Driver) Isolation() string { return "container" }
 // the claim's label is the cluster's own mutex: the guarded patch of an
 // adoption tests it, so of two adopters one writes and the other is told the
 // entry is gone. Mesh, because a mesh is a NetworkPolicy and a headless
-// Service the driver writes per mesh. Display and Input follow the display
-// image: with none configured there is no desktop to give, and declaring one
-// would push the refusal from resolve, where it names the field, to create,
-// where it names nothing. Egress, attach, dial, resize, volumes and snapshots
-// each land with the slice that builds them.
+// Service the driver writes per mesh. Attach, because the exec subresource
+// carries a terminal and stdin. Display and Input follow the display image:
+// with none configured there is no desktop to give, and declaring one would
+// push the refusal from resolve, where it names the field, to create, where
+// it names nothing. Egress, dial, resize, volumes and snapshots each land
+// with the slice that builds them.
 func (d *Driver) Capabilities() driver.Capabilities {
 	desktop := d.opts.DisplayImage != ""
-	return driver.Capabilities{Files: true, Pool: true, Mesh: true, Display: desktop, Input: desktop}
+	return driver.Capabilities{Files: true, Pool: true, Mesh: true, Attach: true, Display: desktop, Input: desktop}
 }
 
 // verbs are the accesses the driver uses, checked one review each so a missing
 // rule is named before the first sandbox rather than at the first create.
 // group is the API group the resource belongs to, empty for the core one, so
-// a review asks about the object the driver actually writes.
+// a review asks about the object the driver actually writes. pods/exec takes
+// two: the executor's WebSocket upgrade is a GET, which the API server reads
+// as get (and from Kubernetes 1.35 as create too), and its SPDY fallback is a
+// POST, which it reads as create.
 var verbs = []struct{ group, resource, subresource, verb string }{
 	{"", "pods", "", "get"}, {"", "pods", "", "list"}, {"", "pods", "", "create"},
 	{"", "pods", "", "delete"}, {"", "pods", "", "patch"},
-	{"", "pods", "exec", "create"}, {"", "pods", "log", "get"},
+	{"", "pods", "exec", "create"}, {"", "pods", "exec", "get"}, {"", "pods", "log", "get"},
 	{"", "persistentvolumeclaims", "", "get"}, {"", "persistentvolumeclaims", "", "list"},
 	{"", "persistentvolumeclaims", "", "create"}, {"", "persistentvolumeclaims", "", "delete"},
 	{"", "persistentvolumeclaims", "", "patch"},

@@ -140,7 +140,7 @@ jobs:
           set -o pipefail
           go test -tags=e2e -count=1 -v -timeout 30m -run '^TestContract$' ./test/conformance -args \
             -url "${CELLA_TEST_URL}" -issuer http://localhost:30081 -sink "${CELLA_TEST_SINK}" \
-            -image docker.io/library/alpine:3.22 -capabilities files,pool,mesh,display,input \
+            -image docker.io/library/alpine:3.22 -capabilities files,pool,mesh,attach,display,input \
             -display-image cella-display:dev \
             -known known.json 2>&1 | tee conformance-kind.txt
           grep -q -- '--- PASS: TestContract' conformance-kind.txt
