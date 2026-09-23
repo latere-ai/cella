@@ -549,37 +549,36 @@ func follow(t TB, open Opener) {
 		return err
 	})
 
-	with(t, s, func(tx store.Tx) error {
-		rows, err := tx.Journal().After(ctx, "sbx_a", 0, 10)
-		if err != nil {
+	after := func(object string, seq int64, limit int) []store.Event {
+		var rows []store.Event
+		with(t, s, func(tx store.Tx) error {
+			var err error
+			rows, err = tx.Journal().After(ctx, object, seq, limit)
 			return err
-		}
-		if got := seqs(rows); !slices.Equal(got, []int64{1, 2, 3}) {
-			t.Fatalf("After(0) read the sequences %v, want 1, 2, 3", got)
-		}
+		})
+		return rows
+	}
+	// A failed read is reported and the case goes on, so an adapter that
+	// reads nothing is also held to the subscriptions below.
+	if rows := after("sbx_a", 0, 10); !slices.Equal(seqs(rows), []int64{1, 2, 3}) {
+		t.Errorf("After(0) read the sequences %v, want 1, 2, 3", seqs(rows))
+	} else {
 		if rows[2].Type != "sandbox.stopped" || rows[2].ID == "" || rows[2].At.IsZero() {
 			t.Errorf("After read the newest row as %+v", rows[2])
 		}
 		sameJSON(t, rows[2].Payload, []byte(`{"phase":"Stopped"}`), "the row After read")
-		if rows, err = tx.Journal().After(ctx, "sbx_a", 1, 1); err != nil {
-			return err
+	}
+	if got := seqs(after("sbx_a", 1, 1)); !slices.Equal(got, []int64{2}) {
+		t.Errorf("After(1) with a limit of one read %v, want 2", got)
+	}
+	for _, tc := range []struct {
+		object string
+		after  int64
+	}{{"sbx_a", 3}, {"sbx_none", 0}} {
+		if got := seqs(after(tc.object, tc.after, 10)); len(got) != 0 {
+			t.Errorf("After(%s, %d) read %v, want nothing", tc.object, tc.after, got)
 		}
-		if got := seqs(rows); !slices.Equal(got, []int64{2}) {
-			t.Errorf("After(1) with a limit of one read %v, want 2", got)
-		}
-		for _, tc := range []struct {
-			object string
-			after  int64
-		}{{"sbx_a", 3}, {"sbx_none", 0}} {
-			if rows, err = tx.Journal().After(ctx, tc.object, tc.after, 10); err != nil {
-				return err
-			}
-			if len(rows) != 0 {
-				t.Errorf("After(%s, %d) read %v, want nothing", tc.object, tc.after, seqs(rows))
-			}
-		}
-		return nil
-	})
+	}
 
 	type seen struct {
 		object string
@@ -646,33 +645,35 @@ func sequence(t TB, open Opener) {
 		}
 		return nil
 	})
+	var (
+		pruned int
+		held   []store.Event
+		seq    int64
+	)
 	with(t, s, func(tx store.Tx) error {
-		n, err := tx.Journal().Prune(ctx, time.Now().UTC().Add(-24*time.Hour))
-		if err != nil {
-			return err
-		}
-		if n != 1 {
-			t.Errorf("pruning two finished rows of one object dropped %d, want the older one", n)
-		}
-		return nil
+		var err error
+		pruned, err = tx.Journal().Prune(ctx, time.Now().UTC().Add(-24*time.Hour))
+		return err
 	})
 	with(t, s, func(tx store.Tx) error {
-		rows, _, err := tx.Journal().ByObject(ctx, "sbx_a", store.Page{})
-		if err != nil {
-			return err
-		}
-		if got := seqs(rows); !slices.Equal(got, []int64{2}) {
-			t.Errorf("the pruned object holds %v, want its newest row, 2", got)
-		}
-		seq, err := tx.Journal().Append(ctx, store.Event{ObjectID: "sbx_a", Type: "sandbox.stopped"})
-		if err != nil {
-			return err
-		}
-		if seq != 3 {
-			t.Errorf("the append after a prune took the sequence %d, want 3", seq)
-		}
-		return nil
+		var err error
+		held, _, err = tx.Journal().ByObject(ctx, "sbx_a", store.Page{})
+		return err
 	})
+	with(t, s, func(tx store.Tx) error {
+		var err error
+		seq, err = tx.Journal().Append(ctx, store.Event{ObjectID: "sbx_a", Type: "sandbox.stopped"})
+		return err
+	})
+	if pruned != 1 {
+		t.Errorf("pruning two finished rows of one object dropped %d, want the older one", pruned)
+	}
+	if got := seqs(held); !slices.Equal(got, []int64{2}) {
+		t.Errorf("the pruned object holds %v, want its newest row, 2", got)
+	}
+	if seq != 3 {
+		t.Errorf("the append after a prune took the sequence %d, want 3", seq)
+	}
 }
 
 // seqs is the sequence of each row, in order.

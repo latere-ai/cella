@@ -16,6 +16,8 @@ import (
 	"testing"
 	"time"
 
+	"go.yaml.in/yaml/v3"
+
 	"latere.ai/x/pkg/authkit/issuertest"
 	"latere.ai/x/pkg/authz"
 
@@ -185,21 +187,37 @@ func TestFollowedFeed(t *testing.T) {
 		}
 	}
 
-	// A page is negotiated as before: newline-delimited JSON is not one of
-	// its syntaxes, and follow=0 is a page.
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, f.url+"/v1/events?object="+obj.Status.ID, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	req.Header.Set("Authorization", "Bearer "+f.alice)
-	req.Header.Set("Accept", ndjson)
-	res, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = res.Body.Close()
-	if res.StatusCode != http.StatusNotAcceptable {
-		t.Errorf("a page asked for as newline-delimited JSON answered %d", res.StatusCode)
+	// A page is negotiated as before: it answers YAML where asked,
+	// newline-delimited JSON is not one of its syntaxes, and follow=0 is a
+	// page.
+	for accept, want := range map[string]int{"application/yaml": http.StatusOK, ndjson: http.StatusNotAcceptable} {
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, f.url+"/v1/events?object="+obj.Status.ID, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer "+f.alice)
+		req.Header.Set("Accept", accept)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := io.ReadAll(res.Body)
+		_ = res.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.StatusCode != want {
+			t.Errorf("a page asked for as %s answered %d", accept, res.StatusCode)
+		}
+		if want != http.StatusOK {
+			continue
+		}
+		var page struct {
+			Items []map[string]any `yaml:"items"`
+		}
+		if err := yaml.Unmarshal(body, &page); err != nil || len(page.Items) == 0 || !strings.Contains(res.Header.Get("Content-Type"), "yaml") {
+			t.Errorf("a page asked for as YAML answered %s %q (%v)", res.Header.Get("Content-Type"), body, err)
+		}
 	}
 	if got := f.feed("follow=0&object="+obj.Status.ID, 200, f.alice); len(got.Items) == 0 {
 		t.Error("follow=0 answered no page")

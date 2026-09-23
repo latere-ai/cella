@@ -106,8 +106,8 @@ func TestObjectFeed(t *testing.T) {
 }
 
 // TestObjectFeedRefusals proves what the route refuses: a page naming no
-// object, a limit outside the ceiling, an object that is not there, whether
-// the read is a page or a follow, and an Accept a page cannot answer.
+// object, a limit outside the ceiling, and an object that is not there,
+// whether the read is a page or a follow.
 func TestObjectFeedRefusals(t *testing.T) {
 	f := setupRecorded(t)
 	for _, tc := range []struct {
