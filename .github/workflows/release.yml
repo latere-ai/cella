@@ -2,10 +2,11 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # The release pipeline of spec 014, on a v* tag: the tag's commit must have
-# passed verify; the binaries, the archives and the image are built, the
-# image pushed by digest and under no tag, signed, given a bill of
-# materials and a provenance attestation; the candidate is exercised; only
-# then is the digest tagged and the GitHub release created with the
+# passed verify; the binaries, the archives and the two images, cellad and
+# the cella-display desktop, are built, each image pushed by digest and
+# under no tag, signed, given a bill of materials and a provenance
+# attestation; the candidate is exercised; only then are the digests
+# tagged and the GitHub release created with the
 # CHANGELOG section as its body; and after that the published artifacts are
 # walked and verified from clean runners.
 #
@@ -29,6 +30,7 @@ permissions:
 env:
   REGISTRY: ghcr.io
   IMAGE: cellad
+  DISPLAY_IMAGE: cella-display
 
 jobs:
   # 1. The verify run for the push of this very commit concluded success.
@@ -80,6 +82,7 @@ jobs:
     outputs:
       owner: ${{ steps.owner.outputs.owner }}
       digest: ${{ steps.image.outputs.digest }}
+      display: ${{ steps.display.outputs.digest }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -119,6 +122,23 @@ jobs:
           digest=$(jq -r '."containerimage.digest"' out/image.json)
           echo "the candidate is ${REGISTRY}/${OWNER}/${IMAGE}@${digest}"
           echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+      # The desktop image of spec 014, which an operator names in
+      # CELLA_K8S_DISPLAY_IMAGE. Its build runs the package manager, so the
+      # arm64 half runs under emulation. It takes the path the control
+      # plane's image takes: by digest under no tag, signed, attested, and
+      # tagged only in publish.
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - name: Build and push the display image by digest, under no tag
+        id: display
+        env:
+          OWNER: ${{ steps.owner.outputs.owner }}
+        run: |
+          docker buildx build --platform linux/amd64,linux/arm64 -f images/display/Dockerfile \
+            --output "type=image,name=${REGISTRY}/${OWNER}/${DISPLAY_IMAGE},push-by-digest=true,name-canonical=true,push=true" \
+            --metadata-file out/display.json .
+          digest=$(jq -r '."containerimage.digest"' out/display.json)
+          echo "the display image is ${REGISTRY}/${OWNER}/${DISPLAY_IMAGE}@${digest}"
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
       # The test stubs image of spec 012, which the two kind jobs below run
       # beside the candidate. It is built from this checkout, pushed under
       # the tag, and neither signed nor attested: nothing an operator
@@ -131,10 +151,12 @@ jobs:
           docker buildx build --platform linux/amd64 -f Dockerfile.stubs \
             -t "${REGISTRY}/${OWNER}/cella-stubs:${GITHUB_REF_NAME}" --push .
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
-      - name: Sign the image by digest with the workflow's identity
+      - name: Sign the two images by digest with the workflow's identity
         env:
           OWNER: ${{ steps.owner.outputs.owner }}
-        run: cosign sign --yes "${REGISTRY}/${OWNER}/${IMAGE}@${{ steps.image.outputs.digest }}"
+        run: |
+          cosign sign --yes "${REGISTRY}/${OWNER}/${IMAGE}@${{ steps.image.outputs.digest }}"
+          cosign sign --yes "${REGISTRY}/${OWNER}/${DISPLAY_IMAGE}@${{ steps.display.outputs.digest }}"
       - name: The bill of materials of the module graph
         uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
         with:
@@ -163,6 +185,27 @@ jobs:
         with:
           subject-name: ${{ env.REGISTRY }}/${{ steps.owner.outputs.owner }}/cellad
           subject-digest: ${{ steps.image.outputs.digest }}
+          push-to-registry: true
+      - name: The bill of materials of the display image
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
+        with:
+          image: ${{ env.REGISTRY }}/${{ steps.owner.outputs.owner }}/cella-display@${{ steps.display.outputs.digest }}
+          format: spdx-json
+          output-file: dist/sbom-cella-display.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+      - name: Attest the display image's bill of materials
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ steps.owner.outputs.owner }}/cella-display
+          subject-digest: ${{ steps.display.outputs.digest }}
+          sbom-path: dist/sbom-cella-display.spdx.json
+          push-to-registry: true
+      - name: Attest the display image's provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ steps.owner.outputs.owner }}/cella-display
+          subject-digest: ${{ steps.display.outputs.digest }}
           push-to-registry: true
       # The deploy archive: the base with the image pinned to this release
       # by digest, the bootstrap templates and both examples, under one
@@ -217,6 +260,7 @@ jobs:
     env:
       OWNER: ${{ needs.build.outputs.owner }}
       DIGEST: ${{ needs.build.outputs.digest }}
+      DISPLAY_DIGEST: ${{ needs.build.outputs.display }}
       XDG_RUNTIME_DIR: /tmp/xdg
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -293,12 +337,14 @@ jobs:
         with:
           install_only: true
       # The cluster runs the bytes this tag published, under the names the
-      # overlay gives them: the candidate is pulled by digest and the stubs
-      # image by tag, and neither is built here.
+      # overlay gives them: the candidate and the display image are pulled
+      # by digest and the stubs image by tag, and none is built here.
       - name: The published images under the names the overlay runs
         run: |
           docker pull "${REGISTRY}/${OWNER}/${IMAGE}@${DIGEST}"
           docker tag "${REGISTRY}/${OWNER}/${IMAGE}@${DIGEST}" cellad:dev
+          docker pull "${REGISTRY}/${OWNER}/${DISPLAY_IMAGE}@${DISPLAY_DIGEST}"
+          docker tag "${REGISTRY}/${OWNER}/${DISPLAY_IMAGE}@${DISPLAY_DIGEST}" cella-display:dev
           docker pull "${REGISTRY}/${OWNER}/cella-stubs:${GITHUB_REF_NAME}"
           docker tag "${REGISTRY}/${OWNER}/cella-stubs:${GITHUB_REF_NAME}" cella-stubs:dev
       - name: The kind stack of spec 012
@@ -319,7 +365,8 @@ jobs:
           set -o pipefail
           go test -tags=e2e -count=1 -v -timeout 30m -run '^TestContract$' ./test/conformance -args \
             -url "${CELLA_TEST_URL}" -issuer http://localhost:30081 -sink "${CELLA_TEST_SINK}" \
-            -image docker.io/library/alpine:3.22 -capabilities files,pool,mesh \
+            -image docker.io/library/alpine:3.22 -capabilities files,pool,mesh,display,input \
+            -display-image cella-display:dev \
             -known known.json 2>&1 | tee /tmp/conformance.log
           grep -q -- '--- PASS: TestContract' /tmp/conformance.log
       - name: The cluster's state, for a failed run
@@ -371,10 +418,12 @@ jobs:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ github.token }}
-      - name: Tag the digest
+      - name: Tag the two digests
         run: |
           docker buildx imagetools create -t "${REGISTRY}/${OWNER}/${IMAGE}:${GITHUB_REF_NAME}" \
             "${REGISTRY}/${OWNER}/${IMAGE}@${{ needs.build.outputs.digest }}"
+          docker buildx imagetools create -t "${REGISTRY}/${OWNER}/${DISPLAY_IMAGE}:${GITHUB_REF_NAME}" \
+            "${REGISTRY}/${OWNER}/${DISPLAY_IMAGE}@${{ needs.build.outputs.display }}"
       # The release is a draft until it holds every file, and it is held to
       # that count before it is published. The count is read from the
       # release's own assets endpoint: the release object's embedded list,
@@ -476,6 +525,8 @@ jobs:
           docker pull "${REGISTRY}/${OWNER}/cella-stubs:${GITHUB_REF_NAME}"
           docker tag "${REGISTRY}/${OWNER}/cella-stubs:${GITHUB_REF_NAME}" cella-stubs:dev
           docker tag "${REGISTRY}/${OWNER}/${IMAGE}:${GITHUB_REF_NAME}" cellad:dev
+          docker pull "${REGISTRY}/${OWNER}/${DISPLAY_IMAGE}:${GITHUB_REF_NAME}"
+          docker tag "${REGISTRY}/${OWNER}/${DISPLAY_IMAGE}:${GITHUB_REF_NAME}" cella-display:dev
           # The archive's base pins the published digest, which the step
           # above already proved every overlay renders. The cluster runs the
           # same bytes under the name this runner loaded them with, so the
@@ -549,7 +600,7 @@ jobs:
             done
           done
           for name in "deploy-${GITHUB_REF_NAME}.tar.gz" checksums.txt checksums.txt.sigstore.json \
-                      sbom-module.spdx.json sbom-cellad.spdx.json; do
+                      sbom-module.spdx.json sbom-cellad.spdx.json sbom-cella-display.spdx.json; do
             test -f "$name" || { echo "the release lacks ${name}" >&2; exit 1; }
           done
       - name: The checksums verify and their signature names this workflow
@@ -560,11 +611,13 @@ jobs:
           sha256sum -c checksums.txt
           # Four archives of each binary and the deploy archive.
           [ "$(grep -c . checksums.txt)" -eq 9 ] || { echo "checksums.txt lists $(grep -c . checksums.txt) archives, want 9" >&2; exit 1; }
-      - name: The image verifies and its attestations answer
+      - name: The two images verify and their attestations answer
         run: |
-          cosign verify --certificate-identity "${IDENTITY}" --certificate-oidc-issuer "${ISSUER}" \
-            "${REGISTRY}/${OWNER}/${IMAGE}:${GITHUB_REF_NAME}" > /dev/null
-          gh attestation verify "oci://${REGISTRY}/${OWNER}/${IMAGE}:${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}"
+          for image in "${IMAGE}" "${DISPLAY_IMAGE}"; do
+            cosign verify --certificate-identity "${IDENTITY}" --certificate-oidc-issuer "${ISSUER}" \
+              "${REGISTRY}/${OWNER}/${image}:${GITHUB_REF_NAME}" > /dev/null
+            gh attestation verify "oci://${REGISTRY}/${OWNER}/${image}:${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}"
+          done
       - name: The image carries the archive's binary
         run: |
           # The reference is a multi-arch index. Creating a container from

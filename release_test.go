@@ -687,3 +687,81 @@ func runBlocks(t *testing.T, doc string) (stdout, stderr string, err error) {
 	err = cmd.Run()
 	return out.String(), errOut.String(), err
 }
+
+// TestReleasePublishesTheDisplayImage: the desktop image of spec 014 takes
+// the control plane's path. It is built for both architectures and pushed
+// by digest under no tag, signed, given an attested bill of materials and
+// provenance, tagged only in publish, its bill of materials attached, and
+// verified by tag from the clean runner.
+func TestReleasePublishesTheDisplayImage(t *testing.T) {
+	path := filepath.Join(".github", "workflows", "release.yml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var o object
+	if err := unmarshalYAML(data, &o); err != nil {
+		t.Fatal(err)
+	}
+	if got := str(dig(o, "env", "DISPLAY_IMAGE")); got != "cella-display" {
+		t.Fatalf("the workflow's DISPLAY_IMAGE is %q, want cella-display", got)
+	}
+	var build, attested []string
+	for _, s := range list(dig(o, "jobs", "build", "steps")) {
+		if str(dig(s, "id")) == "display" {
+			build = append(build, str(dig(s, "run")))
+		}
+		if strings.HasSuffix(str(dig(s, "with", "subject-name")), "/cella-display") {
+			attested = append(attested, str(dig(s, "uses")))
+		}
+	}
+	if len(build) != 1 {
+		t.Fatalf("the build job has %d display steps, want one", len(build))
+	}
+	for _, want := range []string{
+		"-f images/display/Dockerfile",
+		"--platform linux/amd64,linux/arm64",
+		"push-by-digest=true",
+		`echo "digest=${digest}" >> "$GITHUB_OUTPUT"`,
+	} {
+		if !strings.Contains(build[0], want) {
+			t.Errorf("the display build does not carry %q", want)
+		}
+	}
+	if strings.Contains(build[0], "GITHUB_REF_NAME") {
+		t.Error("the display build names the tag; the digest is tagged only in publish")
+	}
+	for _, action := range []string{"actions/attest-sbom@", "actions/attest-build-provenance@"} {
+		if !slices.ContainsFunc(attested, func(uses string) bool { return strings.HasPrefix(uses, action) }) {
+			t.Errorf("the display image is not attested by %s", strings.TrimSuffix(action, "@"))
+		}
+	}
+	if got := str(dig(o, "jobs", "build", "outputs", "display")); got != "${{ steps.display.outputs.digest }}" {
+		t.Errorf("the build job's display output is %q", got)
+	}
+	for job, wants := range map[string][]string{
+		"build": {
+			`cosign sign --yes "${REGISTRY}/${OWNER}/${DISPLAY_IMAGE}@${{ steps.display.outputs.digest }}"`,
+		},
+		"publish": {
+			`-t "${REGISTRY}/${OWNER}/${DISPLAY_IMAGE}:${GITHUB_REF_NAME}"`,
+			`"${REGISTRY}/${OWNER}/${DISPLAY_IMAGE}@${{ needs.build.outputs.display }}"`,
+		},
+		"release-verify": {
+			`for image in "${IMAGE}" "${DISPLAY_IMAGE}"; do`,
+			"cosign verify ",
+			"gh attestation verify",
+			"sbom-cella-display.spdx.json",
+		},
+	} {
+		steps := jobSteps(t, path, job)
+		for _, want := range wants {
+			if !strings.Contains(steps, want) {
+				t.Errorf("the %s job does not carry %q", job, want)
+			}
+		}
+	}
+	if !strings.Contains(string(data), "output-file: dist/sbom-cella-display.spdx.json") {
+		t.Error("the display image's bill of materials is not written into dist, so it is not a release asset")
+	}
+}
