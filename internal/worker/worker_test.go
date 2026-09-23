@@ -206,7 +206,8 @@ func TestWorkerRegistersAndHoldsTheStream(t *testing.T) {
 // deadline, and the whole stream dropped with every operation on it.
 func TestAStalledCallerKeepsTheStream(t *testing.T) {
 	const deadline = 200 * time.Millisecond
-	t.Cleanup(worker.ShortenWriteDeadline(deadline))
+	restore := worker.ShortenWriteDeadline(deadline)
+	t.Cleanup(restore)
 	p := newPlane(t)
 	host := nativeDriver(t)
 	w, _ := p.start(t, host)
@@ -245,6 +246,11 @@ func TestAStalledCallerKeepsTheStream(t *testing.T) {
 	}
 	_ = beside.Close()
 
+	// The stall is over and the stream held through it. The drain below is
+	// ordinary traffic, bounded by the default deadline, so a loaded runner
+	// taking longer than the short one to write a single frame is not read
+	// as the stall this case is about.
+	restore()
 	n, err := io.Copy(io.Discard, stalled.Stdout())
 	if err != nil || n != size {
 		t.Fatalf("the stalled exec carried %d of %d bytes once read: %v", n, size, err)
