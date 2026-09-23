@@ -1,6 +1,6 @@
 # Every push to main and every pull request runs the gate, the shared
 # pipeline of latere-ai/ci, and the checks that need the tree and no
-# cluster: a tidy module file and the licence notice on every source
+# cluster: a tidy module file and the license notice on every source
 # file. The tiers that need a runtime backend beside them, a kind cluster
 # or a container engine, are spec 012's and join here when that spec
 # lands. Every third-party action is pinned by commit.

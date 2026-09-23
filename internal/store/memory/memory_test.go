@@ -67,11 +67,11 @@ func TestMemoryRefusesAWriteAfterClose(t *testing.T) {
 	}
 }
 
-// TestMemoryHonoursACancelledContext: a cancelled caller does not write, in
+// TestMemoryHonorsACancelledContext: a cancelled caller does not write, in
 // the transaction and in every statement inside it. The memory adapter holds
 // the same rule Postgres holds for free, so a caller that gave up reads the
 // same answer whichever store it opened.
-func TestMemoryHonoursACancelledContext(t *testing.T) {
+func TestMemoryHonorsACancelledContext(t *testing.T) {
 	s := open(t, storetest.Key)
 	defer func() {
 		if err := s.Close(); err != nil {

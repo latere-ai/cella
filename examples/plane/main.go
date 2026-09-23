@@ -224,7 +224,7 @@ func (p *plane) options(subject string) manifest.Options {
 			AutoStop: "15m", TTL: "8h", AutoDelete: "24h",
 		},
 		Ceilings: manifest.Ceilings{CPU: plan.CPU, Memory: plan.Memory, TTL: plan.TTL},
-		Admit:    p.catalogue,
+		Admit:    p.catalog,
 	}
 }
 
@@ -249,7 +249,7 @@ func ceilings(subject string) plan {
 // core's kinds. It runs inside Resolve, and what it returns is validated
 // again, so a step that writes a field the schema does not have is a
 // refusal and not a surprise later.
-func (p *plane) catalogue(_ context.Context, in *v1.Sandbox, req manifest.AdmitRequest) (*v1.Sandbox, []string, error) {
+func (p *plane) catalog(_ context.Context, in *v1.Sandbox, req manifest.AdmitRequest) (*v1.Sandbox, []string, error) {
 	out := *in
 	if out.Metadata.Labels == nil {
 		out.Metadata.Labels = map[string]string{}

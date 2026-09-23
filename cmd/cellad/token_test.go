@@ -73,7 +73,7 @@ func TestWorkloadTokenEndToEnd(t *testing.T) {
 		return obj.Status.ID
 	}
 
-	mine, other := create("holder"), create("neighbour")
+	mine, other := create("holder"), create("neighbor")
 	// The token is read the way the agent client of spec 011 reads it:
 	// through the variable the driver set, because the native driver has no
 	// mount namespace to put the reserved path in.

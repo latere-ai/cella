@@ -181,10 +181,10 @@ func lists(t TB, open Opener) {
 	s := opened(t, open, Key)
 	ctx := context.Background()
 	for _, o := range []store.Object{
-		labelled(object("sbx_a", "alice", "one"), "prod", "Running", "env_one"),
-		labelled(object("sbx_b", "alice", "two"), "prod", "Stopped", "env_one"),
-		labelled(object("sbx_c", "alice", "three"), "dev", "Running", "env_two"),
-		labelled(object("sbx_d", "bob", "four"), "prod", "Running", "env_one"),
+		labeled(object("sbx_a", "alice", "one"), "prod", "Running", "env_one"),
+		labeled(object("sbx_b", "alice", "two"), "prod", "Stopped", "env_one"),
+		labeled(object("sbx_c", "alice", "three"), "dev", "Running", "env_two"),
+		labeled(object("sbx_d", "bob", "four"), "prod", "Running", "env_one"),
 	} {
 		put(t, s, o, 0)
 	}
@@ -909,7 +909,7 @@ func object(id, owner, name string) store.Object {
 }
 
 // labeled sets the columns the list filters read.
-func labelled(o store.Object, tier, phase, environment string) store.Object {
+func labeled(o store.Object, tier, phase, environment string) store.Object {
 	o.Labels = map[string]string{"tier": tier}
 	o.Phase = phase
 	o.Environment = environment

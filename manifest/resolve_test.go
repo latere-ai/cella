@@ -686,15 +686,15 @@ func TestImageIsRequiredAfterAdmission(t *testing.T) {
 	}
 	// An admission step supplies it where the operator's default is unset,
 	// which is the image catalog of spec 007.
-	catalogue := bare
-	catalogue.Admit = func(_ context.Context, in *v1.Sandbox, _ AdmitRequest) (*v1.Sandbox, []string, error) {
+	catalog := bare
+	catalog.Admit = func(_ context.Context, in *v1.Sandbox, _ AdmitRequest) (*v1.Sandbox, []string, error) {
 		out := *in
 		if out.Spec.Image == "" {
 			out.Spec.Image = "registry.example/base@sha256:" + strings.Repeat("a", 64)
 		}
 		return &out, nil, nil
 	}
-	if got := resolve(t, sandbox(), catalogue).Sandbox; !strings.HasPrefix(got.Spec.Image, "registry.example/base@sha256:") {
+	if got := resolve(t, sandbox(), catalog).Sandbox; !strings.HasPrefix(got.Spec.Image, "registry.example/base@sha256:") {
 		t.Fatalf("image = %q, want the catalog's pinned reference", got.Spec.Image)
 	}
 	// A caller's image wins over the operator's default, and an environment

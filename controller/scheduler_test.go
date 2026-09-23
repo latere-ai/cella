@@ -323,10 +323,10 @@ func TestPlacementResumesAtTheBoundary(t *testing.T) {
 	}
 }
 
-// TestSchedulerHonoursQueueOrder is spec 020's order across three subjects
+// TestSchedulerHonorsQueueOrder is spec 020's order across three subjects
 // and two priorities: the higher priority first, then the subject holding the
 // least cpu on the environment, then arrival.
-func TestSchedulerHonoursQueueOrder(t *testing.T) {
+func TestSchedulerHonorsQueueOrder(t *testing.T) {
 	c, _, _ := scheduled(t, v1.SchedulingQueued, v1.Capacity{Sandboxes: 2}, Options{})
 	// alice holds two cpu for the whole case, so she is the subject with
 	// the largest share whenever priorities tie.

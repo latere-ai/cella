@@ -161,9 +161,9 @@ func TestSendNeedsAConnectedGateway(t *testing.T) {
 	}
 }
 
-// TestSendReturnsOnTheFirstAcknowledgement is the fan-out rule: the map goes
+// TestSendReturnsOnTheFirstAcknowledgment is the fan-out rule: the map goes
 // to every gateway and one answer is enough to let the sandbox be created.
-func TestSendReturnsOnTheFirstAcknowledgement(t *testing.T) {
+func TestSendReturnsOnTheFirstAcknowledgment(t *testing.T) {
 	f := newHub(t, 5*time.Second, 0)
 	silent := f.connect(t, "default", "", true)
 	answering := f.connect(t, "default", "", false)
