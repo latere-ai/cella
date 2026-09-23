@@ -375,11 +375,23 @@ jobs:
         run: |
           docker buildx imagetools create -t "${REGISTRY}/${OWNER}/${IMAGE}:${GITHUB_REF_NAME}" \
             "${REGISTRY}/${OWNER}/${IMAGE}@${{ needs.build.outputs.digest }}"
+      # The release is a draft until it holds every file, and it is held to
+      # that count before it is published: a create that attached nothing
+      # once exited zero and left a public release with no assets.
       - name: Create the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" --verify-tag --title "${GITHUB_REF_NAME}" --notes-file out/notes.md release/*
+          gh release create "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --verify-tag --draft \
+            --title "${GITHUB_REF_NAME}" --notes-file out/notes.md
+          gh release upload "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --clobber release/*
+          want=$(find release -maxdepth 1 -type f | wc -l)
+          held=$(gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --json assets --jq '.assets | length')
+          if [ "${held}" -ne "${want}" ]; then
+            echo "the draft holds ${held} of ${want} assets; it stays a draft" >&2
+            exit 1
+          fi
+          gh release edit "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --draft=false --latest
 
   # 5. The install document against the published artifacts: the deploy
   # archive unpacked on a runner that has nothing of the checkout but the

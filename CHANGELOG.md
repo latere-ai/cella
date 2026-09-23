@@ -6,6 +6,13 @@ refused before it is pushed.
 
 ## Unreleased
 
+- The binaries, the deploy archive, the checksums and their signature are
+  attached to this release. The `v0.3.0` release page was published
+  without them, although its image `ghcr.io/latere-ai/cellad:v0.3.0` is
+  complete; this release carries the same code as `v0.3.0` with every file.
+  A release is now published only once it holds every file it was built
+  with.
+
 ## v0.3.0 - 2026-09-23
 
 - On Kubernetes, `cellad` now asks the API server at up to 50 requests a
