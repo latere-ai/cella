@@ -2,8 +2,8 @@
 # SPDX-FileCopyrightText: 2026 Latere AI
 # SPDX-License-Identifier: Apache-2.0
 #
-# The kind stack of spec 049: a cluster, both images, this overlay, and the
-# URL and token to drive it with.
+# The kind stack of spec 049: a cluster, the three images, this overlay, and
+# the URL and token to drive it with.
 #
 #   up.sh [-name <cluster>] [-manifests <deploy tree>]
 #
@@ -17,7 +17,7 @@
 # images are built from this checkout unless CELLA_KIND_BUILD=0, which is
 # what a pipeline that pulled the published ones sets.
 #
-# down.sh deletes the cluster. Nothing outside the cluster and the two
+# down.sh deletes the cluster. Nothing outside the cluster and the three
 # images is touched: the state is under the cluster and goes with it.
 set -euo pipefail
 
@@ -38,18 +38,21 @@ docker=${CELLA_DOCKER:-docker}
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
-# 1. Both images under the tag this overlay names. The stubs image is a
-# test image and is never part of an installation.
+# 1. The three images under the tag this overlay names. The stubs image is
+# a test image and is never part of an installation. The display image is
+# the desktop the overlay's CELLA_K8S_DISPLAY_IMAGE names, so the
+# computer-use case runs against the cluster rather than skipping.
 if [ "${CELLA_KIND_BUILD:-1}" = "1" ]; then
   "$docker" build -t cellad:dev "$root" >&2
   "$docker" build -f "$root/Dockerfile.stubs" -t cella-stubs:dev "$root" >&2
+  "$docker" build -f "$root/images/display/Dockerfile" -t cella-display:dev "$root" >&2
 fi
 
 # 2. The cluster, left alone where one of this name is already up.
 if ! kind get clusters 2>/dev/null | grep -qx "$name"; then
   kind create cluster --name "$name" --config "$overlay/kind.yaml" >&2
 fi
-kind load docker-image cellad:dev cella-stubs:dev --name "$name" >&2
+kind load docker-image cellad:dev cella-stubs:dev cella-display:dev --name "$name" >&2
 
 # 3. The namespace, the one mandatory Secret, and the overlay.
 kubectl apply -f "$manifests/bootstrap/namespace.yaml" >&2

@@ -256,3 +256,51 @@ func envOf(v any) map[string]string {
 	}
 	return out
 }
+
+// TestKindStackRunsTheDesktop: the kind stack declares a desktop, so the
+// computer-use case runs against a real API server instead of skipping.
+// up.sh builds and loads the display image, the overlay names it to the
+// driver, and both kind conformance runs declare display and input and
+// pass the image the case creates its sandbox from.
+func TestKindStackRunsTheDesktop(t *testing.T) {
+	script, err := os.ReadFile(filepath.Join("deploy", "examples", "kind-stubs", "up.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`-f "$root/images/display/Dockerfile" -t cella-display:dev`,
+		"kind load docker-image cellad:dev cella-stubs:dev cella-display:dev",
+	} {
+		if !strings.Contains(string(script), want) {
+			t.Errorf("up.sh does not carry %q", want)
+		}
+	}
+	config := find(t, render(t, "deploy/examples/kind-stubs"), "ConfigMap", "cellad")
+	if got := str(dig(config, "data", "CELLA_K8S_DISPLAY_IMAGE")); got != "cella-display:dev" {
+		t.Errorf("the stack's CELLA_K8S_DISPLAY_IMAGE is %q, want the image up.sh loads", got)
+	}
+	const declared = "-capabilities files,pool,mesh,display,input"
+	const image = "-display-image cella-display:dev"
+	for _, run := range []struct{ workflow, job string }{
+		{"verify.yml", "install"},
+		{"release.yml", "conformance"},
+	} {
+		steps := jobSteps(t, filepath.Join(".github", "workflows", run.workflow), run.job)
+		for _, want := range []string{declared, image} {
+			if !strings.Contains(steps, want) {
+				t.Errorf("the kind conformance run of %s %s does not pass %q", run.workflow, run.job, want)
+			}
+		}
+	}
+	// Each job that brings the stack up supplies the image up.sh loads: a
+	// build from the checkout in verify, the published bytes in release.
+	for _, run := range []struct{ workflow, job, want string }{
+		{"verify.yml", "install", "docker build -f images/display/Dockerfile -t cella-display:dev ."},
+		{"release.yml", "conformance", `docker tag "${REGISTRY}/${OWNER}/${DISPLAY_IMAGE}@${DISPLAY_DIGEST}" cella-display:dev`},
+		{"release.yml", "install-release", `docker tag "${REGISTRY}/${OWNER}/${DISPLAY_IMAGE}:${GITHUB_REF_NAME}" cella-display:dev`},
+	} {
+		if steps := jobSteps(t, filepath.Join(".github", "workflows", run.workflow), run.job); !strings.Contains(steps, run.want) {
+			t.Errorf("the %s job of %s does not supply the display image (%q)", run.job, run.workflow, run.want)
+		}
+	}
+}

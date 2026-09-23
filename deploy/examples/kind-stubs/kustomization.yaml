@@ -18,11 +18,12 @@
 # sharing the Pod's network namespace is what makes every endpoint
 # http://127.0.0.1:<port> with nothing waived.
 #
-# The images are the two this repository builds, under the tag the cluster
-# was loaded with:
+# The images are the three this repository builds, under the tag the
+# cluster was loaded with:
 #
 #	docker build -t cellad:dev . && docker build -f Dockerfile.stubs -t cella-stubs:dev .
-#	kind load docker-image cellad:dev cella-stubs:dev --name cella
+#	docker build -f images/display/Dockerfile -t cella-display:dev .
+#	kind load docker-image cellad:dev cella-stubs:dev cella-display:dev --name cella
 #
 # up.sh does both and prints the URL and the token to drive it with.
 apiVersion: kustomize.config.k8s.io/v1beta1
