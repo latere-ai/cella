@@ -256,7 +256,7 @@ included; the display cases skip for want of a desktop image.
 | Spec | What it said | What was built | Why |
 |---|---|---|---|
 | [[004-runtime-contract]] | podman's `Dial` is "yes", with no word on which ports | a declared port only, published at create | the engine's publication is the one route into the container's network namespace the libpod API offers, and it is fixed when the container is made; native reaches any port because it confines nothing |
-| [[004-runtime-contract]] | `remote` passes the whole suite through a native worker | its `NameIsolationCapabilities` and `DialReachesAPort` fail | the remote driver reports the worker's declaration, now carrying `Dial`, and relays no dial; `runtime/remote` was outside this slice |
+| [[004-runtime-contract]] | `remote` passes the whole suite through a native worker | it does, with `Dial` withheld from the worker's declaration | the remote driver relays no dial, and the merge of this slice made it declare only what the worker stream carries (`TestTheSeamDeclaresWhatItCarries`); `runtime/remote` was outside this slice |
 | [[023-computer-use-operations]] | the proxy forwards headers but the hop-by-hop set | `Authorization` is dropped too; `Host` is `localhost:<port>`, and the `X-Forwarded-*` set with a prefix says how the caller reached it | the bearer is the caller's to the control plane and never the workload's; a server inside that checks its host expects the one it listens on |
 | [[020-scheduling-and-sets]] | the pool's match rule reads image, resources, desktop, command, user, workspace and workdir | a declared port refuses the match too | a published port is fixed at the entry's create |
 | [[008-api]] | the proxy is `any` method | one pattern with no method, documented as the eight operations OpenAPI has | the document has no word for every method, and the mux test reads a method-less pattern as those eight |
@@ -265,7 +265,7 @@ included; the display cases skip for want of a desktop image.
 
 | Open | Why |
 |---|---|
-| `Dial` on the `remote` driver, over the worker stream's byte sub-stream, or the driver withholding `Dial` until then | `runtime/remote` belongs to the worker stream's own slice; until one lands, `TestWorkerConformance` fails, and on a worker environment both routes answer 422 |
+| `Dial` on the `remote` driver, over the worker stream's byte sub-stream | `runtime/remote` belongs to the worker stream's own slice; until it lands the driver withholds `Dial`, and on a worker environment both routes answer 422 |
 | The `sandbox.port` record and `CELLA_EVENTS_PORTS` | the variable belongs to the configuration package another slice owns |
 | `Dial` on `k8s`, through the port forwarding subresource | the k8s driver's own slice |
 | `expose: public`, the `Exposer`, and mesh reachability | [[022-mesh-and-spawn]] and [[004-runtime-contract]] |
