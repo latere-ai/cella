@@ -19,6 +19,7 @@ import (
 	kruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
+	"k8s.io/client-go/tools/remotecommand"
 
 	driver "latere.ai/x/cella/runtime"
 )
@@ -153,14 +154,19 @@ type recorder struct {
 	handle func(ctx context.Context, c execCall, stdin io.Reader, stdout, stderr io.Writer) error
 }
 
+// execCall is what one exec asked the cluster for: the command, where, and
+// whether it carries stdin, a terminal, and that terminal's size queue.
 type execCall struct {
 	pod       string
 	argv      []string
 	container string
+	stdin     bool
+	tty       bool
+	window    remotecommand.TerminalSizeQueue
 }
 
 func (r *recorder) stream(ctx context.Context, pod string, o execOpts, stdin io.Reader, stdout, stderr io.Writer) error {
-	c := execCall{pod: pod, argv: o.argv, container: o.name()}
+	c := execCall{pod: pod, argv: o.argv, container: o.name(), stdin: o.stdin, tty: o.tty, window: o.window}
 	r.mu.Lock()
 	r.calls = append(r.calls, c)
 	handle := r.handle

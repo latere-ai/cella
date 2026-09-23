@@ -6,6 +6,7 @@ package k8s
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"reflect"
 	"strings"
@@ -102,8 +103,6 @@ func TestExecRefusals(t *testing.T) {
 	}{
 		{"no command", driver.ExecRequest{}, driver.ErrInvalid},
 		{"negative timeout", driver.ExecRequest{Command: []string{"true"}, Timeout: -time.Second}, driver.ErrInvalid},
-		{"stdin", driver.ExecRequest{Command: []string{"cat"}, Stdin: strings.NewReader("x")}, driver.ErrUnsupported},
-		{"tty", driver.ExecRequest{Command: []string{"sh"}, TTY: true}, driver.ErrUnsupported},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := h.Exec(t.Context(), id, tc.req); !errors.Is(err, tc.want) {
@@ -115,6 +114,83 @@ func TestExecRefusals(t *testing.T) {
 	cancel()
 	if _, err := h.Exec(ctx, id, driver.ExecRequest{Command: []string{"true"}}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("Exec with a cancelled context = %v", err)
+	}
+}
+
+func TestExecStdinKeepsTheStreamsApart(t *testing.T) {
+	h := newHarness(t)
+	const id = "sbx_execstdin"
+	h.created(t, spec(id))
+	h.exec.handle = func(_ context.Context, c execCall, stdin io.Reader, stdout, stderr io.Writer) error {
+		if !c.stdin || c.tty || c.window != nil || stderr == nil {
+			return fmt.Errorf("the exec asked for stdin %v, tty %v, a window %v and a stderr %v", c.stdin, c.tty, c.window != nil, stderr != nil)
+		}
+		// The command reads to the end of its input, which is the reader's
+		// own end: the executor closes the exec's stdin there.
+		in, err := io.ReadAll(stdin)
+		if err != nil {
+			return err
+		}
+		_, _ = io.WriteString(stdout, "got:"+string(in))
+		_, _ = io.WriteString(stderr, "onstderr")
+		return nil
+	}
+	e, err := h.Exec(t.Context(), id, driver.ExecRequest{Command: []string{"cat"}, Stdin: strings.NewReader("ping")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, errOut := drain(e)
+	if code, err := e.Wait(t.Context()); err != nil || code != 0 {
+		t.Fatalf("Wait = %d %v", code, err)
+	}
+	if out != "got:ping" || errOut != "onstderr" {
+		t.Fatalf("streams %q %q, want the input on stdout and the two apart", out, errOut)
+	}
+}
+
+func TestExecTTYHasOneStream(t *testing.T) {
+	h := newHarness(t)
+	const id = "sbx_exectty"
+	h.created(t, spec(id))
+	for _, tc := range []struct {
+		name  string
+		stdin io.Reader
+	}{
+		{"without input", nil},
+		{"with input", strings.NewReader("typed\n")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h.exec.handle = func(_ context.Context, c execCall, stdin io.Reader, stdout, stderr io.Writer) error {
+				// A terminal has one stream, and a command that runs under
+				// one without being given a window keeps the kubelet's.
+				if !c.tty || c.stdin != (tc.stdin != nil) || stderr != nil || c.window != nil {
+					return fmt.Errorf("the exec asked for tty %v, stdin %v, a stderr %v and a window %v", c.tty, c.stdin, stderr != nil, c.window != nil)
+				}
+				if stdin != nil {
+					in, err := io.ReadAll(stdin)
+					if err != nil {
+						return err
+					}
+					_, _ = stdout.Write(in)
+				}
+				_, _ = io.WriteString(stdout, "ISATTY\r\nONERR\r\n")
+				return nil
+			}
+			e, err := h.Exec(t.Context(), id, driver.ExecRequest{Command: []string{"sh"}, Stdin: tc.stdin, TTY: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			out, errOut := drain(e)
+			if code, err := e.Wait(t.Context()); err != nil || code != 0 {
+				t.Fatalf("Wait = %d %v", code, err)
+			}
+			if !strings.Contains(out, "ISATTY") || !strings.Contains(out, "ONERR") || errOut != "" {
+				t.Fatalf("streams %q %q, want everything on stdout and stderr at its end", out, errOut)
+			}
+			if tc.stdin != nil && !strings.HasPrefix(out, "typed") {
+				t.Fatalf("stdout %q does not carry the input", out)
+			}
+		})
 	}
 }
 
