@@ -87,6 +87,10 @@ type Store struct {
 
 	stop context.CancelFunc
 	done chan struct{}
+
+	// broadcast carries the journal rows each committed transaction
+	// appended to the subscriptions Watch opened in this process.
+	broadcast store.Broadcast
 }
 
 // Open connects, refuses a schema this binary does not know, applies the
@@ -230,7 +234,8 @@ func (s *Store) Tx(ctx context.Context, fn func(store.Tx) error) error {
 	if err != nil {
 		return fmt.Errorf("store: beginning a transaction: %w", err)
 	}
-	if err := fn(&txn{q: tx, env: s.env, store: s}); err != nil {
+	t := &txn{q: tx, env: s.env, store: s}
+	if err := fn(t); err != nil {
 		if rollback := tx.Rollback(ctx); rollback != nil && !errors.Is(rollback, pgx.ErrTxClosed) {
 			return errors.Join(err, fmt.Errorf("store: rolling back: %w", rollback))
 		}
@@ -239,7 +244,17 @@ func (s *Store) Tx(ctx context.Context, fn func(store.Tx) error) error {
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("store: committing: %w", err)
 	}
+	// The rows are published after the commit and outside any lock, so two
+	// transactions of one object can publish in the other order. A reader
+	// orders by the sequence each row carries, which the commit fixed.
+	s.broadcast.Publish(t.appended)
 	return nil
+}
+
+// Watch subscribes to the journal rows this process commits from now on.
+// Another replica's commits do not arrive here.
+func (s *Store) Watch(objectID string) *store.Subscription {
+	return s.broadcast.Subscribe(objectID)
 }
 
 // Durable is true: this is the store recovery of design 005 needs.
@@ -275,6 +290,7 @@ func (s *Store) Close() error {
 	held := make(map[string]string, len(s.held))
 	maps.Copy(held, s.held)
 	s.mu.Unlock()
+	s.broadcast.Close(ErrClosed)
 
 	s.stop()
 	<-s.done

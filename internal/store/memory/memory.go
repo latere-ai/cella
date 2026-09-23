@@ -47,6 +47,9 @@ type Store struct {
 	data       *data
 	journalCap int
 	closed     bool
+	// broadcast carries the journal rows each transaction appended to the
+	// subscriptions Watch opened.
+	broadcast store.Broadcast
 }
 
 // Open takes the options and returns a store with nothing in it.
@@ -60,6 +63,10 @@ func Open(o Options) (*Store, error) {
 
 // Tx runs fn under the one mutex. A failed fn restores the snapshot taken
 // before it ran, so every write inside commits together or not at all.
+//
+// The journal rows a transaction appended are published before the mutex is
+// released, so subscribers receive them in the order the transactions
+// committed. Publishing never blocks, so no reader can hold the store.
 func (s *Store) Tx(ctx context.Context, fn func(store.Tx) error) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -70,11 +77,18 @@ func (s *Store) Tx(ctx context.Context, fn func(store.Tx) error) error {
 		return ErrClosed
 	}
 	before := s.data.clone()
-	if err := fn(&txn{d: s.data, env: s.env, journalCap: s.journalCap}); err != nil {
+	t := &txn{d: s.data, env: s.env, journalCap: s.journalCap}
+	if err := fn(t); err != nil {
 		s.data = before
 		return err
 	}
+	s.broadcast.Publish(t.appended)
 	return nil
+}
+
+// Watch subscribes to the journal rows this store commits from now on.
+func (s *Store) Watch(objectID string) *store.Subscription {
+	return s.broadcast.Subscribe(objectID)
 }
 
 // Durable is false: desired state lives with the process.
@@ -90,12 +104,13 @@ func (s *Store) Ready(context.Context) error {
 	return nil
 }
 
-// Close drops everything the store holds.
+// Close drops everything the store holds and ends every subscription.
 func (s *Store) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.closed = true
 	s.data = newData()
+	s.broadcast.Close(ErrClosed)
 	return nil
 }
 
@@ -209,11 +224,14 @@ type txn struct {
 	d          *data
 	env        store.Envelope
 	journalCap int
+	// appended is every journal row this transaction wrote, as it was
+	// stored, which Tx publishes once the transaction succeeds.
+	appended []store.Event
 }
 
 func (t *txn) Desired() store.Desired   { return desired{t.d} }
 func (t *txn) Observed() store.Observed { return observed{t.d} }
-func (t *txn) Journal() store.Journal   { return journal{t.d, t.journalCap} }
+func (t *txn) Journal() store.Journal   { return journal{t.d, t.journalCap, &t.appended} }
 func (t *txn) Values() store.Values     { return values{t.d, t.env} }
 func (t *txn) Leases() store.Leases     { return leases{t.d} }
 
@@ -422,8 +440,9 @@ func (x observed) Rebuild(ctx context.Context, environment string, states []driv
 }
 
 type journal struct {
-	d   *data
-	cap int
+	d        *data
+	cap      int
+	appended *[]store.Event
 }
 
 func (x journal) Append(ctx context.Context, e store.Event) (int64, error) {
@@ -449,6 +468,7 @@ func (x journal) Append(ctx context.Context, e store.Event) (int64, error) {
 		held = slices.Delete(held, 0, len(held)-x.cap)
 	}
 	x.d.events[e.ObjectID] = held
+	*x.appended = append(*x.appended, e)
 	return e.Seq, nil
 }
 
@@ -559,6 +579,26 @@ func (x journal) ByObject(ctx context.Context, objectID string, p store.Page) ([
 	sort.Slice(rows, func(i, j int) bool { return rows[i].Seq > rows[j].Seq })
 	rows, next := store.PageOf(rows, p, func(e store.Event) string { return strconv.FormatInt(e.Seq, 10) })
 	return rows, next, nil
+}
+
+// After reads one object's rows above seq, oldest first.
+func (x journal) After(ctx context.Context, objectID string, seq int64, limit int) ([]store.Event, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	var rows []store.Event
+	for _, e := range x.d.events[objectID] {
+		if e.Seq <= seq {
+			continue
+		}
+		e.Payload = slices.Clone(e.Payload)
+		rows = append(rows, e)
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].Seq < rows[j].Seq })
+	if size := (store.Page{Limit: limit}).Size(); len(rows) > size {
+		rows = rows[:size]
+	}
+	return rows, nil
 }
 
 // Prune forgets finished rows only. An event still waiting for the sink is

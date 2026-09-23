@@ -59,6 +59,7 @@ var cases = []struct {
 	{"Transactions", transactions},
 	{"Observed", observed},
 	{"Journal", journal},
+	{"Follow", follow},
 	{"Sequence", sequence},
 	{"Delivery", delivery},
 	{"Leases", leases},
@@ -509,6 +510,125 @@ func journal(t TB, open Opener) {
 		}
 		return nil
 	})
+}
+
+// follow: the half of the journal a following reader of design 009 needs.
+// A subscription receives the rows of each transaction once it committed,
+// with the sequence each took, and nothing of a transaction that rolled back;
+// an object's subscription receives that object's rows only; a closed store
+// ends every subscription. After reads above a sequence, oldest first.
+//
+// The rows are published before Tx returns on both adapters, so the case
+// reads what is buffered rather than waiting for anything.
+func follow(t TB, open Opener) {
+	s := opened(t, open, Key)
+	ctx := context.Background()
+	every, one := s.Watch(""), s.Watch("sbx_a")
+	t.Cleanup(every.Close)
+	t.Cleanup(one.Close)
+	with(t, s, func(tx store.Tx) error {
+		for _, e := range []store.Event{
+			{ObjectID: "sbx_a", Type: "sandbox.created"},
+			{ObjectID: "sbx_b", Type: "sandbox.created"},
+			{ObjectID: "sbx_a", Type: "sandbox.started"},
+		} {
+			if _, err := tx.Journal().Append(ctx, e); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	refuses(t, s, "a transaction that rolls back after an append", func(tx store.Tx) error {
+		if _, err := tx.Journal().Append(ctx, store.Event{ObjectID: "sbx_a", Type: "sandbox.stopped"}); err != nil {
+			return err
+		}
+		return errors.New("rolled back")
+	})
+	with(t, s, func(tx store.Tx) error {
+		_, err := tx.Journal().Append(ctx, store.Event{ObjectID: "sbx_a", Type: "sandbox.stopped", Payload: []byte(`{"phase":"Stopped"}`)})
+		return err
+	})
+
+	with(t, s, func(tx store.Tx) error {
+		rows, err := tx.Journal().After(ctx, "sbx_a", 0, 10)
+		if err != nil {
+			return err
+		}
+		if got := seqs(rows); !slices.Equal(got, []int64{1, 2, 3}) {
+			t.Fatalf("After(0) read the sequences %v, want 1, 2, 3", got)
+		}
+		if rows[2].Type != "sandbox.stopped" || rows[2].ID == "" || rows[2].At.IsZero() {
+			t.Errorf("After read the newest row as %+v", rows[2])
+		}
+		sameJSON(t, rows[2].Payload, []byte(`{"phase":"Stopped"}`), "the row After read")
+		if rows, err = tx.Journal().After(ctx, "sbx_a", 1, 1); err != nil {
+			return err
+		}
+		if got := seqs(rows); !slices.Equal(got, []int64{2}) {
+			t.Errorf("After(1) with a limit of one read %v, want 2", got)
+		}
+		for _, tc := range []struct {
+			object string
+			after  int64
+		}{{"sbx_a", 3}, {"sbx_none", 0}} {
+			if rows, err = tx.Journal().After(ctx, tc.object, tc.after, 10); err != nil {
+				return err
+			}
+			if len(rows) != 0 {
+				t.Errorf("After(%s, %d) read %v, want nothing", tc.object, tc.after, seqs(rows))
+			}
+		}
+		return nil
+	})
+
+	type seen struct {
+		object string
+		seq    int64
+	}
+	buffered := func(sub *store.Subscription) []seen {
+		var out []seen
+		for {
+			select {
+			case row, ok := <-sub.Rows():
+				if !ok {
+					t.Errorf("the subscription ended while open: %v", sub.Err())
+					return out
+				}
+				if row.ID == "" || row.Type == "" || row.At.IsZero() {
+					t.Errorf("a published row is missing its columns: %+v", row)
+				}
+				out = append(out, seen{row.ObjectID, row.Seq})
+			default:
+				return out
+			}
+		}
+	}
+	if got, want := buffered(every), []seen{{"sbx_a", 1}, {"sbx_b", 1}, {"sbx_a", 2}, {"sbx_a", 3}}; !slices.Equal(got, want) {
+		t.Errorf("every object's subscription received %v, want %v", got, want)
+	}
+	if got, want := buffered(one), []seen{{"sbx_a", 1}, {"sbx_a", 2}, {"sbx_a", 3}}; !slices.Equal(got, want) {
+		t.Errorf("sbx_a's subscription received %v, want %v", got, want)
+	}
+
+	// A closed store ends what is open and answers a later subscription
+	// that has already ended, each with an error.
+	late := s.Watch("")
+	if err := s.Close(); err != nil {
+		t.Fatalf("closing the store: %v", err)
+	}
+	for name, sub := range map[string]*store.Subscription{"open": late, "later": s.Watch("sbx_a")} {
+		select {
+		case _, ok := <-sub.Rows():
+			if ok {
+				t.Errorf("the %s subscription received a row from a closed store", name)
+			}
+		default:
+			t.Errorf("the %s subscription is still open on a closed store", name)
+		}
+		if sub.Err() == nil {
+			t.Errorf("the %s subscription ended with no reason", name)
+		}
+	}
 }
 
 // sequence: the retention keeps each object's newest row whatever its age,

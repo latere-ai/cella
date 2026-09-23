@@ -33,11 +33,14 @@ type txn struct {
 	q     querier
 	env   store.Envelope
 	store *Store
+	// appended is every journal row this transaction wrote, which Tx
+	// publishes once the commit succeeded.
+	appended []store.Event
 }
 
 func (t *txn) Desired() store.Desired   { return desired{t.q} }
 func (t *txn) Observed() store.Observed { return observed{t.q} }
-func (t *txn) Journal() store.Journal   { return journal{t.q} }
+func (t *txn) Journal() store.Journal   { return journal{t.q, &t.appended} }
 func (t *txn) Values() store.Values     { return values{t.q, t.env} }
 func (t *txn) Leases() store.Leases     { return leases{t.q, t.store} }
 
@@ -278,7 +281,10 @@ func (x observed) Rebuild(ctx context.Context, environment string, states []driv
 	return nil
 }
 
-type journal struct{ q querier }
+type journal struct {
+	q        querier
+	appended *[]store.Event
+}
 
 func (x journal) Append(ctx context.Context, e store.Event) (int64, error) {
 	if e.ObjectID == "" || e.Type == "" {
@@ -297,6 +303,8 @@ func (x journal) Append(ctx context.Context, e store.Event) (int64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("store: appending to the journal: %w", err)
 	}
+	e.Seq = seq
+	*x.appended = append(*x.appended, e)
 	return seq, nil
 }
 
@@ -414,6 +422,30 @@ func (x journal) ByObject(ctx context.Context, objectID string, p store.Page) ([
 		return strconv.FormatInt(e.Seq, 10)
 	})
 	return out, next, nil
+}
+
+// After reads one object's rows above seq, oldest first, over the unique
+// index on (object_id, seq).
+func (x journal) After(ctx context.Context, objectID string, seq int64, limit int) ([]store.Event, error) {
+	rows, err := x.q.Query(ctx, `select id, object_id, seq, type, at, payload from events
+		where object_id = $1 and seq > $2 order by seq limit $3`,
+		objectID, seq, (store.Page{Limit: limit}).Size())
+	if err != nil {
+		return nil, fmt.Errorf("store: reading the journal: %w", err)
+	}
+	defer rows.Close()
+	var out []store.Event
+	for rows.Next() {
+		var e store.Event
+		if err := rows.Scan(&e.ID, &e.ObjectID, &e.Seq, &e.Type, &e.At, &e.Payload); err != nil {
+			return nil, fmt.Errorf("store: reading a journal row: %w", err)
+		}
+		out = append(out, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: reading the journal: %w", err)
+	}
+	return out, nil
 }
 
 // Prune forgets finished rows only. An event still waiting for the sink is
