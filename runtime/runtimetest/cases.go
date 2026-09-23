@@ -595,8 +595,20 @@ func attachResize(t tb, open func() runtime.Driver, opts Options) {
 	typed(t, s, "stty size")
 	p.await(t, "24 80")
 	must(t, s.Resize(120, 40), "Resize")
-	typed(t, s, "stty size")
-	p.await(t, "40 120")
+	// A driver may apply a window beside the input rather than in line with
+	// it, as the exec of any container engine does, so the first line typed
+	// after one can still read the old window; the case asks until the new
+	// one is read.
+	deadline := time.Now().Add(pollTimeout)
+	var asked time.Time
+	for !strings.Contains(p.text(), "40 120") {
+		need(t, time.Now().Before(deadline), "the session never wrote %q after the resize; it wrote %q", "40 120", p.text())
+		if time.Since(asked) > 200*time.Millisecond {
+			typed(t, s, "stty size")
+			asked = time.Now()
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 // attachCloseEndsTheStream asserts what Close means on every driver: the

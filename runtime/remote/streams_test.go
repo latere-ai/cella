@@ -203,10 +203,10 @@ func TestRemoteStreams(t *testing.T) {
 			if err = session.Resize(120, 40); err != nil {
 				t.Fatalf("the resize failed: %v", err)
 			}
-			if _, err = session.Write([]byte("stty size\n")); err != nil {
-				t.Fatal(err)
-			}
-			screen.await(t, "40 120")
+			screen.awaitAsking(t, "40 120", func() error {
+				_, err := session.Write([]byte("stty size\n"))
+				return err
+			})
 			if _, err = session.Write([]byte("exit 5\n")); err != nil {
 				t.Fatal(err)
 			}
@@ -297,6 +297,27 @@ func (s *terminal) pump(r io.Reader) {
 			return
 		}
 	}
+}
+
+// awaitAsking writes what prints the text again until it appears. A resize
+// reaches the terminal beside the input rather than in line with it, as it
+// does for the exec of any container engine, so the first command typed
+// after one may still read the old window; the window is applied, and a
+// later command reads it.
+func (s *terminal) awaitAsking(t *testing.T, text string, ask func() error) {
+	t.Helper()
+	var next time.Time
+	waitFor(t, "the terminal printing "+text, func() bool {
+		if now := time.Now(); now.After(next) {
+			if err := ask(); err != nil {
+				t.Fatal(err)
+			}
+			next = now.Add(200 * time.Millisecond)
+		}
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return strings.Contains(s.out.String(), text)
+	})
 }
 
 func (s *terminal) await(t *testing.T, text string) {
