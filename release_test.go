@@ -569,7 +569,7 @@ func shellCommand(t *testing.T, where, script, prefix string) []string {
 			continue
 		}
 		var words []string
-		for _, word := range strings.Fields(line) {
+		for word := range strings.FieldsSeq(line) {
 			if word == "|" || strings.HasPrefix(word, "2>") || strings.HasPrefix(word, ">") {
 				break
 			}
