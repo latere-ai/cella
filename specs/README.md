@@ -84,6 +84,7 @@ later.
 | [060](.archive/060-dial-and-port-proxy.md) | Dial and the port proxy: Dialer on native and podman, the dial socket, the port proxy, cella port-forward | medium | complete | 004, 008, 011, 013, 023, 031, 034, 041, 055 |
 | [061](.archive/061-worker-stream-credit.md) | Worker stream credit: the per sub-stream window, its negotiation in the hello, and Watch across the seam | medium | complete | 004, 021, 031, 051 |
 | [062](.archive/062-journal-retention.md) | Journal retention: the reaper prunes finished records and answered operations, and the memory journal keeps a ring per object | small | complete | 005, 009, 010, 031, 042, 043 |
+| [063](063-k8s-attach.md) | Kubernetes attach: a terminal and exec with stdin over the pods/exec subresource | medium | in-progress | 004, 008, 012, 014, 015, 031, 034, 036 |
 
 ## Dependency graph
 
