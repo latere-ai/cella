@@ -454,3 +454,54 @@ func TestAPeerWithoutCreditKeepsThePreviousStream(t *testing.T) {
 		t.Fatalf("the taps saw nothing cross, so they prove nothing: %v, %v", fromWorker, received)
 	}
 }
+
+// endedWindows is a worker's driver whose sessions answer every resize as a
+// terminal that has ended, which is what a window arriving as the session
+// ends reads on the worker.
+type endedWindows struct{ *native.Driver }
+
+func (d endedWindows) Attach(ctx context.Context, id string, req driver.AttachRequest) (driver.Session, error) {
+	s, err := d.Driver.Attach(ctx, id, req)
+	if err != nil {
+		return nil, err
+	}
+	return endedWindow{s}, nil
+}
+
+type endedWindow struct{ driver.Session }
+
+func (endedWindow) Resize(int, int) error { return driver.ErrNotRunning }
+
+// TestALateWindowLeavesTheExit: a resize the worker's terminal answers as
+// ended does not become the session's result; the session's own end does.
+// Before, the first such window ended the operation with the resize's error
+// and the caller never read the exit code.
+func TestALateWindowLeavesTheExit(t *testing.T) {
+	host, err := native.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = host.Close() })
+	s := openSeamOver(t, endedWindows{host}, remote.HubOptions{Offline: time.Minute},
+		remote.ServerOptions{ReportInterval: time.Minute}, seamWrap{})
+	ref, err := s.driver.Create(t.Context(), driver.CreateSpec{ID: "sbx_late_window", Name: "late", Owner: "ops", Command: []string{"sleep", "60"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.driver.Delete(context.Background(), ref.ID) })
+	session, err := s.driver.Attach(t.Context(), ref.ID, driver.AttachRequest{Cols: 80, Rows: 24})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = session.Close() }()
+	go func() { _, _ = io.Copy(io.Discard, session) }()
+	if err := session.Resize(120, 40); err != nil {
+		t.Fatalf("the resize was not sent: %v", err)
+	}
+	if _, err := session.Write([]byte("exit 3\n")); err != nil {
+		t.Fatal(err)
+	}
+	if code, err := session.Wait(t.Context()); err != nil || code != 3 {
+		t.Fatalf("the session ended with exit %d, err %v; want its own exit 3", code, err)
+	}
+}
