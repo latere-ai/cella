@@ -68,17 +68,27 @@ installation that believes it calls an endpoint and does not.
 
 ## The Role
 
-`base/rbac.yaml` grants the twelve accesses the Kubernetes driver uses and
-nothing else: `get`, `list`, `create`, `delete` and `patch` on Pods and
-PersistentVolumeClaims, `create` on `pods/exec`, and `get` on `pods/log`.
-The driver proves each one at start with a `SelfSubjectAccessReview`, so a
-rule you narrow by hand is named in the start-up log, and by
-`cellad check`, rather than found at the first create.
+`base/rbac.yaml` grants the accesses the Kubernetes driver uses and nothing
+else, all in the one namespace:
 
-It grants no `watch` (the driver lists and gets), no `secrets` (a secret
-value is sealed in the store under `CELLA_SECRET_KEY`), no
-`networkpolicies` (the boundary is the gateway's), and nothing
-cluster-wide.
+| Resource | Verbs | What for |
+|---|---|---|
+| `pods`, `persistentvolumeclaims` | `get`, `list`, `create`, `delete`, `patch` | a sandbox is one claim and one Pod |
+| `pods/exec` | `create` | commands, file transfers, the port probe, the desktop's tools |
+| `pods/log` | `get` | a sandbox's output |
+| `pods/portforward` | `get`, `create` | the dial socket, the port proxy and `cella port-forward`: `get` authorizes the WebSocket session and `create` the SPDY upgrade it falls back to |
+| `secrets` | `create`, `get`, `update`, `delete` | the workload token of each sandbox, never a secret value, which stays sealed in the store under `CELLA_SECRET_KEY` |
+| `services`, `networkpolicies` | `create`, `delete` | one headless Service and one policy per mesh |
+
+The driver proves each one at start with a `SelfSubjectAccessReview`, and
+`cellad serve` does not start without all of them, so a rule you narrow by
+hand is named in the start-up log, and by `cellad check`, rather than found
+at the first create or the first dial.
+
+It grants no `watch` (the driver lists and gets) and nothing cluster-wide.
+Reaching a port inside a sandbox needs no NetworkPolicy rule: the kubelet
+opens the connection inside the sandbox Pod, and `cellad` only talks to the
+API server, on the port its own egress rule already admits.
 
 The Deployment reads `CELLA_K8S_NAMESPACE` from the downward API, so
 sandbox Pods and claims land in the namespace the overlay set and the Role

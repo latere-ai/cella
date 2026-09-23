@@ -234,6 +234,7 @@ var driverVerbs = map[string][]string{
 	"pods":                   {"get", "list", "create", "delete", "patch"},
 	"pods/exec":              {"create"},
 	"pods/log":               {"get"},
+	"pods/portforward":       {"get", "create"},
 	"persistentvolumeclaims": {"get", "list", "create", "delete", "patch"},
 	// The mesh of spec 022: one headless Service and one NetworkPolicy per
 	// mesh, made with its first member and removed with its last.

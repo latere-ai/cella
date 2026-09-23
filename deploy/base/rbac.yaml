@@ -39,6 +39,13 @@ rules:
   - apiGroups: [""]
     resources: ["pods/log"]
     verbs: ["get"]
+  # Dial and the port proxy: a WebSocket session is a GET and the SPDY
+  # upgrade it falls back to a POST, which the API server authorizes as
+  # get and create. The kubelet connects inside the sandbox Pod, so no
+  # NetworkPolicy is involved.
+  - apiGroups: [""]
+    resources: ["pods/portforward"]
+    verbs: ["get", "create"]
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["create", "get", "update", "delete"]
