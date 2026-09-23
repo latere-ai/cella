@@ -185,6 +185,12 @@ curl -fsS -X DELETE "$CELLA_INSTALL_URL/v1/sandboxes/first" \
   -H "Authorization: Bearer $CELLA_INSTALL_TOKEN"
 ```
 
+A sandbox on this installation also takes a terminal: `cella attach
+first` opens a shell inside it with your window, and `cella exec -i` and
+`-t` pass your input and your terminal to a command
+([the cella command](cli.md)). Each rides the Pod's `exec` subresource,
+which is why the Role grants both `get` and `create` on `pods/exec`.
+
 ## Check the installation
 
 `cellad check` prints one line per requirement and exits 1 on any failure.
