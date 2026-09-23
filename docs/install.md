@@ -218,6 +218,10 @@ Each line is a requirement:
 - [deploy/README.md](../deploy/README.md) is the reference for the
   manifests: what each Secret turns on, why the Role grants what it does,
   and how to run the egress gateway beside the control plane.
+- A desktop for computer use is the image each release publishes beside
+  the control plane, `ghcr.io/<owner>/cella-display:<tag>`, named in
+  `CELLA_K8S_DISPLAY_IMAGE` of the `cellad` ConfigMap. A sandbox that
+  asks for `display` then gets a screen, screenshots and input.
 - `deploy/examples/generic` is the same installation with desired state in
   Postgres, an authorization endpoint, an event sink and a gateway. Every
   one is a Secret you apply and nothing else.

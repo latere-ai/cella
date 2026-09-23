@@ -66,6 +66,16 @@ A URL and the bearer that authorizes it are in one Secret, because a URL
 with no bearer is a start-up failure and a bearer with no URL is an
 installation that believes it calls an endpoint and does not.
 
+A desktop is one ConfigMap key. Each release publishes the desktop image
+beside the control plane's, under the same tag,
+`ghcr.io/<owner>/cella-display:<tag>`. With `CELLA_K8S_DISPLAY_IMAGE` set
+to it, a sandbox whose manifest names `display` runs that image as a
+second container of its Pod, and the screen, screenshot and input routes
+answer for it. `CELLA_K8S_DISPLAY_CPU` and `CELLA_K8S_DISPLAY_MEMORY` are
+the desktop container's limits, the driver's defaults when unset. Without
+the image the environment declares no desktop, and a manifest that asks
+for one is refused with the field named.
+
 ## The Role
 
 `base/rbac.yaml` grants the twelve accesses the Kubernetes driver uses and
