@@ -198,7 +198,7 @@ specs own. The conformance run of [[016-building-a-plane]]'s example.
 | Every control row of [[013-security-and-threat-model]] names a test that exists or stands on an exact, non-stale pending list | `TestThreatModelControlsHaveTests` | built |
 | A workload token appears in no event, record, log, API answer or control plane file, and is read only from its own projection | `TestWorkloadTokenNeverLeavesItsSandbox` | built |
 | Every test `SECURITY.md` names exists and is a control of the model, and every commitment maps to a control row | `TestSecurityPolicyMatchesTheModel` | built |
-| The example plane compiles, imports nothing under `internal/`, and serves its own API with its own plan and its own admission step | `TestExamplePlaneBuilds`, `TestThePlaneServesItsOwnAPI`, `TestThePlanesOwnRulesRefuse`, `TestTheCatalogueIsTheAdmissionStep` | built |
+| The example plane compiles, imports nothing under `internal/`, and serves its own API with its own plan and its own admission step | `TestExamplePlaneBuilds`, `TestThePlaneServesItsOwnAPI`, `TestThePlanesOwnRulesRefuse`, `TestTheCatalogIsTheAdmissionStep` | built |
 | Every row of [[016-building-a-plane]]'s concerns table names a mechanism that exists in the tree | `TestConcernsTableIsGrounded` | built |
 
 ## Outcome
