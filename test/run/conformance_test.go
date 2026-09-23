@@ -108,7 +108,13 @@ func TestRunConformance(t *testing.T) {
 	caps := driver.Capabilities()
 	_ = driver.Close()
 	declared := []string{}
-	for name, ok := range map[string]bool{"files": caps.Files, "attach": caps.Attach, "pool": caps.Pool} {
+	// Every capability the suite reads, named as the in-process run in
+	// cmd/cellad names them: a capability the driver declares and the list
+	// leaves out is one the suite holds the server to refusing.
+	for name, ok := range map[string]bool{
+		"files": caps.Files, "attach": caps.Attach, "display": caps.Display,
+		"input": caps.Input, "pool": caps.Pool, "dial": caps.Dial,
+	} {
 		if ok {
 			declared = append(declared, name)
 		}
