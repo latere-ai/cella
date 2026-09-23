@@ -78,28 +78,34 @@ for one is refused with the field named.
 
 ## The Role
 
-`base/rbac.yaml` grants the accesses the Kubernetes driver uses and
-nothing else, in the one namespace it writes in:
+`base/rbac.yaml` grants the accesses the Kubernetes driver uses and nothing
+else, all in the one namespace:
 
 | Resource | Verbs | What for |
 |---|---|---|
-| Pods, PersistentVolumeClaims | `get`, `list`, `create`, `delete`, `patch` | one claim and one Pod per sandbox |
-| `pods/exec` | `create`, `get` | commands, terminals and file transfers |
-| `pods/log` | `get` | a sandbox's logs |
-| Secrets | `create`, `get`, `update`, `delete` | a sandbox's identity token, never a secret value |
-| Services, NetworkPolicies | `create`, `delete` | a mesh's headless Service and the policy that admits its members |
+| `pods`, `persistentvolumeclaims` | `get`, `list`, `create`, `delete`, `patch` | a sandbox is one claim and one Pod |
+| `pods/exec` | `create`, `get` | commands, terminals, file transfers, the port probe, the desktop's tools |
+| `pods/log` | `get` | a sandbox's output |
+| `pods/portforward` | `get`, `create` | the dial socket, the port proxy and `cella port-forward` |
+| `secrets` | `create`, `get`, `update`, `delete` | the workload token of each sandbox, never a secret value, which stays sealed in the store under `CELLA_SECRET_KEY` |
+| `services`, `networkpolicies` | `create`, `delete` | one headless Service and one policy per mesh |
 
-`pods/exec` needs both verbs. The driver opens each exec over a WebSocket
-and falls back to the older SPDY upgrade when that is refused; the API
-server authorizes the WebSocket's `GET` as `get`, and from Kubernetes 1.35
-as `create` as well, and the SPDY `POST` as `create`. A Role with `create`
-alone still runs commands on a cluster before 1.35, one refused round trip
-later each time.
+`pods/exec` and `pods/portforward` each need both verbs. The driver opens
+each session over a WebSocket and falls back to the older SPDY upgrade
+when that is refused; the API server authorizes the WebSocket's `GET` as
+`get`, and for an exec from Kubernetes 1.35 as `create` as well, and the
+SPDY `POST` as `create`. With `create` alone a session still opens on a
+cluster before 1.35, one refused round trip later each time.
 
 The driver proves each access at start with a `SelfSubjectAccessReview`,
-so a rule you narrow by hand is named in the start-up log, and by
-`cellad check`, rather than found at the first create. It grants no
-`watch` (the driver lists and gets) and nothing cluster-wide.
+and `cellad serve` does not start without all of them, so a rule you
+narrow by hand is named in the start-up log, and by `cellad check`, rather
+than found at the first create or the first dial.
+
+It grants no `watch` (the driver lists and gets) and nothing cluster-wide.
+Reaching a port inside a sandbox needs no NetworkPolicy rule: the kubelet
+opens the connection inside the sandbox Pod, and `cellad` only talks to the
+API server, on the port its own egress rule already admits.
 
 The Deployment reads `CELLA_K8S_NAMESPACE` from the downward API, so
 sandbox Pods and claims land in the namespace the overlay set and the Role

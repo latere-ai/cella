@@ -121,9 +121,9 @@ type Options struct {
 	//
 	// Client replaces the clientset New would build, for a caller that
 	// already holds an authenticated connection and for tests. REST is the
-	// configuration the exec subresource dials; a driver with a Client and no
-	// REST serves every call but Exec and the archive transfers. Now is the
-	// clock every stamp reads.
+	// configuration the exec and port forwarding subresources dial; a driver
+	// with a Client and no REST serves every call but Exec, the archive
+	// transfers and Dial. Now is the clock every stamp reads.
 	Client kubernetes.Interface
 	REST   *rest.Config
 	Now    func() time.Time
@@ -168,9 +168,10 @@ func (o Options) withDefaults() Options {
 
 // Driver implements runtime.Driver against one namespace of one cluster.
 type Driver struct {
-	opts   Options
-	cs     kubernetes.Interface
-	stream streamer
+	opts    Options
+	cs      kubernetes.Interface
+	stream  streamer
+	forward forwarder
 }
 
 var _ driver.Driver = (*Driver)(nil)
@@ -200,6 +201,11 @@ func New(opts Options) (*Driver, error) {
 	d := &Driver{opts: opts, cs: cs}
 	if cfg != nil {
 		d.stream = &spdy{cfg: cfg, cs: cs, namespace: opts.Namespace}
+		forward, err := newPortForward(cfg, opts.Namespace)
+		if err != nil {
+			return nil, err
+		}
+		d.forward = forward
 	}
 	return d, nil
 }
@@ -256,14 +262,15 @@ func (d *Driver) Isolation() string { return "container" }
 // adoption tests it, so of two adopters one writes and the other is told the
 // entry is gone. Mesh, because a mesh is a NetworkPolicy and a headless
 // Service the driver writes per mesh. Attach, because the exec subresource
-// carries a terminal and stdin. Display and Input follow the display image:
-// with none configured there is no desktop to give, and declaring one would
-// push the refusal from resolve, where it names the field, to create, where
-// it names nothing. Egress, dial, resize, volumes and snapshots each land
-// with the slice that builds them.
+// carries a terminal and stdin. Dial, because the port forwarding
+// subresource reaches a declared port from inside the Pod. Display and Input
+// follow the display image: with none configured there is no desktop to
+// give, and declaring one would push the refusal from resolve, where it names
+// the field, to create, where it names nothing. Egress, resize, volumes and
+// snapshots each land with the slice that builds them.
 func (d *Driver) Capabilities() driver.Capabilities {
 	desktop := d.opts.DisplayImage != ""
-	return driver.Capabilities{Files: true, Pool: true, Mesh: true, Attach: true, Display: desktop, Input: desktop}
+	return driver.Capabilities{Files: true, Pool: true, Mesh: true, Attach: true, Dial: true, Display: desktop, Input: desktop}
 }
 
 // verbs are the accesses the driver uses, checked one review each so a missing
@@ -277,6 +284,9 @@ var verbs = []struct{ group, resource, subresource, verb string }{
 	{"", "pods", "", "get"}, {"", "pods", "", "list"}, {"", "pods", "", "create"},
 	{"", "pods", "", "delete"}, {"", "pods", "", "patch"},
 	{"", "pods", "exec", "create"}, {"", "pods", "exec", "get"}, {"", "pods", "log", "get"},
+	// Dial: the WebSocket session is a GET and the SPDY upgrade it falls
+	// back to a POST, which the API server authorizes as get and create.
+	{"", "pods", "portforward", "get"}, {"", "pods", "portforward", "create"},
 	{"", "persistentvolumeclaims", "", "get"}, {"", "persistentvolumeclaims", "", "list"},
 	{"", "persistentvolumeclaims", "", "create"}, {"", "persistentvolumeclaims", "", "delete"},
 	{"", "persistentvolumeclaims", "", "patch"},

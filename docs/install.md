@@ -228,6 +228,8 @@ Each line is a requirement:
   the control plane, `ghcr.io/<owner>/cella-display:<tag>`, named in
   `CELLA_K8S_DISPLAY_IMAGE` of the `cellad` ConfigMap. A sandbox that
   asks for `display` then gets a screen, screenshots and input.
+- [Sandboxes on Kubernetes](kubernetes.md) is what a sandbox on this
+  installation can do, and how to reach a server running inside one.
 - `deploy/examples/generic` is the same installation with desired state in
   Postgres, an authorization endpoint, an event sink and a gateway. Every
   one is a Secret you apply and nothing else.

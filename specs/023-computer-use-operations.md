@@ -37,7 +37,8 @@ port probe are built by [[041-display-and-input]] on podman and k8s, with
 the types and the rules in `runtime/display` and the four routes in
 `internal/api`. The HTTP port proxy and the dial socket are built by
 [[060-dial-and-port-proxy]] over the `Dial` of the native and podman
-drivers. `expose: mesh`, `expose: public` and the browser-ready example
+drivers, and reach k8s through its port forwarding
+([[065-k8s-dial]]). `expose: mesh`, `expose: public` and the browser-ready example
 are not: the first two need `Mesh` and an `Exposer`.
 
 ## Design

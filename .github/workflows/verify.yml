@@ -129,6 +129,23 @@ jobs:
           set -o pipefail
           go test -tags=e2e -count=1 -v -timeout 30m -run '^TestCluster' ./test/kind/... 2>&1 | tee kind.txt
           grep -q -- '--- PASS: TestClusterLifecycle' kind.txt
+          grep -q -- '--- PASS: TestClusterDial' kind.txt
+      # The Kubernetes driver's own dial and port cases against the same
+      # cluster, from the runner through the kubeconfig kind wrote. They run
+      # in a namespace of their own, because the suite's cleanup deletes
+      # every sandbox in the namespace it drove, and they are the two cases
+      # that reach into a sandbox's ports, which is what this step asserts.
+      - name: The driver's dial and port cases against the cluster
+        shell: bash
+        env:
+          CELLA_TEST_NAMESPACE: cella-driver
+          CELLA_TEST_IMAGE: docker.io/library/alpine:3.22
+        run: |
+          set -o pipefail
+          export CELLA_TEST_KUBECONFIG="${HOME}/.kube/config"
+          go test -count=1 -v -timeout 15m -run '^TestClusterConformance$/^(DialReachesAPort|PortsReportListening)$' ./runtime/k8s 2>&1 | tee driver-kind.txt
+          grep -q -- '--- PASS: TestClusterConformance/DialReachesAPort' driver-kind.txt
+          grep -q -- '--- PASS: TestClusterConformance/PortsReportListening' driver-kind.txt
       # The contract of spec 015 against the cluster: the same cases, on the
       # Kubernetes environment, with the subjects minted at the stub issuer's
       # node port and the capabilities that driver declares. The stack names
@@ -140,7 +157,7 @@ jobs:
           set -o pipefail
           go test -tags=e2e -count=1 -v -timeout 30m -run '^TestContract$' ./test/conformance -args \
             -url "${CELLA_TEST_URL}" -issuer http://localhost:30081 -sink "${CELLA_TEST_SINK}" \
-            -image docker.io/library/alpine:3.22 -capabilities files,pool,mesh,attach,display,input \
+            -image docker.io/library/alpine:3.22 -capabilities files,pool,mesh,attach,dial,display,input \
             -display-image cella-display:dev \
             -known known.json 2>&1 | tee conformance-kind.txt
           grep -q -- '--- PASS: TestContract' conformance-kind.txt

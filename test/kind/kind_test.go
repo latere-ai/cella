@@ -27,6 +27,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -60,20 +61,7 @@ func TestClusterLifecycle(t *testing.T) {
 		t.Fatalf("the create answered no id: %s", body)
 	}
 
-	deadline := time.Now().Add(ready)
-	var phase string
-	for time.Now().Before(deadline) {
-		_, body = call(t, client, http.MethodGet, url+"/v1/sandboxes/"+name, token, nil)
-		// Running is the phase of spec 005; Ready is a condition, not a
-		// phase, and a sandbox never reaches a phase by that name.
-		if phase = statusField(t, body, "phase"); phase == "Running" || phase == "Failed" {
-			break
-		}
-		time.Sleep(2 * time.Second)
-	}
-	if phase != "Running" {
-		t.Fatalf("the sandbox is %q after %s: %s", phase, ready, body)
-	}
+	awaitRunning(t, client, url, token, name)
 
 	code, body = call(t, client, http.MethodPost, url+"/v1/sandboxes/"+name+"/exec?wait=1", token,
 		[]byte(`{"command":["echo","from the cluster"]}`))
@@ -92,6 +80,28 @@ func TestClusterLifecycle(t *testing.T) {
 	}
 }
 
+// brought is the stack this package brought up itself: once, for every test
+// in the package, and taken down by TestMain after the last of them, so two
+// tests do not build two clusters one after the other.
+var brought struct {
+	once       sync.Once
+	url, token string
+	err        error
+	down       func() error
+}
+
+// TestMain takes down the stack a test brought up, once every test ran.
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if brought.down != nil {
+		if err := brought.down(); err != nil {
+			fmt.Fprintf(os.Stderr, "the cluster was not deleted: %v\n", err)
+			code = max(code, 1)
+		}
+	}
+	os.Exit(code)
+}
+
 // stack is the URL and the token of the cluster under test, brought up
 // here when the tier was told to.
 func stack(t *testing.T) (url, token string) {
@@ -107,30 +117,42 @@ func stack(t *testing.T) (url, token string) {
 			t.Skipf("the kind tier needs %s on PATH: %v", tool, err)
 		}
 	}
+	brought.once.Do(bringUp)
+	if brought.err != nil {
+		t.Fatal(brought.err)
+	}
+	t.Setenv("CELLA_TEST_SINK", "http://localhost:30082")
+	return brought.url, brought.token
+}
+
+// bringUp runs the overlay's up.sh and reads the URL and the token it
+// printed. The teardown is recorded before the outcome is read, so a stack
+// that came up halfway is taken down too.
+func bringUp() {
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
-		t.Fatal(err)
+		brought.err = err
+		return
 	}
 	overlay := filepath.Join(root, "deploy", "examples", "kind-stubs")
 	cluster := os.Getenv("CELLA_TEST_CLUSTER")
 	if cluster == "" {
 		cluster = "cella-tier"
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 	defer cancel()
 	up := exec.CommandContext(ctx, "bash", filepath.Join(overlay, "up.sh"), "-name", cluster)
 	up.Dir = root
 	up.Stderr = os.Stderr
 	out, err := up.Output()
-	t.Cleanup(func() {
+	brought.down = func() error {
 		down := exec.Command("bash", filepath.Join(overlay, "down.sh"), "-name", cluster)
 		down.Stderr, down.Stdout = os.Stderr, os.Stderr
-		if err := down.Run(); err != nil {
-			t.Errorf("the cluster was not deleted: %v", err)
-		}
-	})
+		return down.Run()
+	}
 	if err != nil {
-		t.Fatalf("the stack did not come up: %v", err)
+		brought.err = fmt.Errorf("the stack did not come up: %w", err)
+		return
 	}
 	for line := range strings.SplitSeq(string(out), "\n") {
 		name, value, ok := strings.Cut(strings.TrimSpace(line), "=")
@@ -139,16 +161,35 @@ func stack(t *testing.T) (url, token string) {
 		}
 		switch name {
 		case "CELLA_TEST_URL":
-			url = value
+			brought.url = value
 		case "CELLA_TEST_TOKEN":
-			token = value
+			brought.token = value
 		}
 	}
-	if url == "" || token == "" {
-		t.Fatalf("the stack printed %q", out)
+	if brought.url == "" || brought.token == "" {
+		brought.err = fmt.Errorf("the stack printed %q", out)
 	}
-	t.Setenv("CELLA_TEST_SINK", "http://localhost:30082")
-	return url, token
+}
+
+// awaitRunning polls the sandbox until it runs, and fails the test on any
+// other end.
+func awaitRunning(t *testing.T, client *http.Client, url, token, name string) {
+	t.Helper()
+	deadline := time.Now().Add(ready)
+	var phase string
+	var body []byte
+	for time.Now().Before(deadline) {
+		_, body = call(t, client, http.MethodGet, url+"/v1/sandboxes/"+name, token, nil)
+		// Running is the phase of spec 005; Ready is a condition, not a
+		// phase, and a sandbox never reaches a phase by that name.
+		if phase = statusField(t, body, "phase"); phase == "Running" || phase == "Failed" {
+			break
+		}
+		time.Sleep(2 * time.Second)
+	}
+	if phase != "Running" {
+		t.Fatalf("the sandbox is %q after %s: %s", phase, ready, body)
+	}
 }
 
 // call sends one request and returns the status and the body.

@@ -35,17 +35,20 @@ func TestDeclarations(t *testing.T) {
 		t.Fatalf("Isolation = %q", h.Isolation())
 	}
 	got := h.Capabilities()
-	if !reflect.DeepEqual(got, driver.Capabilities{Files: true, Pool: true, Mesh: true, Attach: true}) {
-		t.Fatalf("Capabilities = %+v, want Files, Pool, Mesh and Attach", got)
+	if !reflect.DeepEqual(got, driver.Capabilities{Files: true, Pool: true, Mesh: true, Attach: true, Dial: true}) {
+		t.Fatalf("Capabilities = %+v, want Files, Pool, Mesh, Attach and Dial", got)
 	}
-	// Attach is declared and its interface implemented; every other
-	// capability with an optional interface behind it is undeclared, because
-	// none of them is implemented here.
+	// Attach and Dial are declared with their interfaces behind them.
 	var d driver.Driver = h.Driver
 	if _, ok := d.(driver.Attacher); !ok {
 		t.Fatal("the driver declares Attach and does not implement runtime.Attacher")
 	}
-	if got.Dial || got.Display || got.Input || got.Volumes || got.Snapshots || got.Resize || got.Ingress || len(got.Egress) > 0 {
+	if _, ok := d.(driver.Dialer); !ok {
+		t.Fatal("the driver declares Dial and does not implement runtime.Dialer")
+	}
+	// Every other capability with an optional interface behind it is
+	// undeclared, because none of them is implemented here.
+	if got.Display || got.Input || got.Volumes || got.Snapshots || got.Resize || got.Ingress || len(got.Egress) > 0 {
 		t.Fatalf("a capability is declared without its behavior: %+v", got)
 	}
 }

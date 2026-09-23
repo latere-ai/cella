@@ -279,17 +279,19 @@ func TestKindStackRunsTheDesktop(t *testing.T) {
 	if got := str(dig(config, "data", "CELLA_K8S_DISPLAY_IMAGE")); got != "cella-display:dev" {
 		t.Errorf("the stack's CELLA_K8S_DISPLAY_IMAGE is %q, want the image up.sh loads", got)
 	}
-	const declared = "-capabilities files,pool,mesh,attach,display,input"
-	const image = "-display-image cella-display:dev"
 	for _, run := range []struct{ workflow, job string }{
 		{"verify.yml", "install"},
 		{"release.yml", "conformance"},
 	} {
 		steps := jobSteps(t, filepath.Join(".github", "workflows", run.workflow), run.job)
-		for _, want := range []string{declared, image} {
-			if !strings.Contains(steps, want) {
-				t.Errorf("the kind conformance run of %s %s does not pass %q", run.workflow, run.job, want)
+		declared, _ := flagValue(steps, "-capabilities")
+		for _, want := range []string{"display", "input"} {
+			if !slices.Contains(strings.Split(declared, ","), want) {
+				t.Errorf("the kind conformance run of %s %s declares %q, without %s", run.workflow, run.job, declared, want)
 			}
+		}
+		if image, _ := flagValue(steps, "-display-image"); image != "cella-display:dev" {
+			t.Errorf("the kind conformance run of %s %s passes the display image %q, want the one up.sh loads", run.workflow, run.job, image)
 		}
 	}
 	// Each job that brings the stack up supplies the image up.sh loads: a

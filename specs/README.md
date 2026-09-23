@@ -86,6 +86,7 @@ later.
 | [062](.archive/062-journal-retention.md) | Journal retention: the reaper prunes finished records and answered operations, and the memory journal keeps a ring per object | small | complete | 005, 009, 010, 031, 042, 043 |
 | [063](.archive/063-k8s-attach.md) | Kubernetes attach: a terminal and exec with stdin over the pods/exec subresource | medium | complete | 004, 008, 012, 014, 015, 031, 034, 036 |
 | [064](.archive/064-k8s-display.md) | The desktop on k8s: CELLA_K8S_DISPLAY_IMAGE, the published cella-display image, and the kind tier's computer-use run | small | complete | 004, 014, 015, 023, 031, 036, 041 |
+| [065](.archive/065-k8s-dial.md) | Dial on the k8s driver: the port forwarding subresource, the declared-port rule, the Role, and the kind tier | medium | complete | 004, 008, 012, 013, 015, 023, 031, 036, 060 |
 
 ## Dependency graph
 
@@ -308,3 +309,4 @@ The map, the order, and the rule for a slice are in 031.
 | [061-worker-stream-credit.md](.archive/061-worker-stream-credit.md) | complete | The `credit` window per sub-stream on the worker stream, measured at the window on both sides and agreed in the hello so two releases keep working, `Watch` across the seam with the `relist` that issues a `List`, and the race that let an operation reach a released worker link |
 | [063-k8s-attach.md](.archive/063-k8s-attach.md) | complete | `Attach` on the k8s driver over `pods/exec` with a terminal and stdin, resize through the terminal size queue, exec with stdin and a terminal, and `get` on `pods/exec` in the Role and the preflight |
 | [064-k8s-display.md](.archive/064-k8s-display.md) | complete | `CELLA_K8S_DISPLAY_IMAGE` and the desktop's limits read at start with every k8s quantity, the display image published by digest beside `cellad` and verified by tag, and the kind stack running the computer-use case |
+| [065-k8s-dial.md](.archive/065-k8s-dial.md) | complete | `Dial` on the k8s driver through the `pods/portforward` subresource to a declared port, `get` and `create` on `pods/portforward` in the Role and the preflight, and the dial and port cases on the kind cluster |

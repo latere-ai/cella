@@ -10,6 +10,7 @@ packages.
 | [Native quickstart](native.md) | Create and execute trusted local workspaces with the implemented API |
 | [The cella command](cli.md) | The client: reaching a plane, the commands, the exit codes, and what a refusal tells you |
 | [Install](install.md) | A cluster, the manifests from the release's `deploy-<tag>.tar.gz`, the first sandbox, and `cellad check` |
+| [Sandboxes on Kubernetes](kubernetes.md) | What a sandbox on a cluster can do, reaching a server inside one, and what the Role has to allow |
 | [Self-hosting a data plane](workers.md) | Running sandboxes on your own machines against somebody else's control plane: the key, the worker, and the outbound-only rule |
 | [Capacity and queues](scheduling.md) | What an environment holds, what happens to a create it cannot fit, and how a queued environment orders what waits |
 | Configuration | the table in the [repository scaffold spec](../specs/.archive/002-repository-scaffold.md) until `docs/configuration.md` is generated from the code |

@@ -359,13 +359,14 @@ jobs:
           set -o pipefail
           go test -tags=e2e -count=1 -v -timeout 30m -run '^TestCluster' ./test/kind/... 2>&1 | tee /tmp/kind.log
           grep -q -- '--- PASS: TestClusterLifecycle' /tmp/kind.log
+          grep -q -- '--- PASS: TestClusterDial' /tmp/kind.log
       - name: The conformance suite against the published images
         shell: bash
         run: |
           set -o pipefail
           go test -tags=e2e -count=1 -v -timeout 30m -run '^TestContract$' ./test/conformance -args \
             -url "${CELLA_TEST_URL}" -issuer http://localhost:30081 -sink "${CELLA_TEST_SINK}" \
-            -image docker.io/library/alpine:3.22 -capabilities files,pool,mesh,attach,display,input \
+            -image docker.io/library/alpine:3.22 -capabilities files,pool,mesh,attach,dial,display,input \
             -display-image cella-display:dev \
             -known known.json 2>&1 | tee /tmp/conformance.log
           grep -q -- '--- PASS: TestContract' /tmp/conformance.log
