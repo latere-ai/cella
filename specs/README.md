@@ -80,10 +80,10 @@ later.
 | [056](.archive/056-contract-evidence.md) | Contract evidence: the manifest corpus, the control cross-check, the security policy, the plane guide | medium | complete | 003, 013, 016, 031 |
 | [057](.archive/057-scheduling-queue.md) | Scheduling queue: the queued mode, capacity by resource, the queue and its loop, the scheduling fields | large | complete | 003, 005, 010, 017, 020, 021, 031, 038, 054 |
 | [058](.archive/058-preemption.md) | Preemption: a higher head stops preemptible sandboxes, a victim waits again in its place, and the bound on how often | medium | complete | 003, 005, 009, 017, 020, 031, 038, 057 |
-| [062](.archive/062-journal-retention.md) | Journal retention: the reaper prunes finished records and answered operations, and the memory journal keeps a ring per object | small | complete | 005, 009, 010, 031, 042, 043 |
 | [059](.archive/059-conformance-closure.md) | Conformance closure: the drift seam, the external run on dispatch, the agent scenario against this server | medium | complete | 003, 011, 012, 015, 031, 052 |
 | [060](.archive/060-dial-and-port-proxy.md) | Dial and the port proxy: Dialer on native and podman, the dial socket, the port proxy, cella port-forward | medium | complete | 004, 008, 011, 013, 023, 031, 034, 041, 055 |
 | [061](.archive/061-worker-stream-credit.md) | Worker stream credit: the per sub-stream window, its negotiation in the hello, and Watch across the seam | medium | complete | 004, 021, 031, 051 |
+| [062](.archive/062-journal-retention.md) | Journal retention: the reaper prunes finished records and answered operations, and the memory journal keeps a ring per object | small | complete | 005, 009, 010, 031, 042, 043 |
 
 ## Dependency graph
 
