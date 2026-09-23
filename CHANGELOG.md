@@ -59,7 +59,9 @@ refused before it is pushed.
   machine to it, one connection at a time. The `native` and `podman`
   runtimes both provide this: `native` reaches the port on the host's own
   loopback, and `podman` publishes every declared port on `127.0.0.1` when
-  the sandbox is created. A manifest that declares ports is no longer
+  the sandbox is created. An environment a self-hosted worker serves does
+  not offer it yet, and its routes answer `capability_unsupported`. A
+  manifest that declares ports is no longer
   served from a prewarmed pool entry, because an entry's published ports
   are fixed when it is made. Each dial session writes a `sandbox.dial`
   event with its duration and the bytes each way.
