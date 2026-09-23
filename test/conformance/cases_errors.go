@@ -148,11 +148,27 @@ func case008PublicDocuments(ctx context.Context, e *Env) error {
 // case004CapabilityGates: a route whose capability the environment does not
 // declare answers capability_unsupported before any driver call, and a route
 // whose capability it declares never answers that code.
+//
+// The desktop routes answer not_found for a sandbox that asked for no
+// desktop, which design 023 states, so a 404 there is the route answering
+// and not the route missing. Where the environment declares a desktop and a
+// display image is given, the sandbox asks for one and a 404 is held to be
+// a missing route; without an image the two cannot be told apart, and only
+// the refusal is checked for them.
 func case004CapabilityGates(ctx context.Context, e *Env) error {
 	if len(e.caps) == 0 {
 		return skipf("the environment declares no capability set; pass Capabilities to run the gates")
 	}
-	obj, err := e.sandbox(ctx, e.caller)
+	desktop := e.caps["display"] && e.cfg.DisplayImage != ""
+	var mutate []func(map[string]any)
+	if desktop {
+		mutate = append(mutate, func(body map[string]any) {
+			spec, _ := body["spec"].(map[string]any)
+			spec["image"] = e.cfg.DisplayImage
+			spec["display"] = map[string]any{"width": 1280, "height": 800}
+		})
+	}
+	obj, err := e.sandbox(ctx, e.caller, mutate...)
 	if err != nil {
 		return err
 	}
@@ -166,6 +182,9 @@ func case004CapabilityGates(ctx context.Context, e *Env) error {
 		_ = json.Unmarshal(x.Body, &env)
 		refused := env.Error.Code == "capability_unsupported"
 		missing := x.Status == http.StatusNotFound || x.Status == http.StatusMethodNotAllowed
+		if (g.capability == "display" || g.capability == "input") && !desktop {
+			missing = false
+		}
 		switch {
 		case e.caps[g.capability] && refused:
 			return x.disagree("no capability refusal where the environment declares "+g.capability,

@@ -355,3 +355,42 @@ func TestTheControlContractIsOneRoute(t *testing.T) {
 		t.Error("a control endpoint that refused the mode was read as one that took it")
 	}
 }
+
+// TestTheGatesReadADesktopRouteOnADesktop: a declared desktop route answers
+// not_found for a sandbox that asked for no desktop, so the gates case gives
+// its sandbox a desktop when it has an image to, and without one does not
+// read that answer as a missing route. A declared route that is not there is
+// still a failure.
+func TestTheGatesReadADesktopRouteOnADesktop(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		declared []string
+		image    string
+		fails    bool
+	}{
+		{"with an image", []string{"files", "display"}, "fake/desktop", false},
+		{"without an image", []string{"files", "display"}, "", false},
+		{"a declared route that is not there", []string{"files", "display", "attach"}, "fake/desktop", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFake(t)
+			f.desktopOnly = true
+			f.declared = map[string]bool{}
+			for _, c := range tc.declared {
+				f.declared[c] = true
+			}
+			cfg := f.config()
+			cfg.Capabilities = tc.declared
+			cfg.DisplayImage = tc.image
+			e, err := newEnv(t.Context(), cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer e.cleanup(context.WithoutCancel(t.Context()))
+			err = case004CapabilityGates(t.Context(), e)
+			if tc.fails != (err != nil) {
+				t.Fatalf("case004CapabilityGates = %v, want a failure %v", err, tc.fails)
+			}
+		})
+	}
+}

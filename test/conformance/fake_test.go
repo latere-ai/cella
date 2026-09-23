@@ -58,6 +58,13 @@ type fake struct {
 	// noSecretKey answers a secret's apply the way an installation that
 	// holds no key to seal a value under answers it.
 	noSecretKey bool
+	// declared, when set, is the capability set the fake honors: a gated
+	// route of any other capability answers capability_unsupported before
+	// it is routed, as the server's own gate does. desktopOnly answers the
+	// display route not_found for a sandbox whose manifest asked for no
+	// desktop, as design 023 states.
+	declared    map[string]bool
+	desktopOnly bool
 	// mintFailure is how the issuer route fails: empty mints, "status" for a
 	// refusal, "body" for an answer that is no token, "empty" for a token
 	// that is not there.
@@ -138,9 +145,29 @@ func newFake(t *testing.T) *fake {
 	mux.Handle("/", f.authenticated(func(w http.ResponseWriter, _ *http.Request) {
 		f.refuse(w, "not_found")
 	}))
-	f.server = httptest.NewServer(mux)
+	f.server = httptest.NewServer(f.gate(mux))
 	t.Cleanup(f.server.Close)
 	return f
+}
+
+// gate refuses a gated route whose capability the fake does not declare,
+// when a set is declared. The route suffixes are the suite's own gates.
+func (f *fake) gate(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		declared := f.declared
+		f.mu.Unlock()
+		if declared != nil && strings.HasPrefix(r.URL.Path, "/v1/sandboxes/") {
+			for _, g := range gates() {
+				suffix, _, _ := strings.Cut(g.suffix, "?")
+				if strings.HasSuffix(r.URL.Path, suffix) && !declared[g.capability] {
+					f.refuse(w, "capability_unsupported")
+					return
+				}
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (f *fake) write(w http.ResponseWriter, status int, body any) {
@@ -610,10 +637,16 @@ func (f *fake) egress(w http.ResponseWriter, _ *http.Request) {
 	f.write(w, http.StatusOK, map[string]any{"items": []any{}, "next": ""})
 }
 
-func (f *fake) display(w http.ResponseWriter, _ *http.Request) {
+func (f *fake) display(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	wrong := f.wrongValues
+	obj, _ := f.lookup(r.PathValue("id"))
+	desktopOnly := f.desktopOnly
 	f.mu.Unlock()
+	if spec, _ := obj["spec"].(map[string]any); desktopOnly && spec["display"] == nil {
+		f.refuse(w, "not_found")
+		return
+	}
 	if wrong {
 		f.write(w, http.StatusOK, map[string]any{"width": 640, "height": 480, "ready": false})
 		return
