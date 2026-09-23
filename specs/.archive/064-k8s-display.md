@@ -1,6 +1,6 @@
 ---
 title: "The desktop on k8s: CELLA_K8S_DISPLAY_IMAGE, the published cella-display image, and the kind tier's computer-use run"
-status: in-progress
+status: complete
 track: core
 depends_on:
   - specs/004-runtime-contract.md
@@ -91,8 +91,30 @@ the published display image under that name, as it does `cellad`.
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| `CELLA_K8S_DISPLAY_IMAGE`, `CELLA_K8S_DISPLAY_CPU` and `CELLA_K8S_DISPLAY_MEMORY` reach the driver's options, empty by default | `TestLoadK8sDisplay` | planned |
-| A resource quantity of the driver that does not parse is a start-up problem naming the variable | `TestLoadK8sQuantities` | planned |
-| The driver built from that configuration declares `Display` and `Input` with an image and neither without one | `TestLoadK8sDisplay`, `TestCapabilitiesFollowTheDisplayImage` | planned |
-| The kind stack loads the display image, sets the variable, and both kind conformance runs declare `display,input` and pass the image | `TestKindStackRunsTheDesktop` | planned |
-| The release builds the display image for both architectures by digest, signs and attests it, tags it only in publish, attaches its bill of materials, and the clean runner verifies it | `TestReleasePublishesTheDisplayImage` | planned |
+| `CELLA_K8S_DISPLAY_IMAGE`, `CELLA_K8S_DISPLAY_CPU` and `CELLA_K8S_DISPLAY_MEMORY` reach the driver's options, empty by default | `TestLoadK8sDisplay` | passing |
+| A resource quantity of the driver that does not parse is a start-up problem naming the variable | `TestLoadK8sQuantities` | passing |
+| The driver built from that configuration declares `Display` and `Input` with an image and neither without one | `TestLoadK8sDisplay`, `TestCapabilitiesFollowTheDisplayImage` | passing |
+| The kind stack loads the display image, sets the variable, and both kind conformance runs declare `display,input` and pass the image | `TestKindStackRunsTheDesktop` | passing; the install job of `verify` runs the case on the cluster on every push |
+| The release builds the display image for both architectures by digest, signs and attests it, tags it only in publish, attaches its bill of materials, and the clean runner verifies it | `TestReleasePublishesTheDisplayImage` | passing; the next tag is the pipeline's first run of it |
+
+## Outcome
+
+| Piece | Where |
+|---|---|
+| `CELLA_K8S_DISPLAY_IMAGE`, `CELLA_K8S_DISPLAY_CPU`, `CELLA_K8S_DISPLAY_MEMORY`, and every k8s quantity parsed at start | `internal/config/k8s.go` |
+| The display image built and loaded by the kind stack, and named by its ConfigMap | `deploy/examples/kind-stubs/up.sh`, `configmap.yaml` |
+| Both kind conformance runs declare `display,input` and pass the image | `.github/workflows/verify.yml` (install), `.github/workflows/release.yml` (conformance) |
+| The display image by digest, signed, attested, tagged in publish, verified by tag | `.github/workflows/release.yml` (build, publish, install-release, release-verify) |
+| The operator's reference | `deploy/README.md` (Configuration), `docs/install.md` (What next) |
+
+The default quantities were read unchecked before this slice: a
+`CELLA_K8S_DEFAULT_CPU` that was not a quantity started cleanly and
+failed every create that fell back to it. `TestLoadK8sQuantities` fails
+without the parse.
+
+Two proofs run outside the gate. The computer-use case on a real API
+server is the install job's kind run, which the first push after this
+slice exercises; before it, the k8s desktop was proved only against the
+fake clientset. The display image's publication is the release pipeline,
+which runs on the next tag. The arm64 half of the image builds under
+emulation there; it was built natively on an arm64 host for this slice.
