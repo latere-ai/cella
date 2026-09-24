@@ -126,7 +126,7 @@ func child(name string, budget, depth int) v1.Sandbox {
 func TestSpawnInheritance(t *testing.T) {
 	c, _ := spawning(t)
 	ctx := t.Context()
-	parent, err := c.Create(ctx, root("planner", 4, 2), "alice", 0)
+	parent, err := realized(ctx, c, root("planner", 4, 2), "alice", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +136,7 @@ func TestSpawnInheritance(t *testing.T) {
 	if parent.Status.Spawn != (v1.SpawnStatus{Budget: 4, Depth: 2}) {
 		t.Fatalf("the root's budget is %+v", parent.Status.Spawn)
 	}
-	first, err := c.Spawn(ctx, child("worker", 1, 1), parent, 0)
+	first, err := realizedSpawn(ctx, c, child("worker", 1, 1), parent, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +158,7 @@ func TestSpawnInheritance(t *testing.T) {
 		t.Fatalf("the parent has used %d of its budget, want 1", read.Status.Spawn.Used)
 	}
 
-	grandchild, err := c.Spawn(ctx, child("helper", 0, 0), first, 0)
+	grandchild, err := realizedSpawn(ctx, c, child("helper", 0, 0), first, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,21 +183,21 @@ func TestSpawnMintsAMesh(t *testing.T) {
 	ctx := t.Context()
 	manifest := root("planner", 2, 2)
 	manifest.Spec.Mesh.Enabled = true
-	parent, err := c.Create(ctx, manifest, "alice", 0)
+	parent, err := realized(ctx, c, manifest, "alice", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.HasPrefix(parent.Status.Mesh, "msh_") || len(parent.Status.Mesh) != len("msh_")+26 {
 		t.Fatalf("the root's mesh is %q, want an msh_ id", parent.Status.Mesh)
 	}
-	first, err := c.Spawn(ctx, child("worker", 1, 1), parent, 0)
+	first, err := realizedSpawn(ctx, c, child("worker", 1, 1), parent, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if first.Status.Mesh != parent.Status.Mesh {
 		t.Fatalf("the child is in the mesh %q, want its parent's %q", first.Status.Mesh, parent.Status.Mesh)
 	}
-	grandchild, err := c.Spawn(ctx, child("helper", 0, 0), first, 0)
+	grandchild, err := realizedSpawn(ctx, c, child("helper", 0, 0), first, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,14 +206,14 @@ func TestSpawnMintsAMesh(t *testing.T) {
 	}
 
 	// A root that enabled none leaves its tree in no mesh.
-	plain, err := c.Create(ctx, root("plain", 1, 1), "alice", 0)
+	plain, err := realized(ctx, c, root("plain", 1, 1), "alice", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if plain.Status.Mesh != "" {
 		t.Fatalf("a root that enabled no mesh is in %q", plain.Status.Mesh)
 	}
-	quiet, err := c.Spawn(ctx, child("quiet", 0, 0), plain, 0)
+	quiet, err := realizedSpawn(ctx, c, child("quiet", 0, 0), plain, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,14 +232,14 @@ func TestSpawnMintsAMesh(t *testing.T) {
 func TestSpawnDebitIsAtomic(t *testing.T) {
 	c, _ := spawning(t)
 	ctx := t.Context()
-	parent, err := c.Create(ctx, root("planner", 1, 1), "alice", 0)
+	parent, err := realized(ctx, c, root("planner", 1, 1), "alice", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = c.Spawn(ctx, child("one", 0, 0), parent, 0); err != nil {
+	if _, err = realizedSpawn(ctx, c, child("one", 0, 0), parent, 0); err != nil {
 		t.Fatal(err)
 	}
-	_, err = c.Spawn(ctx, child("two", 0, 0), parent, 0)
+	_, err = realizedSpawn(ctx, c, child("two", 0, 0), parent, 0)
 	if !errors.Is(err, ErrBudgetExhausted) {
 		t.Fatalf("the second spawn answered %v, want ErrBudgetExhausted", err)
 	}
@@ -258,7 +258,7 @@ func TestSpawnDebitIsAtomic(t *testing.T) {
 	// no second write of the ledger.
 	narrowed := parent
 	narrowed.Spec.Mesh.Spawn.Budget = 0
-	if _, err = c.Spawn(ctx, child("three", 0, 0), narrowed, 0); !errors.Is(err, ErrBudgetExhausted) {
+	if _, err = realizedSpawn(ctx, c, child("three", 0, 0), narrowed, 0); !errors.Is(err, ErrBudgetExhausted) {
 		t.Fatalf("a narrowed parent spawned: %v", err)
 	}
 }
@@ -268,7 +268,7 @@ func TestSpawnDebitIsAtomic(t *testing.T) {
 func TestConcurrentSpawnsRaceForTheLastUnit(t *testing.T) {
 	c, _ := spawning(t)
 	ctx := t.Context()
-	parent, err := c.Create(ctx, root("planner", 1, 1), "alice", 0)
+	parent, err := realized(ctx, c, root("planner", 1, 1), "alice", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -277,7 +277,7 @@ func TestConcurrentSpawnsRaceForTheLastUnit(t *testing.T) {
 	for i := range errs {
 		wg.Go(func() {
 			name := "racer-" + string(rune('a'+i))
-			_, errs[i] = c.Spawn(ctx, child(name, 0, 0), parent, 0)
+			_, errs[i] = realizedSpawn(ctx, c, child(name, 0, 0), parent, 0)
 		})
 	}
 	wg.Wait()
@@ -302,16 +302,16 @@ func TestConcurrentSpawnsRaceForTheLastUnit(t *testing.T) {
 func TestSpawnNeedsALedgerAndAParent(t *testing.T) {
 	c, _ := spawning(t)
 	ctx := t.Context()
-	parent, err := c.Create(ctx, root("planner", 1, 1), "alice", 0)
+	parent, err := realized(ctx, c, root("planner", 1, 1), "alice", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = c.Spawn(ctx, child("one", 0, 0), v1.Sandbox{}, 0); err == nil {
+	if _, err = realizedSpawn(ctx, c, child("one", 0, 0), v1.Sandbox{}, 0); err == nil {
 		t.Fatal("a spawn with no parent was accepted")
 	}
 	held := c.spawner
 	c.spawner = nil
-	if _, err = c.Spawn(ctx, child("one", 0, 0), parent, 0); err == nil {
+	if _, err = realizedSpawn(ctx, c, child("one", 0, 0), parent, 0); err == nil {
 		t.Fatal("a control plane that counts no budget spawned")
 	}
 	c.spawner = held
@@ -332,17 +332,17 @@ func TestFailedSpawnCreditsBack(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = c.Close() })
 	ctx := t.Context()
-	parent, err := c.Create(ctx, root("planner", 1, 1), "alice", 0)
+	parent, err := realized(ctx, c, root("planner", 1, 1), "alice", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	refusing.refuse = true
-	if _, err = c.Spawn(ctx, child("one", 0, 0), parent, 0); err == nil {
+	if _, err = realizedSpawn(ctx, c, child("one", 0, 0), parent, 0); err == nil {
 		t.Fatal("a spawn the driver refused was accepted")
 	}
 	refusing.refuse = false
 	// The unit is back, so the next spawn is the first one all over again.
-	if _, err = c.Spawn(ctx, child("two", 0, 0), parent, 0); err != nil {
+	if _, err = realizedSpawn(ctx, c, child("two", 0, 0), parent, 0); err != nil {
 		t.Fatalf("the refused spawn kept its unit: %v", err)
 	}
 }
@@ -352,18 +352,18 @@ func TestFailedSpawnCreditsBack(t *testing.T) {
 func TestDeletedChildDoesNotCredit(t *testing.T) {
 	c, _ := spawning(t)
 	ctx := t.Context()
-	parent, err := c.Create(ctx, root("planner", 1, 1), "alice", 0)
+	parent, err := realized(ctx, c, root("planner", 1, 1), "alice", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, err := c.Spawn(ctx, child("one", 0, 0), parent, 0)
+	first, err := realizedSpawn(ctx, c, child("one", 0, 0), parent, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err = c.Act(ctx, first.Status.ID, "delete"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = c.Spawn(ctx, child("two", 0, 0), parent, 0); !errors.Is(err, ErrBudgetExhausted) {
+	if _, err = realizedSpawn(ctx, c, child("two", 0, 0), parent, 0); !errors.Is(err, ErrBudgetExhausted) {
 		t.Fatalf("a deleted child returned its unit: %v", err)
 	}
 }
@@ -373,18 +373,18 @@ func TestDeletedChildDoesNotCredit(t *testing.T) {
 func TestCascade(t *testing.T) {
 	c, events := spawning(t)
 	ctx := t.Context()
-	parent, err := c.Create(ctx, root("planner", 4, 2), "alice", 0)
+	parent, err := realized(ctx, c, root("planner", 4, 2), "alice", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, err := c.Spawn(ctx, child("worker", 2, 1), parent, 0)
+	first, err := realizedSpawn(ctx, c, child("worker", 2, 1), parent, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = c.Spawn(ctx, child("sibling", 0, 0), parent, 0); err != nil {
+	if _, err = realizedSpawn(ctx, c, child("sibling", 0, 0), parent, 0); err != nil {
 		t.Fatal(err)
 	}
-	grandchild, err := c.Spawn(ctx, child("helper", 0, 0), first, 0)
+	grandchild, err := realizedSpawn(ctx, c, child("helper", 0, 0), first, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -424,11 +424,11 @@ func TestCascade(t *testing.T) {
 func TestSpawnedEvent(t *testing.T) {
 	c, events := spawning(t)
 	ctx := t.Context()
-	parent, err := c.Create(ctx, root("planner", 2, 1), "alice", 0)
+	parent, err := realized(ctx, c, root("planner", 2, 1), "alice", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, err := c.Spawn(ctx, child("worker", 0, 0), parent, 0)
+	first, err := realizedSpawn(ctx, c, child("worker", 0, 0), parent, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -456,13 +456,13 @@ func TestParentCannotBeNarrowedBelowAChild(t *testing.T) {
 	ctx := t.Context()
 	wide := root("planner", 2, 1)
 	wide.Spec.Resources = v1.Resources{CPU: "2", Memory: "4Gi"}
-	parent, err := c.Create(ctx, wide, "alice", 0)
+	parent, err := realized(ctx, c, wide, "alice", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	narrow := child("worker", 0, 0)
 	narrow.Spec.Resources = v1.Resources{CPU: "1", Memory: "2Gi"}
-	first, err := c.Spawn(ctx, narrow, parent, 0)
+	first, err := realizedSpawn(ctx, c, narrow, parent, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -510,14 +510,14 @@ func TestATreeNeverAdoptsAnEntry(t *testing.T) {
 	// where they are.
 	meshRoot := root("planner", 2, 1)
 	meshRoot.Spec.Mesh.Enabled = true
-	parent, err := c.Create(ctx, meshRoot, "alice", 0)
+	parent, err := realized(ctx, c, meshRoot, "alice", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if d.adopted() != 0 {
 		t.Fatalf("a mesh root adopted %d entries, want none", d.adopted())
 	}
-	if _, err = c.Spawn(ctx, child("worker", 0, 0), parent, 0); err != nil {
+	if _, err = realizedSpawn(ctx, c, child("worker", 0, 0), parent, 0); err != nil {
 		t.Fatal(err)
 	}
 	if d.adopted() != 0 {
@@ -525,7 +525,7 @@ func TestATreeNeverAdoptsAnEntry(t *testing.T) {
 	}
 	// A sandbox that is neither still takes one, so the rule narrows the
 	// acceleration and does not end it.
-	if _, err = c.Create(ctx, workspace(), "alice", 0); err != nil {
+	if _, err = realized(ctx, c, workspace(), "alice", 0); err != nil {
 		t.Fatal(err)
 	}
 	if d.adopted() != 1 {
@@ -539,15 +539,15 @@ func TestATreeNeverAdoptsAnEntry(t *testing.T) {
 func TestADeadlineEndsTheTree(t *testing.T) {
 	c, _ := spawning(t)
 	ctx := t.Context()
-	parent, err := c.Create(ctx, root("planner", 2, 1), "alice", 0)
+	parent, err := realized(ctx, c, root("planner", 2, 1), "alice", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, err := c.Spawn(ctx, child("worker", 1, 1), parent, 0)
+	first, err := realizedSpawn(ctx, c, child("worker", 1, 1), parent, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	grandchild, err := c.Spawn(ctx, child("helper", 0, 0), first, 0)
+	grandchild, err := realizedSpawn(ctx, c, child("helper", 0, 0), first, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

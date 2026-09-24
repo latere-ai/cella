@@ -28,6 +28,9 @@ type gateway struct {
 	sendErr  error
 	ca       string
 	sendOnly bool // the map is taken and never acknowledged
+	// disconnected reports no gateway holding a stream open, which is what
+	// the create's admission reads.
+	disconnected bool
 }
 
 func (g *gateway) Send(_ context.Context, m egress.Map) error {
@@ -52,8 +55,13 @@ func (g *gateway) Purge(_ context.Context, principal string) {
 	g.purged = append(g.purged, principal)
 }
 
-func (g *gateway) CA() string     { return g.ca }
-func (g *gateway) Connected() int { return 1 }
+func (g *gateway) CA() string { return g.ca }
+func (g *gateway) Connected() int {
+	if g.disconnected {
+		return 0
+	}
+	return 1
+}
 
 func (g *gateway) maps() []egress.Map {
 	g.mu.Lock()
@@ -142,7 +150,7 @@ func TestCreatePushesTheMapBeforeTheDriver(t *testing.T) {
 	gw := &gateway{order: &order, ca: "-----BEGIN CERTIFICATE-----\nauthority\n-----END CERTIFICATE-----\n"}
 	d := &gatewayDriver{order: &order, modes: []v1.EgressMode{v1.EgressAllowlist}}
 	c := openController(t, Options{Driver: d, Egress: gw, Gateway: GatewayAddresses{Proxy: "gateway.example.internal:3128", Reverse: "gateway.example.internal:8080"}})
-	obj, err := c.Create(t.Context(), bounded(), "alice", 0)
+	obj, err := realized(t.Context(), c, bounded(), "alice", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,48 +185,76 @@ func TestCreatePushesTheMapBeforeTheDriver(t *testing.T) {
 	}
 }
 
-// TestCreateWaitsForTheGateway holds the refusal: a boundary no gateway will
-// hold leaves no sandbox behind.
+// TestCreateWaitsForTheGateway holds the two ways a boundary finds no gateway.
+// With none connected the create is refused before anything is written, and
+// takes no name. With one connected that does not acknowledge the map, which
+// is a gateway lost between the create's admission and the loop's push, the
+// sandbox is Failed with the cause on its EgressEnforced condition, the
+// driver is never called and the principal is purged.
 func TestCreateWaitsForTheGateway(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		egress Egress
 	}{
 		{"noGatewayAtAll", nil},
-		{"noneAcknowledges", &gateway{sendOnly: true}},
-		{"theStreamFailed", &gateway{sendErr: errors.New("the stream is closed")}},
+		{"noneConnected", &gateway{disconnected: true}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			d := &gatewayDriver{modes: []v1.EgressMode{v1.EgressAllowlist}}
 			c := openController(t, Options{Driver: d, Egress: tc.egress})
-			if _, err := c.Create(t.Context(), bounded(), "alice", 0); err == nil {
-				t.Fatal("a boundary with no gateway was created")
+			if _, err := c.Create(t.Context(), bounded(), "alice", 0); !errors.Is(err, ErrNoGateway) {
+				t.Fatalf("Create = %v, want %v", err, ErrNoGateway)
 			}
 			if len(c.List()) != 0 {
-				t.Fatalf("the refused sandbox is still listed: %+v", c.List())
+				t.Fatalf("the refused sandbox is listed: %+v", c.List())
 			}
-			d.mu.Lock()
-			if len(d.specs) != 0 {
-				d.mu.Unlock()
-				t.Fatal("the driver was called for a sandbox whose map reached no gateway")
-			}
-			d.mu.Unlock()
-			// A gateway that took the put and never answered holds a map for
-			// a sandbox that does not exist, so the principal is purged with
-			// the refusal.
-			if gw, ok := tc.egress.(*gateway); ok {
-				gw.mu.Lock()
-				defer gw.mu.Unlock()
-				if len(gw.purged) != 1 {
-					t.Fatalf("purged = %v, want the refused sandbox's principal", gw.purged)
-				}
+			// The refusal took no name, so the same create succeeds once a
+			// gateway is there.
+			c.egress = &gateway{}
+			if _, err := realized(t.Context(), c, bounded(), "alice", 0); err != nil {
+				t.Fatalf("the create after a gateway connected: %v", err)
 			}
 		})
 	}
-	// The error the API turns into an unavailable environment.
-	c := openController(t, Options{Driver: &gatewayDriver{modes: []v1.EgressMode{v1.EgressAllowlist}}})
-	if _, err := c.Create(t.Context(), bounded(), "alice", 0); !errors.Is(err, ErrNoGateway) {
-		t.Fatalf("Create = %v, want %v", err, ErrNoGateway)
+	for _, tc := range []struct {
+		name   string
+		gw     *gateway
+		reason string
+	}{
+		{"noneAcknowledges", &gateway{sendOnly: true}, v1.ReasonNoGateway},
+		{"theStreamFailed", &gateway{sendErr: errors.New("the stream is closed")}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := &gatewayDriver{modes: []v1.EgressMode{v1.EgressAllowlist}}
+			c := openController(t, Options{Driver: d, Egress: tc.gw})
+			answered, err := c.Create(t.Context(), bounded(), "alice", 0)
+			if err != nil || answered.Status.Phase != driver.Pending {
+				t.Fatalf("the create answered %s and %v, want Pending", answered.Status.Phase, err)
+			}
+			got, err := finished(t.Context(), c, answered, nil)
+			if err == nil {
+				t.Fatal("the loop reported no failure for a map no gateway held")
+			}
+			if got.Status.Phase != PhaseFailed || got.Status.Reason != ReasonCreateFailed {
+				t.Fatalf("the sandbox is %s/%s, want Failed/CreateFailed", got.Status.Phase, got.Status.Reason)
+			}
+			if cond := conditionOf(got, v1.ConditionEgressEnforced); tc.reason != "" && cond.Reason != tc.reason {
+				t.Fatalf("condition = %+v, want the reason %s", cond, tc.reason)
+			}
+			d.mu.Lock()
+			calls := len(d.specs)
+			d.mu.Unlock()
+			if calls != 0 {
+				t.Fatal("the driver was called for a sandbox whose map reached no gateway")
+			}
+			// A gateway that took the put and never answered holds a map for
+			// a sandbox that will not run, so the principal is purged.
+			tc.gw.mu.Lock()
+			defer tc.gw.mu.Unlock()
+			if len(tc.gw.purged) != 1 {
+				t.Fatalf("purged = %v, want the failed sandbox's principal", tc.gw.purged)
+			}
+		})
 	}
 }
 
@@ -229,7 +265,7 @@ func TestCreateWaitsForTheGateway(t *testing.T) {
 func TestOpenBoundaryNeedsNoGateway(t *testing.T) {
 	d := &gatewayDriver{modes: []v1.EgressMode{v1.EgressOpen}}
 	c := openController(t, Options{Driver: d})
-	obj, err := c.Create(t.Context(), workspace(), "alice", 0)
+	obj, err := realized(t.Context(), c, workspace(), "alice", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,7 +277,7 @@ func TestOpenBoundaryNeedsNoGateway(t *testing.T) {
 	denied := workspace()
 	denied.Spec.Network.Egress = v1.Egress{Mode: v1.EgressOpen, DeniedHosts: []string{"api.example.com"}}
 	denied.Metadata.Name = "denied"
-	if _, err = c.Create(t.Context(), denied, "alice", 0); !errors.Is(err, ErrNoGateway) {
+	if _, err = realized(t.Context(), c, denied, "alice", 0); !errors.Is(err, ErrNoGateway) {
 		t.Fatalf("Create = %v, want a denied host to need a gateway", err)
 	}
 }
@@ -252,7 +288,7 @@ func TestEgressEnforcedNeedsBothPoints(t *testing.T) {
 	gw := &gateway{}
 	d := &gatewayDriver{} // declares no egress enforcement
 	c := openController(t, Options{Driver: d, Egress: gw})
-	obj, err := c.Create(t.Context(), bounded(), "alice", 0)
+	obj, err := realized(t.Context(), c, bounded(), "alice", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -268,7 +304,7 @@ func TestCreatePurgesWhenTheDriverRefuses(t *testing.T) {
 	gw := &gateway{}
 	d := &gatewayDriver{modes: []v1.EgressMode{v1.EgressAllowlist}, create: errors.New("no room")}
 	c := openController(t, Options{Driver: d, Egress: gw})
-	obj, err := c.Create(t.Context(), bounded(), "alice", 0)
+	obj, err := realized(t.Context(), c, bounded(), "alice", 0)
 	if err == nil {
 		t.Fatal("a failed create was reported as a success")
 	}
@@ -283,7 +319,7 @@ func TestDeletePurgesTheMap(t *testing.T) {
 	gw := &gateway{}
 	d := &gatewayDriver{modes: []v1.EgressMode{v1.EgressAllowlist}}
 	c := openController(t, Options{Driver: d, Egress: gw})
-	obj, err := c.Create(t.Context(), bounded(), "alice", 0)
+	obj, err := realized(t.Context(), c, bounded(), "alice", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -314,7 +350,7 @@ func TestTheCredentialIsDesiredStateAndNotAnAnswer(t *testing.T) {
 		return c
 	}
 	c := open()
-	obj, err := c.Create(t.Context(), bounded(), "alice", 0)
+	obj, err := realized(t.Context(), c, bounded(), "alice", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -345,7 +381,7 @@ func TestTheCredentialIsDesiredStateAndNotAnAnswer(t *testing.T) {
 func TestEgressMapsLeavesOutWhatIsGoing(t *testing.T) {
 	gw := &gateway{}
 	c := openController(t, Options{Driver: &gatewayDriver{modes: []v1.EgressMode{v1.EgressAllowlist}}, Egress: gw})
-	obj, err := c.Create(t.Context(), bounded(), "alice", 0)
+	obj, err := realized(t.Context(), c, bounded(), "alice", 0)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -308,7 +308,7 @@ func created(t *testing.T, c *Controller, name string) v1.Sandbox {
 	t.Helper()
 	obj := workspace()
 	obj.Metadata.Name = name
-	got, err := c.Create(t.Context(), obj, "alice", 0)
+	got, err := realized(t.Context(), c, obj, "alice", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -532,7 +532,10 @@ func TestReaperDriverFailuresKeepTheIntent(t *testing.T) {
 }
 
 func TestReaperStoreFailuresKeepTheRecord(t *testing.T) {
-	for _, failOn := range []int{3, 4} {
+	// A create writes three times, the row, the status before the driver
+	// call and the settle, so the reaper's intent and its removal are the
+	// fourth and the fifth.
+	for _, failOn := range []int{4, 5} {
 		store := &memoryStore{saveErr: errors.New("write failed"), failOn: failOn}
 		c, _, clock := newFake(t, Options{Store: store, Lifecycle: driver.Lifecycle{TTL: time.Minute}})
 		obj := created(t, c, "expired")
@@ -718,7 +721,7 @@ func TestReaperEndToEndOverNative(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = c.Close() })
-	obj, err := c.Create(t.Context(), workspace(), "alice", 0)
+	obj, err := realized(t.Context(), c, workspace(), "alice", 0)
 	if err != nil {
 		t.Fatal(err)
 	}

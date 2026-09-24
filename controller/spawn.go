@@ -123,7 +123,9 @@ func (c *Controller) debit(ctx context.Context, obj v1.Sandbox, parent *v1.Sandb
 	if c.durable == nil {
 		c.emit(ctx, MutationCreated, clone(obj))
 	}
-	return nil
+	// The parent reads the debit at once, since the child's create answers
+	// before the loop realizes it and records the spawn.
+	return c.projectSpawnUsed(ctx, parent.Status.ID)
 }
 
 // credit returns the unit a create that did not complete took. It is called

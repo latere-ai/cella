@@ -184,7 +184,7 @@ func TestControllerRoutesByEnvironment(t *testing.T) {
 	obj := workspace()
 	obj.Metadata.Name = "there"
 	obj.Spec.Environment = "eu-gpu"
-	created, err := c.Create(t.Context(), obj, "alice", 0)
+	created, err := realized(t.Context(), c, obj, "alice", 0)
 	if err != nil {
 		t.Fatalf("the create on the worker's environment failed: %v", err)
 	}
@@ -202,7 +202,7 @@ func TestControllerRoutesByEnvironment(t *testing.T) {
 	local := workspace()
 	local.Metadata.Name = "here"
 	local.Spec.Environment = ""
-	if _, err = c.Create(t.Context(), local, "alice", 0); err != nil {
+	if _, err = realized(t.Context(), c, local, "alice", 0); err != nil {
 		t.Fatalf("the create on the default failed: %v", err)
 	}
 	if len(here.sandboxes()) != 1 {
@@ -248,7 +248,7 @@ func TestARestartKeepsSandboxesOnEveryEnvironment(t *testing.T) {
 	obj := workspace()
 	obj.Metadata.Name = "there"
 	obj.Spec.Environment = "eu-gpu"
-	created, err := c.Create(t.Context(), obj, "alice", 0)
+	created, err := realized(t.Context(), c, obj, "alice", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -293,7 +293,7 @@ func TestCreateOnAnEnvironmentBelowReady(t *testing.T) {
 	obj := workspace()
 	obj.Metadata.Name = "before"
 	obj.Spec.Environment = "eu-gpu"
-	running, err := c.Create(t.Context(), obj, "alice", 0)
+	running, err := realized(t.Context(), c, obj, "alice", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -315,7 +315,7 @@ func TestCreateOnAnEnvironmentBelowReady(t *testing.T) {
 	next := workspace()
 	next.Metadata.Name = "after"
 	next.Spec.Environment = "eu-gpu"
-	if _, err = c.Create(t.Context(), next, "alice", 0); !errors.Is(err, ErrEnvironmentUnavailable) {
+	if _, err = realized(t.Context(), c, next, "alice", 0); !errors.Is(err, ErrEnvironmentUnavailable) {
 		t.Errorf("a create on an offline environment answered %v", err)
 	}
 	if _, err = c.Get(t.Context(), running.Status.ID, "alice"); err != nil {
@@ -326,7 +326,7 @@ func TestCreateOnAnEnvironmentBelowReady(t *testing.T) {
 	absent := workspace()
 	absent.Metadata.Name = "nowhere"
 	absent.Spec.Environment = "us-east"
-	if _, err = c.Create(t.Context(), absent, "alice", 0); !errors.Is(err, ErrNoEnvironment) {
+	if _, err = realized(t.Context(), c, absent, "alice", 0); !errors.Is(err, ErrNoEnvironment) {
 		t.Errorf("a create on an absent environment answered %v", err)
 	}
 }
@@ -492,14 +492,14 @@ func TestReaperPerEnvironment(t *testing.T) {
 	local := workspace()
 	local.Metadata.Name = "here"
 	local.Spec.Lifecycle = v1.Lifecycle{TTL: "1h"}
-	if _, err := c.Create(t.Context(), local, "alice", 0); err != nil {
+	if _, err := realized(t.Context(), c, local, "alice", 0); err != nil {
 		t.Fatal(err)
 	}
 	remote := workspace()
 	remote.Metadata.Name = "there"
 	remote.Spec.Environment = "eu-gpu"
 	remote.Spec.Lifecycle = v1.Lifecycle{TTL: "1h"}
-	if _, err := c.Create(t.Context(), remote, "alice", 0); err != nil {
+	if _, err := realized(t.Context(), c, remote, "alice", 0); err != nil {
 		t.Fatal(err)
 	}
 
@@ -529,7 +529,7 @@ func TestTheReaperHoldsOnAnEnvironmentBelowReady(t *testing.T) {
 	obj.Metadata.Name = "there"
 	obj.Spec.Environment = "eu-gpu"
 	obj.Spec.Lifecycle = v1.Lifecycle{TTL: "1h"}
-	if _, err := c.Create(t.Context(), obj, "alice", 0); err != nil {
+	if _, err := realized(t.Context(), c, obj, "alice", 0); err != nil {
 		t.Fatal(err)
 	}
 	w.set(nil)
@@ -580,14 +580,14 @@ func TestASpawnRunsWhereItsParentRuns(t *testing.T) {
 	obj.Metadata.Name = "root"
 	obj.Spec.Environment = "eu-gpu"
 	obj.Spec.Mesh.Spawn = v1.Spawn{Budget: 2, Depth: 1}
-	parent, err := c.Create(t.Context(), obj, "alice", 0)
+	parent, err := realized(t.Context(), c, obj, "alice", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	child := workspace()
 	child.Metadata.Name = "child"
 	child.Spec.Environment = ""
-	spawned, err := c.Spawn(t.Context(), child, parent, 0)
+	spawned, err := realizedSpawn(t.Context(), c, child, parent, 0)
 	if err != nil {
 		t.Fatalf("the spawn failed: %v", err)
 	}
@@ -615,7 +615,7 @@ func TestDeleteEnvironment(t *testing.T) {
 	obj := workspace()
 	obj.Metadata.Name = "there"
 	obj.Spec.Environment = "eu-gpu"
-	created, err := c.Create(t.Context(), obj, "alice", 0)
+	created, err := realized(t.Context(), c, obj, "alice", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -770,7 +770,7 @@ func TestAControlPlaneThatStoresNoEnvironment(t *testing.T) {
 	}
 	// Placement still works: the environment this process drives is the one
 	// every manifest that names none gets.
-	if _, err = c.Create(t.Context(), workspace(), "alice", 0); err != nil {
+	if _, err = realized(t.Context(), c, workspace(), "alice", 0); err != nil {
 		t.Errorf("a create on a control plane with no environment store failed: %v", err)
 	}
 }
@@ -836,7 +836,7 @@ func TestAStoredEnvironmentComesBackWithoutADriverSeam(t *testing.T) {
 	// data plane reported, and it has no driver to report through either.
 	obj := workspace()
 	obj.Spec.Environment = "eu-gpu"
-	if _, err = again.Create(t.Context(), obj, "alice", 0); !errors.Is(err, ErrEnvironmentUnavailable) {
+	if _, err = realized(t.Context(), again, obj, "alice", 0); !errors.Is(err, ErrEnvironmentUnavailable) {
 		t.Errorf("a create on an environment with no driver answered %v", err)
 	}
 	if _, err = again.driverFor("eu-gpu"); !errors.Is(err, ErrNoEnvironment) {

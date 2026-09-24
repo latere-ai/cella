@@ -17,7 +17,7 @@ func TestUpdateReplacesTheSpecificationAndKeepsTheStatus(t *testing.T) {
 	d := &gatewayDriver{modes: []v1.EgressMode{v1.EgressAllowlist, v1.EgressOpen}}
 	gw := &gateway{}
 	c := openController(t, Options{Driver: d, Egress: gw})
-	created, err := c.Create(t.Context(), bounded(), "alice", 0)
+	created, err := realized(t.Context(), c, bounded(), "alice", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestUpdateWhoseBoundaryNoGatewayWillHold(t *testing.T) {
 	d := &gatewayDriver{modes: []v1.EgressMode{v1.EgressAllowlist}}
 	gw := &gateway{}
 	c := openController(t, Options{Driver: d, Egress: gw})
-	created, err := c.Create(t.Context(), bounded(), "alice", 0)
+	created, err := realized(t.Context(), c, bounded(), "alice", 0)
 	if err != nil {
 		t.Fatal(err)
 	}

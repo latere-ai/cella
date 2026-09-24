@@ -18,7 +18,7 @@ type noDialer struct{ driver.Driver }
 // the unsupported operation the API turns into 422.
 func TestDialerIsTheEnvironmentsDriver(t *testing.T) {
 	c, o := newController(t)
-	obj, err := c.Create(t.Context(), workspace(), "alice", 2)
+	obj, err := realized(t.Context(), c, workspace(), "alice", 2)
 	if err != nil {
 		t.Fatal(err)
 	}

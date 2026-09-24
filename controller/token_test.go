@@ -191,7 +191,7 @@ func TestCreateFailureRevokes(t *testing.T) {
 	d.set(func(d *fakeDriver) { d.createErr = errors.New("the driver refused") })
 	obj := workspace()
 	obj.Metadata.Name = "work"
-	got, err := c.Create(t.Context(), obj, "alice", 0)
+	got, err := realized(t.Context(), c, obj, "alice", 0)
 	if err == nil {
 		t.Fatal("the refused create was reported as a success")
 	}
@@ -214,7 +214,7 @@ func TestCreateRefusesWhenTheMintFails(t *testing.T) {
 	tokens.fail(errors.New("the signer is unavailable"), nil)
 	obj := workspace()
 	obj.Metadata.Name = "work"
-	if _, err := c.Create(t.Context(), obj, "alice", 0); err == nil {
+	if _, err := realized(t.Context(), c, obj, "alice", 0); err == nil {
 		t.Fatal("a sandbox was created without the identity it was to carry")
 	}
 	if len(d.order) != 0 {
@@ -307,7 +307,7 @@ func TestCappedTokenIsNotRotated(t *testing.T) {
 	obj := workspace()
 	obj.Metadata.Name = "work"
 	obj.Spec.Lifecycle.TTL = "1h"
-	if _, err := c.Create(t.Context(), obj, "alice", 0); err != nil {
+	if _, err := realized(t.Context(), c, obj, "alice", 0); err != nil {
 		t.Fatal(err)
 	}
 	clock.Advance(59 * time.Minute)
@@ -365,7 +365,7 @@ func TestReapedSandboxRevokes(t *testing.T) {
 	obj := workspace()
 	obj.Metadata.Name = "work"
 	obj.Spec.Lifecycle.TTL = "1h"
-	if _, err := c.Create(t.Context(), obj, "alice", 0); err != nil {
+	if _, err := realized(t.Context(), c, obj, "alice", 0); err != nil {
 		t.Fatal(err)
 	}
 	clock.Advance(time.Hour)

@@ -136,7 +136,9 @@ func TestPoolMatch(t *testing.T) {
 }
 
 // TestPoolAdoption is one create served from an entry: no driver create, the
-// entry's id, the adoption's instant, and the reason a caller reads.
+// entry's id, the adoption's instant, and the reason a caller reads. The
+// adoption runs on the create's own call, so the answer is the adopted
+// sandbox and no pass of the loop is needed.
 // setPool changes what one environment keeps prewarmed the way an apply
 // does, so a case can widen or narrow the pool under a running controller.
 func setPool(c *Controller, pool v1.PoolSpec) {
@@ -164,6 +166,8 @@ func TestPoolAdoption(t *testing.T) {
 		t.Fatal(err)
 	}
 	switch {
+	case obj.Status.Phase != driver.Running:
+		t.Errorf("the adoption answered %s, want Running", obj.Status.Phase)
 	case obj.Status.ID != entry.ID:
 		t.Errorf("the adopted sandbox is %s, want the entry %s", obj.Status.ID, entry.ID)
 	case d.adopted() != 1:
@@ -203,7 +207,7 @@ func TestPoolMismatchCreatesForReal(t *testing.T) {
 	}
 	obj := workspace()
 	obj.Spec.Command = []string{"sh", "-c", "sleep 1"}
-	got, err := c.Create(t.Context(), obj, "alice", 0)
+	got, err := realized(t.Context(), c, obj, "alice", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,7 +231,7 @@ func TestPoolSkipsDeclaredPorts(t *testing.T) {
 	}
 	obj := workspace()
 	obj.Spec.Network.Ports = []v1.Port{{Name: "web", Port: 8080}}
-	if _, err := c.Create(t.Context(), obj, "alice", 0); err != nil {
+	if _, err := realized(t.Context(), c, obj, "alice", 0); err != nil {
 		t.Fatal(err)
 	}
 	if d.adopted() != 0 {
@@ -260,7 +264,7 @@ func TestPoolAdoptionFallsBack(t *testing.T) {
 			f.states[id] = s
 		}
 	})
-	obj, err := c.Create(t.Context(), workspace(), "alice", 0)
+	obj, err := realized(t.Context(), c, workspace(), "alice", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -424,7 +428,7 @@ func TestPoolYieldsCapacity(t *testing.T) {
 	// A create the entries cannot serve needs one of their slots.
 	obj := workspace()
 	obj.Spec.Command = []string{"sh"}
-	if _, err := c.Create(t.Context(), obj, "alice", 0); err != nil {
+	if _, err := realized(t.Context(), c, obj, "alice", 0); err != nil {
 		t.Fatal(err)
 	}
 	_, deletes, _ := d.acted()
@@ -438,12 +442,12 @@ func TestPoolYieldsCapacity(t *testing.T) {
 	// and the third has none left to take.
 	second := workspace()
 	second.Metadata.Name, second.Spec.Command = "second", []string{"sh"}
-	if _, err := c.Create(t.Context(), second, "alice", 0); err != nil {
+	if _, err := realized(t.Context(), c, second, "alice", 0); err != nil {
 		t.Fatal(err)
 	}
 	third := workspace()
 	third.Metadata.Name, third.Spec.Command = "third", []string{"sh"}
-	over, err := c.Create(t.Context(), third, "alice", 0)
+	over, err := realized(t.Context(), c, third, "alice", 0)
 	if err != nil || over.Status.Phase != PhaseFailed || over.Status.Reason != ReasonNoCapacity {
 		t.Fatalf("a create over the ceiling is %s %s, %v; want Failed NoCapacity", over.Status.Phase, over.Status.Reason, err)
 	}
@@ -647,7 +651,7 @@ func TestPoolAdoptionIsExclusiveUnderOneController(t *testing.T) {
 		wg.Go(func() {
 			obj := workspace()
 			obj.Metadata.Name = []string{"first", "second"}[i]
-			results[i], errs[i] = c.Create(t.Context(), obj, "alice", 0)
+			results[i], errs[i] = realized(t.Context(), c, obj, "alice", 0)
 		})
 	}
 	wg.Wait()
@@ -689,7 +693,7 @@ func TestPoolReadFailures(t *testing.T) {
 		t.Fatal(err)
 	}
 	d.set(func(f *fakeDriver) { f.listErr = errors.New("the environment is unreachable") })
-	obj, err := c.Create(t.Context(), workspace(), "alice", 0)
+	obj, err := realized(t.Context(), c, workspace(), "alice", 0)
 	if err != nil {
 		t.Fatal(err)
 	}

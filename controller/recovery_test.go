@@ -267,7 +267,7 @@ func TestLostGraceReaps(t *testing.T) {
 	if _, err := c.Get(t.Context(), id, "alice"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("the lost record outlived its grace: %v", err)
 	}
-	want := []string{MutationCreated, MutationStarted, MutationLost, MutationDeleting, MutationDeleted}
+	want := []string{MutationCreated, MutationStatus, MutationStarted, MutationLost, MutationDeleting, MutationDeleted}
 	if got := st.mutations(id); !slices.Equal(got, want) {
 		t.Fatalf("the journal reads %v, want %v", got, want)
 	}
@@ -496,7 +496,7 @@ func TestRecoveryEndToEndOverNative(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = c.Close() })
-	obj, err := c.Create(t.Context(), workspace(), "alice", 0)
+	obj, err := realized(t.Context(), c, workspace(), "alice", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -533,8 +533,8 @@ func TestRecoveryEndToEndOverNative(t *testing.T) {
 	}
 }
 
-// hangUp is a driver whose create is where the caller hangs up: it ends the
-// caller's context and answers what the Kubernetes driver answers then.
+// hangUp is a driver whose create is where the loop stops: it ends the
+// loop's context and answers what the Kubernetes driver answers then.
 type hangUp struct {
 	*fakeDriver
 	cancel context.CancelFunc
@@ -545,27 +545,48 @@ func (d hangUp) Create(ctx context.Context, _ driver.CreateSpec) (driver.Ref, er
 	return driver.Ref{}, ctx.Err()
 }
 
-// TestAHungUpCreateStillRecordsTheFailure: a caller that hangs up while the
-// driver creates leaves the sandbox Failed in the store with its failure in
-// the journal, rather than a row that says it is still being created.
-func TestAHungUpCreateStillRecordsTheFailure(t *testing.T) {
+// TestAStoppedLoopLeavesTheCreateToTheNext: a loop that stops while the
+// driver creates writes nothing after the call. The row stays as the status
+// write left it, placed with its boundary record and its identity, rather
+// than Failed, and the next pass creates the sandbox from there and ends the
+// identity the stopped pass minted.
+func TestAStoppedLoopLeavesTheCreateToTheNext(t *testing.T) {
 	clock := newClock()
 	st := newDurable(true)
 	st.live = true
+	tokens := newTokens(clock, time.Hour)
 	ctx, cancel := context.WithCancel(t.Context())
-	c := withDriver(t, st, hangUp{fakeDriver: newDriver(clock), cancel: cancel}, clock, Options{})
-	obj, err := c.Create(ctx, workspace(), "alice", 0)
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("a create the caller hung up on answered %v", err)
+	fake := newDriver(clock)
+	c := withDriver(t, st, hangUp{fakeDriver: fake, cancel: cancel}, clock, Options{Tokens: tokens})
+	answered, err := c.Create(t.Context(), workspace(), "alice", 0)
+	if err != nil {
+		t.Fatal(err)
 	}
-	id := obj.Status.ID
+	id := answered.Status.ID
+	if _, err := finished(ctx, c, answered, nil); !errors.Is(err, context.Canceled) {
+		t.Fatalf("a pass the loop stopped answered %v", err)
+	}
 	st.mu.Lock()
 	stored, ok := st.objects[id]
 	st.mu.Unlock()
-	if !ok || stored.Status.Phase != PhaseFailed || stored.Status.Reason != ReasonCreateFailed {
-		t.Fatalf("the store holds %+v (present %v), want the sandbox Failed with CreateFailed", stored.Status, ok)
+	if !ok || !placed(stored) || stored.Status.EgressState == nil || stored.Status.TokenState == nil {
+		t.Fatalf("the store holds %+v (present %v), want the sandbox placed with its boundary and identity", stored.Status, ok)
 	}
-	if got := st.mutations(id); !slices.Contains(got, MutationFailed) {
-		t.Fatalf("the journal holds %v for the sandbox, without %s", got, MutationFailed)
+	if got := st.mutations(id); slices.Contains(got, MutationFailed) {
+		t.Fatalf("the journal holds %v, a failure for a create nobody refused", got)
+	}
+	first := stored.Status.TokenState.JTI
+
+	// The next pass runs over a driver that creates.
+	c.setDriver("default", fake)
+	if err := c.Schedule(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	got, err := c.Get(t.Context(), id, "alice")
+	if err != nil || got.Status.Phase != driver.Running {
+		t.Fatalf("the next pass left %s: %v", got.Status.Phase, err)
+	}
+	if _, revoked, _ := tokens.read(); !slices.Contains(revoked, first) {
+		t.Fatalf("the identity the stopped pass minted, %s, is still live: revoked %v", first, revoked)
 	}
 }

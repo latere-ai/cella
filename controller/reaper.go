@@ -293,6 +293,12 @@ func (c *Controller) enforceToken(ctx context.Context, state driver.State, now t
 	if !tracked || !rotatable(obj.Status.Phase) {
 		return false, nil
 	}
+	// A create the loop has not settled holds the identity it was just
+	// given, and its driver call may be in flight: a re-projection would
+	// cross it.
+	if _, busy := c.realizing[state.ID]; busy || placed(obj) {
+		return false, nil
+	}
 	if !dueForRotation(obj.Status.TokenState, state.ExpiresAt, now) {
 		return false, nil
 	}

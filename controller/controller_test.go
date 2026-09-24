@@ -19,6 +19,38 @@ import (
 	"latere.ai/x/cella/runtime/native"
 )
 
+// realized is a create and the realize the scheduler loop runs for it,
+// answering the sandbox as the realize left it with the error the realize
+// ended with. It is for the cases that read what a create made rather than
+// what a create answers: the create answers Pending at once, and the loop's
+// pass is what makes the sandbox.
+func realized(ctx context.Context, c *Controller, obj v1.Sandbox, owner string, max int) (v1.Sandbox, error) {
+	out, err := c.Create(ctx, obj, owner, max)
+	return finished(ctx, c, out, err)
+}
+
+// realizedSpawn is realized for a spawn.
+func realizedSpawn(ctx context.Context, c *Controller, obj, parent v1.Sandbox, max int) (v1.Sandbox, error) {
+	out, err := c.Spawn(ctx, obj, parent, max)
+	return finished(ctx, c, out, err)
+}
+
+// finished runs the loop's realize for a create that answered placed, and
+// reads the sandbox back. A create that answered anything else, or refused,
+// is returned as it answered.
+func finished(ctx context.Context, c *Controller, out v1.Sandbox, err error) (v1.Sandbox, error) {
+	if err != nil || !placed(out) {
+		return out, err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	err = c.realize(ctx, out.Status.ID)
+	if obj, held := c.objects[out.Status.ID]; held {
+		out = export(obj)
+	}
+	return out, err
+}
+
 // workspace is a resolved manifest, which is what Create takes: the boundary
 // carries the mode the resolver inferred, because a manifest with none never
 // reaches the controller.
@@ -46,7 +78,7 @@ func newController(t *testing.T) (*Controller, Options) {
 func TestDurableLifecycle(t *testing.T) {
 	c, o := newController(t)
 	ctx := t.Context()
-	obj, err := c.Create(ctx, workspace(), "alice", 2)
+	obj, err := realized(ctx, c, workspace(), "alice", 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +142,7 @@ func TestDurableLifecycle(t *testing.T) {
 	if len(c.List()) != 0 {
 		t.Fatal("deleted row remains")
 	}
-	if _, err = c.Create(ctx, workspace(), "alice", 1); err != nil {
+	if _, err = realized(ctx, c, workspace(), "alice", 1); err != nil {
 		t.Fatal("deleted name not reusable", err)
 	}
 }
@@ -122,7 +154,7 @@ func TestQuotaAndNameAtomic(t *testing.T) {
 		wg.Go(func() {
 			obj := workspace()
 			obj.Metadata.Name = ""
-			if _, err := c.Create(t.Context(), obj, "alice", 1); err == nil {
+			if _, err := realized(t.Context(), c, obj, "alice", 1); err == nil {
 				success.Add(1)
 			} else if !errors.Is(err, ErrQuota) {
 				t.Error(err)
@@ -133,13 +165,13 @@ func TestQuotaAndNameAtomic(t *testing.T) {
 	if success.Load() != 1 {
 		t.Fatal(success.Load())
 	}
-	if _, err := c.Create(t.Context(), workspace(), "bob", 0); err != nil {
+	if _, err := realized(t.Context(), c, workspace(), "bob", 0); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.Create(t.Context(), workspace(), "bob", 0); !errors.Is(err, ErrNameTaken) {
+	if _, err := realized(t.Context(), c, workspace(), "bob", 0); !errors.Is(err, ErrNameTaken) {
 		t.Fatal(err)
 	}
-	if _, err := c.Create(t.Context(), workspace(), "", 0); err == nil {
+	if _, err := realized(t.Context(), c, workspace(), "", 0); err == nil {
 		t.Fatal("empty owner")
 	}
 }
@@ -162,7 +194,7 @@ func TestFailuresRemainRecoverable(t *testing.T) {
 	c, _ := newController(t)
 	real, _ := c.driverFor(c.environment)
 	c.setDriver(c.environment, failureDriver{Driver: real, createErr: errors.New("create failed"), inspectErr: driver.ErrNotFound, deleteErr: errors.New("delete failed")})
-	obj, err := c.Create(t.Context(), workspace(), "alice", 0)
+	obj, err := realized(t.Context(), c, workspace(), "alice", 0)
 	if err == nil || obj.Status.Phase != "Failed" {
 		t.Fatal(obj, err)
 	}
@@ -246,10 +278,10 @@ func TestStoreFailuresNeverLoseDesiredState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = other.Create(t.Context(), workspace(), "alice", 0); err == nil || len(other.List()) != 0 {
+	if _, err = realized(t.Context(), other, workspace(), "alice", 0); err == nil || len(other.List()) != 0 {
 		t.Fatal("failed reservation persisted")
 	}
-	obj, err := c.Create(t.Context(), workspace(), "alice", 0)
+	obj, err := realized(t.Context(), c, workspace(), "alice", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -314,7 +346,7 @@ func (d deleteFailureDriver) Delete(context.Context, string) error {
 }
 func TestDeletingObjectsDoNotConsumeCountQuota(t *testing.T) {
 	c, _ := newController(t)
-	obj, err := c.Create(t.Context(), workspace(), "alice", 1)
+	obj, err := realized(t.Context(), c, workspace(), "alice", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -324,7 +356,7 @@ func TestDeletingObjectsDoNotConsumeCountQuota(t *testing.T) {
 	}
 	next := workspace()
 	next.Metadata.Name = "replacement"
-	if _, err = c.Create(t.Context(), next, "alice", 1); err != nil {
+	if _, err = realized(t.Context(), c, next, "alice", 1); err != nil {
 		t.Fatal("Deleting still consumed count quota", err)
 	}
 }
@@ -361,7 +393,7 @@ func TestCreateSpecCarriesManifestFields(t *testing.T) {
 	obj.Spec.Workspace = v1.Workspace{Path: "/workspace", Source: v1.WorkspaceSourceEmpty}
 	obj.Spec.Lifecycle = v1.Lifecycle{AutoStop: "15m", TTL: "1h", AutoDelete: v1.DurationNever}
 	obj.Status.Warnings = []string{"The native environment does not limit cpu, memory or disk."}
-	got, err := c.Create(t.Context(), obj, "alice", 0)
+	got, err := realized(t.Context(), c, obj, "alice", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -395,7 +427,7 @@ func TestCreateSpecCarriesManifestFields(t *testing.T) {
 	obj = workspace()
 	obj.Metadata.Name = "broken"
 	obj.Spec.Lifecycle.TTL = "soon"
-	if _, err = c.Create(t.Context(), obj, "alice", 0); err == nil {
+	if _, err = realized(t.Context(), c, obj, "alice", 0); err == nil {
 		t.Fatal("an unparsable lifecycle reached the driver")
 	}
 }

@@ -39,7 +39,7 @@ func asking(name, owner, cpu string, priority int) (v1.Sandbox, string) {
 
 func mustCreate(t *testing.T, c *Controller, obj v1.Sandbox, owner string) v1.Sandbox {
 	t.Helper()
-	got, err := c.Create(t.Context(), obj, owner, 0)
+	got, err := realized(t.Context(), c, obj, owner, 0)
 	if err != nil {
 		t.Fatalf("creating %s: %v", obj.Metadata.Name, err)
 	}
@@ -633,7 +633,7 @@ func TestAQuantityThatDoesNotParseStopsThePlacement(t *testing.T) {
 	}
 	next, owner := asking("c", "alice", "1", 0)
 	next.Spec.Scheduling.Queue = "other"
-	if _, err := c.Create(t.Context(), next, owner, 0); err == nil {
+	if _, err := realized(t.Context(), c, next, owner, 0); err == nil {
 		t.Fatal("a create was placed over a sum that does not parse")
 	}
 	c.mu.Lock()

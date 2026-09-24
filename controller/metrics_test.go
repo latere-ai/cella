@@ -143,12 +143,12 @@ func TestARefusedCreateIsNoAdoption(t *testing.T) {
 	refill()
 	second := workspace()
 	second.Metadata.Name = "second"
-	if _, err := c.Create(t.Context(), second, "alice", 1); !errors.Is(err, ErrQuota) {
+	if _, err := realized(t.Context(), c, second, "alice", 1); !errors.Is(err, ErrQuota) {
 		t.Fatalf("a create past the owner's count is %v", err)
 	}
 	taken := workspace()
 	taken.Metadata.Name = "first"
-	if _, err := c.Create(t.Context(), taken, "alice", 0); !errors.Is(err, ErrNameTaken) {
+	if _, err := realized(t.Context(), c, taken, "alice", 0); !errors.Is(err, ErrNameTaken) {
 		t.Fatalf("a create of a name taken is %v", err)
 	}
 	if got := rec.createLabels(); !slices.Equal(got, []string{PoolHit}) {

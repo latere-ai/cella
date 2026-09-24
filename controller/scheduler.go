@@ -243,16 +243,55 @@ func (c *Controller) Schedule(ctx context.Context) error {
 	return failed
 }
 
-// environmentsWaiting is every environment with a sandbox in a queue.
+// environmentsWaiting is every environment with a sandbox in a queue or one
+// placed and not yet realized.
 func (c *Controller) environmentsWaiting() []string {
 	var out []string
 	for _, obj := range c.objects {
-		if obj.Status.Phase == PhaseQueued && !slices.Contains(out, obj.Status.Environment) {
+		if (obj.Status.Phase == PhaseQueued || placed(obj)) && !slices.Contains(out, obj.Status.Environment) {
 			out = append(out, obj.Status.Environment)
 		}
 	}
 	slices.Sort(out)
 	return out
+}
+
+// placed reports whether a sandbox is placed and not yet realized: Pending,
+// with no Scheduled condition that is True. Scheduled is written True once
+// the driver's create or adoption has returned, and no driver reports it, so
+// this separates a sandbox the control plane has not handed to a driver from
+// one a driver reported as Pending itself. A sandbox the loop dequeued still
+// carries Scheduled False Queued, and one a direct create placed carries no
+// Scheduled at all; both are placed.
+func placed(obj v1.Sandbox) bool {
+	if obj.Status.Phase != driver.Pending {
+		return false
+	}
+	for _, cond := range obj.Status.Conditions {
+		if cond.Type == v1.ConditionScheduled && cond.Status == v1.ConditionTrue {
+			return false
+		}
+	}
+	return true
+}
+
+// placedOn is every placed and unrealized sandbox of one environment, oldest
+// first, which is the order their creates answered in.
+func (c *Controller) placedOn(environment string) []string {
+	var out []v1.Sandbox
+	for _, obj := range c.objects {
+		if obj.Status.Environment == environment && placed(obj) {
+			out = append(out, obj)
+		}
+	}
+	slices.SortFunc(out, func(a, b v1.Sandbox) int {
+		return cmp.Or(a.Status.CreatedAt.Compare(b.Status.CreatedAt), cmp.Compare(a.Status.ID, b.Status.ID))
+	})
+	ids := make([]string, 0, len(out))
+	for _, obj := range out {
+		ids = append(ids, obj.Status.ID)
+	}
+	return ids
 }
 
 // scheduleEnvironment is one pass over one environment's queues, read as one
@@ -278,6 +317,15 @@ func (c *Controller) scheduleEnvironment(ctx context.Context, environment string
 	}
 	if c.admits(environment) != nil {
 		return failed
+	}
+	// A placed sandbox already holds its capacity and answered its caller,
+	// so it is realized before any queue is read: it is not fitted, not
+	// ordered and not held to a start deadline. Each realize reads its row
+	// again, since the lock is released around the driver's call.
+	for _, id := range c.placedOn(environment) {
+		if err := c.realize(ctx, id); err != nil {
+			failed = errors.Join(failed, fmt.Errorf("realizing %s: %w", id, err))
+		}
 	}
 	closed := map[string]bool{}
 	tried := map[string]bool{}
@@ -368,29 +416,25 @@ func (c *Controller) parentOf(obj v1.Sandbox) *v1.Sandbox {
 }
 
 // placeQueued moves one queued sandbox to Pending and resumes its create at
-// step 3. It takes the slow path: a pool entry is adopted only by a create
-// placed at once, under that create's own lock. A sandbox the loop preempted
-// has its object already, and is started rather than created.
+// step 3, which is the realize a create placed at once gets. It takes the
+// slow path: a pool entry is adopted only by a create placed at once, on that
+// create's own request. A sandbox the loop preempted has its object already,
+// and is started rather than created.
 func (c *Controller) placeQueued(ctx context.Context, obj v1.Sandbox) error {
 	if requeued(obj) {
 		return c.resume(ctx, obj)
 	}
-	started := c.clock.Now()
-	d, err := c.driverFor(obj.Status.Environment)
-	if err != nil {
+	if _, err := c.driverFor(obj.Status.Environment); err != nil {
 		return err
 	}
-	lifecycle, err := c.lifecycleFor(obj)
-	if err != nil {
+	if _, err := c.lifecycleFor(obj); err != nil {
 		return err
 	}
 	obj.Status.Phase = driver.Pending
 	if err := c.persist(ctx, obj, MutationStatus); err != nil {
 		return err
 	}
-	out, err := c.realize(ctx, obj, d, lifecycle, nil, c.parentOf(obj), true)
-	c.observeCreate(out, PoolMiss, started)
-	return err
+	return c.realize(ctx, obj.Status.ID)
 }
 
 // QueueDepth is how many sandboxes wait in one queue of one environment.

@@ -215,6 +215,10 @@ type Controller struct {
 	offline  time.Duration
 	answerMu sync.Mutex
 	answered map[string]time.Time
+	// realizing is every sandbox whose driver create the scheduler loop has
+	// in flight with the controller's lock released. An act that would reach
+	// the driver for one of them waits for the settle instead of crossing it.
+	realizing map[string]struct{}
 }
 
 // Open restores desired state from an operator-supplied store, or the provisional
@@ -271,6 +275,7 @@ func Open(ctx context.Context, o Options) (*Controller, error) {
 		scheduleInterval: cmp.Or(o.ScheduleInterval, DefaultScheduleInterval), wake: make(chan struct{}, 1), maxPreemptions: cmp.Or(o.MaxPreemptions, DefaultMaxPreemptions),
 		newDriver: o.NewDriver, releaseDriver: o.ReleaseDriver, registrations: o.Registrations,
 		offline: o.EnvironmentOffline, answered: map[string]time.Time{},
+		realizing: map[string]struct{}{},
 	}
 	// A store of design 010 takes one conditional write per object and
 	// carries the journal; one that is also durable is what lets the lost
@@ -412,14 +417,22 @@ func (c *Controller) forget(ctx context.Context, id, mutation string) error {
 	return nil
 }
 
-// Create atomically reserves the owner's name and quota before calling runtime.
+// Create writes one sandbox's desired state and answers with it, which is
+// steps 1 and 2 of design 005's create order: the owner's name and count, the
+// placement, and the write. A sandbox placed now answers Pending, and the
+// scheduler loop runs steps 3 onward for it, the boundary, the identity, the
+// driver's create and the first read, so the answer does not wait for a
+// substrate that provisions and attaches storage before a workload starts.
+// A queued one answers Queued and a direct environment that cannot fit it
+// answers Failed NoCapacity, as before.
 //
 // Where the environment keeps a pool and one of its entries can carry this
-// manifest, the create adopts it: every step of design 005's order is the
-// same act on the same id, and only the driver call at the end differs
-// ([[020-scheduling-and-sets]]). An entry another adopter took between the
-// match and the adoption leaves nothing behind, and the create runs again on
-// the slow path.
+// manifest, the create adopts it on this call and answers after the
+// adoption: every step of design 005's order is the same act on the same id,
+// and only the driver call at the end differs ([[020-scheduling-and-sets]]).
+// An entry another adopter took between the match and the adoption leaves
+// nothing behind, and the create takes the slow path under an id of its own,
+// which it can only do before the caller has read one.
 func (c *Controller) Create(ctx context.Context, obj v1.Sandbox, owner string, max int) (v1.Sandbox, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -453,6 +466,12 @@ func (c *Controller) create(ctx context.Context, obj v1.Sandbox, owner string, m
 	// holds, which is the gate of spec 021's phase table.
 	if err := c.admits(environment); err != nil {
 		return obj, err
+	}
+	// Whether a gateway is connected is known now, so a boundary that needs
+	// one while none is connected is refused on the request, with nothing
+	// written, rather than failed once the create has answered.
+	if needsGatewayFor(obj.Spec) && (c.egress == nil || c.egress.Connected() == 0) {
+		return obj, ErrNoGateway
 	}
 	pool, _ := c.poolOf(environment)
 	entries := c.poolEntries(ctx, environment)
@@ -492,17 +511,18 @@ func (c *Controller) create(ctx context.Context, obj v1.Sandbox, owner string, m
 }
 
 // refused reports whether a create ended before step 1 of the create order
-// wrote anything: the owner's count, a name already taken, or a spawn budget
-// already spent.
+// wrote anything: the owner's count, a name already taken, a spawn budget
+// already spent, or a boundary no connected gateway can hold.
 func refused(err error) bool {
-	return errors.Is(err, ErrQuota) || errors.Is(err, ErrNameTaken) || errors.Is(err, ErrBudgetExhausted)
+	return errors.Is(err, ErrQuota) || errors.Is(err, ErrNameTaken) || errors.Is(err, ErrBudgetExhausted) ||
+		errors.Is(err, ErrNoGateway)
 }
 
 // observeCreate records one create's duration where the driver was asked for
-// the sandbox. One that was queued or refused for capacity asked no driver;
-// the loop records a queued one when it places it.
+// the sandbox. One that was queued, placed for the loop, or refused for
+// capacity asked no driver; the loop records it when it realizes it.
 func (c *Controller) observeCreate(out v1.Sandbox, pool string, started time.Time) {
-	if out.Status.Phase == PhaseQueued || out.Status.Reason == ReasonNoCapacity {
+	if out.Status.Phase == PhaseQueued || out.Status.Reason == ReasonNoCapacity || placed(out) {
 		return
 	}
 	c.metrics.SandboxCreated(pool, c.clock.Now().Sub(started))
@@ -612,83 +632,244 @@ func (c *Controller) createLocked(ctx context.Context, obj v1.Sandbox, owner str
 		obj.Status.Conditions = setCondition(obj.Status.Conditions, waitingCondition(v1.ReasonNoCapacity, now))
 		return export(obj), errors.Join(c.persist(ctx, obj, MutationFailed), c.credit(ctx, parent))
 	}
-	return c.realize(ctx, obj, d, lifecycle, entry, parent, false)
+	if entry == nil {
+		// Steps 3 onward are the scheduler loop's. It is woken rather than
+		// left to its tick, so the driver is asked as soon as this answer is
+		// written.
+		c.wakeScheduler()
+		return export(obj), nil
+	}
+	return c.adopt(ctx, obj, d, lifecycle, entry)
 }
 
-// realize is steps 3 onward of design 005's create order over a sandbox whose
-// desired state is written: the boundary, the identity, and the driver's
-// create or the adoption of an entry. A create placed at once runs it inline;
-// the scheduler loop runs it for a queued sandbox it places, which is later,
-// so the caller already holds the object and a refusal at the boundary is
-// recorded as a failure rather than taken back.
-func (c *Controller) realize(ctx context.Context, obj v1.Sandbox, d driver.Driver, lifecycle driver.Lifecycle,
-	entry *driver.State, parent *v1.Sandbox, later bool,
+// adopt is steps 3 onward of design 005's create order for a create that
+// takes a pool entry, on the request that made it and under the controller's
+// lock: the boundary, the identity, and the adoption. It runs before the
+// answer because an adoption that loses the entry is undone whole and the
+// create is made again under an id of its own, which is only possible before
+// the caller has read the entry's. A spawn never adopts, so there is no
+// parent's unit to credit.
+func (c *Controller) adopt(ctx context.Context, obj v1.Sandbox, d driver.Driver, lifecycle driver.Lifecycle,
+	entry *driver.State,
 ) (v1.Sandbox, error) {
 	id, environment, now := obj.Status.ID, obj.Status.Environment, time.Now().UTC()
-	var err error
 	// The undo and the record of what became of the sandbox run to the end
 	// whether or not the caller is still there. A caller that hangs up mid
-	// create leaves a sandbox half made, and the store, the journal, the
-	// token list and the parent's budget must still say what happened to it;
-	// the driver's own work stops with the caller.
+	// create leaves a sandbox half made, and the store, the journal and the
+	// token list must still say what happened to it; the driver's own work
+	// stops with the caller.
 	settle := context.WithoutCancel(ctx)
 	// The boundary is put in a gateway before the driver is called, so a
 	// sandbox never starts before a gateway knows it (spec 018). A boundary
-	// that no gateway will hold is a refusal here, with nothing created.
-	boundary, egressErr := c.pushEgress(ctx, &obj)
-	if err = egressErr; err != nil {
+	// that no gateway acknowledges is a refusal here, with nothing created.
+	boundary, err := c.pushEgress(ctx, &obj)
+	if err != nil {
 		// The map may already sit in a gateway that took the put and never
 		// answered, so the principal is purged with the object: every map a
 		// gateway holds is a map desired state has.
 		c.purgeEgress(settle, id)
-		if later {
-			obj.Status.Phase = PhaseFailed
-			obj.Status.Reason = ReasonCreateFailed
-			return export(obj), errors.Join(err, c.persist(settle, obj, MutationFailed), c.credit(settle, parent))
-		}
-		return obj, errors.Join(err, c.forget(settle, id, MutationDeleted), c.credit(settle, parent))
+		return obj, errors.Join(err, c.forget(settle, id, MutationDeleted))
 	}
 	obj.Status.Secrets = boundary.Secrets
 	obj.Status.Conditions = setCondition(obj.Status.Conditions, c.egressCondition(environment, boundary.Map, boundary.Held, now))
 	// The identity is minted after the boundary and before the driver, which
 	// is step 5 of design 005's create order: a sandbox that never starts
 	// leaves a token nobody holds, and the undo below ends it.
-	token, tokenState, mintErr := c.mintToken(ctx, obj)
-	if err = mintErr; err != nil {
+	token, tokenState, err := c.mintToken(ctx, obj)
+	if err != nil {
 		obj.Status.Phase = PhaseFailed
 		obj.Status.Reason = ReasonCreateFailed
 		c.purgeEgress(settle, id)
-		return export(obj), errors.Join(err, c.persist(settle, obj, MutationFailed), c.credit(settle, parent))
+		return export(obj), errors.Join(err, c.persist(settle, obj, MutationFailed))
 	}
 	obj.Status.TokenState = tokenState
-	if entry != nil {
-		adoption := adoptionOf(obj, lifecycle, c.egressSpec(boundary.Map), boundary.Env, token)
-		err = d.Update(ctx, id, driver.Change{Adopt: &adoption})
-	} else {
-		_, err = d.Create(ctx, specOf(obj, lifecycle, c.egressSpec(boundary.Map), boundary.Env, token))
-	}
-	if err != nil {
+	adoption := adoptionOf(obj, lifecycle, c.egressSpec(boundary.Map), boundary.Env, token)
+	if err = d.Update(ctx, id, driver.Change{Adopt: &adoption}); err != nil {
 		c.purgeEgress(settle, id)
 		revoked := c.revokeToken(settle, tokenState)
 		obj.Status.TokenState = nil
-		if entry != nil && adoptionLost(err) {
+		if adoptionLost(err) {
 			// The entry is another caller's now, or it cannot carry this
 			// manifest. Nothing of this attempt survives: no map, no
 			// identity and no row, so the create that follows is an
 			// ordinary first create under an id of its own.
-			return obj, errors.Join(err, revoked, c.forget(settle, id, MutationDeleted), c.credit(settle, parent))
+			return obj, errors.Join(err, revoked, c.forget(settle, id, MutationDeleted))
 		}
 		obj.Status.Phase = PhaseFailed
 		obj.Status.Reason = ReasonCreateFailed
-		return export(obj), errors.Join(err, revoked, c.persist(settle, obj, MutationFailed), c.credit(settle, parent))
+		return export(obj), errors.Join(err, revoked, c.persist(settle, obj, MutationFailed))
 	}
-	obj.Status.Conditions = setCondition(obj.Status.Conditions, scheduledCondition(entry != nil, c.clock.Now()))
+	obj.Status.Conditions = setCondition(obj.Status.Conditions, scheduledCondition(true, c.clock.Now()))
 	obj, err = c.refresh(settle, obj)
-	err = errors.Join(err, c.persist(settle, obj, phaseMutation(obj.Status.Phase)))
-	if parent != nil {
-		err = errors.Join(err, c.spawned(settle, obj, parent.Status.ID))
+	return export(obj), errors.Join(err, c.persist(settle, obj, phaseMutation(obj.Status.Phase)))
+}
+
+// realize is steps 3 onward of design 005's create order for a sandbox the
+// scheduler loop took: one a create placed and answered at once, one the loop
+// placed from its queue, or one a process that stopped left placed. It is
+// called under the controller's lock and returns under it.
+//
+// The boundary, the identity and a status write come first, under the lock.
+// The write puts what the driver is about to be given in the store, so a
+// second run after a crash pushes the same map with the same credential and
+// placeholders and ends the token the first run minted. The driver's create
+// and the first read then run with the lock released: on a substrate that
+// provisions and attaches a volume before the workload starts they take as
+// long as that does, and every other request would otherwise wait with them.
+// The result is settled against the row as it stands after the call, which a
+// delete, an apply or a spawn may have changed in the meantime.
+func (c *Controller) realize(ctx context.Context, id string) error {
+	obj, held := c.objects[id]
+	if _, busy := c.realizing[id]; !held || busy || !placed(obj) {
+		return nil
 	}
-	return export(obj), err
+	d, err := c.driverFor(obj.Status.Environment)
+	if err != nil {
+		return err
+	}
+	lifecycle, err := c.lifecycleFor(obj)
+	if err != nil {
+		return err
+	}
+	started, now, environment := c.clock.Now(), time.Now().UTC(), obj.Status.Environment
+	parent := c.parentOf(obj)
+	// The records of what became of the sandbox are written whether or not
+	// the loop is still running, so the store never holds a half-told
+	// create.
+	settle := context.WithoutCancel(ctx)
+	// A row a previous run wrote carries the identity that run minted. It
+	// is replaced below and ended once this run has settled.
+	previous := obj.Status.TokenState
+	boundary, err := c.pushEgress(ctx, &obj)
+	if err != nil {
+		// A gateway that went away between the create's admission and this
+		// pass, or one that took the put and never answered. The map may sit
+		// in it, so the principal is purged with the failure.
+		c.purgeEgress(settle, id)
+		if errors.Is(err, ErrNoGateway) {
+			obj.Status.Conditions = setCondition(obj.Status.Conditions, v1.Condition{
+				Type: v1.ConditionEgressEnforced, Status: v1.ConditionFalse, Reason: v1.ReasonNoGateway, Since: now,
+				Message: "No gateway of this environment acknowledged the sandbox's map, so it was not created.",
+			})
+		}
+		return errors.Join(err, c.failCreate(settle, obj, parent, nil, previous))
+	}
+	obj.Status.Secrets = boundary.Secrets
+	obj.Status.Conditions = setCondition(obj.Status.Conditions, c.egressCondition(environment, boundary.Map, boundary.Held, now))
+	token, tokenState, err := c.mintToken(ctx, obj)
+	if err != nil {
+		c.purgeEgress(settle, id)
+		return errors.Join(err, c.failCreate(settle, obj, parent, nil, previous))
+	}
+	obj.Status.TokenState = tokenState
+	if err := c.persist(settle, obj, MutationStatus); err != nil {
+		// The row still says what the store holds, so the next pass takes
+		// it again from there, with a map and an identity of its own.
+		c.purgeEgress(settle, id)
+		return errors.Join(err, c.revokeToken(settle, tokenState))
+	}
+	spec := specOf(obj, lifecycle, c.egressSpec(boundary.Map), boundary.Env, token)
+	c.realizing[id] = struct{}{}
+	c.mu.Unlock()
+	out := drive(ctx, d, spec, token)
+	c.mu.Lock()
+	delete(c.realizing, id)
+	if ctx.Err() != nil {
+		// The loop is stopping. The row is left as the status write left
+		// it, placed and unrealized, and the next process takes it from
+		// there: its driver create finds the object this one made, and its
+		// settle ends the token this one minted.
+		return errors.Join(ctx.Err(), out.created)
+	}
+	return c.settleCreate(settle, id, d, out, tokenState, previous, parent, started)
+}
+
+// driven is what the driver's half of a realize ended with: the create's
+// error, and the first read with its own.
+type driven struct {
+	state   driver.State
+	created error
+	read    error
+}
+
+// drive is the part of realize that runs without the controller's lock: the
+// driver's create and its first read. ErrAlreadyExists is a create that
+// reached the driver before a restart and whose result was never written; ids
+// are never reused, so the object is this sandbox's, and it is taken the way
+// recovery takes one, with the new identity projected into it.
+func drive(ctx context.Context, d driver.Driver, spec driver.CreateSpec, token string) driven {
+	_, err := d.Create(ctx, spec)
+	if errors.Is(err, driver.ErrAlreadyExists) {
+		err = nil
+		if token != "" {
+			err = d.Update(ctx, spec.ID, driver.Change{Token: []byte(token)})
+		}
+	}
+	if err != nil {
+		return driven{created: err}
+	}
+	state, read := d.Inspect(ctx, spec.ID)
+	return driven{state: state, read: read}
+}
+
+// settleCreate writes what one realize ended with, against the row as it
+// stands after the driver's call. It runs under the controller's lock.
+func (c *Controller) settleCreate(ctx context.Context, id string, d driver.Driver, out driven,
+	token, previous *v1.TokenState, parent *v1.Sandbox, started time.Time,
+) error {
+	created, read := out.created, out.read
+	cur, held := c.objects[id]
+	switch {
+	case !held:
+		// A delete, a cascade or a deadline ended the sandbox during the
+		// call, and its driver call may have run before the create made
+		// anything. What the create made goes now, with the map and the
+		// identity it was given.
+		gone := d.Delete(ctx, id)
+		if errors.Is(gone, driver.ErrNotFound) {
+			gone = nil
+		}
+		c.purgeEgress(ctx, id)
+		return errors.Join(gone, c.revokeToken(ctx, token), c.revokeToken(ctx, previous))
+	case cur.Status.Phase == PhaseDeleting:
+		// A delete is in flight and its driver call failed. The row is
+		// the delete's, and the retried delete removes the object and ends
+		// the identity the row names.
+		return created
+	case created != nil:
+		c.purgeEgress(ctx, id)
+		return errors.Join(created, c.failCreate(ctx, cur, parent, token, previous))
+	}
+	cur.Status.Conditions = setCondition(cur.Status.Conditions, scheduledCondition(false, c.clock.Now()))
+	switch {
+	case read == nil:
+		cur = observe(cur, out.state)
+	case errors.Is(read, driver.ErrNotFound):
+		// The driver took the create and does not report it yet. The
+		// sandbox is written Pending and handed on, and the next read says
+		// what it is.
+		read = nil
+	}
+	err := errors.Join(read, c.persist(ctx, cur, phaseMutation(cur.Status.Phase)))
+	if parent != nil {
+		err = errors.Join(err, c.spawned(ctx, cur, parent.Status.ID))
+	}
+	c.observeCreate(cur, PoolMiss, started)
+	return errors.Join(err, c.revokeToken(ctx, previous))
+}
+
+// failCreate is the undo of a create the loop could not finish: the sandbox
+// is Failed with CreateFailed, every identity minted for it is ended, and a
+// spawn's unit is credited back to its parent. The caller has purged the map.
+func (c *Controller) failCreate(ctx context.Context, obj v1.Sandbox, parent *v1.Sandbox, tokens ...*v1.TokenState) error {
+	obj.Status.Phase = PhaseFailed
+	obj.Status.Reason = ReasonCreateFailed
+	obj.Status.TokenState = nil
+	var revoked error
+	for _, token := range tokens {
+		revoked = errors.Join(revoked, c.revokeToken(ctx, token))
+	}
+	return errors.Join(revoked, c.persist(ctx, obj, MutationFailed), c.credit(ctx, parent))
 }
 
 // phaseMutation is the act the first driver read after a create observed. A
@@ -805,6 +986,12 @@ func (c *Controller) refresh(ctx context.Context, obj v1.Sandbox) (v1.Sandbox, e
 	if err != nil {
 		return obj, err
 	}
+	return observe(obj, state), nil
+}
+
+// observe writes one driver read onto the sandbox: the phase and its reason,
+// the conditions the driver owns, the ports it probed, and its instants.
+func observe(obj v1.Sandbox, state driver.State) v1.Sandbox {
 	// A driver names the reason for a transition it made itself and names
 	// none for one it was told to make, so a reason the controller wrote
 	// stands until the phase it was written for changes. Without that the
@@ -825,7 +1012,7 @@ func (c *Controller) refresh(ctx context.Context, obj v1.Sandbox) (v1.Sandbox, e
 	obj.Status.StoppedAt = state.StoppedAt
 	obj.Status.LastActivityAt = state.LastActivityAt
 	obj.Status.ExpiresAt = state.ExpiresAt
-	return obj, nil
+	return obj
 }
 
 // lifecycleFor is the deadline set one sandbox runs under: its own manifest's,
@@ -875,6 +1062,14 @@ func (c *Controller) Act(ctx context.Context, id, verb string) (v1.Sandbox, erro
 	d, err := c.driverFor(obj.Status.Environment)
 	if err != nil {
 		return obj, err
+	}
+	// A sandbox whose create the loop has not finished has nothing a driver
+	// can start or stop yet, and one whose driver call is in flight must not
+	// be crossed by another: both are phase_conflict until the create
+	// settles. A delete is accepted in every phase, and the create's settle
+	// removes what it made.
+	if _, busy := c.realizing[id]; (busy || placed(obj)) && (verb == "start" || verb == "stop") {
+		return obj, ErrPhase
 	}
 	switch verb {
 	case "start":

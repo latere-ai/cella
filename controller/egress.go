@@ -17,9 +17,10 @@ import (
 	driver "latere.ai/x/cella/runtime"
 )
 
-// ErrNoGateway is a create whose boundary needs a gateway and found none. The
-// gateway is part of the environment's data plane, so the API answers it the
-// way it answers an unavailable driver: the environment is unavailable.
+// ErrNoGateway is a create or an apply whose boundary needs a gateway and
+// found none connected, or none that acknowledged its map. The API answers it
+// with a code of its own, since the remedy is a gateway or a wider boundary
+// and not waiting for the environment.
 var ErrNoGateway = errors.New("no gateway of the environment acknowledged the sandbox's map")
 
 // Egress is the control plane's half of the gateway protocol, as the
@@ -207,6 +208,16 @@ func viewOf(secret v1.Secret, placeholder, value string) egress.SecretView {
 // starting outside it.
 func needsGateway(m egress.Map) bool {
 	return m.Mode != v1.EgressOpen || len(m.Deny) > 0 || len(m.Entries) > 0 || len(m.NotInjectable) > 0
+}
+
+// needsGatewayFor is needsGateway read from a manifest rather than a
+// compiled map: an egress mode other than open, a denied host, or a mounted
+// secret is something a gateway must enforce or substitute. It is what a
+// create is refused on before it writes anything, when no gateway is
+// connected to hold the map.
+func needsGatewayFor(spec v1.SandboxSpec) bool {
+	e := spec.Network.Egress
+	return e.Mode != v1.EgressOpen || len(e.DeniedHosts) > 0 || len(spec.Secrets) > 0
 }
 
 // pushEgress compiles the sandbox's map and puts it in a gateway before the

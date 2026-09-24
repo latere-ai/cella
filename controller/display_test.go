@@ -113,7 +113,7 @@ func TestRefreshCarriesDisplayAndPorts(t *testing.T) {
 	obj.Spec.Network.Ports = []v1.Port{{Name: "web", Port: 8080}}
 	recorder := &recordingDriver{Driver: &desktopDriver{Driver: openDriver(c)}}
 	c.setDriver(c.environment, recorder)
-	created, err := c.Create(t.Context(), obj, "alice", 0)
+	created, err := realized(t.Context(), c, obj, "alice", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +163,7 @@ func TestSandboxWithoutADesktopCarriesNoCondition(t *testing.T) {
 	c, _ := newController(t)
 	recorder := &recordingDriver{Driver: openDriver(c)}
 	c.setDriver(c.environment, recorder)
-	created, err := c.Create(t.Context(), workspace(), "alice", 0)
+	created, err := realized(t.Context(), c, workspace(), "alice", 0)
 	if err != nil {
 		t.Fatal(err)
 	}

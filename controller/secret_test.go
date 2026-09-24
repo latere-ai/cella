@@ -254,7 +254,7 @@ func TestTheMapCarriesTheValue(t *testing.T) {
 	if _, err := c.CreateSecret(ctx, aSecret("github", "api.github.com", "ghp_canary"), "alice"); err != nil {
 		t.Fatal(err)
 	}
-	obj, err := c.Create(ctx, mounting("github", "GITHUB_TOKEN"), "alice", 0)
+	obj, err := realized(ctx, c, mounting("github", "GITHUB_TOKEN"), "alice", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -313,7 +313,7 @@ func TestACompanionKeySaysWhereToPutIt(t *testing.T) {
 	}
 	obj := mounting("vendor", "VENDOR_KEY")
 	obj.Spec.Secrets = append(obj.Spec.Secrets, v1.SecretMount{Name: "search", Env: "SEARCH_KEY"})
-	if _, err := c.Create(ctx, obj, "alice", 0); err != nil {
+	if _, err := realized(ctx, c, obj, "alice", 0); err != nil {
 		t.Fatal(err)
 	}
 	spec := openDriver(c).(*gatewayDriver).specs[0]
@@ -336,7 +336,7 @@ func TestRotationAndRevocationReachTheGateway(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	obj, err := c.Create(ctx, mounting("github", "GITHUB_TOKEN"), "alice", 0)
+	obj, err := realized(ctx, c, mounting("github", "GITHUB_TOKEN"), "alice", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -385,7 +385,7 @@ func TestASecretTheBoundaryDeniesIsNotInjectable(t *testing.T) {
 	}
 	obj := mounting("github", "GITHUB_TOKEN")
 	obj.Spec.Network.Egress = v1.Egress{Mode: v1.EgressOpen, DeniedHosts: []string{"api.github.com"}}
-	created, err := c.Create(ctx, obj, "alice", 0)
+	created, err := realized(ctx, c, obj, "alice", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -400,7 +400,7 @@ func TestASecretTheBoundaryDeniesIsNotInjectable(t *testing.T) {
 // will leave unauthenticated.
 func TestAMountOfAnAbsentSecretIsNotInjectable(t *testing.T) {
 	c, _, _ := sealedController(t)
-	created, err := c.Create(t.Context(), mounting("absent", "TOKEN"), "alice", 0)
+	created, err := realized(t.Context(), c, mounting("absent", "TOKEN"), "alice", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
