@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"latere.ai/x/cella/internal/cellaclient"
+	cellaclient "latere.ai/x/cella/client"
 )
 
 // streamCases prove every stream of design 008's table: the bounded exec,

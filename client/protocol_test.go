@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Latere AI
 // SPDX-License-Identifier: Apache-2.0
 
-package cellaclient_test
+package client_test
 
 import (
 	"bufio"
@@ -20,7 +20,7 @@ import (
 	"strings"
 	"testing"
 
-	"latere.ai/x/cella/internal/cellaclient"
+	"latere.ai/x/cella/client"
 )
 
 // The frames below are written by hand rather than by a library: the client
@@ -249,11 +249,11 @@ func closePayload(code int) []byte {
 // returns what it read and how it ended.
 func drive(t *testing.T, address string) (string, int, error) {
 	t.Helper()
-	c, err := cellaclient.New(cellaclient.Config{URL: address, Token: "t", Getenv: env(nil)})
+	c, err := client.New(client.Config{URL: address, Token: "t", Getenv: env(nil)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := c.ExecSession(t.Context(), "dev", cellaclient.ExecRequest{Command: []string{"sh"}})
+	s, err := c.ExecSession(t.Context(), "dev", client.ExecRequest{Command: []string{"sh"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -278,19 +278,19 @@ func TestTLSUsesTheSystemRootsAndTheAuthorityTheCallerNamed(t *testing.T) {
 	}
 	// Without the authority the handshake fails, which is what a trust
 	// store is for.
-	plain, err := cellaclient.New(cellaclient.Config{URL: server.URL, Token: "t", Getenv: env(nil)})
+	plain, err := client.New(client.Config{URL: server.URL, Token: "t", Getenv: env(nil)})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err = plain.GetSandbox(t.Context(), "dev"); err == nil {
 		t.Fatal("a certificate signed by nothing the client trusts was accepted")
 	}
-	var refused *cellaclient.Unreachable
+	var refused *client.Unreachable
 	if !errors.As(err, &refused) {
 		t.Fatalf("a TLS failure is %T: %v", err, err)
 	}
 
-	trusting, err := cellaclient.New(cellaclient.Config{URL: server.URL, CAFile: authority, Token: "t", Getenv: env(nil)})
+	trusting, err := client.New(client.Config{URL: server.URL, CAFile: authority, Token: "t", Getenv: env(nil)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -299,10 +299,10 @@ func TestTLSUsesTheSystemRootsAndTheAuthorityTheCallerNamed(t *testing.T) {
 	}
 	// The same trust store reaches the socket, whose dial is the client's
 	// own and not the transport's.
-	if _, err = trusting.ExecSession(t.Context(), "dev", cellaclient.ExecRequest{Command: []string{"sh"}}); err == nil {
+	if _, err = trusting.ExecSession(t.Context(), "dev", client.ExecRequest{Command: []string{"sh"}}); err == nil {
 		t.Fatal("this server upgrades nothing, so the session cannot open")
 	}
-	var refusal *cellaclient.Error
+	var refusal *client.Error
 	if !errors.As(err, &refusal) || refusal.Status != 200 {
 		t.Fatalf("the socket failed with %T: %v", err, err)
 	}
@@ -315,7 +315,7 @@ func TestTheSystemRootsStandWhenNoAuthorityIsNamed(t *testing.T) {
 	if _, err := x509.SystemCertPool(); err != nil {
 		t.Skip("this platform has no system certificate pool")
 	}
-	c, err := cellaclient.New(cellaclient.Config{URL: "https://127.0.0.1:1", Token: "t", Getenv: env(nil)})
+	c, err := client.New(client.Config{URL: "https://127.0.0.1:1", Token: "t", Getenv: env(nil)})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Latere AI
 // SPDX-License-Identifier: Apache-2.0
 
-package cellaclient_test
+package client_test
 
 import (
 	"encoding/json"
@@ -16,7 +16,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"latere.ai/x/cella/internal/cellaclient"
+	"latere.ai/x/cella/client"
 )
 
 // The socket fixture speaks the frames of internal/api/attach.go: the
@@ -86,9 +86,9 @@ func newSocketFixture(t *testing.T, session func(*socketFixture, *websocket.Conn
 }
 
 // client is a client pointed at the socket fixture.
-func (f *socketFixture) client() *cellaclient.Client {
+func (f *socketFixture) client() *client.Client {
 	f.t.Helper()
-	c, err := cellaclient.New(cellaclient.Config{URL: f.server.URL, Token: "caller-token", Getenv: env(nil)})
+	c, err := client.New(client.Config{URL: f.server.URL, Token: "caller-token", Getenv: env(nil)})
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -149,7 +149,7 @@ func TestASessionCarriesBytesBothWaysAndEndsWithTheExitFrame(t *testing.T) {
 		}
 		exit(conn, 7)
 	})
-	s, err := f.client().ExecSession(t.Context(), "dev", cellaclient.ExecRequest{
+	s, err := f.client().ExecSession(t.Context(), "dev", client.ExecRequest{
 		Command: []string{"sh"}, Env: map[string]string{"K": "V"}, Workdir: "/workspace", Cols: 80, Rows: 24, Timeout: "1m",
 	})
 	if err != nil {
@@ -204,7 +204,7 @@ func TestAResizeReachesTheServer(t *testing.T) {
 		close(done)
 		exit(conn, 0)
 	})
-	s, err := f.client().AttachSession(t.Context(), "dev", cellaclient.ExecRequest{Cols: 80, Rows: 24})
+	s, err := f.client().AttachSession(t.Context(), "dev", client.ExecRequest{Cols: 80, Rows: 24})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +235,7 @@ func TestAnErrorFrameIsTheSameErrorAnHTTPRefusalIs(t *testing.T) {
 		}})
 		_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "capability_unsupported"))
 	})
-	s, err := f.client().ExecSession(t.Context(), "dev", cellaclient.ExecRequest{Command: []string{"sh"}})
+	s, err := f.client().ExecSession(t.Context(), "dev", client.ExecRequest{Command: []string{"sh"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,7 +244,7 @@ func TestAnErrorFrameIsTheSameErrorAnHTTPRefusalIs(t *testing.T) {
 		t.Fatal("the output ended cleanly after an error frame")
 	}
 	_, err = s.Wait()
-	var refusal *cellaclient.Error
+	var refusal *client.Error
 	if !errors.As(err, &refusal) {
 		t.Fatalf("Wait() = %T: %v", err, err)
 	}
@@ -267,12 +267,12 @@ func TestARefusalBeforeTheUpgradeIsAnHTTPStatus(t *testing.T) {
 		writeError(w, 422, "capability_unsupported", "The environment cannot provide this.", nil)
 	}))
 	defer server.Close()
-	c, err := cellaclient.New(cellaclient.Config{URL: server.URL, Token: "t", Getenv: env(nil)})
+	c, err := client.New(client.Config{URL: server.URL, Token: "t", Getenv: env(nil)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = c.ExecSession(t.Context(), "dev", cellaclient.ExecRequest{Command: []string{"sh"}})
-	var refusal *cellaclient.Error
+	_, err = c.ExecSession(t.Context(), "dev", client.ExecRequest{Command: []string{"sh"}})
+	var refusal *client.Error
 	if !errors.As(err, &refusal) {
 		t.Fatalf("the refusal is %T: %v", err, err)
 	}
@@ -297,11 +297,11 @@ func TestAServerThatIsNoWebSocketIsRefused(t *testing.T) {
 		_, _ = conn.Write([]byte("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: wrong\r\n\r\n"))
 	}))
 	defer server.Close()
-	c, err := cellaclient.New(cellaclient.Config{URL: server.URL, Token: "t", Getenv: env(nil)})
+	c, err := client.New(client.Config{URL: server.URL, Token: "t", Getenv: env(nil)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = c.AttachSession(t.Context(), "dev", cellaclient.ExecRequest{}); err == nil {
+	if _, err = c.AttachSession(t.Context(), "dev", client.ExecRequest{}); err == nil {
 		t.Fatal("a handshake the server did not answer was accepted")
 	}
 }
@@ -309,12 +309,12 @@ func TestAServerThatIsNoWebSocketIsRefused(t *testing.T) {
 // TestASocketOnAnAddressNothingAnswersIsUnreachable: the socket separates a
 // refusal from an address that is not there, as every other call does.
 func TestASocketOnAnAddressNothingAnswersIsUnreachable(t *testing.T) {
-	c, err := cellaclient.New(cellaclient.Config{URL: "http://127.0.0.1:1", Token: "t", Getenv: env(nil)})
+	c, err := client.New(client.Config{URL: "http://127.0.0.1:1", Token: "t", Getenv: env(nil)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = c.ExecSession(t.Context(), "dev", cellaclient.ExecRequest{Command: []string{"sh"}})
-	var gone *cellaclient.Unreachable
+	_, err = c.ExecSession(t.Context(), "dev", client.ExecRequest{Command: []string{"sh"}})
+	var gone *client.Unreachable
 	if !errors.As(err, &gone) {
 		t.Fatalf("the failure is %T: %v", err, err)
 	}
@@ -346,7 +346,7 @@ func TestTheClientAnswersThePingsTheServerSends(t *testing.T) {
 		}
 		exit(conn, 0)
 	})
-	s, err := f.client().ExecSession(t.Context(), "dev", cellaclient.ExecRequest{Command: []string{"sh"}})
+	s, err := f.client().ExecSession(t.Context(), "dev", client.ExecRequest{Command: []string{"sh"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -388,7 +388,7 @@ func TestAMessagePastOneFrameIsCarriedWhole(t *testing.T) {
 		}
 		exit(conn, 0)
 	})
-	s, err := f.client().ExecSession(t.Context(), "dev", cellaclient.ExecRequest{Command: []string{"sh"}})
+	s, err := f.client().ExecSession(t.Context(), "dev", client.ExecRequest{Command: []string{"sh"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -420,7 +420,7 @@ func TestASessionEndedWithoutAnExitFrameFails(t *testing.T) {
 		_ = conn.WriteMessage(websocket.BinaryMessage, []byte("partial"))
 		_ = conn.Close()
 	})
-	s, err := f.client().ExecSession(t.Context(), "dev", cellaclient.ExecRequest{Command: []string{"sh"}})
+	s, err := f.client().ExecSession(t.Context(), "dev", client.ExecRequest{Command: []string{"sh"}})
 	if err != nil {
 		t.Fatal(err)
 	}

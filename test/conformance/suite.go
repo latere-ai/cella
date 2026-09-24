@@ -10,8 +10,8 @@
 // A case is a pure function of the configuration and the server. It reads
 // the wire and not this repository's types, so a server built from the
 // specs alone passes it. The one dependency beyond the standard library is
-// the exec and attach socket client of internal/cellaclient, because the
-// framing of those two streams is the same client every caller speaks.
+// the exec and attach socket client of the exported client package, because
+// the framing of those two streams is the same client every caller speaks.
 package conformance
 
 import (

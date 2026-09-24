@@ -1,15 +1,15 @@
 // SPDX-FileCopyrightText: 2026 Latere AI
 // SPDX-License-Identifier: Apache-2.0
 
-// Package cellaclient is the typed client the cella command speaks /v1
-// with: one method per route of design 008, the error envelope decoded into
-// one error type, and the streams of the exec and attach sockets over the
-// package's own WebSocket implementation.
+// Package client is the typed client of the /v1 API: one method per route of
+// design 008, the error envelope decoded into one error type, and the streams
+// of the exec, attach and dial sockets over the package's own WebSocket
+// implementation.
 //
 // It reaches the standard library, this module's contract types and the
 // error envelope of latere.ai/x/pkg/httpjson, which is what design 011 fixes
 // the agent client's build list to.
-package cellaclient
+package client
 
 import (
 	"bytes"

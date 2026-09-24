@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Latere AI
 // SPDX-License-Identifier: Apache-2.0
 
-package cellaclient_test
+package client_test
 
 import (
 	"errors"
@@ -14,7 +14,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"latere.ai/x/cella/internal/cellaclient"
+	"latere.ai/x/cella/client"
 )
 
 // dialPlane speaks the dial socket of internal/api/dial.go: the subprotocol,
@@ -46,13 +46,13 @@ func dialPlane(t *testing.T, session func(*websocket.Conn)) (*httptest.Server, *
 	return server, path
 }
 
-func dialClient(t *testing.T, server *httptest.Server) *cellaclient.Client {
+func dialClient(t *testing.T, server *httptest.Server) *client.Client {
 	t.Helper()
-	client, err := cellaclient.New(cellaclient.Config{URL: server.URL, Token: "caller-token", UserAgent: "cella-test"})
+	c, err := client.New(client.Config{URL: server.URL, Token: "caller-token", UserAgent: "cella-test"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return client
+	return c
 }
 
 // TestADialStreamCarriesBytesBothWays: the stream writes frames of bounded
@@ -115,7 +115,7 @@ func TestADialStreamNamesTheCodeItClosedWith(t *testing.T) {
 			}
 			defer func() { _ = stream.Close() }()
 			_, err = stream.Read(make([]byte, 8))
-			var refusal *cellaclient.Error
+			var refusal *client.Error
 			if !errors.As(err, &refusal) || refusal.Code != tc.reason || refusal.Message != tc.message || refusal.Status != tc.status {
 				t.Fatalf("the close read as %#v", err)
 			}
@@ -123,7 +123,7 @@ func TestADialStreamNamesTheCodeItClosedWith(t *testing.T) {
 	}
 	server, _ := dialPlane(t, func(*websocket.Conn) {})
 	_, err := dialClient(t, server).Dial(t.Context(), "dev", 9)
-	if cellaclient.CodeOf(err) != "phase_conflict" {
+	if client.CodeOf(err) != "phase_conflict" {
 		t.Fatalf("a refusal before the upgrade read as %v", err)
 	}
 	server.Close()

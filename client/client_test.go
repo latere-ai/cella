@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Latere AI
 // SPDX-License-Identifier: Apache-2.0
 
-package cellaclient_test
+package client_test
 
 import (
 	"context"
@@ -22,7 +22,7 @@ import (
 
 	"latere.ai/x/pkg/httpjson"
 
-	"latere.ai/x/cella/internal/cellaclient"
+	"latere.ai/x/cella/client"
 	v1 "latere.ai/x/cella/manifest/v1"
 )
 
@@ -62,7 +62,7 @@ func newFixture(t *testing.T, handler func(http.ResponseWriter, *http.Request)) 
 
 // client builds a client against the fixture with the configuration a case
 // names.
-func (f *fixture) client(cfg cellaclient.Config) *cellaclient.Client {
+func (f *fixture) client(cfg client.Config) *client.Client {
 	f.t.Helper()
 	if cfg.URL == "" {
 		cfg.URL = f.server.URL
@@ -70,7 +70,7 @@ func (f *fixture) client(cfg cellaclient.Config) *cellaclient.Client {
 	if cfg.Token == "" && cfg.TokenFile == "" && cfg.Getenv == nil {
 		cfg.Token = "caller-token"
 	}
-	c, err := cellaclient.New(cfg)
+	c, err := client.New(cfg)
 	if err != nil {
 		f.t.Fatalf("New: %v", err)
 	}
@@ -129,25 +129,25 @@ func TestTheAddressAndTheBearerComeFromTheEnvironment(t *testing.T) {
 	}
 	for _, tc := range []struct {
 		name string
-		cfg  cellaclient.Config
+		cfg  client.Config
 		want string
 	}{{
 		name: "the flag wins over everything",
-		cfg: cellaclient.Config{Token: "from-the-flag", TokenFile: file,
+		cfg: client.Config{Token: "from-the-flag", TokenFile: file,
 			Getenv: env(map[string]string{"CELLA_TOKEN": "from-the-variable"})},
 		want: "from-the-flag",
 	}, {
 		name: "the variable wins over the file",
-		cfg: cellaclient.Config{TokenFile: file,
+		cfg: client.Config{TokenFile: file,
 			Getenv: env(map[string]string{"CELLA_TOKEN": "from-the-variable"})},
 		want: "from-the-variable",
 	}, {
 		name: "the file flag is read when neither is set",
-		cfg:  cellaclient.Config{TokenFile: file, Getenv: env(nil)},
+		cfg:  client.Config{TokenFile: file, Getenv: env(nil)},
 		want: "from-the-file",
 	}, {
 		name: "the file variable is read when no flag names one",
-		cfg:  cellaclient.Config{Getenv: env(map[string]string{"CELLA_TOKEN_FILE": file})},
+		cfg:  client.Config{Getenv: env(map[string]string{"CELLA_TOKEN_FILE": file})},
 		want: "from-the-file",
 	}} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -155,7 +155,7 @@ func TestTheAddressAndTheBearerComeFromTheEnvironment(t *testing.T) {
 			if cfg.URL == "" {
 				cfg.URL = f.server.URL
 			}
-			c, err := cellaclient.New(cfg)
+			c, err := client.New(cfg)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -168,14 +168,14 @@ func TestTheAddressAndTheBearerComeFromTheEnvironment(t *testing.T) {
 		})
 	}
 	// The address comes from the variable when no flag names one.
-	c, err := cellaclient.New(cellaclient.Config{Getenv: env(map[string]string{
+	c, err := client.New(client.Config{Getenv: env(map[string]string{
 		"CELLA_URL": f.server.URL, "CELLA_TOKEN": "from-the-variable",
 	})})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err = c.GetSandbox(t.Context(), "dev"); err != nil {
-		t.Fatalf("the address of %s was not read: %v", cellaclient.URLEnv, err)
+		t.Fatalf("the address of %s was not read: %v", client.URLEnv, err)
 	}
 }
 
@@ -188,7 +188,7 @@ func TestTheTokenFileIsReadPerRequest(t *testing.T) {
 	if err := os.WriteFile(file, []byte("first"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	c := f.client(cellaclient.Config{TokenFile: file, Getenv: env(nil)})
+	c := f.client(client.Config{TokenFile: file, Getenv: env(nil)})
 	if _, _, err := c.GetSandbox(t.Context(), "dev"); err != nil {
 		t.Fatal(err)
 	}
@@ -214,19 +214,19 @@ func TestTheTokenFileIsReadPerRequest(t *testing.T) {
 // what to set rather than sending a request without one.
 func TestNoBearerIsNamedByItsVariables(t *testing.T) {
 	f := newFixture(t, func(w http.ResponseWriter, _ *http.Request) { writeObject(w, 200, "dev", "sbx_1") })
-	c := f.client(cellaclient.Config{TokenFile: filepath.Join(t.TempDir(), "absent"), Getenv: env(nil)})
+	c := f.client(client.Config{TokenFile: filepath.Join(t.TempDir(), "absent"), Getenv: env(nil)})
 	_, _, err := c.GetSandbox(t.Context(), "dev")
 	if err == nil {
 		t.Fatal("a client with no bearer sent a request")
 	}
-	if !strings.Contains(err.Error(), cellaclient.TokenEnv) || !strings.Contains(err.Error(), cellaclient.TokenFileEnv) {
+	if !strings.Contains(err.Error(), client.TokenEnv) || !strings.Contains(err.Error(), client.TokenFileEnv) {
 		t.Fatalf("the failure is %q, and it names neither variable", err)
 	}
 	empty := filepath.Join(t.TempDir(), "token")
 	if err = os.WriteFile(empty, []byte("  \n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	c = f.client(cellaclient.Config{TokenFile: empty, Getenv: env(nil)})
+	c = f.client(client.Config{TokenFile: empty, Getenv: env(nil)})
 	if _, _, err = c.GetSandbox(t.Context(), "dev"); err == nil {
 		t.Fatal("an empty token file was sent as a bearer")
 	}
@@ -235,10 +235,10 @@ func TestNoBearerIsNamedByItsVariables(t *testing.T) {
 // TestTheDefaultTokenFileIsTheProjection: inside a sandbox the command needs
 // no flag, because the file the driver projects is the default.
 func TestTheDefaultTokenFileIsTheProjection(t *testing.T) {
-	if cellaclient.DefaultTokenPath != "/run/cella/token" {
-		t.Fatalf("the default token file is %q; design 045 projects /run/cella/token", cellaclient.DefaultTokenPath)
+	if client.DefaultTokenPath != "/run/cella/token" {
+		t.Fatalf("the default token file is %q; design 045 projects /run/cella/token", client.DefaultTokenPath)
 	}
-	c, err := cellaclient.New(cellaclient.Config{URL: "http://127.0.0.1:1", Getenv: env(nil)})
+	c, err := client.New(client.Config{URL: "http://127.0.0.1:1", Getenv: env(nil)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -253,16 +253,16 @@ func TestTheDefaultTokenFileIsTheProjection(t *testing.T) {
 func TestABadConfigurationIsRefusedAtOnce(t *testing.T) {
 	for _, tc := range []struct {
 		name string
-		cfg  cellaclient.Config
+		cfg  client.Config
 		want string
 	}{
-		{"no address", cellaclient.Config{Getenv: env(nil)}, cellaclient.URLEnv},
-		{"an address that is no URL", cellaclient.Config{URL: "://nowhere", Getenv: env(nil)}, "no http or https address"},
-		{"an address of another scheme", cellaclient.Config{URL: "ftp://example.com", Getenv: env(nil)}, "no http or https address"},
-		{"a certificate authority that is not there", cellaclient.Config{URL: "https://example.com", CAFile: filepath.Join(t.TempDir(), "absent"), Getenv: env(nil)}, "certificate authority"},
+		{"no address", client.Config{Getenv: env(nil)}, client.URLEnv},
+		{"an address that is no URL", client.Config{URL: "://nowhere", Getenv: env(nil)}, "no http or https address"},
+		{"an address of another scheme", client.Config{URL: "ftp://example.com", Getenv: env(nil)}, "no http or https address"},
+		{"a certificate authority that is not there", client.Config{URL: "https://example.com", CAFile: filepath.Join(t.TempDir(), "absent"), Getenv: env(nil)}, "certificate authority"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := cellaclient.New(tc.cfg); err == nil || !strings.Contains(err.Error(), tc.want) {
+			if _, err := client.New(tc.cfg); err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("New() = %v, want a failure naming %q", err, tc.want)
 			}
 		})
@@ -272,7 +272,7 @@ func TestABadConfigurationIsRefusedAtOnce(t *testing.T) {
 	if err := os.WriteFile(pem, []byte("not a certificate"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := cellaclient.New(cellaclient.Config{URL: "https://example.com", CAFile: pem, Getenv: env(nil)}); err == nil {
+	if _, err := client.New(client.Config{URL: "https://example.com", CAFile: pem, Getenv: env(nil)}); err == nil {
 		t.Fatal("a file holding no certificate was accepted as a trust store")
 	}
 }
@@ -285,7 +285,7 @@ func TestTheClientIgnoresProxyVariables(t *testing.T) {
 	for _, name := range []string{"HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY"} {
 		t.Setenv(name, "http://127.0.0.1:1")
 	}
-	c := f.client(cellaclient.Config{})
+	c := f.client(client.Config{})
 	if _, _, err := c.GetSandbox(t.Context(), "dev"); err != nil {
 		t.Fatalf("the client went through the proxy the environment named: %v", err)
 	}
@@ -295,7 +295,7 @@ func TestTheClientIgnoresProxyVariables(t *testing.T) {
 // a request id inside the rule of design 008, different per request.
 func TestEveryRequestCarriesAFreshIdentity(t *testing.T) {
 	f := newFixture(t, func(w http.ResponseWriter, _ *http.Request) { writeObject(w, 200, "dev", "sbx_1") })
-	c := f.client(cellaclient.Config{UserAgent: "cella/v9.9.9"})
+	c := f.client(client.Config{UserAgent: "cella/v9.9.9"})
 	for range 2 {
 		if _, _, err := c.GetSandbox(t.Context(), "dev"); err != nil {
 			t.Fatal(err)
@@ -323,9 +323,9 @@ func TestARefusalDecodesToTheEnvelope(t *testing.T) {
 		writeError(w, 409, "immutable_field", "This field cannot be changed after the object is created.",
 			map[string]any{"paths": []any{"spec.image"}, "detail": "image changed", "request_id": "req_theservers"})
 	})
-	c := f.client(cellaclient.Config{})
+	c := f.client(client.Config{})
 	_, _, err := c.GetSandbox(t.Context(), "dev")
-	var refusal *cellaclient.Error
+	var refusal *client.Error
 	if !errors.As(err, &refusal) {
 		t.Fatalf("the refusal is %T: %v", err, err)
 	}
@@ -344,10 +344,10 @@ func TestARefusalDecodesToTheEnvelope(t *testing.T) {
 	if refusal.Detail != "image changed" || refusal.RetryAfter != "30" {
 		t.Errorf("the detail is %q and Retry-After is %q", refusal.Detail, refusal.RetryAfter)
 	}
-	if cellaclient.CodeOf(err) != "immutable_field" {
-		t.Errorf("CodeOf() = %q", cellaclient.CodeOf(err))
+	if client.CodeOf(err) != "immutable_field" {
+		t.Errorf("CodeOf() = %q", client.CodeOf(err))
 	}
-	if cellaclient.CodeOf(nil) != "" {
+	if client.CodeOf(nil) != "" {
 		t.Error("CodeOf() names a code for no error")
 	}
 }
@@ -360,9 +360,9 @@ func TestABodyThatIsNoEnvelopeStillHasAStatus(t *testing.T) {
 		w.WriteHeader(502)
 		_, _ = w.Write([]byte("<html>a proxy</html>"))
 	})
-	c := f.client(cellaclient.Config{})
+	c := f.client(client.Config{})
 	_, _, err := c.GetSandbox(t.Context(), "dev")
-	var refusal *cellaclient.Error
+	var refusal *client.Error
 	if !errors.As(err, &refusal) {
 		t.Fatalf("the failure is %T: %v", err, err)
 	}
@@ -375,7 +375,7 @@ func TestABodyThatIsNoEnvelopeStillHasAStatus(t *testing.T) {
 	// An empty body falls back to the status text, so a refusal always has a
 	// sentence to print.
 	empty := newFixture(t, func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(503) })
-	if _, _, err = empty.client(cellaclient.Config{}).GetSandbox(t.Context(), "dev"); err == nil || err.Error() == "" {
+	if _, _, err = empty.client(client.Config{}).GetSandbox(t.Context(), "dev"); err == nil || err.Error() == "" {
 		t.Fatalf("a refusal with no body prints %q", err)
 	}
 }
@@ -383,12 +383,12 @@ func TestABodyThatIsNoEnvelopeStillHasAStatus(t *testing.T) {
 // TestAServerThatIsNotThereIsUnreachable: the exit scheme separates a
 // refusal from an address nothing answers, so the client does too.
 func TestAServerThatIsNotThereIsUnreachable(t *testing.T) {
-	c, err := cellaclient.New(cellaclient.Config{URL: "http://127.0.0.1:1", Token: "t", Getenv: env(nil)})
+	c, err := client.New(client.Config{URL: "http://127.0.0.1:1", Token: "t", Getenv: env(nil)})
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, _, err = c.GetSandbox(t.Context(), "dev")
-	var gone *cellaclient.Unreachable
+	var gone *client.Unreachable
 	if !errors.As(err, &gone) {
 		t.Fatalf("the failure is %T: %v", err, err)
 	}
@@ -408,7 +408,7 @@ func TestTheRoutesOfEveryObjectCall(t *testing.T) {
 		}
 		writeObject(w, 200, "dev", "sbx_1")
 	})
-	c := f.client(cellaclient.Config{})
+	c := f.client(client.Config{})
 	ctx := t.Context()
 	body := []byte(`{"apiVersion":"` + v1.APIVersion + `","kind":"Sandbox","metadata":{"name":"dev"},"spec":{}}`)
 	for _, tc := range []struct {
@@ -420,8 +420,8 @@ func TestTheRoutesOfEveryObjectCall(t *testing.T) {
 		{"apply a secret", func() error { _, _, err := c.ApplySecret(ctx, "api", body); return err }, "PUT", "/v1/secrets/api"},
 		{"get a sandbox", func() error { _, _, err := c.GetSandbox(ctx, "sbx_1"); return err }, "GET", "/v1/sandboxes/sbx_1"},
 		{"get a secret", func() error { _, _, err := c.GetSecret(ctx, "api"); return err }, "GET", "/v1/secrets/api"},
-		{"delete a sandbox", func() error { _, err := c.Delete(ctx, cellaclient.KindSandbox, "dev"); return err }, "DELETE", "/v1/sandboxes/dev"},
-		{"delete a secret", func() error { _, err := c.Delete(ctx, cellaclient.KindSecret, "api"); return err }, "DELETE", "/v1/secrets/api"},
+		{"delete a sandbox", func() error { _, err := c.Delete(ctx, client.KindSandbox, "dev"); return err }, "DELETE", "/v1/sandboxes/dev"},
+		{"delete a secret", func() error { _, err := c.Delete(ctx, client.KindSecret, "api"); return err }, "DELETE", "/v1/secrets/api"},
 		{"start", func() error { _, _, err := c.Act(ctx, "dev", "start"); return err }, "POST", "/v1/sandboxes/dev/start"},
 		{"stop", func() error { _, _, err := c.Act(ctx, "dev", "stop"); return err }, "POST", "/v1/sandboxes/dev/stop"},
 	} {
@@ -441,15 +441,15 @@ func TestTheRoutesOfEveryObjectCall(t *testing.T) {
 // else is a failure the caller reads, not a zero object.
 func TestAnAnswerThatIsNotTheObjectIsReported(t *testing.T) {
 	f := newFixture(t, func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("[]")) })
-	c := f.client(cellaclient.Config{})
+	c := f.client(client.Config{})
 	if _, _, err := c.GetSandbox(t.Context(), "dev"); err == nil {
 		t.Fatal("a list decoded as one object")
 	}
-	if _, _, err := c.ListSandboxes(t.Context(), cellaclient.ListOptions{}); err == nil {
+	if _, _, err := c.ListSandboxes(t.Context(), client.ListOptions{}); err == nil {
 		t.Fatal("a list answer that is no page was accepted")
 	}
 	bad := newFixture(t, func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"items":[1],"next":""}`)) })
-	if _, _, err := bad.client(cellaclient.Config{}).ListSandboxes(t.Context(), cellaclient.ListOptions{}); err == nil {
+	if _, _, err := bad.client(client.Config{}).ListSandboxes(t.Context(), client.ListOptions{}); err == nil {
 		t.Fatal("a page holding no object was accepted")
 	}
 }
@@ -465,8 +465,8 @@ func TestAListFollowsTheCursorAndCarriesTheSelectors(t *testing.T) {
 	f := newFixture(t, func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(pages[r.URL.Query().Get("cursor")]))
 	})
-	c := f.client(cellaclient.Config{})
-	items, raws, err := c.ListSandboxes(t.Context(), cellaclient.ListOptions{
+	c := f.client(client.Config{})
+	items, raws, err := c.ListSandboxes(t.Context(), client.ListOptions{
 		Labels: []string{"team=core", "tier=dev"}, Phase: "Running", Owner: "alice", Environment: "default",
 	})
 	if err != nil {
@@ -506,8 +506,8 @@ func TestALimitStopsTheListAndNeverAsksPastTheCeiling(t *testing.T) {
 		}
 		_, _ = w.Write([]byte(`{"items":[{"status":{"id":"sbx_3"}}],"next":""}`))
 	})
-	c := f.client(cellaclient.Config{})
-	items, _, err := c.ListSandboxes(t.Context(), cellaclient.ListOptions{Limit: 300})
+	c := f.client(client.Config{})
+	items, _, err := c.ListSandboxes(t.Context(), client.ListOptions{Limit: 300})
 	if err != nil {
 		t.Fatalf("a limit above the ceiling was sent to the server: %v", err)
 	}
@@ -519,7 +519,7 @@ func TestALimitStopsTheListAndNeverAsksPastTheCeiling(t *testing.T) {
 	}
 	// One object wanted is one object returned, and the cursor is not
 	// followed past it.
-	one, _, err := c.ListSandboxes(t.Context(), cellaclient.ListOptions{Limit: 1})
+	one, _, err := c.ListSandboxes(t.Context(), client.ListOptions{Limit: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -534,7 +534,7 @@ func TestAPageThatRepeatsItselfEndsTheList(t *testing.T) {
 	f := newFixture(t, func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"items":[],"next":"sbx_9"}`))
 	})
-	items, _, err := f.client(cellaclient.Config{}).ListSandboxes(t.Context(), cellaclient.ListOptions{})
+	items, _, err := f.client(client.Config{}).ListSandboxes(t.Context(), client.ListOptions{})
 	if err != nil || len(items) != 0 {
 		t.Fatalf("the list returned %d item(s), %v", len(items), err)
 	}
@@ -546,8 +546,8 @@ func TestExecIsTheSynchronousRoute(t *testing.T) {
 	f := newFixture(t, func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"exitCode":3,"stdout":"out","stderr":"err","truncated":true,"durationMs":12}`))
 	})
-	c := f.client(cellaclient.Config{})
-	result, raw, err := c.Exec(t.Context(), "dev", cellaclient.ExecRequest{
+	c := f.client(client.Config{})
+	result, raw, err := c.Exec(t.Context(), "dev", client.ExecRequest{
 		Command: []string{"sh", "-c", "exit 3"}, Env: map[string]string{"K": "V"}, Workdir: "/workspace", Timeout: "5s",
 	})
 	if err != nil {
@@ -581,7 +581,7 @@ func TestTheEgressRecordsAreTheGatewaysRows(t *testing.T) {
 	f := newFixture(t, func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"items":[{"principal":"sbx_1","at":"2026-09-20T10:00:00Z","door":"proxy","host":"api.example.com","port":443,"decision":"allow","substituted":["api"]}]}`))
 	})
-	c := f.client(cellaclient.Config{})
+	c := f.client(client.Config{})
 	records, raw, err := c.EgressRecords(t.Context(), "dev", 5)
 	if err != nil {
 		t.Fatal(err)
@@ -596,7 +596,7 @@ func TestTheEgressRecordsAreTheGatewaysRows(t *testing.T) {
 		t.Errorf("the call asked for limit %q", got)
 	}
 	bad := newFixture(t, func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`"records"`)) })
-	if _, _, err = bad.client(cellaclient.Config{}).EgressRecords(t.Context(), "dev", 0); err == nil {
+	if _, _, err = bad.client(client.Config{}).EgressRecords(t.Context(), "dev", 0); err == nil {
 		t.Fatal("an answer that is no record list was accepted")
 	}
 }
@@ -610,7 +610,7 @@ func TestTheServerIdentityNeedsNoBearer(t *testing.T) {
 		}
 		_, _ = w.Write([]byte(`{"version":"v1.2.3","commit":"abc1234","buildTime":"2026-09-20"}`))
 	})
-	c := f.client(cellaclient.Config{TokenFile: filepath.Join(t.TempDir(), "absent"), Getenv: env(nil)})
+	c := f.client(client.Config{TokenFile: filepath.Join(t.TempDir(), "absent"), Getenv: env(nil)})
 	build, err := c.ServerVersion(t.Context())
 	if err != nil {
 		t.Fatalf("the identity was not read without a bearer: %v", err)
@@ -622,7 +622,7 @@ func TestTheServerIdentityNeedsNoBearer(t *testing.T) {
 		t.Errorf("the identity call carried %q", got)
 	}
 	bad := newFixture(t, func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("not json")) })
-	if _, err = bad.client(cellaclient.Config{}).ServerVersion(t.Context()); err == nil {
+	if _, err = bad.client(client.Config{}).ServerVersion(t.Context()); err == nil {
 		t.Fatal("an answer that is no identity was accepted")
 	}
 }
@@ -632,10 +632,10 @@ func TestTheServerIdentityNeedsNoBearer(t *testing.T) {
 func TestKindsAreReadSingularOrPlural(t *testing.T) {
 	for _, tc := range []struct {
 		in   string
-		want cellaclient.Kind
-	}{{"sandbox", cellaclient.KindSandbox}, {"sandboxes", cellaclient.KindSandbox}, {"Sandbox", cellaclient.KindSandbox},
-		{"secret", cellaclient.KindSecret}, {"secrets", cellaclient.KindSecret}, {"volume", ""}, {"sandboxs", ""}} {
-		got, ok := cellaclient.ParseKind(tc.in)
+		want client.Kind
+	}{{"sandbox", client.KindSandbox}, {"sandboxes", client.KindSandbox}, {"Sandbox", client.KindSandbox},
+		{"secret", client.KindSecret}, {"secrets", client.KindSecret}, {"volume", ""}, {"sandboxs", ""}} {
+		got, ok := client.ParseKind(tc.in)
 		if tc.want == "" {
 			if ok {
 				t.Errorf("ParseKind(%q) = %q, and this API serves no such kind", tc.in, got)
@@ -646,10 +646,10 @@ func TestKindsAreReadSingularOrPlural(t *testing.T) {
 			t.Errorf("ParseKind(%q) = %q, %v", tc.in, got, ok)
 		}
 	}
-	if cellaclient.KindSandbox.Path() != "/v1/sandboxes" || cellaclient.KindSecret.Path() != "/v1/secrets" {
-		t.Errorf("the collection routes are %q and %q", cellaclient.KindSandbox.Path(), cellaclient.KindSecret.Path())
+	if client.KindSandbox.Path() != "/v1/sandboxes" || client.KindSecret.Path() != "/v1/secrets" {
+		t.Errorf("the collection routes are %q and %q", client.KindSandbox.Path(), client.KindSecret.Path())
 	}
-	if cellaclient.KindSandbox.ManifestKind() != "Sandbox" || cellaclient.KindSecret.ManifestKind() != "Secret" {
+	if client.KindSandbox.ManifestKind() != "Sandbox" || client.KindSecret.ManifestKind() != "Secret" {
 		t.Error("the manifest kinds are not the names a document declares")
 	}
 }
@@ -664,7 +664,7 @@ func TestACancelledContextIsTheCallersOwn(t *testing.T) {
 	})
 	defer close(release)
 	ctx, cancel := context.WithCancel(t.Context())
-	c := f.client(cellaclient.Config{})
+	c := f.client(client.Config{})
 	go func() {
 		time.Sleep(20 * time.Millisecond)
 		cancel()
@@ -681,7 +681,7 @@ func TestSecretsListLikeSandboxesDo(t *testing.T) {
 	f := newFixture(t, func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"items":[{"metadata":{"name":"api"},"spec":{"kind":"static"},"status":{"id":"sec_1","version":2}}],"next":""}`))
 	})
-	items, raws, err := f.client(cellaclient.Config{}).ListSecrets(t.Context(), cellaclient.ListOptions{Limit: 10})
+	items, raws, err := f.client(client.Config{}).ListSecrets(t.Context(), client.ListOptions{Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -695,7 +695,7 @@ func TestSecretsListLikeSandboxesDo(t *testing.T) {
 	if seen.Path != "/v1/secrets" || seen.Query.Get("limit") != "10" {
 		t.Fatalf("the list called %s?%s", seen.Path, seen.Query.Encode())
 	}
-	if cellaclient.KindSecret.Plural() != "secrets" || cellaclient.KindSandbox.Plural() != "sandboxes" {
+	if client.KindSecret.Plural() != "secrets" || client.KindSandbox.Plural() != "sandboxes" {
 		t.Error("the collection names are not the plural of the kinds")
 	}
 }
@@ -706,7 +706,7 @@ func TestWritingToASessionThatEndedFails(t *testing.T) {
 	f := newSocketFixture(t, func(_ *socketFixture, conn *websocket.Conn) {
 		exit(conn, 0)
 	})
-	s, err := f.client().ExecSession(t.Context(), "dev", cellaclient.ExecRequest{Command: []string{"sh"}})
+	s, err := f.client().ExecSession(t.Context(), "dev", client.ExecRequest{Command: []string{"sh"}})
 	if err != nil {
 		t.Fatal(err)
 	}

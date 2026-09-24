@@ -15,7 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"latere.ai/x/cella/internal/cellaclient"
+	cellaclient "latere.ai/x/cella/client"
 )
 
 // reference is one side of a transfer: a path inside a sandbox, or a path on

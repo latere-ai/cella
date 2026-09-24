@@ -18,7 +18,7 @@ import (
 	"strings"
 	"time"
 
-	"latere.ai/x/cella/internal/cellaclient"
+	cellaclient "latere.ai/x/cella/client"
 )
 
 // Env is everything the command reads and writes. It is a parameter so the

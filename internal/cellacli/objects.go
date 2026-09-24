@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"latere.ai/x/cella/internal/cellaclient"
+	cellaclient "latere.ai/x/cella/client"
 	v1 "latere.ai/x/cella/manifest/v1"
 )
 

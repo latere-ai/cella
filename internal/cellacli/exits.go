@@ -7,7 +7,7 @@ import (
 	"context"
 	"errors"
 
-	"latere.ai/x/cella/internal/cellaclient"
+	cellaclient "latere.ai/x/cella/client"
 )
 
 // The exit codes of design 011. One scheme, by the response's status class

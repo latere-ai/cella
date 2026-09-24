@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Latere AI
 // SPDX-License-Identifier: Apache-2.0
 
-package cellaclient_test
+package client_test
 
 import (
 	"archive/tar"
@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"latere.ai/x/cella/internal/cellaclient"
+	"latere.ai/x/cella/client"
 )
 
 // TestEveryFileRouteIsTheOneDesign008Names holds each granular call to its
@@ -30,7 +30,7 @@ func TestEveryFileRouteIsTheOneDesign008Names(t *testing.T) {
 			w.WriteHeader(http.StatusNoContent)
 		}
 	})
-	c := f.client(cellaclient.Config{})
+	c := f.client(client.Config{})
 	ctx := t.Context()
 
 	entries, raw, err := c.FileList(ctx, "dev", "/workspace")
@@ -121,7 +121,7 @@ func TestARefusalOnAFileRouteReachesTheCaller(t *testing.T) {
 	f := newFixture(t, func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, 400, "invalid_field", "A field has a value it cannot take.", nil)
 	})
-	c := f.client(cellaclient.Config{})
+	c := f.client(client.Config{})
 	ctx := t.Context()
 	for name, run := range map[string]func() error{
 		"write":  func() error { return c.FilePut(ctx, "dev", "/etc/passwd", "", strings.NewReader("x")) },
@@ -135,7 +135,7 @@ func TestARefusalOnAFileRouteReachesTheCaller(t *testing.T) {
 		"export": func() error { _, err := c.ExportTar(ctx, "dev", []string{"/etc"}); return err },
 	} {
 		t.Run(name, func(t *testing.T) {
-			if got := cellaclient.CodeOf(run()); got != "invalid_field" {
+			if got := client.CodeOf(run()); got != "invalid_field" {
 				t.Fatalf("the refusal became %q", got)
 			}
 		})
@@ -156,7 +156,7 @@ func TestAnArchiveTravelsBothWaysAsTar(t *testing.T) {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
-	c := f.client(cellaclient.Config{})
+	c := f.client(client.Config{})
 	stream, err := c.ExportTar(t.Context(), "dev", []string{"/workspace/a.txt", "/workspace/sub"})
 	if err != nil {
 		t.Fatal(err)
@@ -201,7 +201,7 @@ func TestATransferThatFailedPartWayIsTheTrailer(t *testing.T) {
 		_, _ = w.Write([]byte("half an archive"))
 		w.Header().Set("X-Cella-Error", "driver_unavailable")
 	})
-	stream, err := f.client(cellaclient.Config{}).ExportTar(t.Context(), "dev", []string{"/workspace"})
+	stream, err := f.client(client.Config{}).ExportTar(t.Context(), "dev", []string{"/workspace"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,9 +221,9 @@ func TestLogsCarryTheirSelectors(t *testing.T) {
 	f := newFixture(t, func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("first line\nsecond line\n"))
 	})
-	c := f.client(cellaclient.Config{})
+	c := f.client(client.Config{})
 	since := time.Date(2026, 9, 20, 10, 0, 0, 0, time.UTC)
-	body, err := c.Logs(t.Context(), "dev", cellaclient.LogOptions{Follow: true, Since: since, Tail: 10})
+	body, err := c.Logs(t.Context(), "dev", client.LogOptions{Follow: true, Since: since, Tail: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -242,7 +242,7 @@ func TestLogsCarryTheirSelectors(t *testing.T) {
 		}
 	}
 	// Nothing asked for is nothing sent, so the server's defaults stand.
-	if _, err = c.Logs(t.Context(), "dev", cellaclient.LogOptions{}); err != nil {
+	if _, err = c.Logs(t.Context(), "dev", client.LogOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	if q := f.last().Query; q.Has("follow") || q.Has("since") || q.Has("tail") {
