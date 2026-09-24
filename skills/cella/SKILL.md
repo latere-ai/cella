@@ -11,9 +11,9 @@ its output and delete it.
 
 ## Reaching the control plane
 
-Inside a sandbox nothing needs to be set: the address is already in
-`CELLA_URL` and the sandbox's own token is at `/run/cella/token`, which is
-where the command looks when `CELLA_TOKEN` is unset. Outside one, set both:
+Inside a sandbox the token is already there: the sandbox's own token is at
+`/run/cella/token`, which is where the command looks when `CELLA_TOKEN` is
+unset, so only `CELLA_URL` needs setting. Outside one, set both:
 
 ```sh
 export CELLA_URL=https://control-plane.example.com
@@ -56,8 +56,9 @@ cella stop work; cella start work
 cella delete sandbox work
 ```
 
-Every path inside a sandbox is absolute and under `/workspace`. Every
-command takes `--json` and answers the API's own shape.
+Every path inside a sandbox is absolute and inside its workspace,
+`/workspace` unless the manifest moved it. Every command takes `--json` and
+answers the API's own shape.
 
 `-i` sends your standard input, and the end of it is not sent: run a
 command that ends by itself, not one that reads until end of file.

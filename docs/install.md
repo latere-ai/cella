@@ -167,11 +167,11 @@ curl -fsS -X POST "$CELLA_INSTALL_URL/v1/sandboxes" \
   }' | tee sandbox.json
 ```
 
-The body is JSON: `application/json` is the one media type the route
-takes today, and `apiVersion` other than `cella.latere.ai/v1beta1` is
-refused with `unsupported_version`. The response is the resolved
+The body is JSON here; the route also takes YAML under
+`application/yaml`. An `apiVersion` other than `cella.latere.ai/v1beta1`
+is refused with `unsupported_version`. The response is the resolved
 manifest, with the defaults the installation applied and a `status` that
-carries the id and the phase.
+carries the id and the phase. [Manifests](manifest.md) is every field.
 
 A sandbox is addressed by the name its owner gave it, or by the id in
 `status.id`. Run something inside it, and then delete it:
