@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"latere.ai/x/cella/internal/cellaclient"
+	cellaclient "latere.ai/x/cella/client"
 )
 
 // defaultWindow is the terminal a session asks for when the caller has none

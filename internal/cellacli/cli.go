@@ -8,17 +8,19 @@ package cellacli
 
 import (
 	"context"
+	"crypto/x509"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
 
-	"latere.ai/x/cella/internal/cellaclient"
+	cellaclient "latere.ai/x/cella/client"
 )
 
 // Env is everything the command reads and writes. It is a parameter so the
@@ -160,16 +162,55 @@ func (c *invocation) flags(usageLine string) *flag.FlagSet {
 	return fs
 }
 
-// client builds the client from the flags and the environment.
+// client builds the client from the flags and the environment. Each flag
+// overrides the variable of the same meaning and the client's own reading
+// of the environment does the rest, so the order is design 011's: the
+// token, from --token or CELLA_TOKEN, before the file, and the projected
+// token last.
 func (c *invocation) client() (*cellaclient.Client, error) {
-	client, err := cellaclient.New(cellaclient.Config{
-		URL: c.url, Token: c.token, TokenFile: c.tokenFile, CAFile: c.ca,
-		UserAgent: "cella/" + c.Version, Getenv: c.Getenv,
+	flags := map[string]string{
+		cellaclient.URLEnv: c.url, cellaclient.TokenEnv: c.token, cellaclient.TokenFileEnv: c.tokenFile,
+	}
+	cfg := cellaclient.Environment(func(name string) string {
+		if value := flags[name]; value != "" {
+			return value
+		}
+		return c.Getenv(name)
 	})
+	if cfg.URL == "" {
+		return nil, usagef("no control plane address: set %s or --url", cellaclient.URLEnv)
+	}
+	trust, err := roots(c.ca)
 	if err != nil {
 		return nil, usageError{err}
 	}
+	cfg.RootCAs = trust
+	cfg.UserAgent = "cella/" + c.Version
+	client, err := cellaclient.New(cfg)
+	if err != nil {
+		return nil, usageError{fmt.Errorf("%s: %w", cellaclient.URLEnv, err)}
+	}
 	return client, nil
+}
+
+// roots are the system authorities plus the one --ca names, or nil, which
+// the client reads as the system roots alone.
+func roots(caFile string) (*x509.CertPool, error) {
+	if caFile == "" {
+		return nil, nil
+	}
+	pem, err := os.ReadFile(caFile)
+	if err != nil {
+		return nil, fmt.Errorf("reading the certificate authority: %w", err)
+	}
+	pool, err := x509.SystemCertPool()
+	if err != nil || pool == nil {
+		pool = x509.NewCertPool()
+	}
+	if !pool.AppendCertsFromPEM(pem) {
+		return nil, fmt.Errorf("%s holds no certificate", caFile)
+	}
+	return pool, nil
 }
 
 // report writes the failure and returns the exit code of design 011.
@@ -189,6 +230,11 @@ func (c *invocation) report(err error) int {
 // code, the paths and the request id on their own. No token and no value is
 // ever among them, because the client never puts one in an error.
 func (c *invocation) write(err error) {
+	var none *cellaclient.NoBearer
+	if errors.As(err, &none) {
+		_, _ = fmt.Fprintf(c.Stderr, "cella: %v; set %s, or %s to a readable file\n", err, cellaclient.TokenEnv, cellaclient.TokenFileEnv)
+		return
+	}
 	var refusal *cellaclient.Error
 	if !errors.As(err, &refusal) {
 		_, _ = fmt.Fprintf(c.Stderr, "cella: %v\n", err)

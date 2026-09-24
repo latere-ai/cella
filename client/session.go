@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Latere AI
 // SPDX-License-Identifier: Apache-2.0
 
-package cellaclient
+package client
 
 import (
 	"context"
@@ -131,6 +131,7 @@ func frameError(e httpjson.Error) *Error {
 	out.RequestID, _ = e.Details["request_id"].(string)
 	out.Detail, _ = e.Details["detail"].(string)
 	out.Paths = list(e.Details["paths"])
+	out.Details = e.Details
 	return out
 }
 

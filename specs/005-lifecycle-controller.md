@@ -8,7 +8,7 @@ depends_on:
 affects: [controller/, internal/config/]
 effort: large
 created: 2026-09-12
-updated: 2026-09-23
+updated: 2026-09-24
 author: changkun
 ---
 
@@ -275,7 +275,7 @@ store behind `Store` ([[010-state]]); the token's shape
 | A spawn debits the budget in the same transaction as the desired write; two concurrent spawns against a budget of one yield one child and one `spawn_budget_exhausted` | `TestSpawnDebitIsAtomic` | built ([[040-mesh-and-spawn]]): the debit, the child's row and its record commit together, a refused spawn leaves no object and takes no name, and `status.spawn.used` tracks the ledger |
 | A narrowing update and an owner's widening update each keep the effective boundary within both manifests at every instant, observed through fake gateway and driver | `TestUpdateNeverWidensMidChange` | not built |
 | `Change.Volumes` is sent only while `Stopped`; a secret update re-pushes; a secret delete re-pushes and writes `notInjectable` | `TestUpdatePaths` | not built |
-| Each reaper rule fires at its second and not one before under a fake clock; `never` disables it; a sandbox matching two rules gets the first | `TestReaperRules`, one case per rule and one per tie | built for expired, autoDelete and autoStop ([[037-lifecycle-enforcement]]), for lost ([[043-postgres-store]]) and for token ([[045-workload-tokens]]), whose rule is asked only of a sandbox no deadline rule claimed; a pool entry is asked of none of them, with `TestReaperLeavesPoolEntries` driving one that carries a deadline ([[038-environment-pools]]) |
+| Each reaper rule fires at its second and not one before under a fake clock; `never` disables it; a sandbox matching two rules gets the first | `TestReaperRules`, one case per rule and one per tie | built for expired, autoDelete and autoStop ([[037-lifecycle-enforcement]]), and end to end over the native driver as `TestReaperEndToEndOverNative`, which reads the `AutoStop` stop and the `AutoDelete` delete from the act record rather than polling for a state that lasts one `autoDelete` ([[068-reaper-end-to-end-observation]]), for lost ([[043-postgres-store]]) and for token ([[045-workload-tokens]]), whose rule is asked only of a sandbox no deadline rule claimed; a pool entry is asked of none of them, with `TestReaperLeavesPoolEntries` driving one that carries a deadline ([[038-environment-pools]]) |
 | The reaper does not run on a replica without the lease | `TestReaperNeedsTheLease` | built ([[037-lifecycle-enforcement]]) |
 | For an environment that is `Offline`, nothing is rebuilt, no rule runs, and `Lost` does not count the grace; when it returns, lost sandboxes recover | `TestTheReaperHoldsOnAnEnvironmentBelowReady` | built for the first half as `TestTheReaperHoldsOnAnEnvironmentBelowReady`, over a reaper that now passes per environment ([[054-environments-desired-state]]); the `Lost` grace and the recovery on return are not built |
 | An errored `List` rebuilds nothing | `TestListErrorIsNotEmpty` | built, with the observed rebuild and the lost rule it holds ([[043-postgres-store]]) |

@@ -6,6 +6,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -47,6 +48,25 @@ func (r *actRecorder) environmentsOf(kind string) []EnvironmentAct {
 		if a.Type == kind {
 			out = append(out, a)
 		}
+	}
+	return out
+}
+
+// all returns every act, in the order they were emitted.
+func (r *actRecorder) all() []Act {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.acts)
+}
+
+// types returns the type of every act, in the order they were emitted, for a
+// failure sentence.
+func (r *actRecorder) types() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]string, 0, len(r.acts))
+	for _, a := range r.acts {
+		out = append(out, a.Type+"/"+a.Object.Status.Reason)
 	}
 	return out
 }

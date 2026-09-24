@@ -13,7 +13,7 @@ import (
 	"strings"
 	"sync"
 
-	"latere.ai/x/cella/internal/cellaclient"
+	cellaclient "latere.ai/x/cella/client"
 )
 
 // portForward serves design 011's port-forward: a listener on loopback whose

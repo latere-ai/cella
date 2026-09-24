@@ -5,7 +5,7 @@
 // plane from a shell and from an agent inside a sandbox. This file is the
 // entry point and holds the process's own edges only: the signals, the
 // streams, the environment and the terminal. The commands live in
-// internal/cellacli and the calls in internal/cellaclient.
+// internal/cellacli and the calls in the exported client package.
 package main
 
 import (

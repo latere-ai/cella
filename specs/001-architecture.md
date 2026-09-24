@@ -6,7 +6,7 @@ depends_on: []
 affects: [manifest/, runtime/, controller/, egress/, internal/, cmd/cellad/, cmd/cella/, docs/]
 effort: medium
 created: 2026-09-12
-updated: 2026-09-21
+updated: 2026-09-24
 author: changkun
 ---
 
@@ -159,7 +159,8 @@ The word for what turns a manifest into a running environment is
 | `internal/api` | the `/v1` handlers, streams, the OpenAPI document | none | [[008-api]], [[023-computer-use-operations]] |
 | `internal/auth` | the OIDC verifier, workload and environment tokens, the authorizer client, the owner policy | none | [[006-identity]] |
 | `internal/serve`, `internal/worker`, `internal/egressd`, `internal/check` | the four roles of `cellad`, one package each with its own dependency allow list | none | [[002-repository-scaffold]], [[021-data-plane-workers]], [[018-egress-and-secrets]], [[014-release-and-installation]] |
-| `internal/admission`, `internal/events`, `internal/store`, `internal/config`, `internal/version`, `internal/cellacli`, `internal/cellaclient` | as their specs say | none | [[007-admission]], [[009-events]], [[010-state]], [[002-repository-scaffold]], [[011-agent-client]] |
+| `client` | the typed `/v1` client: one method per route, the error envelope as one error type, the exec, attach and dial sockets | Go API additive within a module major; its build list is the standard library, `manifest/v1` and the error envelope, so an importer builds no part of the server | [[011-agent-client]] |
+| `internal/admission`, `internal/events`, `internal/store`, `internal/config`, `internal/version`, `internal/cellacli` | as their specs say | none | [[007-admission]], [[009-events]], [[010-state]], [[002-repository-scaffold]], [[011-agent-client]] |
 
 The rule for the root packages: they compute, validate, and drive.
 `manifest`, `runtime`, `controller`, and `egress` themselves import
