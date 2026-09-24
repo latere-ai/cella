@@ -1228,11 +1228,14 @@ func keys(t TB, open Opener) {
 			rows []store.Key
 			next string
 		)
-		with(t, s, func(tx store.Tx) error {
+		err := s.Tx(ctx, func(tx store.Tx) error {
 			var err error
 			rows, next, err = tx.Keys().List(ctx, environment, p)
 			return err
 		})
+		if err != nil {
+			t.Fatalf("listing the keys of %s: %v", environment, err)
+		}
 		return rows, next
 	}
 	jtis := func(rows []store.Key) []string {
