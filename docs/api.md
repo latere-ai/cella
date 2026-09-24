@@ -184,7 +184,7 @@ previous file as it was.
 | Route | Action | What it does |
 |---|---|---|
 | `GET /v1/sandboxes/{id}/ports` | `sandbox.read` | each declared port, `listening` or `closed` |
-| `/v1/sandboxes/{id}/ports/{name}/{path}` | `sandbox.exec` | forward any HTTP request, WebSocket upgrades included, to the port declared under `name`; your bearer is not passed on |
+| `/v1/sandboxes/{id}/ports/{name}/{path}` | `sandbox.exec` | forward any HTTP request, WebSocket upgrades included, to the port declared under `name`; your bearer is not passed on |; the path without its trailing slash answers `307` with a relative `Location`, so a proxy serving the core under a prefix keeps it |
 | `GET /v1/sandboxes/{id}/dial/{port}` | `sandbox.exec` | a WebSocket with subprotocol `cella.dial.v1` whose binary frames are a TCP connection's bytes |
 
 [Sandboxes on Kubernetes](kubernetes.md#reaching-a-port) is how each one
@@ -240,6 +240,7 @@ administrator creates one.
 | `PUT /v1/environments/{id}` | `environment.create` or `environment.update` | apply by name, with `If-Match` against a concurrent edit |
 | `DELETE /v1/environments/{id}` | `environment.delete` | delete one no sandbox is placed on; the control plane's own environment is not deletable |
 | `POST /v1/environments/{id}/keys` | `environment.key` | mint an environment key, shown once |
+| `GET /v1/environments/{id}/keys` | `environment.key` | the keys minted for the environment, oldest first: each jti, when it was minted and by whom, when it expires, and whether it was revoked; never the token |
 | `DELETE /v1/environments/{id}/keys/{jti}` | `environment.key` | revoke one key |
 
 ### Workers and gateways
