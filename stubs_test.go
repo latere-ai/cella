@@ -181,6 +181,11 @@ func TestTheInstallJobWalksTheDocument(t *testing.T) {
 			t.Errorf("the install job does not run %q", want)
 		}
 	}
+	// The walk waits on a check Job of its own, not on the stack's, whose
+	// time to live can end during a long run of the tiers before it.
+	if del, walk := strings.Index(steps, "delete job cellad-check"), strings.Index(steps, "run-blocks.sh"); del < 0 || del > walk {
+		t.Error("the install job does not remove the stack's check Job before the walk")
+	}
 	// One cluster per run: the stack's own script creates it and the walk
 	// and the tier share it.
 	if got := strings.Count(steps, "kind create cluster"); got != 0 {

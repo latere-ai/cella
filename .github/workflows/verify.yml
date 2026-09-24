@@ -161,6 +161,12 @@ jobs:
             -display-image cella-display:dev \
             -known known.json 2>&1 | tee conformance-kind.txt
           grep -q -- '--- PASS: TestContract' conformance-kind.txt
+      # The stack's check Job ran when up.sh applied the overlay, before the
+      # tiers above, and its time to live can end while the walk reads it.
+      # The walk applies the overlay as an operator's first install does, so
+      # it starts without that Job and waits on one of its own.
+      - name: The walk starts without the stack's check Job
+        run: kubectl -n cella delete job cellad-check --ignore-not-found --wait
       # The document is a program, and this is the run that proves it: the
       # same blocks an operator pastes, against the cluster above, with the
       # stub issuer as this installation's issuer.
