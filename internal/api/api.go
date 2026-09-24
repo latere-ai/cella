@@ -157,6 +157,7 @@ func New(o Options) (http.Handler, error) {
 	h.handle("PUT /v1/environments/{id}", h.environmentApply)
 	h.handle("DELETE /v1/environments/{id}", h.environmentItem)
 	h.handle("POST /v1/environments/{id}/keys", h.environmentKeyMint)
+	h.handle("GET /v1/environments/{id}/keys", h.environmentKeyList)
 	h.handle("DELETE /v1/environments/{id}/keys/{jti}", h.environmentKeyRevoke)
 	// The routes whose content type is the route's own: an archive, a file
 	// body, a frame, a log, a framed stream and the four sockets. A caller

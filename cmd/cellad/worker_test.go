@@ -134,6 +134,62 @@ func TestWorkerRefusesARevokedKey(t *testing.T) {
 	}
 }
 
+// TestEnvironmentKeysAreListedEndToEnd is spec 021's key list on a running
+// cellad serve: a key minted through the route an operator uses is listed
+// with the administrator who minted it and without its token, and after the
+// revocation it is listed revoked, the registry being the store the
+// revocation list is in.
+func TestEnvironmentKeysAreListedEndToEnd(t *testing.T) {
+	p := startPlane(t, "", "")
+	status, body := p.do(t, http.MethodPost, "/v1/environments/default/keys", nil)
+	if status != http.StatusCreated {
+		t.Fatalf("the key mint answered %d: %s", status, body)
+	}
+	var minted struct {
+		Token string `json:"token"`
+		JTI   string `json:"jti"`
+		Exp   string `json:"exp"`
+	}
+	if err := json.Unmarshal([]byte(body), &minted); err != nil {
+		t.Fatalf("the mint's answer did not decode: %v", err)
+	}
+	type key struct {
+		JTI      string `json:"jti"`
+		Exp      string `json:"exp"`
+		Revoked  bool   `json:"revoked"`
+		MintedBy string `json:"mintedBy"`
+	}
+	list := func() []key {
+		t.Helper()
+		status, body := p.do(t, http.MethodGet, "/v1/environments/default/keys", nil)
+		if status != http.StatusOK {
+			t.Fatalf("the key list answered %d: %s", status, body)
+		}
+		if strings.Contains(body, minted.Token) {
+			t.Fatal("the key list carries the token")
+		}
+		var page struct {
+			Items []key `json:"items"`
+		}
+		if err := json.Unmarshal([]byte(body), &page); err != nil {
+			t.Fatalf("the key list did not decode: %v", err)
+		}
+		return page.Items
+	}
+	keys := list()
+	if len(keys) != 1 || keys[0].JTI != minted.JTI || keys[0].Exp != minted.Exp || keys[0].Revoked ||
+		!strings.HasSuffix(keys[0].MintedBy, "|alice") {
+		t.Fatalf("the key list is %+v, want the key just minted, live, minted by alice", keys)
+	}
+	status, body = p.do(t, http.MethodDelete, "/v1/environments/default/keys/"+minted.JTI, nil)
+	if status != http.StatusNoContent {
+		t.Fatalf("the revocation answered %d: %s", status, body)
+	}
+	if keys = list(); len(keys) != 1 || !keys[0].Revoked {
+		t.Errorf("after the revocation the key list is %+v, want the key revoked", keys)
+	}
+}
+
 // TestWorkerRoleRefusesItsConfiguration holds that the role fails to start
 // rather than running half configured, which is spec 002's rule for a role.
 func TestWorkerRoleRefusesItsConfiguration(t *testing.T) {

@@ -350,9 +350,11 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		return fail(stderr, err)
 	}
 	// The credential every data plane role carries: an administrator mints
-	// one per worker and per gateway through the key routes, and revokes it
-	// by the jti the mint returned (spec 021).
-	keys, err := auth.NewEnvironmentKeys(identity.Signer, revocations, cfg.EnvironmentKeyTTL)
+	// one per worker and per gateway through the key routes, lists them, and
+	// revokes one by its jti (spec 021). The registry is in the store the
+	// revocation list is in, so a revocation marks the key and refuses it in
+	// one transaction.
+	keys, err := auth.NewEnvironmentKeys(identity.Signer, revocations, store.NewKeyRegistry(journal), cfg.EnvironmentKeyTTL)
 	if err != nil {
 		return fail(stderr, err)
 	}

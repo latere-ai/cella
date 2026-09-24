@@ -34,12 +34,19 @@ func (r *RevocationList) Revoked(ctx context.Context, jti string) (bool, error) 
 	return revoked, err
 }
 
-// Forget drops the rows whose exp has passed and reports how many went.
+// Forget drops the revocations and the key records whose exp has passed and
+// reports how many went. The key records are swept here because both are
+// rows a credential leaves behind and both end at its exp, and this is the
+// sweep the reaper's tick already runs under its lease.
 func (r *RevocationList) Forget(ctx context.Context, before time.Time) (int, error) {
 	var n int
 	err := r.store.Tx(ctx, func(tx Tx) error {
-		var err error
-		n, err = tx.Revocations().Forget(ctx, before)
+		revoked, err := tx.Revocations().Forget(ctx, before)
+		if err != nil {
+			return err
+		}
+		expired, err := tx.Keys().Forget(ctx, before)
+		n = revoked + expired
 		return err
 	})
 	return n, err

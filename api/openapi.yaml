@@ -995,6 +995,68 @@ paths:
           description: The answer this route serves.
         default:
           $ref: "#/components/responses/Error"
+    get:
+      operationId: listEnvironmentKeys
+      summary: List the keys minted for an environment, oldest first.
+      description: >-
+        One page of the environment's keys in the order they were minted: each
+        key's `jti`, when it was minted, its `exp`, whether it is revoked and
+        since when, and the subject that minted it. The token is never listed,
+        because the control plane keeps no copy of it. A key stays listed
+        until its `exp` passes. A control plane that signs no environment keys
+        answers `capability_unsupported`. Authorized as `environment.key`.
+      parameters:
+        - name: cursor
+          in: query
+          description: The `next` of the previous page.
+          schema:
+            type: string
+        - name: limit
+          in: query
+          description: The keys one page holds, 1 to 200; 50 when absent.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+      responses:
+        "200":
+          description: One page of the environment's keys.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [jti, mintedAt, exp, revoked]
+                      properties:
+                        jti:
+                          type: string
+                          description: The key's identifier, which revokes it.
+                        mintedAt:
+                          type: string
+                          format: date-time
+                        exp:
+                          type: string
+                          format: date-time
+                          description: When the key stops verifying, as the mint returned it.
+                        revoked:
+                          type: boolean
+                        revokedAt:
+                          type: string
+                          format: date-time
+                          description: Present on a revoked key.
+                        mintedBy:
+                          type: string
+                          description: The rendered subject that minted the key.
+                  next:
+                    type: string
+                    description: The cursor of the next page, empty on the last.
+        default:
+          $ref: "#/components/responses/Error"
   /v1/environments/{id}/keys/{jti}:
     parameters:
       - name: id

@@ -21,13 +21,19 @@ import (
 	v1 "latere.ai/x/cella/manifest/v1"
 )
 
-// EnvironmentKeys is the mint and the revocation of the credential a data
-// plane carries, as the two key routes use it. It is optional: a control
-// plane with no signer serves no key route, and the data plane roles of an
-// installation like that carry a key an operator minted elsewhere.
+// EnvironmentKeys is the mint, the revocation and the listing of the
+// credential a data plane carries, as the three key routes use them. It is
+// optional: a control plane with no signer serves no key route, and the data
+// plane roles of an installation like that carry a key an operator minted
+// elsewhere.
 type EnvironmentKeys interface {
-	Mint(ctx context.Context, environment string) (auth.Token, error)
+	// Mint signs one key for the environment on behalf of the subject that
+	// asked, which the registry records as the key's minter.
+	Mint(ctx context.Context, environment, subject string) (auth.Token, error)
 	Revoke(ctx context.Context, jti string) error
+	// List is one page of the environment's keys, oldest first, and the
+	// cursor of the next page.
+	List(ctx context.Context, environment, cursor string, limit int) ([]auth.KeyRecord, string, error)
 }
 
 // environmentItem answers or deletes one environment by name. A name this
@@ -261,7 +267,7 @@ func (h *handler) environmentKeyMint(w http.ResponseWriter, r *http.Request) {
 		respondError(w, err)
 		return
 	}
-	token, err := h.Keys.Mint(r.Context(), environmentSubject(obj))
+	token, err := h.Keys.Mint(r.Context(), environmentSubject(obj), caller(r).Subject)
 	if err != nil {
 		respondError(w, err)
 		return
@@ -272,6 +278,62 @@ func (h *handler) environmentKeyMint(w http.ResponseWriter, r *http.Request) {
 		"jti":   token.JTI,
 		"exp":   token.ExpiresAt.UTC().Format(time.RFC3339),
 	})
+}
+
+// keyItem is one key as the listing answers it. The token is not a field: the
+// control plane keeps none, and a listing is not a way to recover one. exp is
+// the name the mint's own answer uses, so a console joins the two by it.
+type keyItem struct {
+	JTI       string `json:"jti"`
+	MintedAt  string `json:"mintedAt"`
+	Exp       string `json:"exp"`
+	Revoked   bool   `json:"revoked"`
+	RevokedAt string `json:"revokedAt,omitempty"`
+	MintedBy  string `json:"mintedBy,omitempty"`
+}
+
+// environmentKeyList is GET /v1/environments/{id}/keys: the keys minted for
+// one environment, oldest first and a page at a time, with when each was
+// minted, when it expires, whether it is revoked and who minted it. Listing an
+// environment's credentials is an administrator's act on them, the same one
+// the mint and the revocation are, so it is authorized as environment.key.
+func (h *handler) environmentKeyList(w http.ResponseWriter, r *http.Request) {
+	if h.Keys == nil {
+		respondError(w, &manifest.Error{Code: "capability_unsupported",
+			Detail: "this control plane signs no environment keys, so it holds none to list"})
+		return
+	}
+	obj, err := h.environment(r.PathValue("id"))
+	if err != nil {
+		respondError(w, err)
+		return
+	}
+	if _, err = h.decide(r, authorizer.ActionEnvironmentKey, environmentResource(obj)); err != nil {
+		respondError(w, err)
+		return
+	}
+	limit, err := pageLimit(r)
+	if err != nil {
+		respondError(w, err)
+		return
+	}
+	records, next, err := h.Keys.List(r.Context(), environmentSubject(obj), r.URL.Query().Get("cursor"), limit)
+	if err != nil {
+		respondError(w, err)
+		return
+	}
+	items := make([]keyItem, 0, len(records))
+	for _, k := range records {
+		item := keyItem{
+			JTI: k.JTI, MintedAt: k.MintedAt.UTC().Format(time.RFC3339), Exp: k.ExpiresAt.UTC().Format(time.RFC3339),
+			Revoked: !k.RevokedAt.IsZero(), MintedBy: k.Subject,
+		}
+		if item.Revoked {
+			item.RevokedAt = k.RevokedAt.UTC().Format(time.RFC3339)
+		}
+		items = append(items, item)
+	}
+	respond(w, http.StatusOK, map[string]any{"items": items, "next": next})
 }
 
 // environmentKeyRevoke ends one key by the jti its mint returned. Every

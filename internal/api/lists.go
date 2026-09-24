@@ -4,10 +4,28 @@
 package api
 
 import (
+	"net/http"
 	"slices"
+	"strconv"
 
 	"latere.ai/x/pkg/authz"
+
+	"latere.ai/x/cella/manifest"
 )
+
+// pageLimit reads the limit of one page of a list: 1 to 200, 50 when the
+// request names none, and anything else invalid_field.
+func pageLimit(r *http.Request) (int, error) {
+	raw := r.URL.Query().Get("limit")
+	if raw == "" {
+		return 50, nil
+	}
+	limit, err := strconv.Atoi(raw)
+	if err != nil || limit < 1 || limit > 200 {
+		return 0, &manifest.Error{Code: "invalid_field", Path: "limit", Detail: "limit must be between 1 and 200"}
+	}
+	return limit, nil
+}
 
 // admits is the filter step of design 008's list rule: a list decision's
 // filter over one row. The row's owner is one the filter names, when it names

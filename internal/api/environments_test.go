@@ -86,7 +86,7 @@ func setupKeyed(t *testing.T, policy authz.Authorizer) *keyed {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = c.Close() })
-	keys, err := auth.NewEnvironmentKeys(signer, revocations, time.Hour)
+	keys, err := auth.NewEnvironmentKeys(signer, revocations, store.NewKeyRegistry(journal), time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,6 +174,88 @@ func TestEnvironmentKeyRoutes(t *testing.T) {
 	p.request(http.MethodDelete, "/v1/environments/default/keys/"+first.JTI, p.alice, "", http.StatusNoContent)
 }
 
+// TestEnvironmentKeyList is spec 021's listing of an environment's keys over
+// HTTP: every key minted for the environment, oldest first and a page at a
+// time, with its jti, when it was minted, its exp, whether it is revoked and
+// who minted it, and never the token. It is an administrator's act, as the
+// mint and the revocation are.
+func TestEnvironmentKeyList(t *testing.T) {
+	p := setupKeyed(t, nil)
+	var minted []mintedKey
+	for range 3 {
+		var key mintedKey
+		if err := json.Unmarshal(p.request(http.MethodPost, "/v1/environments/default/keys", p.alice, "", http.StatusCreated), &key); err != nil {
+			t.Fatalf("the mint's answer did not decode: %v", err)
+		}
+		minted = append(minted, key)
+	}
+	revoked := minted[1].JTI
+	p.request(http.MethodDelete, "/v1/environments/default/keys/"+revoked, p.alice, "", http.StatusNoContent)
+	slices.SortFunc(minted, func(a, b mintedKey) int { return strings.Compare(a.JTI, b.JTI) })
+
+	type page struct {
+		Items []map[string]any `json:"items"`
+		Next  string           `json:"next"`
+	}
+	read := func(query string) (page, string) {
+		t.Helper()
+		body := p.request(http.MethodGet, "/v1/environments/default/keys"+query, p.alice, "", http.StatusOK)
+		var got page
+		if err := json.Unmarshal(body, &got); err != nil {
+			t.Fatalf("the list did not decode: %v", err)
+		}
+		return got, string(body)
+	}
+	all, body := read("")
+	if len(all.Items) != len(minted) || all.Next != "" {
+		t.Fatalf("the list carries %d keys and the cursor %q, want all %d on one page", len(all.Items), all.Next, len(minted))
+	}
+	for i, item := range all.Items {
+		want := minted[i]
+		if item["jti"] != want.JTI || item["exp"] != want.Exp {
+			t.Errorf("key %d reads %v, want the jti %s and the exp %s its mint returned", i, item, want.JTI, want.Exp)
+		}
+		if at, _ := item["mintedAt"].(string); at == "" {
+			t.Errorf("key %d carries no mint time: %v", i, item)
+		} else if _, err := time.Parse(time.RFC3339, at); err != nil {
+			t.Errorf("key %d was minted at %q, which is not an instant: %v", i, at, err)
+		}
+		if item["mintedBy"] != p.issuerURL+"|admin" {
+			t.Errorf("key %d was minted by %v, want the administrator who asked", i, item["mintedBy"])
+		}
+		isRevoked := want.JTI == revoked
+		if item["revoked"] != isRevoked {
+			t.Errorf("key %d reads revoked %v, want %v", i, item["revoked"], isRevoked)
+		}
+		if _, marked := item["revokedAt"]; marked != isRevoked {
+			t.Errorf("key %d carries revokedAt %v while revoked is %v", i, item["revokedAt"], isRevoked)
+		}
+		if _, leaked := item["token"]; leaked {
+			t.Errorf("key %d carries a token member", i)
+		}
+	}
+	for _, key := range minted {
+		if strings.Contains(body, key.Token) {
+			t.Fatalf("the list carries the token of %s", key.JTI)
+		}
+	}
+
+	first, _ := read("?limit=2")
+	if len(first.Items) != 2 || first.Next != minted[1].JTI {
+		t.Fatalf("the first page carries %d keys and the cursor %q, want two and %s", len(first.Items), first.Next, minted[1].JTI)
+	}
+	rest, _ := read("?limit=2&cursor=" + first.Next)
+	if len(rest.Items) != 1 || rest.Items[0]["jti"] != minted[2].JTI || rest.Next != "" {
+		t.Errorf("the second page is %v with the cursor %q, want the newest key and no cursor", rest.Items, rest.Next)
+	}
+
+	p.request(http.MethodGet, "/v1/environments/default/keys", p.bob, "", http.StatusForbidden)
+	p.request(http.MethodGet, "/v1/environments/eu-gpu/keys", p.alice, "", http.StatusNotFound)
+	p.request(http.MethodGet, "/v1/environments/default/keys?limit=0", p.alice, "", http.StatusBadRequest)
+	p.request(http.MethodGet, "/v1/environments/default/keys?limit=201", p.alice, "", http.StatusBadRequest)
+	p.request(http.MethodGet, "/v1/environments/default/keys", "", "", http.StatusUnauthorized)
+}
+
 // TestEnvironmentKeyRefusals holds who may mint and what may be minted for.
 func TestEnvironmentKeyRefusals(t *testing.T) {
 	p := setupKeyed(t, nil)
@@ -206,6 +288,7 @@ func TestEnvironmentKeyRoutesWithoutASigner(t *testing.T) {
 	f := setup(t, nil)
 	f.request(http.MethodPost, "/v1/environments/default/keys", f.alice, "", http.StatusUnprocessableEntity)
 	f.request(http.MethodDelete, "/v1/environments/default/keys/01JABC", f.alice, "", http.StatusUnprocessableEntity)
+	f.request(http.MethodGet, "/v1/environments/default/keys", f.alice, "", http.StatusUnprocessableEntity)
 }
 
 // TestTheDefaultEnvironmentReads holds the read and the list of the
