@@ -48,13 +48,10 @@ var pendingControls = []string{
 	"TestArchiveFetchIsBounded",            // spec 019, the bounded archive fetch
 	"TestAttachByIdUnderTheAuthorizer",     // spec 019, attaching a volume by id
 	"TestBodiesAndTypes",                   // spec 008, the body caps and the content types
-	"TestClusterEgressBoundary",            // spec 018, the boundary on the cluster tier
-	"TestClusterNoLateralMovement",         // spec 004, the cluster tier's network policy
 	"TestClusterPodIsConfined",             // spec 004, the cluster tier's Pod baseline
 	"TestControlPlaneWriter",               // spec 019, the one writer of a volume
 	"TestDecoratorCannotWeakenTheBaseline", // spec 004, a decorator against the baseline
 	"TestEgressMapCrossesOneHop",           // spec 021, a map that reaches one environment
-	"TestMeshReachability",                 // spec 022, two peers on the cluster tier
 	"TestNoInboundToTheDataPlane",          // spec 021, no connection toward a worker
 	"TestNoSecretLeaks",                    // spec 018, the placeholder's confinement
 	"TestRateLimits",                       // spec 008, the token buckets

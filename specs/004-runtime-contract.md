@@ -8,7 +8,7 @@ depends_on:
 affects: [runtime/, runtime/k8s/, runtime/podman/, runtime/native/, runtime/local/, runtime/vm/, runtime/remote/, runtime/runtimetest/, internal/config/]
 effort: large
 created: 2026-09-12
-updated: 2026-09-23
+updated: 2026-09-24
 author: changkun
 ---
 
@@ -153,7 +153,7 @@ type Capabilities struct {
 
 | Capability | k8s | podman | vm | local | native | remote |
 |---|---|---|---|---|---|---|
-| Egress | `none, allowlist, open`: NetworkPolicy to the gateway, DNS, `cellad` only | `none, allowlist, open`: per-sandbox network, gateway the only route | `none, allowlist, open`: one NIC routed to the gateway | `none, allowlist`: the OS sandbox's allow-only proxy refuses a wildcard, so `open` is not listed | empty; `EgressEnforced` false | the worker's |
+| Egress | `none, allowlist, open` once the operator names the gateway's Pods, and empty otherwise: a NetworkPolicy per sandbox admitting the gateway, DNS and the sandbox's mesh peers only ([[070-k8s-egress]]) | `none, allowlist, open`: per-sandbox network, gateway the only route | `none, allowlist, open`: one NIC routed to the gateway | `none, allowlist`: the OS sandbox's allow-only proxy refuses a wildcard, so `open` is not listed | empty; `EgressEnforced` false | the worker's |
 | Mesh | yes: a policy selecting peers by mesh label, a headless Service per mesh with each Pod's `hostname` and `subdomain` set so `<sandbox-name>.mesh` resolves through the installation's DNS rewrite | yes: one network per mesh with `<name>.mesh` as the container's alias | as k8s | no | no | the worker's |
 | Ingress | only when an `Exposer` decorator is installed; `false` otherwise | no | as k8s | no | no | the worker's |
 | Volumes | yes: PVCs | yes: named volumes | yes: block devices or virtiofs | yes: directories under the data dir, granted as readable or writable paths | yes: directories | the worker's |
@@ -229,9 +229,13 @@ tunnel first and the SPDY upgrade where the API server refuses it, to a
 port the manifest declared, with `get` and `create` on
 `pods/portforward` in the Role and no NetworkPolicy rule, because the
 kubelet connects inside the Pod ([[065-k8s-dial]]). The egress rule is a NetworkPolicy selecting
-the Pod, created before the Pod; the mesh rule a second policy
+the Pod, created before the Pod: no ingress, and, once the operator names
+the gateway's Pods, egress to them, to cluster DNS and to the sandbox's
+own mesh peers only; the mesh rule a second policy
 selecting peers by the mesh label plus a headless Service per mesh; the
-token and CA a projected Secret. With `CELLA_EGRESS_SIDECAR=1` the
+token and CA a projected Secret, and the gateway's doors and the
+sandbox's credential in the workload container's environment
+([[070-k8s-egress]]). With `CELLA_EGRESS_SIDECAR=1` the
 driver adds the gateway as a native sidecar and points the proxy
 variables at it; the sidecar is then part of the baseline below.
 
@@ -464,7 +468,8 @@ requests ([[023-computer-use-operations]]); the microVM driver's design
 | `local` passes it on a machine with the sandbox runtime installed, with `Attach`, `Dial`, `Mesh`, `Display`, `Input`, `Resize`, `Pool` and the `open` egress case skipped as undeclared, and is skipped whole with the remediation printed where the runtime is absent | `TestLocalConformance` | not built |
 | `podman` passes it in the podman tier; `k8s` against kind; `remote` through a worker running `native` | `TestPodmanConformance`, `TestClusterConformance`, `TestWorkerConformance` | `podman` passing against a real engine, the `Attacher`, `FileStore`, display, screen, input, port and dial cases included, skipped where no socket answers, [[035-podman-driver]], [[034-terminal-attach]], [[033-file-operations]], [[041-display-and-input]], [[060-dial-and-port-proxy]]; `TestClusterConformance` built and skipped where no cluster is configured, [[036-k8s-driver]], with `Attach` declared from [[063-k8s-attach]], so a configured run holds the driver to the attach, stdin and TTY cases, and `TestAttachRoundTripOverTheExecStream`, `TestTheExecSubresourceCarriesATerminal` and `TestTheExecStreamFallsBackToSPDY` hold the terminal to a served exec endpoint on every run; with `Echo` so `DialReachesAPort` runs there, and its `DialReachesAPort` and `PortsReportListening` run against the kind cluster of `verify.yml`'s install job, held there by `TestKindRunsDeclareDial` ([[065-k8s-dial]]); both declare `Pool` and pass its cases, [[038-environment-pools]]; `remote` passes the whole suite against an in-process worker running `native`, [[051-environments-and-workers]], with `Dial`, `Display` and `Input` withheld from the worker's declaration because no frame of the worker stream carries them, `TestTheSeamDeclaresWhatItCarries`; it is reached as the driver of an `Environment` with `mode: worker` by `TestControllerRoutesByEnvironment` and `TestWorkerEnvironmentEndToEnd` ([[054-environments-desired-state]]) |
 | A driver that declares a capability without its interface, implements one it does not declare, or declares one the suite finds not to hold, fails | `TestConformanceCatchesAFalseCapability` with nine lying wrappers | passing, [[032-runtime-conformance-suite]], [[034-terminal-attach]], [[033-file-operations]], [[045-workload-tokens]] |
-| `Mesh`: podman puts each member on one network per mesh under `<name>.mesh`, k8s renders the policy admitting that mesh alone with a headless Service and each Pod's `hostname` and `subdomain`, the object ends with the last member, and `native` declares none | `TestMeshNetwork` and `TestPodmanMeshOnARealEngine`, `TestRenderMesh`, `TestMeshPolicyAdmitsTheMeshAndNothingElse`, `TestMeshLifetime`, `TestNativeDeclaresNoMesh` | built ([[040-mesh-and-spawn]]); the peer-reachability case belongs to the conformance tier and waits on [[012-test-stubs-and-tiers]] |
+| `Mesh`: podman puts each member on one network per mesh under `<name>.mesh`, k8s renders the policy admitting that mesh alone with a headless Service and each Pod's `hostname` and `subdomain`, the object ends with the last member, and `native` declares none | `TestMeshNetwork` and `TestPodmanMeshOnARealEngine`, `TestRenderMesh`, `TestMeshPolicyAdmitsTheMeshAndNothingElse`, `TestMeshLifetime`, `TestNativeDeclaresNoMesh` | built ([[040-mesh-and-spawn]]); on k8s two members reach each other by name under the egress rule, `TestAMeshMemberReachesItsPeersAlone` and on the kind tier `TestClusterMeshReachability` ([[070-k8s-egress]]); the driver suite has no peer case yet |
+| `k8s` declares `none`, `allowlist` and `open` once the gateway's Pods are named and none otherwise; each sandbox runs under its own NetworkPolicy, written before its Pod, rewritten at a start and before a transfer's helper, and removed after its Pod, which admits no ingress and, with the gateway named, egress to DNS and the gateway alone; the workload container carries the gateway's doors and the sandbox's credential, and the Secret the gateway's authority | `TestEgressModesFollowTheGateway`, `TestTheSandboxRuleAdmitsDNSAndTheGateway`, `TestTheSandboxRuleWithoutAGatewayConfinesIngress`, `TestTheSandboxRuleIsWrittenBeforeThePod`, `TestStartRewritesTheSandboxRule`, `TestTheFileHelperRunsUnderTheSandboxRule`, `TestDeleteRemovesTheSandboxRule`, `TestThePodCarriesTheGatewayProjection` | passing ([[070-k8s-egress]]), and on the kind tier `TestClusterEgressBoundary` and `TestClusterNoLateralMovement` |
 | Every stamped label value is a legal Kubernetes label value and every key a legal key, for an owner with `@` and a user label with a `/` | `TestStampedIdentityIsLegal` | passing, [[036-k8s-driver]] |
 | The workload token a create carries is a file inside the sandbox its owner alone reads, at `/run/cella/token` or at the path `CELLA_TOKEN_FILE` names where the driver has no mount namespace of its own, and `Change.Token` is what the next read returns | the `TokenProjection` case of the conformance suite | passing on `native` and on `podman` against a real engine; on `k8s` over the client double, and in the cluster run where one is configured ([[045-workload-tokens]]) |
 | A decorator that removes the token mount, sets `privileged`, adds `hostNetwork` or `shareProcessNamespace`, or mounts a service account token is refused with `decorator_violation` naming the field | `TestDecoratorCannotWeakenTheBaseline`, table-driven over the baseline | not built |
