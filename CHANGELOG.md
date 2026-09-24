@@ -6,6 +6,16 @@ refused before it is pushed.
 
 ## Unreleased
 
+- The file routes accept paths in the sandbox's own workspace. A sandbox
+  whose manifest set `spec.workspace.path` to something other than
+  `/workspace` had every file route refused with `invalid_field`, although
+  its driver keeps the files at that path.
+- `unsupported_media_type` now reads "Send the body in a media type this
+  route accepts." An archive upload sent with the wrong type used to be
+  told to send a manifest. The detail still names the type the route
+  takes.
+- The API document describes each file route's parameters, bodies and
+  answers, including the `204` the writes return.
 - A create whose caller disconnects while the sandbox is starting is now
   recorded as `Failed` with its `sandbox.failed` record, and its identity
   token is revoked. The record and the state used to be written under the
