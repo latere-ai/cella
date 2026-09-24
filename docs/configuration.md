@@ -24,8 +24,9 @@ separated.
 
 | Variable | Default | What it is |
 |---|---|---|
-| `CELLA_PUBLIC_ADDR` | `:8080` | the listener callers reach: the `/v1` API, the key set, the OpenAPI document, and the probes |
+| `CELLA_PUBLIC_ADDR` | `:8080` | the listener callers reach: the `/v1` API, the key set, the OpenAPI document, and, at the root, the probes |
 | `CELLA_INTERNAL_ADDR` | `:8081` | the listener for the probes and `/metrics`. It must differ from the public one. Do not publish it |
+| `CELLA_BASE_PATH` | unset, the root | the path the public listener answers under when the control plane shares an origin with other services, such as `/v1/environments`. It takes the place of `/v1`: `/v1/sandboxes` is answered at `/v1/environments/sandboxes`, and the key set, the OpenAPI document and `/version` move under it too. Nothing is answered outside it, and the probes stay on the internal listener. It must be the path of `CELLA_PUBLIC_URL`. See [Serving behind a shared origin](install.md#serving-behind-a-shared-origin) |
 | `CELLA_DATA_DIR` | `/var/lib/cella` | the directory `cellad` keeps local state in: the readiness write test, the native runtime's sandboxes, and, without a database, the snapshot of desired state. Created at start |
 | `CELLA_MAX_BODY_BYTES` | `65536` | the largest manifest or JSON body accepted. Integer bytes, or with a `Ki`, `Mi`, or `Gi` suffix |
 | `CELLA_MAX_UPLOAD_BYTES` | `1Gi` | the largest file or archive upload accepted, in the same syntax |
@@ -36,7 +37,7 @@ Who may call, and what `cellad` signs. The first three are required.
 
 | Variable | Default | What it is |
 |---|---|---|
-| `CELLA_PUBLIC_URL` | required | the absolute URL callers reach the public listener at. It is the issuer of every token `cellad` mints, so it must be the address callers actually dial |
+| `CELLA_PUBLIC_URL` | required | the absolute URL callers reach the public listener at. It is the issuer of every token `cellad` mints, so it must be the address callers actually dial. A path on it, such as `https://api.example.com/v1/environments`, is where the control plane is served, and every path `cellad` writes, a `Location` header or the paths of the served OpenAPI document, is under it. No query and no fragment |
 | `CELLA_OIDC_ISSUERS` | required | the OpenID Connect issuers whose tokens are accepted. At start `cellad` reads each one's discovery document and key set, and refuses to start when one does not answer |
 | `CELLA_TOKEN_KEY` | required | one or two PEM RSA private keys of at least 2048 bits. The first signs every sandbox's workload token and every environment key; every key is published at `/.well-known/jwks.json`. To rotate, put the new key first and remove the old block once the tokens it signed have expired |
 | `CELLA_OIDC_AUDIENCE` | `cella` | the audiences a caller's token may carry, one or more. The first is the audience of the tokens `cellad` mints. An empty or repeated entry is a start-up failure |
@@ -184,7 +185,7 @@ outbound to a control plane somebody else operates.
 
 | Variable | Default | What it is |
 |---|---|---|
-| `CELLA_URL` | required | the control plane's public URL. `http://` is accepted on loopback only, unless `CELLA_INSECURE_CONTROL_PLANE` is set |
+| `CELLA_URL` | required | the control plane's public URL, its `CELLA_PUBLIC_URL`, with the path when it has one: `https://api.example.com/v1/environments`. `http://` is accepted on loopback only, unless `CELLA_INSECURE_CONTROL_PLANE` is set |
 | `CELLA_ENVIRONMENT_KEY` | required | the environment key an administrator minted for this environment |
 | `CELLA_RUNTIME` | `k8s` | the runtime this worker drives, with its variables above: the Kubernetes section, `CELLA_PODMAN_SOCKET`, or `CELLA_ALLOW_UNSAFE_NATIVE` |
 | `CELLA_DATA_DIR` | `/var/lib/cella` | local state, as for the control plane |
@@ -200,7 +201,7 @@ control plane and serves two doors to sandboxes.
 
 | Variable | Default | What it is |
 |---|---|---|
-| `CELLA_URL` | required | the control plane's public URL |
+| `CELLA_URL` | required | the control plane's public URL, with its path, as for the worker |
 | `CELLA_ENVIRONMENT_KEY` | required | the environment key of the environment this gateway serves |
 | `CELLA_EGRESS_PROXY_ADDR` | `:3128` | the proxy door a sandbox's `HTTP_PROXY` and `HTTPS_PROXY` point at |
 | `CELLA_EGRESS_REVERSE_ADDR` | `:8080` | the reverse door, for a client that takes a base URL rather than a proxy. It must differ from the proxy door |
@@ -212,7 +213,7 @@ control plane and serves two doors to sandboxes.
 
 | Variable | Default | What it is |
 |---|---|---|
-| `CELLA_URL` | required | the control plane's address. `--url` overrides it |
+| `CELLA_URL` | required | the control plane's address, with its path when it is served under one. `--url` overrides it |
 | `CELLA_TOKEN` | unset | the bearer to send. `--token` overrides it |
 | `CELLA_TOKEN_FILE` | `/run/cella/token` | a file holding the bearer, read on every request, used when `CELLA_TOKEN` is unset. `--token-file` overrides it |
 
