@@ -120,11 +120,14 @@ func freePorts(t tb, n int) []int {
 		}
 	}()
 	ports := make([]int, 0, n)
+	var lc net.ListenConfig
 	for range n {
-		l, err := net.Listen("tcp", "127.0.0.1:0")
+		l, err := lc.Listen(context.Background(), "tcp", "127.0.0.1:0")
 		must(t, err, "reserving a free port on loopback")
 		listeners = append(listeners, l)
-		ports = append(ports, l.Addr().(*net.TCPAddr).Port)
+		addr, ok := l.Addr().(*net.TCPAddr)
+		need(t, ok, "a loopback listener reports %T, not a TCP address", l.Addr())
+		ports = append(ports, addr.Port)
 	}
 	return ports
 }

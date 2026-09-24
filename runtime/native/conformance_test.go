@@ -43,7 +43,8 @@ func TestNativeConformance(t *testing.T) {
 func TestConformanceWhileAnotherRunHoldsPorts(t *testing.T) {
 	for _, port := range []string{"18080", "18081", "18090"} {
 		// A port already held by something else is the same condition.
-		if l, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", port)); err == nil {
+		var lc net.ListenConfig
+		if l, err := lc.Listen(t.Context(), "tcp", net.JoinHostPort("127.0.0.1", port)); err == nil {
 			t.Cleanup(func() { _ = l.Close() })
 		}
 	}
