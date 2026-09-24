@@ -1,6 +1,6 @@
 ---
 title: "Serving under a base path: CELLA_BASE_PATH, the paths the core writes under its public URL, and every client composing under it"
-status: in-progress
+status: complete
 track: core
 depends_on:
   - specs/.archive/002-repository-scaffold.md
@@ -276,15 +276,75 @@ so the whole contract is exercised under a base.
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| `Route` replaces the leading `/v1` of an API route with the base, puts a document under it, and is the identity with no base | `TestRouteReplacesTheVersionSegment` | not built |
-| `CELLA_BASE_PATH` is empty by default; a set value that does not begin with `/`, ends with `/`, is not clean, or holds a segment character outside the rule is a problem naming it; a set value that differs from the path of `CELLA_PUBLIC_URL` is a problem naming both; an empty base with a public path is accepted; a public URL with a query or a fragment is refused | `TestBasePathRules` | not built |
-| With a base, the public listener answers the API, the key set, the API document, the build identity and the build line under it and nothing at the root, the internal listener's probes are unchanged, and the start-up line names the base | `TestThePublicListenerMountsUnderTheBasePath` | not built |
-| With no base the public listener serves every route at the root as before | `TestAnEmptyBasePathIsTheRoot` | not built |
-| Behind a rewrite the listener stays at the root and the paths it writes carry the public path | `TestBehindARewriteTheListenerStaysAtTheRoot` | not built |
-| Every `Location` the API writes and the `X-Forwarded-Prefix` it sends carry the public path, and are rooted with none | `TestWrittenPathsCarryThePublicPath` | not built |
-| The served document under a public path names each path under it and is otherwise the committed document | `TestTheDocumentUnderAPublicPath` | not built |
-| Under a base, a sandbox's workload token and an environment key carry `CELLA_PUBLIC_URL` with its path as `iss` and are accepted; a create answers a `Location` under the base; the port path without its slash redirects relatively and the followed proxy reaches the server inside with the base in `X-Forwarded-Prefix`; the exec and dial sockets open under the base | `TestServingUnderABasePathEndToEnd` | not built |
-| A worker and a gateway whose `CELLA_URL` carries the base register, claim and run a sandbox, and hold their stream | `TestWorkerAndGatewayUnderABasePath`, `TestTheWorkerComposesUnderABasePath`, `TestTheGatewayComposesUnderABasePath` | not built |
-| The exported client composes every call, the sockets and the build identity under a URL with a path | `TestEveryCallComposesUnderABaseURL` | not built |
-| The conformance suite composes every request under a URL with a path, and the whole suite holds against `cellad serve` under `/v1/environments`, the agent case running `cella` against the same URL | `TestTheSuiteComposesUnderABasePath`, `TestTheConformanceSuiteHoldsUnderABasePath` | not built |
-| The configuration page names `CELLA_BASE_PATH` | `TestTheConfigurationPageNamesEveryVariable` | not built |
+| `Route` replaces the leading `/v1` of an API route with the base, puts a document under it, and is the identity with no base | `TestRouteReplacesTheVersionSegment` | built |
+| `CELLA_BASE_PATH` is empty by default; a set value that does not begin with `/`, ends with `/`, is not clean, or holds a segment character outside the rule is a problem naming it; a set value that differs from the path of `CELLA_PUBLIC_URL` is a problem naming both; an empty base with a public path is accepted; a public URL with a query or a fragment is refused | `TestBasePathRules` | built |
+| With a base, the public listener answers the API, the key set, the API document, the build identity and the build line under it and nothing at the root, the internal listener's probes are unchanged, and the start-up line names the base | `TestThePublicListenerMountsUnderTheBasePath` | built |
+| With no base the public listener serves every route at the root as before | `TestAnEmptyBasePathIsTheRoot` | built |
+| Behind a rewrite the listener stays at the root and the paths it writes carry the public path | `TestBehindARewriteTheListenerStaysAtTheRoot` | built |
+| Every `Location` the API writes and the `X-Forwarded-Prefix` it sends carry the public path, and are rooted with none | `TestWrittenPathsCarryThePublicPath` | built |
+| The served document under a public path names each path under it and is otherwise the committed document | `TestTheDocumentUnderAPublicPath` | built |
+| Under a base, a sandbox's workload token and an environment key carry `CELLA_PUBLIC_URL` with its path as `iss` and are accepted; a create answers a `Location` under the base; the port path without its slash redirects relatively and the followed proxy reaches the server inside with the base in `X-Forwarded-Prefix`; the exec and dial sockets open under the base | `TestServingUnderABasePathEndToEnd` | built |
+| A worker and a gateway whose `CELLA_URL` carries the base register, claim and run a sandbox, and hold their stream | `TestWorkerAndGatewayUnderABasePath`, `TestTheWorkerComposesUnderABasePath`, `TestTheGatewayComposesUnderABasePath` | built |
+| The exported client composes every call, the sockets and the build identity under a URL with a path | `TestEveryCallComposesUnderABaseURL` | built |
+| The conformance suite composes every request under a URL with a path, and the whole suite holds against `cellad serve` under `/v1/environments`, the agent case running `cella` against the same URL | `TestTheSuiteComposesUnderABasePath`, `TestTheConformanceSuiteHoldsUnderABasePath` | built |
+| The configuration page names `CELLA_BASE_PATH` | `TestTheConfigurationPageNamesEveryVariable` | built |
+
+## Outcome
+
+Built on 2026-09-24. Every criterion holds, each by the test its row
+names, and the whole contract runs under a base: the conformance suite
+passes 48 cases against `cellad serve` mounted under
+`/v1/environments`, with a worker environment registered through a
+worker whose `CELLA_URL` carries the base and the agent case running the
+built `cella` against the same URL, the same count and the same skips
+as the rooted run.
+
+| Piece | Where |
+|---|---|
+| `client.Route`, the one rule every place composes a route with | `client/route.go` |
+| The client's calls, sockets and build identity under a URL with a path | `request` in `client/client.go`, `ServerVersion` in `client/sandboxes.go` |
+| `CELLA_BASE_PATH`, the public path, and their rules | `internal/config/basepath.go`, `publicPath` in `internal/config/identity.go` |
+| The public listener at the root or under a base | `publicHandler` and `underVersion` in `cmd/cellad/public.go`, the `base=` token of the start-up line in `cmd/cellad/main.go` |
+| Every `Location` and the port proxy's `X-Forwarded-Prefix` under the public path | `Options.PublicPath` and `public` in `internal/api/api.go`, `internal/api/secrets.go`, `internal/api/environments.go`, `internal/api/portproxy.go` |
+| The served document placed under the public path | `Under` and `HandlerUnder` in `api/api.go` |
+| The worker's registration and stream, and the gateway's stream, under the path of `CELLA_URL` | `register` and `StreamURL` in `internal/worker/worker.go`, `streamURL` in `internal/egressd/sync.go` |
+| The suite's requests under the path of `-url` | `newClient` and `build` in `test/conformance/env.go` |
+
+The URL-writing places this slice changed: the `Location` of a sandbox
+create and apply, of a secret create and apply, and of an environment
+create and apply; the `X-Forwarded-Prefix` the port proxy sends; the
+paths of the served API document. The `iss` of a workload token and of
+an environment key needed no change: it was `CELLA_PUBLIC_URL` already,
+and the verifier's local issuer is the same value. The port redirect
+needed none either: it is relative since
+[[067-environment-list-ports-redirect-keys]]. No other place in the core
+writes a path or a URL: a port's `status.url` is set only by a driver's
+exposer and no driver sets it, and list and event cursors are opaque.
+
+The base-path cases fail on the tree before this slice:
+`TestWorkerAndGatewayUnderABasePath` fails at the gateway, whose stream
+went to `/v1/environments/v1/environments/default/egress`, and with the
+gateway fixed and the worker not, at the worker, which never registers;
+`TestTheWorkerComposesUnderABasePath` and
+`TestTheGatewayComposesUnderABasePath` name the doubled path.
+
+### What diverges from the specs above
+
+| Spec | What it said | What was built | Why |
+|---|---|---|---|
+| [[069-client-package]], `docs/client.md` | a path on the client's URL prefixes every route | a path on the URL takes the place of `/v1` in the client, the worker, the gateway and the suite | the one rule the server mounts and writes by; a client behind a proxy that strips a path of its own names the control plane's `/v1` in its URL |
+| This slice's overview | `CELLA_BASE_PATH` must match the path of `CELLA_PUBLIC_URL` | a set base must; an empty base beside a public path is accepted | a proxy that rewrites the prefix away is the second mode the platform rule names, and the core still writes every path under the public one there |
+| [[008-api]] | the public listener answers the probes | under a base it answers none | the orchestrator reads them on the internal listener, and the public listener answers nothing outside the base |
+
+Found on the way and fixed: the gateway's stream URL escaped an
+environment name twice, since the escaped segment was set as the
+decoded path; it is composed in both forms now, and
+`TestTheGatewayComposesUnderABasePath` holds a name that needs escaping.
+
+### What this leaves open
+
+| Open | Why |
+|---|---|
+| The caller's address behind a proxy: the authorizer's envelope carries the proxy's address | the core has no trusted-proxy rule yet; it is a variable of its own |
+| A move under a base changes the issuer, so environment keys are minted again and a running sandbox's token is refused until its next rotation | any change of `CELLA_PUBLIC_URL` does this; accepting a second issuer across a move is a migration rule this slice does not add |
+| The routing object that claims the prefix at an origin | it belongs to the installation that runs the origin |
