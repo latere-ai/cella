@@ -13,6 +13,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"slices"
 	"strings"
 	"sync"
@@ -449,5 +451,81 @@ func TestProxyPath(t *testing.T) {
 	}
 	if got := unescapedPath("/a%2Fb"); got != "/a/b" {
 		t.Errorf("the path decoded to %q", got)
+	}
+}
+
+// TestPortPathWithoutItsSlashRedirectsRelatively: a port named without the
+// slash that opens the proxied path answers 307 with a Location relative to
+// the path the client used, the escaped segment and a slash, the query kept.
+// The redirect reads nothing, so every method, a caller who may not reach the
+// sandbox and an id that names none are all answered alike, without a dial.
+func TestPortPathWithoutItsSlashRedirectsRelatively(t *testing.T) {
+	f, d, obj, _ := proxyFixture(t)
+	base := "/v1/sandboxes/" + obj.Status.ID + "/ports/"
+	for _, method := range []string{"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "TRACE", "PROPFIND"} {
+		res := f.proxied(method, base+"web", f.alice, strings.NewReader("payload"), nil)
+		if res.StatusCode != http.StatusTemporaryRedirect || res.Header.Get("Location") != "web/" {
+			t.Errorf("%s answered %d with the Location %q", method, res.StatusCode, res.Header.Get("Location"))
+		}
+	}
+	for _, tc := range []struct {
+		name, path, token, location string
+	}{
+		{"the query is kept", base + "web?x=1&y=a%20b", f.alice, "web/?x=1&y=a%20b"},
+		{"the segment keeps its escaping", base + "w%20b", f.alice, "w%20b/"},
+		{"a segment with a colon is not a scheme", base + "a:b", f.alice, "./a:b/"},
+		{"a caller who may not reach the sandbox", base + "web", f.bob, "web/"},
+		{"an id that names no sandbox", "/v1/sandboxes/sbx_01j0000000000000000000000/ports/web", f.alice, "web/"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			res := f.proxied("GET", tc.path, tc.token, nil, nil)
+			if res.StatusCode != http.StatusTemporaryRedirect || res.Header.Get("Location") != tc.location {
+				t.Errorf("%s answered %d with the Location %q, want %q", tc.path, res.StatusCode, res.Header.Get("Location"), tc.location)
+			}
+		})
+	}
+	if res := f.proxied("GET", base+"web", "", nil, nil); res.StatusCode != http.StatusUnauthorized {
+		t.Errorf("a request with no bearer answered %d", res.StatusCode)
+	}
+	if n := len(d.asked()); n != 0 {
+		t.Errorf("a redirect reached the dialer %d times", n)
+	}
+}
+
+// TestPortRedirectThroughAPrefixProxy is the redirect behind a proxy that
+// serves the control plane under a prefix of its own and forwards the
+// Location unchanged: a client that names the port without its slash and
+// follows the answer stays under the prefix and reaches the server inside,
+// with the method, the body and the query it sent.
+func TestPortRedirectThroughAPrefixProxy(t *testing.T) {
+	f, _, obj, _ := proxyFixture(t)
+	target, err := url.Parse(f.url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	front := httptest.NewServer(http.StripPrefix("/cella", httputil.NewSingleHostReverseProxy(target)))
+	t.Cleanup(front.Close)
+	port := front.URL + "/cella/v1/sandboxes/" + obj.Status.ID + "/ports/web"
+	for _, method := range []string{"GET", "POST"} {
+		req, err := http.NewRequest(method, port+"?x=1", strings.NewReader("the body"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer "+f.alice)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = res.Body.Close() })
+		got := decodeSeen(t, res)
+		if res.Request.URL.Path != "/cella/v1/sandboxes/"+obj.Status.ID+"/ports/web/" {
+			t.Errorf("%s was redirected to %s, outside the prefix or without the slash", method, res.Request.URL)
+		}
+		if got.Method != method || got.RequestURI != "/?x=1" {
+			t.Errorf("%s reached the server inside as %s %s", method, got.Method, got.RequestURI)
+		}
+		if method == "POST" && got.Body != "the body" {
+			t.Errorf("the redirected POST carried %q", got.Body)
+		}
 	}
 }

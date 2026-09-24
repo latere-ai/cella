@@ -173,6 +173,7 @@ func New(o Options) (http.Handler, error) {
 	// The port proxy answers every method: what the server inside accepts is
 	// the server's, so the pattern names none.
 	h.stream(portProxyPattern, h.portProxy)
+	h.stream(portRedirectPattern, h.portRedirect)
 	h.stream("GET /v1/sandboxes/{id}/screenshot", h.screenshot)
 	h.stream("GET /v1/sandboxes/{id}/screen", h.screen)
 	// A page of the feed negotiates its syntax in the handler; a following
