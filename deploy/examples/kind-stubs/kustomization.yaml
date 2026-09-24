@@ -11,6 +11,11 @@
 # a stub that answers what its flags say; in a real one each of them is the
 # operator's.
 #
+# Beside them run the egress gateway, `cellad egress` with an environment
+# key up.sh mints at the control plane, and an upstream host a sandbox may
+# be allowed to reach, so the boundary of spec 018 is enforced and proved on
+# the cluster rather than recorded.
+#
 # The stubs are a container of the control plane's own Pod and not a
 # Deployment of their own. CELLA_AUTHORIZER_URL that is http:// on a host
 # other than loopback is a start-up failure with no escape hatch (spec
@@ -33,6 +38,8 @@ resources:
   - ../kind
   - secrets.yaml
   - service-stubs.yaml
+  - gateway.yaml
+  - upstream.yaml
 patches:
   - path: stubs-sidecar.yaml
     target:

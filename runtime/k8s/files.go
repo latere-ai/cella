@@ -167,6 +167,11 @@ func (d *Driver) transferPod(ctx context.Context, id string, spec driver.CreateS
 	if err != nil {
 		return "", nil, err
 	}
+	// The helper runs the sandbox's image, so it runs under the sandbox's
+	// rule, written again here for a sandbox stopped before it had one.
+	if err := d.putSandboxRule(ctx, id, spec.Mesh.ID); err != nil {
+		return "", nil, err
+	}
 	release := func() {
 		clean := context.WithoutCancel(ctx)
 		_ = d.deletePodNamed(clean, helper.Name)
@@ -193,16 +198,19 @@ func (d *Driver) transferPod(ctx context.Context, id string, spec driver.CreateS
 
 // helperPod renders the transfer Pod: the sandbox's image and baseline, its
 // claim, and a command that waits. It carries no id label, so List never reads
-// it as the sandbox's Pod.
+// it as the sandbox's Pod, and the sandbox label, so the sandbox's network
+// rule confines it as it confines the sandbox.
 func (d *Driver) helperPod(id string, spec driver.CreateSpec) (*corev1.Pod, error) {
-	// It carries no identity either: a transfer reaches the claim's files
-	// and never the sandbox's token.
-	pod, err := d.pod(spec, d.opts.Now().UTC(), false)
+	// It carries no identity and no gateway either: a transfer reaches the
+	// claim's files and never the sandbox's token, credential or authority.
+	bare := spec
+	bare.Egress = driver.Egress{}
+	pod, err := d.pod(bare, d.opts.Now().UTC(), false)
 	if err != nil {
 		return nil, err
 	}
 	pod.Name = objectName(id) + "-files"
-	pod.Labels = map[string]string{labelManagedBy: managedValue, labelHelper: id}
+	pod.Labels = map[string]string{labelManagedBy: managedValue, labelHelper: id, labelSandbox: id}
 	pod.Annotations = map[string]string{annOwner: spec.Owner, annImage: spec.Image}
 	pod.Spec.Containers[0].Command = keepAlive
 	pod.Spec.Containers[0].Args = nil

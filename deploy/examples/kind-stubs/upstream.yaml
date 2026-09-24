@@ -1,0 +1,72 @@
+# SPDX-FileCopyrightText: 2026 Latere AI
+# SPDX-License-Identifier: Apache-2.0
+#
+# The host a sandbox of this stack is allowed to reach, standing for any
+# upstream a manifest names: busybox's netcat writing back every byte each
+# connection sends, on port 80 of its Service. The gateway reaches it; a
+# sandbox reaches it only through the gateway, which is what the egress
+# cases of the kind tier prove. It is a test object and no installation
+# runs it.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cella-upstream
+  labels:
+    app.kubernetes.io/name: cella-upstream
+    app.kubernetes.io/component: test-upstream
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cella-upstream
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cella-upstream
+        app.kubernetes.io/component: test-upstream
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: upstream
+          image: docker.io/library/alpine:3.22
+          command: ["nc", "-lk", "-p", "8080", "-e", "cat"]
+          ports:
+            - name: echo
+              containerPort: 8080
+          readinessProbe:
+            tcpSocket:
+              port: echo
+            periodSeconds: 2
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cella-upstream
+  labels:
+    app.kubernetes.io/name: cella-upstream
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: cella-upstream
+  ports:
+    - name: echo
+      port: 80
+      targetPort: echo

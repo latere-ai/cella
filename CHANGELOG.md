@@ -44,6 +44,41 @@ refused before it is pushed.
   while a runtime brings a sandbox up. A create a restart interrupted is
   finished by the next process's first scheduler pass, and `Changed`
   returns a channel closed at the next write of any sandbox.
+- Sandboxes on Kubernetes can be confined to the egress gateway. Set
+  `CELLA_K8S_GATEWAY_SELECTOR` to the labels of the gateway's Pods, with
+  `CELLA_K8S_GATEWAY_NAMESPACE` and `CELLA_K8S_GATEWAY_PORTS` where they
+  differ from the sandbox namespace and `3128,8080`, and every sandbox runs
+  under a NetworkPolicy of its own that admits cluster DNS, the gateway and
+  the members of its own mesh, and nothing else. The environment then
+  enforces the `none`, `allowlist` and `open` boundaries: a manifest that
+  declares one no longer carries the warning, and `EgressEnforced` is true
+  once the gateway holds the sandbox's boundary. The workload container
+  carries `HTTPS_PROXY`, `HTTP_PROXY`, `CELLA_GATEWAY_URL` and the trust
+  variables, and the gateway's authority is at `/run/cella/egress-ca.pem`,
+  as on Podman. `CELLA_K8S_DNS_SELECTOR` and `CELLA_K8S_DNS_NAMESPACE` name
+  a cluster's DNS Pods where they are not `k8s-app=kube-dns` in
+  `kube-system`. The selector is refused at start without `CELLA_GATEWAY`,
+  and the other four without the selector. The cluster's network plugin has
+  to enforce NetworkPolicy, egress included.
+- Every sandbox on Kubernetes now runs under its own NetworkPolicy, gateway
+  or not: nothing in the cluster opens a connection to a sandbox's Pod
+  except the other members of its mesh. Commands, files, logs and ports are
+  unaffected; they reach the sandbox through the API server. The Role needs
+  no new access, since a policy is made with `create` and replaced or
+  removed with `delete` on `networkpolicies`, which it already grants. A
+  sandbox created before this release takes its policy at its next start.
+- Under that confinement a sandbox does not reach the control plane from
+  inside, so `cella` inside it cannot call the API, and a sandbox taken from
+  a warm pool carries none of the proxy variables until its next start,
+  because its container started before it had a gateway.
+- The conformance suite holds a declared egress boundary: with `egress` in
+  `-capabilities` and an `-upstream` host:port, it checks from inside a
+  sandbox that the upstream is reached through the sandbox's gateway, a
+  host off its allow list is refused, nothing is reached around the
+  gateway, and the refusal is in the sandbox's records.
+- The kind stack in `deploy/examples/kind-stubs` runs `cellad egress`, with
+  the environment key `up.sh` mints at the control plane, and an upstream
+  a sandbox may be allowed to reach.
 
 ## v0.5.0 - 2026-09-24
 

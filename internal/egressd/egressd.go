@@ -46,6 +46,13 @@ type Options struct {
 	// ProxyAddr and ReverseAddr are the two doors' listen addresses.
 	ProxyAddr   string
 	ReverseAddr string
+	// ProxyListener and ReverseListener, when set, are doors already bound,
+	// which the gateway serves on in place of listening at the two
+	// addresses. A caller that has to name the doors to the control plane
+	// before the gateway starts binds them first, so no other process can
+	// take a port between the choice and the bind.
+	ProxyListener   net.Listener
+	ReverseListener net.Listener
 	// CAPEM carries the authority the gateway terminates TLS with, both its
 	// certificate and its private key. An environment with several gateways
 	// sets the same value on each, so a sandbox trusts every one of them;
@@ -150,12 +157,18 @@ func New(ctx context.Context, o Options) (*Gateway, error) {
 	gw.proxy = &http.Server{Handler: http.HandlerFunc(g.ServeProxy), ReadHeaderTimeout: 30 * time.Second}
 	gw.reverse = &http.Server{Handler: http.HandlerFunc(g.ServeReverse), ReadHeaderTimeout: 30 * time.Second}
 	var listen net.ListenConfig
-	if gw.proxyLn, err = listen.Listen(ctx, "tcp", o.ProxyAddr); err != nil {
-		return nil, fmt.Errorf("CELLA_EGRESS_PROXY_ADDR: %w", err)
+	gw.proxyLn = o.ProxyListener
+	if gw.proxyLn == nil {
+		if gw.proxyLn, err = listen.Listen(ctx, "tcp", o.ProxyAddr); err != nil {
+			return nil, fmt.Errorf("CELLA_EGRESS_PROXY_ADDR: %w", err)
+		}
 	}
-	if gw.reverseLn, err = listen.Listen(ctx, "tcp", o.ReverseAddr); err != nil {
-		_ = gw.proxyLn.Close()
-		return nil, fmt.Errorf("CELLA_EGRESS_REVERSE_ADDR: %w", err)
+	gw.reverseLn = o.ReverseListener
+	if gw.reverseLn == nil {
+		if gw.reverseLn, err = listen.Listen(ctx, "tcp", o.ReverseAddr); err != nil {
+			_ = gw.proxyLn.Close()
+			return nil, fmt.Errorf("CELLA_EGRESS_REVERSE_ADDR: %w", err)
+		}
 	}
 	return gw, nil
 }

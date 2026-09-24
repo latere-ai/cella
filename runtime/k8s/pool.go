@@ -77,6 +77,7 @@ func (d *Driver) discard(ctx context.Context, id string) error {
 	ctx = context.WithoutCancel(ctx)
 	_ = d.deletePod(ctx, id)
 	_ = d.deleteToken(ctx, id)
+	_ = d.deleteSandboxRule(ctx, id)
 	err := d.cs.CoreV1().PersistentVolumeClaims(d.opts.Namespace).Delete(ctx, objectName(id), *d.deleteOptions())
 	if err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("discarding the entry %s: %w", id, err)
@@ -165,12 +166,23 @@ func labelPath(key string) string { return "/metadata/labels/" + jsonPointer(key
 
 // projectAdopted writes what the adopted sandbox holds inside itself and
 // stamps the Pod. The Secret is mounted by a projection the entry was rendered
-// with, so the kubelet syncs the file into the running container; the Pod's
-// labels follow the claim's so a cluster selecting on them sees one sandbox
-// and not an entry beside it.
+// with, listing the token and the gateway's authority, so the kubelet syncs
+// both files into the running container; the Pod's labels follow the claim's
+// so a cluster selecting on them sees one sandbox and not an entry beside it.
+// The proxy variables are not projected: a running container's environment
+// cannot change, so the adopted workload runs confined by the entry's rule
+// and is not pointed at the gateway until its next start, whose Pod is
+// rendered from the adopted record and carries them.
 func (d *Driver) projectAdopted(ctx context.Context, id string, adopted driver.CreateSpec, a driver.Adoption) error {
+	data := map[string][]byte{}
 	if len(a.Token) > 0 {
-		if err := d.putToken(ctx, id, a.Token); err != nil {
+		data[tokenKey] = a.Token
+	}
+	if a.Egress.CAPEM != "" {
+		data[authorityKey] = []byte(a.Egress.CAPEM)
+	}
+	if len(data) > 0 {
+		if err := d.putSecret(ctx, id, data); err != nil {
 			return fmt.Errorf("adopting %s: %w", id, err)
 		}
 	}

@@ -2,8 +2,8 @@
 # SPDX-FileCopyrightText: 2026 Latere AI
 # SPDX-License-Identifier: Apache-2.0
 #
-# The kind stack of spec 049: a cluster, the three images, this overlay, and
-# the URL and token to drive it with.
+# The kind stack of spec 049: a cluster, the three images, this overlay, the
+# egress gateway's key, and the URL and token to drive it with.
 #
 #   up.sh [-name <cluster>] [-manifests <deploy tree>]
 #
@@ -71,6 +71,31 @@ token=$(curl -fsS --retry 10 --retry-delay 1 --retry-all-errors -X POST http://l
   -H 'content-type: application/json' -d '{"sub":"dev"}' \
   | sed -e 's/.*"token":"//' -e 's/".*//')
 [ -n "$token" ] || { echo "the stub issuer minted nothing" >&2; exit 1; }
+
+# 5. The gateway's environment key, minted the way an operator mints one: at
+# the control plane, for the default environment, with an administrator's
+# token, which the stub issuer's subject is here. The key cannot exist
+# before the control plane does, so the gateway's container waited on its
+# Secret; it is restarted on the key and awaited until the control plane
+# counts it connected, so the first boundary a caller declares finds it.
+key=$(curl -fsS --retry 10 --retry-delay 1 --retry-all-errors -X POST http://localhost:30080/v1/environments/default/keys \
+  -H "authorization: Bearer $token" \
+  | sed -e 's/.*"token":"//' -e 's/".*//')
+[ -n "$key" ] || { echo "the control plane minted no environment key" >&2; exit 1; }
+kubectl -n cella create secret generic cellad-egress \
+  --from-literal=CELLA_ENVIRONMENT_KEY="$key" --dry-run=client -o yaml | kubectl apply -f - >&2
+kubectl -n cella rollout restart deploy/cellad-egress >&2
+kubectl -n cella rollout status deploy/cellad-egress --timeout=180s >&2
+kubectl -n cella rollout status deploy/cella-upstream --timeout=300s >&2
+connected=""
+for _ in $(seq 1 60); do
+  if curl -fsS http://localhost:30080/v1/environments/default -H "authorization: Bearer $token" | grep -q '"gateways":[1-9]'; then
+    connected=yes
+    break
+  fi
+  sleep 2
+done
+[ -n "$connected" ] || { echo "the gateway did not connect to the control plane" >&2; exit 1; }
 
 echo "CELLA_TEST_URL=http://localhost:30080"
 echo "CELLA_TEST_TOKEN=$token"

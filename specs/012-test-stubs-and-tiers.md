@@ -14,7 +14,7 @@ depends_on:
 affects: [test/stubs/, test/e2e/, test/conformance/, Makefile, Dockerfile.stubs, .github/workflows/, deploy/examples/kind/, internal/config/]
 effort: medium
 created: 2026-09-12
-updated: 2026-09-23
+updated: 2026-09-24
 author: changkun
 ---
 
@@ -176,6 +176,6 @@ conformance tier runs ([[015-conformance-suite]]).
 | The local tier reaches the upstream through the gateway with its placeholder substituted and cannot reach an unlisted host; the sandbox runtime's policy names only the gateway | `TestLocalEgress` | not built |
 | The worker tier runs the lifecycle on the worker's environment while the worker opens no listening socket and `cellad` opens no connection toward it | `TestWorkerLifecycle`, `TestWorkerNoInbound` | not built |
 | The podman tier runs the lifecycle and the driver's conformance suite rootless | `TestPodmanConformance` through `make tier-podman` | the driver's suite runs rootless in `verify` and in the release pipeline (048, 049); the API lifecycle over podman waits on `test/e2e` |
-| The kind tier runs the lifecycle with a Pod and a PVC observed, through Cilium-enforced policy, on both the in-process environment and the worker's; `up.sh` and `down.sh` leave nothing behind | `TestClusterLifecycle` over `deploy/examples/kind-stubs` | passing for the in-process environment (049): create, ready, exec, delete and the records at the sink, with `up.sh` and `down.sh` as the overlay's own. Cilium and the worker's half wait on the worker tier |
+| The kind tier runs the lifecycle with a Pod and a PVC observed, through enforced policy, on both the in-process environment and the worker's; `up.sh` and `down.sh` leave nothing behind | `TestClusterLifecycle` over `deploy/examples/kind-stubs` | passing for the in-process environment (049): create, ready, exec, delete and the records at the sink, with `up.sh` and `down.sh` as the overlay's own; the stack runs `cellad egress` with a key `up.sh` mints at the control plane and an echo upstream, and `TestClusterEgressBoundary`, `TestClusterNoLateralMovement` and `TestClusterMeshReachability` hold the policy the driver writes, which kind's own network plugin enforces from kind 0.24 on, so no Cilium is installed ([[070-k8s-egress]]). The worker's half waits on the worker tier |
 | Every tier binds `:0`, keeps state under `t.TempDir()`, tears down its containers, and leaves no `srt-mux-*.sock` | `TestTiersAreIsolated` | not built |
 | The verify workflow has one job per tier with the command from the table | `TestTheInstallJobWalksTheDocument`, `TestTheReleaseRunsTheStubsAndTheStack` | the `install` job runs the bootstrap tier, the conformance tier against the development stack and against the cluster, the document's walk and the kind tier on one cluster per run, and the release pipeline runs the kind stack, the suite over it and publishes `cella-stubs` (049, [[052-conformance-suite]]). The install job also runs the Kubernetes driver's dial and port cases against its cluster, and both kind jobs require the dial through the deployed control plane, `TestClusterDial` ([[065-k8s-dial]], `TestKindRunsDeclareDial`). One job per tier arrives with the tiers that are not built |

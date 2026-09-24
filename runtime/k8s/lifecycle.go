@@ -62,6 +62,13 @@ func (d *Driver) Create(ctx context.Context, s driver.CreateSpec) (driver.Ref, e
 	// the caller hung up, so it drops the cancellation it inherited: a
 	// cancelled context makes each cleanup a no-op and leaks both objects.
 	rollback := func() { _ = d.remove(context.WithoutCancel(ctx), s.ID) }
+	// The sandbox's own network rule is in the cluster before its Pod, so
+	// the Pod is confined from its first packet (spec 018). It is made
+	// after the claim, so the rollback above reaches it.
+	if err := d.putSandboxRule(ctx, s.ID, s.Mesh.ID); err != nil {
+		rollback()
+		return driver.Ref{}, err
+	}
 	// The mesh's policy and Service are in the cluster before the Pod that
 	// belongs to them, so a member is reachable by its peers and by nothing
 	// else from the moment it starts (spec 022). They are made after the
@@ -71,11 +78,21 @@ func (d *Driver) Create(ctx context.Context, s driver.CreateSpec) (driver.Ref, e
 		rollback()
 		return driver.Ref{}, err
 	}
-	// The identity is in the cluster before the Pod that mounts it, so the
-	// workload's first read finds the token rather than an empty directory
-	// the kubelet fills a moment later (spec 006).
+	// The identity and the gateway's authority are in the cluster before
+	// the Pod that mounts them, so the workload's first read finds the
+	// token and its first request trusts the door it is pointed at, rather
+	// than an empty directory the kubelet fills a moment later (specs 006
+	// and 018). A prewarmed entry's Secret carries an empty token, which an
+	// adoption replaces.
+	data := map[string][]byte{}
 	if token {
-		if err := d.putToken(ctx, s.ID, s.Token); err != nil {
+		data[tokenKey] = s.Token
+	}
+	if s.Egress.CAPEM != "" {
+		data[authorityKey] = []byte(s.Egress.CAPEM)
+	}
+	if len(data) > 0 {
+		if err := d.putSecret(ctx, s.ID, data); err != nil {
 			rollback()
 			return driver.Ref{}, err
 		}
@@ -114,6 +131,12 @@ func (d *Driver) Start(ctx context.Context, id string) error {
 	}
 	spec, err := specOf(pvc)
 	if err != nil {
+		return err
+	}
+	// The rule is written again before the new Pod, so a sandbox created
+	// before the driver's options named the gateway, or under other ones,
+	// starts under the rule they describe now.
+	if err := d.putSandboxRule(ctx, id, spec.Mesh.ID); err != nil {
 		return err
 	}
 	started := d.opts.Now().UTC()
@@ -187,6 +210,10 @@ func (d *Driver) remove(ctx context.Context, id string) error {
 	}); err != nil {
 		return err
 	}
+	// The rule goes once no Pod of the sandbox is left for it to confine.
+	if err := d.deleteSandboxRule(ctx, id); err != nil {
+		return err
+	}
 	return d.leaveMesh(ctx, id, mesh)
 }
 
@@ -234,7 +261,7 @@ func (d *Driver) Update(ctx context.Context, id string, c driver.Change) error {
 		if _, err := d.getClaim(ctx, id); err != nil {
 			return err
 		}
-		if err := d.putToken(ctx, id, c.Token); err != nil {
+		if err := d.putSecret(ctx, id, map[string][]byte{tokenKey: c.Token}); err != nil {
 			return err
 		}
 	}

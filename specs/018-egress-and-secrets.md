@@ -10,7 +10,7 @@ depends_on:
 affects: [manifest/v1/, egress/, internal/egressd/, internal/api/, internal/store/, internal/config/, runtime/]
 effort: large
 created: 2026-09-12
-updated: 2026-09-21
+updated: 2026-09-24
 author: changkun
 ---
 
@@ -51,7 +51,9 @@ records are built by [[039-egress-gateway]]; the `Secret` kind, its
 store and the values it substitutes are [[046-secret-kind]], and the
 `Records` store surface, the metrics and the journal path are 042's and
 010's. Both slices' Outcomes record where they read this spec
-differently.
+differently. The driver's half on k8s, the NetworkPolicy per sandbox and
+the gateway projected into the Pod, is [[070-k8s-egress]], which admits
+DNS and the gateway and not `cellad`, and writes no sidecar.
 `pkg/egress` today holds the substitution engine (`Map`,
 `Entry` with placeholder, secret, allowed hosts, an optional resolver
 and a body flag; `SubstituteHTTPRequestContext` over header values,
@@ -401,5 +403,6 @@ The `Volume` kind ([[019-volumes]]); the worker's own stream
 | Every connection yields one record with the fields named and never a header, body, value, placeholder, or credential; a sandbox's records are served newest first; the counters move; under a flood the ring keeps the cap and the journal's lifecycle events are untouched; events reach the sink only with `CELLA_EVENTS_EGRESS=1` | `TestRecordNormalize`, `TestRecordsAreKeptPerSandboxNewestFirst`, `TestTheRecordsRouteIsTheSandboxOwnersToRead` | [[039-egress-gateway]]: the fields, the ring and the route; the counters, the journal and the sink are open |
 | Updating a value reaches a running sandbox's next request without a restart; deleting it marks the sandbox `notInjectable` and its next request leaves unauthenticated | `TestLiveUpdateAndRevoke`, `TestRotationAndRevocationReachTheGateway` | [[046-secret-kind]]: passing |
 | A workload token cannot add a host, remove a denied host, or add a secret to its own sandbox; the owner can | `TestNarrowingIsForWorkloads`, `TestAWorkloadCannotMountASecret` | [[039-egress-gateway]]: `TestNarrowingIsForWorkloads`; [[046-secret-kind]]: `TestAWorkloadCannotMountASecret` |
-| On `local`, the sandbox runtime's policy names only the gateway and a request to an allowed host succeeds through the chain; on k8s, a sandbox reaches an allowed host through each door and cannot reach a disallowed host, another sandbox, or the Pod network | `TestLocalEgress`, e2e `TestClusterEgressBoundary` | not built |
+| On `local`, the sandbox runtime's policy names only the gateway and a request to an allowed host succeeds through the chain | `TestLocalEgress` | not built |
+| On k8s, a sandbox reaches an allowed host through its proxy door and cannot reach a disallowed host, another sandbox, or an upstream around the gateway | `TestClusterEgressBoundary`, `TestClusterNoLateralMovement`, conformance case `case018EgressEnforced` | [[070-k8s-egress]]: passing against a local kind cluster, and both kind jobs require it; the reverse door on the cluster is open, since it reaches an upstream over TLS on 443 and the tier's upstream serves neither; the Pod network through the gateway is the gateway's own egress rule, which the operator writes |
 | The reserved key list in `egress` equals `manifest`'s; `egress` imports no package that dials | `TestReservedKeysMatchTheGateway`, `TestRootPackagesDialNothing` | [[039-egress-gateway]]: `TestReservedKeysMatchTheGateway`, `TestRootPackagesDialNothing` |

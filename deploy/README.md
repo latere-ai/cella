@@ -88,7 +88,7 @@ else, all in the one namespace:
 | `pods/log` | `get` | a sandbox's output |
 | `pods/portforward` | `get`, `create` | the dial socket, the port proxy and `cella port-forward` |
 | `secrets` | `create`, `get`, `update`, `delete` | the workload token of each sandbox, never a secret value, which stays sealed in the store under `CELLA_SECRET_KEY` |
-| `services`, `networkpolicies` | `create`, `delete` | one headless Service and one policy per mesh |
+| `services`, `networkpolicies` | `create`, `delete` | one headless Service and one policy per mesh, and one policy per sandbox, replaced by a delete and a create |
 
 `pods/exec` and `pods/portforward` each need both verbs. The driver opens
 each session over a WebSocket and falls back to the older SPDY upgrade
@@ -105,7 +105,9 @@ than found at the first create or the first dial.
 It grants no `watch` (the driver lists and gets) and nothing cluster-wide.
 Reaching a port inside a sandbox needs no NetworkPolicy rule: the kubelet
 opens the connection inside the sandbox Pod, and `cellad` only talks to the
-API server, on the port its own egress rule already admits.
+API server, on the port its own egress rule already admits. The policy of
+each sandbox, which admits no inbound connection but a mesh peer's, does
+not stand in the way for the same reason.
 
 The Deployment reads `CELLA_K8S_NAMESPACE` from the downward API, so
 sandbox Pods and claims land in the namespace the overlay set and the Role
@@ -170,5 +172,29 @@ when the metrics land.
 enforces a sandbox's network boundary. This base deploys the control plane
 alone. An installation that wants a boundary runs a second Deployment of
 the same image with `args: ["egress"]`, `CELLA_URL` pointing at the
-control plane, and the `cellad-egress` Secret, and sets `CELLA_GATEWAY` in
-the ConfigMap to the doors that Deployment serves.
+control plane, and the `cellad-egress` Secret, and sets three values in the
+ConfigMap:
+
+| Key | Value |
+|---|---|
+| `CELLA_GATEWAY`, `CELLA_GATEWAY_REVERSE` | the two doors as a sandbox dials them, usually the gateway's Service |
+| `CELLA_K8S_GATEWAY_SELECTOR` | the labels of the gateway's Pods, for example `app.kubernetes.io/name=cellad-egress` |
+| `CELLA_K8S_GATEWAY_NAMESPACE`, `CELLA_K8S_GATEWAY_PORTS` | only where the gateway runs in another namespace, or its Pods listen on other ports than `3128` and `8080` |
+
+With the labels named, the driver writes a NetworkPolicy for every sandbox
+that admits cluster DNS, the gateway's Pods and the sandbox's own mesh
+peers, and nothing else, and the environment enforces the `none`,
+`allowlist` and `open` boundaries. Without them each sandbox's policy
+admits no inbound connection and limits nothing outbound, and a boundary is
+recorded and not enforced. The cluster's network plugin has to enforce
+NetworkPolicy, egress included.
+
+The environment key is minted at the control plane once it runs,
+`POST /v1/environments/<name>/keys` with an administrator's token, so the
+gateway's Deployment starts after the control plane's. The gateway's own
+Pods want two policies of the installation's: ingress on the two doors
+from the sandboxes alone, and egress to the upstreams sandboxes may reach
+and to the control plane's URL, with the cluster's private ranges left out
+so the gateway is no route into the cluster.
+`examples/kind-stubs/gateway.yaml` is the test stack's gateway, and
+`examples/kind-stubs/up.sh` mints its key.

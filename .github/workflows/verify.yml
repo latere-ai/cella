@@ -130,6 +130,9 @@ jobs:
           go test -tags=e2e -count=1 -v -timeout 30m -run '^TestCluster' ./test/kind/... 2>&1 | tee kind.txt
           grep -q -- '--- PASS: TestClusterLifecycle' kind.txt
           grep -q -- '--- PASS: TestClusterDial' kind.txt
+          grep -q -- '--- PASS: TestClusterEgressBoundary' kind.txt
+          grep -q -- '--- PASS: TestClusterNoLateralMovement' kind.txt
+          grep -q -- '--- PASS: TestClusterMeshReachability' kind.txt
       # The Kubernetes driver's own dial and port cases against the same
       # cluster, from the runner through the kubeconfig kind wrote. They run
       # in a namespace of their own, because the suite's cleanup deletes
@@ -150,15 +153,17 @@ jobs:
       # Kubernetes environment, with the subjects minted at the stub issuer's
       # node port and the capabilities that driver declares. The stack names
       # a display image, so the desktop and its input are declared and the
-      # computer-use case runs on the cluster.
+      # computer-use case runs on the cluster; it names the gateway's Pods,
+      # so egress is declared and the enforcement case runs against the
+      # stack's upstream.
       - name: The conformance suite against the kind stack
         shell: bash
         run: |
           set -o pipefail
           go test -tags=e2e -count=1 -v -timeout 30m -run '^TestContract$' ./test/conformance -args \
             -url "${CELLA_TEST_URL}" -issuer http://localhost:30081 -sink "${CELLA_TEST_SINK}" \
-            -image docker.io/library/alpine:3.22 -capabilities files,pool,mesh,attach,dial,display,input \
-            -display-image cella-display:dev \
+            -image docker.io/library/alpine:3.22 -capabilities files,pool,mesh,attach,dial,display,input,egress \
+            -display-image cella-display:dev -upstream cella-upstream.cella.svc:80 \
             -known known.json 2>&1 | tee conformance-kind.txt
           grep -q -- '--- PASS: TestContract' conformance-kind.txt
       # The stack's check Job ran when up.sh applied the overlay, before the
@@ -187,3 +192,4 @@ jobs:
           kubectl -n cella describe pod -l app.kubernetes.io/name=cellad || true
           kubectl -n cella logs deploy/cellad --tail=200 || true
           kubectl -n cella logs deploy/cellad -c stubs --tail=200 || true
+          kubectl -n cella logs deploy/cellad-egress --tail=200 || true

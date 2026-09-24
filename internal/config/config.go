@@ -189,6 +189,11 @@ func Load(getenv Getenv) (Config, error) {
 	}
 	if c.Runtime == RuntimeK8s {
 		c.K8s = loadK8s(getenv, &problems)
+		// A sandbox confined to the gateway reaches nothing unless it is
+		// pointed at the gateway, which is what CELLA_GATEWAY does.
+		if len(c.K8s.Gateway.Labels) > 0 && c.Gateway.ProxyAddr == "" {
+			problems = append(problems, "CELLA_K8S_GATEWAY_SELECTOR is set without CELLA_GATEWAY; a sandbox confined to the gateway is pointed at it by CELLA_GATEWAY")
+		}
 	}
 	c.DriftDefault = loadDriftDefault(getenv, c.Runtime, &problems)
 	if c.Runtime == RuntimeNative && !c.AllowUnsafeNative {

@@ -26,6 +26,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -114,6 +115,14 @@ type Options struct {
 	// own request would take the workload's memory. Empty falls back to the
 	// driver's defaults for a sandbox that names none.
 	DisplayResources driver.Resources
+	// Gateway is the egress gateway's Pods and DNS the cluster's resolver,
+	// the two peers a sandbox's network rule admits egress to (spec 018).
+	// With no gateway labels the driver confines no egress and declares no
+	// egress mode: a sandbox confined to DNS alone would reach nothing while
+	// its condition said the boundary was not enforced. The gateway's
+	// namespace defaults to Namespace and its ports to the two doors'
+	// listen defaults; DNS defaults to kube-system, k8s-app=kube-dns, 53.
+	Gateway, DNS Peer
 
 	// The three fields below are seams, not configuration: no variable sets
 	// them, internal/config leaves them zero, and a deployment is described
@@ -163,7 +172,7 @@ func (o Options) withDefaults() Options {
 	if o.Now == nil {
 		o.Now = func() time.Time { return time.Now().UTC() }
 	}
-	return o
+	return o.withPeerDefaults()
 }
 
 // Driver implements runtime.Driver against one namespace of one cluster.
@@ -183,6 +192,14 @@ func New(opts Options) (*Driver, error) {
 	opts = opts.withDefaults()
 	if opts.CPURequestRatio > 1 || opts.MemoryRequestRatio > 1 {
 		return nil, fmt.Errorf("%w: request ratios are fractions of the limit", driver.ErrInvalid)
+	}
+	for _, peer := range []struct {
+		name string
+		p    Peer
+	}{{"gateway", opts.Gateway}, {"DNS", opts.DNS}} {
+		if err := peer.p.Check(); err != nil {
+			return nil, fmt.Errorf("%w: the %s peer: %w", driver.ErrInvalid, peer.name, err)
+		}
 	}
 	cs := opts.Client
 	cfg := opts.REST
@@ -266,11 +283,18 @@ func (d *Driver) Isolation() string { return "container" }
 // subresource reaches a declared port from inside the Pod. Display and Input
 // follow the display image: with none configured there is no desktop to
 // give, and declaring one would push the refusal from resolve, where it names
-// the field, to create, where it names nothing. Egress, resize, volumes and
-// snapshots each land with the slice that builds them.
+// the field, to create, where it names nothing. Egress follows the gateway:
+// with its Pods named, every sandbox runs under a NetworkPolicy that leaves
+// the gateway as the only way out, which is the one rule all three modes
+// need; with none, nothing confines egress and no mode is declared. Resize,
+// volumes and snapshots each land with the slice that builds them.
 func (d *Driver) Capabilities() driver.Capabilities {
 	desktop := d.opts.DisplayImage != ""
-	return driver.Capabilities{Files: true, Pool: true, Mesh: true, Attach: true, Dial: true, Display: desktop, Input: desktop}
+	caps := driver.Capabilities{Files: true, Pool: true, Mesh: true, Attach: true, Dial: true, Display: desktop, Input: desktop}
+	if d.confines() {
+		caps.Egress = slices.Clone(egressModes)
+	}
+	return caps
 }
 
 // verbs are the accesses the driver uses, checked one review each so a missing
@@ -291,7 +315,9 @@ var verbs = []struct{ group, resource, subresource, verb string }{
 	{"", "persistentvolumeclaims", "", "create"}, {"", "persistentvolumeclaims", "", "delete"},
 	{"", "persistentvolumeclaims", "", "patch"},
 	// The mesh of spec 022: one headless Service and one NetworkPolicy per
-	// mesh, made with its first member and removed with its last.
+	// mesh, made with its first member and removed with its last. The rule
+	// of each sandbox (spec 018) is a NetworkPolicy too, replaced by a
+	// delete and a create, so it needs no verb beyond these two.
 	{"", "services", "", "create"}, {"", "services", "", "delete"},
 	{networkGroup, "networkpolicies", "", "create"}, {networkGroup, "networkpolicies", "", "delete"},
 	// The workload token of spec 006: one Secret per sandbox, projected on

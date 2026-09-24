@@ -131,4 +131,13 @@ func sweep(t *testing.T, d *Driver) {
 			t.Logf("cleaning up the secret %s: %v", secret.Name, err)
 		}
 	}
+	rules, err := d.cs.NetworkingV1().NetworkPolicies(d.opts.Namespace).List(ctx, metav1.ListOptions{LabelSelector: labelSandbox})
+	if err != nil {
+		return
+	}
+	for _, rule := range rules.Items {
+		if err := d.cs.NetworkingV1().NetworkPolicies(d.opts.Namespace).Delete(ctx, rule.Name, metav1.DeleteOptions{}); err != nil {
+			t.Logf("cleaning up the rule %s: %v", rule.Name, err)
+		}
+	}
 }

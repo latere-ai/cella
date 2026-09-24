@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kruntime "k8s.io/apimachinery/pkg/runtime"
@@ -124,7 +125,8 @@ func TestMeshLifetime(t *testing.T) {
 }
 
 // TestMeshlessSandboxMakesNoMeshObject: a sandbox in no mesh leaves the
-// cluster with no policy and no Service of its own.
+// cluster with no mesh policy and no Service of its own. Its own network
+// rule is the sandbox's and not a mesh's.
 func TestMeshlessSandboxMakesNoMeshObject(t *testing.T) {
 	h := newHarness(t)
 	ctx := t.Context()
@@ -139,8 +141,14 @@ func TestMeshlessSandboxMakesNoMeshObject(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(services.Items) != 0 || len(policies.Items) != 0 {
-		t.Fatalf("the cluster holds %d services and %d policies, want none", len(services.Items), len(policies.Items))
+	var mesh []string
+	for _, p := range policies.Items {
+		if p.Name != sandboxRuleName("sbx_alone") {
+			mesh = append(mesh, p.Name)
+		}
+	}
+	if len(services.Items) != 0 || len(mesh) != 0 {
+		t.Fatalf("the cluster holds %d services and the policies %v, want none", len(services.Items), mesh)
 	}
 	if err = h.Delete(ctx, "sbx_alone"); err != nil {
 		t.Fatal(err)
@@ -193,7 +201,10 @@ func (h *harness) meshHeld(t *testing.T, name string, want bool) {
 func TestMeshJoinFailureLeavesNoObjects(t *testing.T) {
 	h := newHarness(t)
 	ctx := t.Context()
-	h.cs.PrependReactor("create", "networkpolicies", func(k8stesting.Action) (bool, kruntime.Object, error) {
+	h.cs.PrependReactor("create", "networkpolicies", func(action k8stesting.Action) (bool, kruntime.Object, error) {
+		if action.(k8stesting.CreateAction).GetObject().(*networkingv1.NetworkPolicy).Name != driver.MeshObjectName(testMesh) {
+			return false, nil, nil
+		}
 		return true, nil, errors.New("the cluster refused the policy")
 	})
 	if _, err := h.Create(ctx, meshSpec("sbx_one", "planner")); err == nil {

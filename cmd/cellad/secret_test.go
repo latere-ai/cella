@@ -48,7 +48,8 @@ func TestSecretValuesNeverEnterASandbox(t *testing.T) {
 	trust.AddCert(upstream.Certificate())
 
 	sink := newStubSink(t, "only-secret")
-	proxyAddr, reverseAddr := freePort(t), freePort(t)
+	proxyLn, reverseLn := doors(t)
+	proxyAddr, reverseAddr := proxyLn.Addr().String(), reverseLn.Addr().String()
 	plane := startPlaneWith(t, proxyAddr, reverseAddr, map[string]string{
 		// A control plane that stores a value needs the key that seals it.
 		"CELLA_SECRET_KEY":    base64.StdEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef")),
@@ -59,7 +60,7 @@ func TestSecretValuesNeverEnterASandbox(t *testing.T) {
 	var gatewayLog syncBuffer
 	ready := make(chan struct{})
 	startGateway(t, plane, egressd.Options{
-		ProxyAddr: proxyAddr, ReverseAddr: reverseAddr,
+		ProxyListener: proxyLn, ReverseListener: reverseLn,
 		UpstreamCAPEM: certificatePEM(t, upstream),
 		Dial:          dialTo(upstream.Listener.Addr().String()),
 		Log:           slog.New(slog.NewTextHandler(&gatewayLog, &slog.HandlerOptions{Level: slog.LevelDebug})),

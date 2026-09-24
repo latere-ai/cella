@@ -14,6 +14,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"latere.ai/x/cella/egress"
 	driver "latere.ai/x/cella/runtime"
 )
 
@@ -62,8 +63,12 @@ func TestTokenIsASecretProjectedReadOnly(t *testing.T) {
 	if source.Optional == nil || !*source.Optional {
 		t.Error("the projected secret is required, so a Pod outlives its own identity badly")
 	}
-	if len(source.Items) != 1 || source.Items[0].Key != tokenKey || source.Items[0].Path != path.Base(driver.TokenPath) {
-		t.Errorf("the projected items are %v, want the token at %s", source.Items, driver.TokenPath)
+	// The token and the gateway's authority, each at its reserved path, the
+	// authority readable by every user of the sandbox.
+	if len(source.Items) != 2 || source.Items[0].Key != tokenKey || source.Items[0].Path != path.Base(driver.TokenPath) ||
+		source.Items[1].Key != authorityKey || source.Items[1].Path != path.Base(egress.CAPath) ||
+		source.Items[1].Mode == nil || *source.Items[1].Mode != authorityMode {
+		t.Errorf("the projected items are %v, want the token at %s and the authority at %s", source.Items, driver.TokenPath, egress.CAPath)
 	}
 	if volume.Projected.DefaultMode == nil || *volume.Projected.DefaultMode != tokenMode {
 		t.Errorf("the projected mode is %v, want %o", volume.Projected.DefaultMode, tokenMode)

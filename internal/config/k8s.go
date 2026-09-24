@@ -42,7 +42,59 @@ func loadK8s(getenv Getenv, problems *[]string) k8s.Options {
 			Memory: sized(getenv, "CELLA_K8S_DISPLAY_MEMORY", "", problems),
 		},
 	}
+	o.Gateway, o.DNS = loadPeers(getenv, problems)
 	return o
+}
+
+// loadPeers reads the two peers of a sandbox's network rule (spec 018): the
+// gateway's Pods and cluster DNS. The gateway's selector is the switch.
+// Without it the driver confines no egress, so a value set for the rule's
+// other parts describes a rule that is never written, and is a problem
+// rather than a setting that silently does nothing. Every default is the
+// driver's own.
+func loadPeers(getenv Getenv, problems *[]string) (gateway, dns k8s.Peer) {
+	gateway = k8s.Peer{
+		Labels:    pairs(getenv, "CELLA_K8S_GATEWAY_SELECTOR", problems),
+		Namespace: strings.TrimSpace(getenv("CELLA_K8S_GATEWAY_NAMESPACE")),
+		Ports:     portList(getenv, "CELLA_K8S_GATEWAY_PORTS", problems),
+	}
+	dns = k8s.Peer{
+		Labels:    pairs(getenv, "CELLA_K8S_DNS_SELECTOR", problems),
+		Namespace: strings.TrimSpace(getenv("CELLA_K8S_DNS_NAMESPACE")),
+	}
+	if len(gateway.Labels) == 0 {
+		for _, name := range []string{"CELLA_K8S_GATEWAY_NAMESPACE", "CELLA_K8S_GATEWAY_PORTS", "CELLA_K8S_DNS_SELECTOR", "CELLA_K8S_DNS_NAMESPACE"} {
+			if strings.TrimSpace(getenv(name)) != "" {
+				*problems = append(*problems, name+" is set without CELLA_K8S_GATEWAY_SELECTOR; the egress rule it describes is written only once the gateway's Pods are named")
+			}
+		}
+		return gateway, dns
+	}
+	for _, part := range []struct {
+		name string
+		peer k8s.Peer
+	}{
+		{"CELLA_K8S_GATEWAY_SELECTOR", k8s.Peer{Labels: gateway.Labels}},
+		{"CELLA_K8S_GATEWAY_NAMESPACE", k8s.Peer{Namespace: gateway.Namespace}},
+		{"CELLA_K8S_DNS_SELECTOR", k8s.Peer{Labels: dns.Labels}},
+		{"CELLA_K8S_DNS_NAMESPACE", k8s.Peer{Namespace: dns.Namespace}},
+	} {
+		if err := part.peer.Check(); err != nil {
+			*problems = append(*problems, part.name+": "+err.Error())
+		}
+	}
+	return gateway, dns
+}
+
+// portList reads a comma-separated list of ports. Empty is the driver's
+// default.
+func portList(getenv Getenv, name string, problems *[]string) []int32 {
+	ports, err := k8s.ParsePorts(getenv(name))
+	if err != nil {
+		*problems = append(*problems, name+" holds "+err.Error())
+		return nil
+	}
+	return ports
 }
 
 // sized reads one of the driver's compute amounts through quantity, the

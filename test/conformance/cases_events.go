@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -35,9 +36,14 @@ func secretCases() []Case {
 	}
 }
 
-// egressCases prove the record of what left a sandbox.
+// egressCases prove the record of what left a sandbox, and, where the
+// environment declares egress, that nothing left it but through its
+// gateway.
 func egressCases() []Case {
-	return []Case{{"egress", "case018EgressRecords", case018EgressRecords}}
+	return []Case{
+		{"egress", "case018EgressRecords", case018EgressRecords},
+		{"egress", "case018EgressEnforced", case018EgressEnforced},
+	}
 }
 
 // record is one event as design 009 puts it on the wire.
@@ -372,6 +378,146 @@ func case018EgressRecords(ctx context.Context, e *Env) error {
 		return x.disagree("items as a list, empty where nothing left the sandbox", "no items member")
 	}
 	return nil
+}
+
+// deniedHost is the host the enforcement case asks for off the allow list.
+// It is an example name: the gateway refuses it before any dial, so it needs
+// no address.
+const deniedHost = "denied.example.com"
+
+// egressProbe runs inside the sandbox with the upstream as $1 and the denied
+// host as $2, and prints three lines: the gateway's status line to a CONNECT
+// through the sandbox's own proxy door for each host, and how many bytes a
+// request sent straight to the upstream got back. The proxy door and the
+// credential are read off HTTPS_PROXY, as any client that honors it reads
+// them. It needs a shell, netcat and base64, which is what a busybox image
+// has, and says which it lacks otherwise.
+const egressProbe = `up=$1 denied=$2
+for tool in nc base64; do
+  command -v "$tool" >/dev/null 2>&1 || { echo "missing $tool"; exit 3; }
+done
+[ -n "$HTTPS_PROXY" ] || { echo "missing HTTPS_PROXY"; exit 3; }
+door=${HTTPS_PROXY#*://}
+auth=${door%@*}
+door=${door##*@}
+door=${door%/}
+basic=$(printf %s "$auth" | base64 | tr -d '\n')
+connect() {
+  { printf 'CONNECT %s HTTP/1.1\r\nHost: %s\r\nProxy-Authorization: Basic %s\r\nConnection: close\r\n\r\n' "$1" "$1" "$basic"; sleep 2; } |
+    nc -w 5 "${door%:*}" "${door##*:}" 2>/dev/null | head -n 1 | tr -d '\r'
+}
+case $up in *:*) host=${up%:*} port=${up##*:} ;; *) host=$up port=443 ;; esac
+echo "allowed $(connect "$host:$port")"
+echo "denied $(connect "$denied:443")"
+echo "direct $({ printf 'GET / HTTP/1.0\r\n\r\n'; sleep 2; } | nc -w 5 "$host" "$port" 2>/dev/null | wc -c | tr -d ' ')"
+`
+
+// case018EgressEnforced: where the environment declares egress, a sandbox
+// whose allow list names the upstream reports the boundary enforced; from
+// inside it, a CONNECT through its own proxy door reaches the upstream, one
+// to a host off the list is refused, a request sent straight to the upstream
+// gets nothing back, and the refused connection is in its records.
+func case018EgressEnforced(ctx context.Context, e *Env) error {
+	if err := e.need("egress"); err != nil {
+		return err
+	}
+	upstream := strings.TrimSpace(e.cfg.Upstream)
+	if upstream == "" {
+		return skipf("no upstream: set Upstream to a host:port the sandbox may reach")
+	}
+	host := upstream
+	if h, _, err := net.SplitHostPort(upstream); err == nil {
+		host = h
+	}
+	obj, err := e.sandbox(ctx, e.caller, func(body map[string]any) {
+		spec, _ := body["spec"].(map[string]any)
+		spec["network"] = map[string]any{"egress": map[string]any{"mode": "allowlist", "allowedHosts": []string{host}}}
+	})
+	if err != nil {
+		return err
+	}
+	x, err := e.caller.get(ctx, "/v1/sandboxes/"+obj.Status.ID)
+	if err != nil {
+		return err
+	}
+	if err := x.status(http.StatusOK); err != nil {
+		return err
+	}
+	var read struct {
+		Status struct {
+			Conditions []struct {
+				Type   string `json:"type"`
+				Status string `json:"status"`
+				Reason string `json:"reason"`
+			} `json:"conditions"`
+		} `json:"status"`
+	}
+	if err := json.Unmarshal(x.Body, &read); err != nil {
+		return x.disagree("a sandbox with its conditions", err.Error())
+	}
+	enforced := false
+	for _, c := range read.Status.Conditions {
+		enforced = enforced || (c.Type == "EgressEnforced" && c.Status == "True")
+	}
+	if !enforced {
+		return x.disagree("EgressEnforced True on an environment that declares egress", "the conditions "+string(x.Body))
+	}
+	result, x, err := e.exec(ctx, e.caller, obj.Status.ID, "/bin/sh", "-c", egressProbe, "probe", upstream, deniedHost)
+	if err != nil {
+		return err
+	}
+	if strings.HasPrefix(result.Stdout, "missing ") {
+		return skipf("the sandbox's image cannot run the probe: %s", strings.TrimSpace(result.Stdout))
+	}
+	answers := map[string]string{}
+	for line := range strings.SplitSeq(result.Stdout, "\n") {
+		if key, value, ok := strings.Cut(line, " "); ok {
+			answers[key] = value
+		}
+	}
+	switch {
+	case !strings.Contains(answers["allowed"], " 200"):
+		return x.disagree("200 from the gateway to a CONNECT toward "+upstream+", which the allow list names", "the answers "+result.Stdout)
+	case !strings.Contains(answers["denied"], " 403"):
+		return x.disagree("403 from the gateway to a CONNECT toward "+deniedHost+", which the allow list does not name", "the answers "+result.Stdout)
+	case answers["direct"] != "0":
+		return x.disagree("nothing back from a request sent to "+upstream+" around the gateway", "the answers "+result.Stdout)
+	}
+	return e.awaitRecord(ctx, obj.Status.ID, deniedHost, "denied")
+}
+
+// awaitRecord polls a sandbox's connection records until one names the host
+// with the decision. The gateway reports on its own stream, so a record
+// arrives a moment after the connection it describes.
+func (e *Env) awaitRecord(ctx context.Context, id, host, decision string) error {
+	for {
+		x, err := e.caller.get(ctx, "/v1/sandboxes/"+id+"/egress?limit=50")
+		if err != nil {
+			return err
+		}
+		if err := x.status(http.StatusOK); err != nil {
+			return err
+		}
+		var page struct {
+			Items []struct {
+				Host     string `json:"host"`
+				Decision string `json:"decision"`
+			} `json:"items"`
+		}
+		if err := json.Unmarshal(x.Body, &page); err != nil {
+			return x.disagree("a list of connection records", err.Error())
+		}
+		for _, r := range page.Items {
+			if r.Host == host && r.Decision == decision {
+				return nil
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return x.disagree("a record of the connection to "+host+" as "+decision, "the records "+string(x.Body))
+		case <-time.After(pollInterval):
+		}
+	}
 }
 
 // secret is the body of one Secret apply: the smallest manifest the kind

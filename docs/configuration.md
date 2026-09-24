@@ -98,9 +98,17 @@ PersistentVolumeClaim and one Pod in the namespace below.
 | `CELLA_K8S_DISPLAY_IMAGE` | unset | the desktop image, `ghcr.io/<owner>/cella-display:<tag>` from the same release. Set, a sandbox that asks for `display` gets a screen, screenshots, and input; unset, such a manifest is refused |
 | `CELLA_K8S_DISPLAY_CPU` | the default cpu | the cpu limit of the desktop container |
 | `CELLA_K8S_DISPLAY_MEMORY` | the default memory | the memory limit of the desktop container |
+| `CELLA_K8S_GATEWAY_SELECTOR` | unset | `key=value` labels of the egress gateway's Pods. Set, every sandbox reaches the network only through the gateway and the environment enforces the `none`, `allowlist` and `open` boundaries; unset, a boundary is recorded and not enforced. Needs `CELLA_GATEWAY` |
+| `CELLA_K8S_GATEWAY_NAMESPACE` | the sandbox namespace | the namespace the gateway's Pods run in |
+| `CELLA_K8S_GATEWAY_PORTS` | `3128,8080` | the ports the gateway's Pods listen on, which are the gateway's `CELLA_EGRESS_PROXY_ADDR` and `CELLA_EGRESS_REVERSE_ADDR`, not the ports of its Service |
+| `CELLA_K8S_DNS_SELECTOR` | `k8s-app=kube-dns` | `key=value` labels of the cluster's DNS Pods, which a sandbox reaches to resolve the gateway |
+| `CELLA_K8S_DNS_NAMESPACE` | `kube-system` | the namespace the DNS Pods run in |
+
+The last four are read only with `CELLA_K8S_GATEWAY_SELECTOR`, and are a
+start-up problem without it.
 
 [Sandboxes on Kubernetes](kubernetes.md) is what the Role has to allow
-for each capability.
+for each capability, and what the network rule of each sandbox admits.
 
 ## Lifecycle
 
@@ -226,9 +234,15 @@ variables below, because the runtime would overwrite them.
 | Variable | Set to |
 |---|---|
 | `CELLA_TOKEN_FILE` | the path of the sandbox's own workload token, `/run/cella/token` on Podman and Kubernetes. `cella` reads it with no flag |
-| `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, and their lowercase forms | on the native and Podman runtimes, the gateway's proxy door with the sandbox's credential, when the sandbox runs behind a gateway |
-| `SSL_CERT_FILE`, `NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`, `GIT_SSL_CAINFO`, `CURL_CA_BUNDLE` | the same runtimes, the gateway's certificate authority where the runtime projected it |
-| `CELLA_GATEWAY_URL`, `CELLA_GATEWAY_CREDENTIAL` | the same runtimes, the reverse door and the credential it takes, when the environment has one |
+| `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, and their lowercase forms | the gateway's proxy door with the sandbox's credential, when the sandbox runs behind a gateway |
+| `SSL_CERT_FILE`, `NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`, `GIT_SSL_CAINFO`, `CURL_CA_BUNDLE` | the gateway's certificate authority, `/run/cella/egress-ca.pem` on Podman and Kubernetes, where the runtime projected it |
+| `CELLA_GATEWAY_URL`, `CELLA_GATEWAY_CREDENTIAL` | the reverse door and the credential it takes, when the environment has one |
+
+A sandbox taken from a warm pool on Kubernetes is the exception: its
+container started before it had a gateway, so the three rows above are
+not in its environment until its next start, whose Pod carries them, and
+until then its commands reach the gateway only where they are pointed at
+it.
 | `DISPLAY` | `:0`, the desktop, on a sandbox with a display |
 | `<env>_HEADER` or `<env>_QUERY` | for a mounted secret whose value goes somewhere a client would not look by itself: the header or the query parameter to put the placeholder in |
 

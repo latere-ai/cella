@@ -209,3 +209,87 @@ func TestLoadK8sQuantities(t *testing.T) {
 		})
 	}
 }
+
+// TestK8sEgressVariables: the gateway's Pods and cluster DNS reach the
+// driver from five variables, every default is the driver's own, the driver
+// built from them declares the egress modes exactly when the gateway's
+// selector is set, and each malformed or orphaned value is a start-up
+// problem naming its variable.
+func TestK8sEgressVariables(t *testing.T) {
+	c, err := Load(env(k8sEnv(t, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.K8s.Gateway.Labels != nil || c.K8s.Gateway.Namespace != "" || c.K8s.Gateway.Ports != nil || c.K8s.DNS.Labels != nil || c.K8s.DNS.Namespace != "" {
+		t.Fatalf("an unset peer carries a value of its own: %+v %+v", c.K8s.Gateway, c.K8s.DNS)
+	}
+	opts := c.K8s
+	opts.Client = fake.NewClientset()
+	d, err := k8s.New(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := d.Capabilities().Egress; len(got) != 0 {
+		t.Fatalf("a driver with no gateway named declares %v", got)
+	}
+
+	c, err = Load(env(k8sEnv(t, map[string]string{
+		"CELLA_GATEWAY":               "gateway.example.com:3128",
+		"CELLA_K8S_GATEWAY_SELECTOR":  "app.kubernetes.io/name=gateway, tier=egress",
+		"CELLA_K8S_GATEWAY_NAMESPACE": "gateways",
+		"CELLA_K8S_GATEWAY_PORTS":     "3129, 8081",
+		"CELLA_K8S_DNS_SELECTOR":      "k8s-app=coredns",
+		"CELLA_K8S_DNS_NAMESPACE":     "dns",
+	})))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := k8s.Peer{Namespace: "gateways", Labels: map[string]string{"app.kubernetes.io/name": "gateway", "tier": "egress"}, Ports: []int32{3129, 8081}}
+	if !reflect.DeepEqual(c.K8s.Gateway, want) {
+		t.Fatalf("the gateway is %+v, want %+v", c.K8s.Gateway, want)
+	}
+	if !reflect.DeepEqual(c.K8s.DNS, k8s.Peer{Namespace: "dns", Labels: map[string]string{"k8s-app": "coredns"}}) {
+		t.Fatalf("DNS is %+v", c.K8s.DNS)
+	}
+	opts = c.K8s
+	opts.Client = fake.NewClientset()
+	if d, err = k8s.New(opts); err != nil {
+		t.Fatal(err)
+	}
+	if got := d.Capabilities().Egress; len(got) != 3 {
+		t.Fatalf("a driver with its gateway named declares %v, want the three modes", got)
+	}
+
+	gateway := map[string]string{"CELLA_GATEWAY": "gateway.example.com:3128", "CELLA_K8S_GATEWAY_SELECTOR": "app=gateway"}
+	for _, tc := range []struct {
+		env   map[string]string
+		name  string
+		wants string
+	}{
+		{map[string]string{"CELLA_K8S_GATEWAY_NAMESPACE": "gateways"}, "CELLA_K8S_GATEWAY_NAMESPACE", "without CELLA_K8S_GATEWAY_SELECTOR"},
+		{map[string]string{"CELLA_K8S_GATEWAY_PORTS": "3128"}, "CELLA_K8S_GATEWAY_PORTS", "without CELLA_K8S_GATEWAY_SELECTOR"},
+		{map[string]string{"CELLA_K8S_DNS_SELECTOR": "k8s-app=dns"}, "CELLA_K8S_DNS_SELECTOR", "without CELLA_K8S_GATEWAY_SELECTOR"},
+		{map[string]string{"CELLA_K8S_DNS_NAMESPACE": "dns"}, "CELLA_K8S_DNS_NAMESPACE", "without CELLA_K8S_GATEWAY_SELECTOR"},
+		{map[string]string{"CELLA_K8S_GATEWAY_SELECTOR": "app=gateway"}, "CELLA_GATEWAY", "pointed at it"},
+		{with(gateway, "CELLA_K8S_GATEWAY_SELECTOR", "app"), "CELLA_K8S_GATEWAY_SELECTOR", "each entry is key=value"},
+		{with(gateway, "CELLA_K8S_GATEWAY_SELECTOR", "app=no spaces"), "CELLA_K8S_GATEWAY_SELECTOR", "not a label value"},
+		{with(gateway, "CELLA_K8S_GATEWAY_NAMESPACE", "Gateways"), "CELLA_K8S_GATEWAY_NAMESPACE", "not a namespace name"},
+		{with(gateway, "CELLA_K8S_GATEWAY_PORTS", "3128,proxy"), "CELLA_K8S_GATEWAY_PORTS", "not a port"},
+		{with(gateway, "CELLA_K8S_DNS_SELECTOR", "bad key=x"), "CELLA_K8S_DNS_SELECTOR", "not a label key"},
+		{with(gateway, "CELLA_K8S_DNS_NAMESPACE", "kube_system"), "CELLA_K8S_DNS_NAMESPACE", "not a namespace name"},
+	} {
+		t.Run(tc.name+" "+tc.wants, func(t *testing.T) {
+			_, err := Load(env(k8sEnv(t, tc.env)))
+			if err == nil || !strings.Contains(err.Error(), tc.name) || !strings.Contains(err.Error(), tc.wants) {
+				t.Fatalf("Load = %v, want a problem naming %s and %q", err, tc.name, tc.wants)
+			}
+		})
+	}
+}
+
+// with is a copy of an environment with one variable set.
+func with(base map[string]string, name, value string) map[string]string {
+	out := maps.Clone(base)
+	out[name] = value
+	return out
+}

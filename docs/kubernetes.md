@@ -1,8 +1,9 @@
 # Sandboxes on Kubernetes
 
 What a sandbox on the Kubernetes environment can do, how to reach a server
-running inside one, and what the cluster has to allow for it. [Install](install.md)
-is how to get an installation; this page is what it then offers.
+running inside one, what it can reach itself, and what the cluster has to
+allow for it. [Install](install.md) is how to get an installation; this page
+is what it then offers.
 
 ## What a sandbox gets
 
@@ -19,7 +20,8 @@ the Pod and keeps the claim, so the files survive a stop and a start.
 | Ports: the listing, the proxy, the dial socket, `cella port-forward` | yes, for every port the manifest declares |
 | Desktop, screenshots and input | only when the control plane is given a display image; without one, a manifest that asks for a desktop is refused when it is resolved |
 | Interactive terminal (`attach`, `cella exec -i` and `-t`) | yes, with the window's size carried through and the shell's exit code returned |
-| Egress modes, resize, volumes, snapshots | no |
+| Egress boundaries: `none`, `allowlist`, `open` | yes, once the control plane is told which Pods are the egress gateway; without that, a boundary is recorded and not enforced |
+| Resize, volumes, snapshots | no |
 
 A capability the environment does not provide is refused before anything
 runs: the route answers `422` with `capability_unsupported`, and a manifest
@@ -72,6 +74,77 @@ environment. On an environment that a [self-hosted worker](workers.md)
 serves, the proxy and the dial socket answer `422 capability_unsupported`,
 whatever runtime the worker drives.
 
+## What a sandbox can reach
+
+Every sandbox runs under a NetworkPolicy of its own, written before its Pod
+starts and removed after its Pod is gone. Nothing inside the cluster opens a
+connection to a sandbox, except the other members of its mesh. Commands,
+files, logs and ports still work, because the control plane reaches a
+sandbox through the API server and the node, not over the Pod network.
+
+Once the control plane knows which Pods are the egress gateway, the same
+policy also limits what a sandbox reaches: cluster DNS, the gateway, and
+the other members of its own mesh, and nothing else. Every other connection
+leaves through the gateway, which admits the hosts the manifest allows:
+
+| Boundary | What leaves |
+|---|---|
+| `open` | every host except those in `deniedHosts` |
+| `allowlist` | the hosts in `allowedHosts` and the hosts of every mounted secret |
+| `none` | nothing |
+
+The sandbox is pointed at the gateway through its environment:
+`HTTPS_PROXY`, `HTTP_PROXY` and their lowercase forms carry the gateway's
+address and the sandbox's own credential, `CELLA_GATEWAY_URL` and
+`CELLA_GATEWAY_CREDENTIAL` name the gateway's second door for tools that
+ignore proxy variables, and the trust variables name
+`/run/cella/egress-ca.pem`, the authority the gateway presents when it
+substitutes a secret. A program that honors none of them reaches nothing.
+`status.conditions` reports `EgressEnforced` true once the gateway holds
+the sandbox's boundary.
+
+Mesh members reach each other directly, not through the gateway, at
+`<name>.<mesh>`, where `<mesh>` is `mesh-` followed by the lowercase mesh
+id after its prefix.
+
+Two limits hold on this runtime:
+
+- A sandbox does not reach the control plane from inside. The control plane
+  is outside the policy, so `cella` inside a sandbox cannot call the API; a
+  child sandbox is created with the sandbox's token from outside it.
+- A sandbox taken from a warm pool started before it had a gateway, so its
+  environment carries none of the variables above until its next start,
+  whose Pod carries them. Until then its commands reach the gateway only
+  where they are pointed at it by hand.
+
+### Turning it on
+
+1. Run the gateway, `cellad egress`, as a Deployment of its own, as the
+   [deploy manifests](../deploy/README.md#the-gateway) describe.
+2. Point the sandboxes at it: `CELLA_GATEWAY`, and `CELLA_GATEWAY_REVERSE`
+   for the second door, in the control plane's ConfigMap.
+3. Name its Pods: `CELLA_K8S_GATEWAY_SELECTOR`, the labels the gateway's
+   Pods carry, with `CELLA_K8S_GATEWAY_NAMESPACE` where they run in another
+   namespace and `CELLA_K8S_GATEWAY_PORTS` where they listen on other
+   ports than `3128` and `8080`. A cluster whose DNS Pods are not
+   `k8s-app=kube-dns` in `kube-system` sets `CELLA_K8S_DNS_SELECTOR` and
+   `CELLA_K8S_DNS_NAMESPACE`. [Configuration](configuration.md#kubernetes)
+   has every variable.
+
+Name the Pods only once the gateway runs and carries those labels. A
+selector that matches no running Pod leaves every sandbox reaching DNS and
+nothing else.
+
+The cluster's network plugin has to enforce NetworkPolicy, egress
+included. A plugin that ignores it leaves the policy written and nothing
+confined, and the environment still reports the boundary enforced. In a
+namespace whose own policies already deny everything but the gateway and
+DNS, the per-sandbox policy opens one more path and no other: a mesh
+member's connections to the other members of its mesh.
+
+A sandbox created before the gateway was named takes the new policy at its
+next start.
+
 ## What the cluster has to allow
 
 The control plane's ServiceAccount needs one Role in the sandbox namespace,
@@ -81,11 +154,15 @@ needs the same two on `pods/portforward`: `get` for the WebSocket session
 current API servers offer, and `create` for the SPDY upgrade older ones
 answer instead.
 
-No NetworkPolicy rule is involved. The control plane talks only to the API
-server, on the port its own egress rule already admits, and the kubelet
-opens the connection inside the sandbox's Pod, where no policy between Pods
-applies. A mesh's policy, which admits only the mesh's own members, does
-not stand in the way either.
+Reaching a port involves no NetworkPolicy rule. The control plane talks
+only to the API server, on the port its own egress rule already admits, and
+the kubelet opens the connection inside the sandbox's Pod, where no policy
+between Pods applies. Neither the sandbox's own policy nor its mesh's
+stands in the way.
+
+The policies themselves are the driver's: one per sandbox and one per mesh,
+each made with `create` and replaced or removed with `delete` on
+`networkpolicies`, which the same Role grants.
 
 `cellad serve` checks every access in the Role when it starts and does not
 start without all of them, naming the ones it is missing; `cellad check`
