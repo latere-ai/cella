@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 )
 
 // volumeCases, setCases, environmentCases, spawnCases, agentCases,
@@ -298,23 +299,37 @@ func case023BrowserReady(ctx context.Context, e *Env) error {
 		return err
 	}
 	base := "/v1/sandboxes/" + obj.Status.ID
-	x, err := e.caller.get(ctx, base+"/display")
-	if err != nil {
-		return err
-	}
-	if err := x.status(http.StatusOK); err != nil {
-		return err
-	}
-	var display struct {
-		Width  int  `json:"width"`
-		Height int  `json:"height"`
-		Ready  bool `json:"ready"`
-	}
-	if err := json.Unmarshal(x.Body, &display); err != nil {
-		return x.disagree("the geometry and the readiness of the desktop", err.Error())
-	}
-	if display.Width != 1280 || display.Height != 800 {
-		return x.disagree("the geometry the manifest declared", fmt.Sprintf("%dx%d", display.Width, display.Height))
+	// The desktop comes up beside the workload and may follow it by a
+	// moment: a running sandbox reports DisplayReady false until it does.
+	// The case reads the display until it is ready, which is the state the
+	// screenshot needs, and never sleeps for it.
+	for {
+		x, err := e.caller.get(ctx, base+"/display")
+		if err != nil {
+			return err
+		}
+		if err := x.status(http.StatusOK); err != nil {
+			return err
+		}
+		var display struct {
+			Width  int  `json:"width"`
+			Height int  `json:"height"`
+			Ready  bool `json:"ready"`
+		}
+		if err := json.Unmarshal(x.Body, &display); err != nil {
+			return x.disagree("the geometry and the readiness of the desktop", err.Error())
+		}
+		if display.Width != 1280 || display.Height != 800 {
+			return x.disagree("the geometry the manifest declared", fmt.Sprintf("%dx%d", display.Width, display.Height))
+		}
+		if display.Ready {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return x.disagree("DisplayReady before the case's deadline", "a desktop that is not ready")
+		case <-time.After(pollInterval):
+		}
 	}
 	shot, err := e.caller.get(ctx, base+"/screenshot?format=png")
 	if err != nil {

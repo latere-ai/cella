@@ -446,3 +446,19 @@ func TestTheEgressCaseReadsEveryAnswer(t *testing.T) {
 		})
 	}
 }
+
+// TestTheBrowserCaseWaitsForTheDesktop: a desktop that is not ready on the
+// first read of the display is read again until it is, and the screenshot is
+// asked for then, so a desktop that comes up a moment after the workload
+// passes the case rather than failing its first screenshot.
+func TestTheBrowserCaseWaitsForTheDesktop(t *testing.T) {
+	f := newFake(t)
+	f.desktopLate = true
+	report, err := Execute(t.Context(), f.full())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(report.Passed, "case023BrowserReady") {
+		t.Fatalf("the browser case did not pass against a desktop that came up late: %+v", report.Failed)
+	}
+}

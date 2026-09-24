@@ -47,6 +47,11 @@ type fake struct {
 	// is what proves a case reads the answer and not only its status.
 	wrongMessage bool
 	wrongValues  bool
+	// desktopLate reports a sandbox's desktop not ready on the first read of
+	// its display and refuses a screenshot until a read has reported it
+	// ready, which is a desktop that comes up a moment after the workload.
+	desktopLate  bool
+	desktopReads int
 	// driftedDefault resolves spec.mesh.spawn.budget to 1 where the manifest
 	// contract's default is 0, and answers everything else as an honest
 	// server does: the fake's form of the drift seam of design 015.
@@ -691,7 +696,11 @@ func (f *fake) display(w http.ResponseWriter, r *http.Request) {
 		f.write(w, http.StatusOK, map[string]any{"width": 640, "height": 480, "ready": false})
 		return
 	}
-	f.write(w, http.StatusOK, map[string]any{"width": 1280, "height": 800, "ready": true})
+	f.mu.Lock()
+	f.desktopReads++
+	ready := !f.desktopLate || f.desktopReads > 1
+	f.mu.Unlock()
+	f.write(w, http.StatusOK, map[string]any{"width": 1280, "height": 800, "ready": ready})
 }
 
 // pngHeader is the first bytes of a PNG, which is what a screenshot case
@@ -701,7 +710,12 @@ var pngHeader = []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a}
 func (f *fake) screenshot(w http.ResponseWriter, _ *http.Request) {
 	f.mu.Lock()
 	wrong := f.wrongValues
+	unready := f.desktopLate && f.desktopReads < 2
 	f.mu.Unlock()
+	if unready {
+		f.refuse(w, "driver_unavailable")
+		return
+	}
 	w.Header().Set("Content-Type", "image/png")
 	w.WriteHeader(http.StatusOK)
 	if wrong {
