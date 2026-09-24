@@ -1,6 +1,6 @@
 ---
 title: "Egress on the k8s driver: a NetworkPolicy per sandbox, the declared modes, the gateway projected into the Pod, mesh peers under confinement, and the kind tier's gateway"
-status: in-progress
+status: complete
 track: core
 depends_on:
   - specs/004-runtime-contract.md
@@ -278,3 +278,70 @@ running Pod.
 | Two members of one mesh reach each other by name under confinement | `TestClusterMeshReachability` | passing against a local kind cluster; both kind jobs run it and require its pass |
 | The kind stack runs the gateway with a minted key and an upstream, its ConfigMap names the gateway's Pods by the labels they carry, and both kind conformance runs declare `egress`, pass the upstream and require the three cluster tests | `TestKindRunsTheGateway` | passing |
 | No file this slice adds names a Latere host, image, pool or namespace | `TestNoLatereCoordinates`, `TestNoLatereCoordinatesInReleasedArtifacts` | passing |
+
+## Outcome
+
+`runtime/k8s` writes a NetworkPolicy for every sandbox, before its Pod and
+after the claim, and removes it after the Pod. The policy admits no ingress
+but what the mesh's own policy admits, and, once the operator names the
+gateway's Pods with `CELLA_K8S_GATEWAY_SELECTOR`, egress to cluster DNS, the
+gateway's Pods and the sandbox's own mesh peers and nothing else. With the
+gateway named the driver declares `none`, `allowlist` and `open`, so a
+boundary no longer warns and `EgressEnforced` reads `True` once a gateway
+holds the map. The workload container carries the gateway's two doors and
+the sandbox's credential, and the sandbox's Secret carries the gateway's
+authority at `/run/cella/egress-ca.pem`. The Role and the preflight table are
+unchanged.
+
+| Piece | Where |
+|---|---|
+| The peer type, the defaults, the rule, its replacement by a delete and a create, the projection | `runtime/k8s/egress.go` |
+| `Gateway` and `DNS` in `Options`, their check at `New`, the declared modes | `runtime/k8s/k8s.go` |
+| The rule in `Create`, `Start` and `remove`, the Secret's authority key in `Create` and `Update` | `runtime/k8s/lifecycle.go` |
+| The `sandbox` label and the projection in the Pod | `runtime/k8s/render.go` |
+| The rule before a transfer's helper, the helper under the `sandbox` label and with no gateway | `runtime/k8s/files.go` |
+| The authority in the projected volume and the Secret written key by key | `runtime/k8s/token.go` |
+| The authority at adoption, the rule removed with a discarded entry | `runtime/k8s/pool.go` |
+| The five variables and their start-up problems | `internal/config/k8s.go`, `internal/config/config.go`, `docs/configuration.md` |
+| `case018EgressEnforced` and the fake that answers it | `test/conformance/cases_events.go`, `test/conformance/fake_test.go` |
+| The gateway, its Service and policy, the upstream, the key minted in `up.sh` | `deploy/examples/kind-stubs/` |
+| `TestClusterEgressBoundary`, `TestClusterNoLateralMovement`, `TestClusterMeshReachability` | `test/kind/egress_test.go` |
+| `egress` and `-upstream` in both kind conformance runs, the three tests required in both kind jobs | `.github/workflows/verify.yml`, `.github/workflows/release.yml`, `egress_test.go` |
+| The operator's and caller's pages | `docs/kubernetes.md`, `docs/manifest.md`, `docs/conformance.md`, `deploy/README.md`, `README.md`, `CHANGELOG.md` |
+
+`go tool lateregate` passes with `runtime/k8s` at 93.4%, `internal/config`
+at 96.5% and `test/conformance` at 90.8%. A kind 0.33 cluster on the
+machine this was built on ran the stack as `up.sh` brings it up, with images
+built from this tree: `TestContract` with `egress` declared passed 39 cases
+and skipped 14 for inputs the run did not carry, `case018EgressEnforced`
+among the passes; the whole kind tier passed, the three new tests included;
+and the driver's `DialReachesAPort` and `PortsReportListening` passed under
+the ingress rule. Removing a sandbox's policy by hand turned its direct
+request to the upstream from nothing back into a reply, and removing a mesh
+member's peer rule turned its request to a peer from a reply into nothing,
+so both halves of the rule are what the tests hold. kind's own network
+plugin enforces NetworkPolicy from kind 0.24 on, egress included, which is
+what the pipelines install.
+
+### What diverges from the specs above
+
+| Spec | What it said | What was built | Why |
+|---|---|---|---|
+| [[018-egress-and-secrets]] | the k8s rule admits DNS, the gateway and `cellad` | DNS, the gateway and the sandbox's mesh peers; `cellad` is not admitted | a sandbox reaches the control plane at its public URL, which on a cluster resolves to an ingress controller or a load balancer the driver cannot name without one installation's coordinates, and the hosted namespace's own policies admit no such path either |
+| [[018-egress-and-secrets]] | a per-Pod sidecar with `CELLA_EGRESS_SIDECAR=1` | none | one gateway Deployment per environment serves the hosted plane; the sidecar's start ordering and single-principal filter are their own slice |
+| [[004-runtime-contract]] | k8s egress is `none, allowlist, open` with a NetworkPolicy to the gateway, DNS and `cellad` | the three modes only once the operator names the gateway's Pods, and the peers are the operator's variables | a policy selects Pods by label, and no label of an installation's gateway is this repository's to fix |
+| [[013-security-and-threat-model]] | a mesh peer is reached on its `mesh` ports | on any port | the mesh's policy admits every port today, and the peer rule matches it; narrowing both is the `expose: mesh` work |
+| [[022-mesh-and-spawn]] | peers reach each other at `<sandbox-name>.mesh` | on k8s at `<name>.<mesh object name>`, and at `<name>.mesh` only where the installation's DNS rewrites it | the headless Service publishes the member under its subdomain; the short form is podman's network alias, and [[004-runtime-contract]] leaves it to an installation's DNS rewrite on k8s |
+| This spec | the peer rule could sit in the mesh's policy | it is rule 3 of the member's own policy | the mesh's policy is written once by its first member, and an `Egress` type there would confine a member's egress on an installation with no gateway |
+
+### What this leaves open
+
+| Open | Why |
+|---|---|
+| The per-Pod sidecar of `CELLA_EGRESS_SIDECAR=1` | not needed by one gateway Deployment per environment |
+| The control plane as an admitted peer | the driver cannot name the path a sandbox takes to the public URL; `cella` inside a confined sandbox does not reach the API |
+| The reverse door on the cluster | it reaches an upstream over TLS on 443, and the tier's upstream serves neither |
+| The proxy variables in an adopted pool entry's running container | a container's environment cannot change; the entry's next start carries them |
+| A mesh's ingress narrowed to the ports a member declares `mesh` | the `expose: mesh` field is recorded and not enforced by either policy |
+| A preflight check that the gateway's selector matches a running Pod | it needs a read of Pods in the gateway's namespace, which the Role does not grant; a selector that matches nothing confines every sandbox to DNS |
+| The driver suite's own peer case | the mesh is proved through the API on the kind tier; the driver suite still reports `Mesh` as declared without a case |
