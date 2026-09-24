@@ -148,8 +148,10 @@ translated the address, and `CELLA_GATEWAY` names what a sandbox dials, which
 is usually the Service. A worker that drives a cluster reads the same five
 variables, since it holds no `CELLA_GATEWAY` of its own. The gateway's
 namespace, the ports, and the DNS pair are refused at start without the
-selector they belong to, and a label, a namespace or a port the API server
-would refuse is a start-up problem naming the variable.
+selector they belong to; the selector is refused on a control plane with no
+`CELLA_GATEWAY`, because a sandbox confined to a gateway it is not pointed
+at reaches nothing; and a label, a namespace or a port the API server would
+refuse is a start-up problem naming the variable.
 
 ### The control plane is not admitted
 
