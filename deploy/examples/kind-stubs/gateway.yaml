@@ -1,0 +1,134 @@
+# SPDX-FileCopyrightText: 2026 Latere AI
+# SPDX-License-Identifier: Apache-2.0
+#
+# The egress gateway beside the control plane: `cellad egress` from the
+# stack's own image, the Service a sandbox reaches its two doors at, and the
+# policy that admits the namespace's sandboxes to those doors and nothing
+# else. The ConfigMap names these Pods to the driver by their name label,
+# which is what puts every sandbox of this stack behind the gateway.
+#
+# It is a Deployment of its own and not a container of the control plane's
+# Pod: its environment key is minted by the control plane once the control
+# plane is up, which up.sh does, and its reverse door listens on 8080, the
+# control plane's public port.
+#
+# The stream it opens reaches the control plane's Service over plain HTTP,
+# which CELLA_INSECURE_CONTROL_PLANE admits. That is this test stack's
+# choice; an installation reaches its control plane over https.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cellad-egress
+  labels:
+    app.kubernetes.io/name: cellad-egress
+    app.kubernetes.io/component: egress-gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cellad-egress
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cellad-egress
+        app.kubernetes.io/component: egress-gateway
+    spec:
+      # The gateway drives no cluster API.
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: cellad-egress
+          image: cellad
+          args: ["egress"]
+          env:
+            - name: CELLA_URL
+              value: "http://cellad:8080"
+            - name: CELLA_INSECURE_CONTROL_PLANE
+              value: "true"
+            - name: CELLA_EGRESS_PROXY_ADDR
+              value: ":3128"
+            - name: CELLA_EGRESS_REVERSE_ADDR
+              value: ":8080"
+            # Minted by up.sh at the control plane for the default
+            # environment. Until the Secret exists the container waits.
+            - name: CELLA_ENVIRONMENT_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: cellad-egress
+                  key: CELLA_ENVIRONMENT_KEY
+            # The audience this repository answers to, named on every
+            # container of its image. The egress role verifies no caller's
+            # token; the control plane verifies the gateway's key.
+            - name: CELLA_OIDC_AUDIENCE
+              value: "cella"
+          ports:
+            - name: proxy
+              containerPort: 3128
+            - name: reverse
+              containerPort: 8080
+          # The role serves no HTTP probe: a door that accepts a connection
+          # is the readiness it gives.
+          readinessProbe:
+            tcpSocket:
+              port: proxy
+            periodSeconds: 2
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 500m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cellad-egress
+  labels:
+    app.kubernetes.io/name: cellad-egress
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: cellad-egress
+  ports:
+    - name: proxy
+      port: 3128
+      targetPort: proxy
+    - name: reverse
+      port: 8080
+      targetPort: reverse
+---
+# The doors admit the sandboxes of this namespace and nothing else. The
+# control plane never dials the gateway: the gateway opens its stream
+# outbound.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cellad-egress
+  labels:
+    app.kubernetes.io/name: cellad-egress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: cellad-egress
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              cella.latere.ai/managed-by: cella
+      ports:
+        - port: 3128
+          protocol: TCP
+        - port: 8080
+          protocol: TCP

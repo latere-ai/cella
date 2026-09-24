@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # What this installation verifies against, the stub issuer inside the Pod,
-# and the desktop image its sandboxes run.
+# the desktop image its sandboxes run, and the gateway its sandboxes leave
+# through.
 # The URL is loopback, which is the address the control plane dials and the
 # iss of every token the stub signs; a caller outside the cluster mints at
 # the node port of service-stubs.yaml and the token it gets carries this
@@ -17,3 +18,10 @@ data:
   # The desktop of a sandbox that names `display`: the image up.sh built and
   # loaded under this name, so the node pulls nothing.
   CELLA_K8S_DISPLAY_IMAGE: "cella-display:dev"
+  # The gateway of gateway.yaml, as a sandbox dials its two doors, and its
+  # Pods as the driver's rule names them: by the label they carry. With the
+  # label named every sandbox reaches the network only through the gateway,
+  # and the environment enforces the three egress modes.
+  CELLA_GATEWAY: "cellad-egress.cella.svc:3128"
+  CELLA_GATEWAY_REVERSE: "cellad-egress.cella.svc:8080"
+  CELLA_K8S_GATEWAY_SELECTOR: "app.kubernetes.io/name=cellad-egress"
