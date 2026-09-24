@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.4.0 - 2026-09-24
+
 - The file routes accept paths in the sandbox's own workspace. A sandbox
   whose manifest set `spec.workspace.path` to something other than
   `/workspace` had every file route refused with `invalid_field`, although
