@@ -153,7 +153,7 @@ curl -fsS "$CELLA_INSTALL_URL/version"
 ## The first sandbox
 
 ```sh
-curl -fsS -X POST "$CELLA_INSTALL_URL/v1/sandboxes" \
+curl -fsS -X POST "$CELLA_INSTALL_URL/v1/sandboxes?wait=1" \
   -H "Authorization: Bearer $CELLA_INSTALL_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{
@@ -172,6 +172,12 @@ The body is JSON here; the route also takes YAML under
 is refused with `unsupported_version`. The response is the resolved
 manifest, with the defaults the installation applied and a `status` that
 carries the id and the phase. [Manifests](manifest.md) is every field.
+
+A create answers as soon as the sandbox is recorded, in phase `Pending`,
+and the control plane brings it to `Running` after: on a cluster that
+provisions and attaches a volume first, that takes as long as the two do.
+`?wait=1` holds the answer until the sandbox runs, which is what the
+command below needs.
 
 A sandbox is addressed by the name its owner gave it, or by the id in
 `status.id`. Run something inside it, and then delete it:

@@ -130,7 +130,7 @@ EOF
 if [ "$smoke" -eq 1 ]; then
   token=$(eval "$mint")
   [ -n "$token" ] || { echo "the issuer minted nothing" >&2; exit 1; }
-  code=$(curl -sS -o "$out/sandbox.json" -w '%{http_code}' -X POST "$url/v1/sandboxes" \
+  code=$(curl -sS -o "$out/sandbox.json" -w '%{http_code}' -X POST "$url/v1/sandboxes?wait=1" \
     -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
     -d '{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox","metadata":{"name":"smoke"},
          "spec":{"command":["sleep","300"]}}')

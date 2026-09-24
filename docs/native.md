@@ -37,7 +37,7 @@ nothing is confined.
 ## Create and run a command
 
 ```sh
-curl --fail-with-body "$CELLA_URL/v1/sandboxes" \
+curl --fail-with-body "$CELLA_URL/v1/sandboxes?wait=1" \
   -H "Authorization: Bearer $CELLA_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox","metadata":{"name":"demo"},"spec":{"env":{"TASK":"hello"}}}'
@@ -48,7 +48,9 @@ curl --fail-with-body "$CELLA_URL/v1/sandboxes/demo/exec?wait=1" \
   -d '{"command":["sh","-c","printf %s \"$TASK\""],"timeout":"10s"}'
 ```
 
-With `?wait=1` the answer is one JSON object carrying `exitCode`,
+The create's `?wait=1` holds its answer until the sandbox runs; without
+it the answer comes as soon as the sandbox is recorded, `Pending`. On the
+exec, `?wait=1` makes the answer one JSON object carrying `exitCode`,
 `stdout`, `stderr`, `truncated`, and `durationMs`. A command that fails
 is an exit code; a request that fails is an HTTP error. Each output is
 capped at 1 MiB. Without `?wait=1` the output streams as the command
