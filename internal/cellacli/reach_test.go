@@ -138,3 +138,29 @@ func TestTheCommandReadsTheKindsItServesSingularOrPlural(t *testing.T) {
 		}
 	}
 }
+
+// TestNoBearerIsNamedByItsVariables: a command with no token anywhere is a
+// usage error that names the two variables to set, and it sends no request
+// without a bearer.
+func TestNoBearerIsNamedByItsVariables(t *testing.T) {
+	p := newPlane(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"items":[],"next":""}`))
+	})
+	dir := t.TempDir()
+	empty := filepath.Join(dir, "empty")
+	if err := os.WriteFile(empty, []byte("  \n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for name, file := range map[string]string{"a file that is not there": filepath.Join(dir, "absent"), "an empty file": empty} {
+		got := runWith(t, cellacli.Env{Args: []string{"get", "sandboxes"}, Getenv: environment(map[string]string{
+			"CELLA_URL": p.server.URL, "CELLA_TOKEN_FILE": file,
+		})})
+		if got.code != 2 || !strings.Contains(got.stderr, "CELLA_TOKEN,") || !strings.Contains(got.stderr, "CELLA_TOKEN_FILE") {
+			t.Errorf("%s exited %d with %q", name, got.code, got.stderr)
+		}
+	}
+	if len(p.seen()) != 0 {
+		t.Fatal("a command with no bearer reached the server")
+	}
+}
