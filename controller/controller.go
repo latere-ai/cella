@@ -216,8 +216,9 @@ type Controller struct {
 	answerMu sync.Mutex
 	answered map[string]time.Time
 	// realizing is every sandbox whose driver create the scheduler loop has
-	// in flight with the controller's lock released. An act that would reach
-	// the driver for one of them waits for the settle instead of crossing it.
+	// in flight with the controller's lock released. A start, a stop or a
+	// re-minted identity for one of them is refused rather than crossing the
+	// create; a delete is taken, and the settle removes what the create made.
 	realizing map[string]struct{}
 	// origins is the context of the request whose create placed a sandbox,
 	// kept until the loop realizes it. Its values are the caller's: the
