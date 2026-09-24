@@ -39,10 +39,10 @@ takes a few minutes; with images and a cluster, up to fifteen.
 | `-issuer` | an issuer with a `POST /mint` route, so the run takes a token per subject | the cases that need a second subject skip |
 | `-admin` | a bearer the server treats as an administrator | the environment cases skip |
 | `-image` | the image every case creates from | the manifests carry a command and no image |
-| `-capabilities` | what this environment provides, comma separated: `files`, `attach`, `dial`, `display`, `input`, `volumes`, `mesh` | every capability case skips |
+| `-capabilities` | what this environment provides, comma separated: `files`, `attach`, `dial`, `display`, `input`, `volumes`, `mesh`, `egress` | every capability case skips |
 | `-sink` | the event sink's address, whose `/events` route the run reads back | the delivery case skips |
 | `-authorizer-control`, `-admission-control` | the control address of the permission service and the policy service, which the run drives to reach their refusals and their outages | those cases skip |
-| `-display-image`, `-upstream`, `-queued-environment`, `-worker-environment`, `-cella` | the inputs of the desktop, the network boundary, queued work, a second environment, and the command line client | each group skips naming what is missing |
+| `-display-image`, `-upstream`, `-queued-environment`, `-worker-environment`, `-cella` | the inputs of the desktop, the network boundary, queued work, a second environment, and the command line client. `-upstream` is a `host:port` a sandbox may be allowed to reach, answering any request with at least one byte; with `egress` declared, the run checks that a sandbox reaches it through its gateway, is refused a host its allow list does not name, and reaches nothing around the gateway, using `nc` and `base64` inside the sandbox's image | each group skips naming what is missing |
 | `-known` | a file declaring the cases this server fails and why | every failure is a failure |
 | `-skip` | group or case names to leave out | nothing is left out |
 

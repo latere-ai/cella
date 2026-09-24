@@ -111,11 +111,13 @@ hosts on it.
 | `spec.network.ports[].expose` | `none` | `none` is reachable through the control plane's own routes alone; `mesh` also from the sandbox's mesh peers; `public` is refused in this release |
 
 A boundary other than `open` with no denied host needs a gateway in the
-environment, and the create waits for the gateway to acknowledge it. No
-runtime in this release confines a workload to the gateway, so such a
-boundary is recorded, `status.conditions` reports `EgressEnforced` false,
-and the answer carries a warning. A sandbox may narrow its own boundary
-later and never widen it.
+environment, and the create waits for the gateway to acknowledge it. The
+Kubernetes runtime, once its operator names the gateway's Pods, lets a
+sandbox reach the network only through the gateway, and `status.conditions`
+reports `EgressEnforced` true ([Sandboxes on Kubernetes](kubernetes.md#what-a-sandbox-can-reach)).
+Every other runtime records such a boundary without confining the workload
+to it: `EgressEnforced` is false, and the answer carries a warning. A
+sandbox may narrow its own boundary later and never widen it.
 
 ### Spawn and mesh
 

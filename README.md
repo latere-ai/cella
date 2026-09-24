@@ -128,11 +128,12 @@ for one of these is refused with `capability_unsupported` or
   takes `empty`.
 - A public endpoint for a port (`expose: public`). No runtime provides
   one.
-- Egress confined to the gateway. No runtime in this release declares an
-  enforced egress mode, so a boundary other than `open` is recorded, the
-  sandbox reports `EgressEnforced` false, and the create answers with a
-  warning. The gateway still decides and records every connection that
-  reaches it, and substitutes secret values.
+- Egress confined to the gateway outside Kubernetes. The Podman and native
+  runtimes declare no enforced egress mode, and neither does Kubernetes
+  until its operator names the gateway's Pods; there a boundary other than
+  `open` is recorded, the sandbox reports `EgressEnforced` false, and the
+  create answers with a warning. The gateway still decides and records
+  every connection that reaches it, and substitutes secret values.
 - Ports and the desktop on an environment a self-hosted worker serves.
 - A virtual machine runtime.
 
