@@ -24,12 +24,13 @@ against; there is no `cella login`. `--url` and `--token` override the two
 variables, `--token-file` reads the token from a file instead, and `--ca`
 adds one certificate authority to the system roots.
 
-**Inside a sandbox nothing needs to be set.** The control plane injects the
-address, and the sandbox's own token is at `/run/cella/token`, which is
-where `cella` looks when `CELLA_TOKEN` is unset. The file is read for every
-request, so a command that runs for hours keeps working when the token is
-replaced under it. A sandbox's token reaches its own sandbox and the
-objects its owner holds, and nothing else.
+**Inside a sandbox the token is already there.** The sandbox's own token
+is at `/run/cella/token`, which is where `cella` looks when `CELLA_TOKEN`
+is unset, so only the address needs setting: export `CELLA_URL`, or pass
+`--url`. The file is read for every request, so a command that runs for
+hours keeps working when the token is replaced under it. A sandbox's token
+reads and runs commands in its own sandbox, reads the sandboxes below it,
+and creates a child within its spawn budget, and nothing else.
 
 ## The commands
 
@@ -55,7 +56,7 @@ object's name or its id; a name resolves among the objects you own.
 
 ### Making a sandbox
 
-A manifest is JSON:
+`cella apply` reads a manifest as JSON; the API itself also takes YAML.
 
 ```sh
 cat > sandbox.json <<'JSON'
@@ -225,9 +226,9 @@ start, `127` the server was not reachable.
 The command never retries. A caller that wants one has the exit code, and
 `3`, `4` and `5` are answers rather than accidents.
 
-## What it does not do yet
+## What it does not do
 
-A command whose route this server does not serve is not in the table above:
-port forwarding, screenshots and input, events, volumes, sets and
-environments arrive with the routes that serve them. `cella --help` lists
-what the binary you have can do.
+`cella` covers sandboxes and secrets. Environments, environment keys, the
+event feed, and the desktop's screenshots and input have routes and no
+command yet: call [the API](api.md) for them. `cella help` lists what the
+binary you have can do.

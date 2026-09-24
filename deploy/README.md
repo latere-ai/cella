@@ -57,7 +57,7 @@ key, so a dependency is turned on by applying its Secret and nothing else.
 | Secret | Turns on | Without it |
 |---|---|---|
 | `cellad-token` | required in every mode: the key cellad signs a sandbox's identity with | the Pod does not start |
-| `cellad-authorizer` | the authorization endpoint of spec 006 | the built-in owner policy decides, and `CELLA_ADMIN_SUBJECTS` names who acts on everything |
+| `cellad-authorizer` | your authorization endpoint | the built-in owner policy decides, and `CELLA_ADMIN_SUBJECTS` names who acts on everything |
 | `cellad-events` | signed delivery of every record to a sink | the journal holds every record and nothing is delivered |
 | `cellad-db` | desired state in Postgres, and sealed secret values | every state is in memory: nothing survives a restart, and a sandbox the backend lost is not recovered |
 | `cellad-egress` | read by the egress gateway, not by the control plane | a sandbox whose manifest declares a boundary is refused at create |

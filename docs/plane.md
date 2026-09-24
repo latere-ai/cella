@@ -67,8 +67,12 @@ Three rules the core holds you to. Deny the reserved probe id: an endpoint
 that allows it is one that does not read the request, and `cellad check`
 fails on it. Answer a deny as a decision and not as an error, because an
 error is read as "no decision" and refuses the request either way. Carry
-your plan's ceilings on the allow, as `authorizer.WireLimits`, rather than
-enforcing them in a proxy in front.
+your plan's sandbox limit on the allow of `sandbox.create`, as
+`max_sandboxes` in `authorizer.WireLimits`, rather than enforcing it in a
+proxy in front: a create past it is refused with `quota_exceeded`. Of the
+other two figures the type carries, this release does not apply
+`max_priority`, and refuses any request whose allow carries
+`requests_per_minute` with `capability_unsupported`, so leave both out.
 
 A list is decided in two steps. The list action (`sandbox.list`,
 `secret.list`, `environment.list`) answers an allow that may carry a
@@ -125,7 +129,7 @@ admission step as a function in your process rather than a webhook. Nothing
 else in the core reads a claim or a plan.
 
 A complete, compiling server is in [`examples/plane/`](../examples/plane).
-It is under three hundred lines: a native driver, a controller, three routes,
+It is about three hundred lines: a native driver, a controller, three routes,
 and the three places a platform fills, each marked. Run it with
 
 ```sh
@@ -140,7 +144,7 @@ plans, and its own image catalog.
 | Concern | Through the webhooks | Through the packages |
 |---|---|---|
 | accounts and organizations | the claims of your issuer, read by your authorizer | your own middleware, before `Resolve` |
-| plans and quotas | the limits on an allow, and the ceilings your admission endpoint applies | `Options.Ceilings` and the count you pass to `Create` |
+| plans and quotas | `max_sandboxes` on an allow, and the ceilings your admission endpoint applies | `Options.Ceilings` and the count you pass to `Create` |
 | an image catalog | admission rewrites the image | an admission function in `Options` |
 | secrets | the `Secret` kind holds the value; your authorizer decides who may mount one | the same kind through the store you construct |
 | audit and usage | the event sink | your own implementation of the controller's event seam |

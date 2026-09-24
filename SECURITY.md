@@ -10,8 +10,8 @@ Report one to security@latere.ai. Do not open a public issue for it. You
 will hear back within three business days, and a fix for a high severity
 issue ships within thirty days. Credit in the release notes on request.
 
-Fixes go to the two most recent minor release series. There is no release
-yet; the first one is `v0.1.0`.
+Fixes go to the two most recent minor release series, which the
+[releases page](https://github.com/latere-ai/cella/releases) lists.
 
 ## Commitments
 
