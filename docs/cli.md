@@ -167,7 +167,10 @@ each connection to it is closed with a line on standard error that says so.
 A server that speaks HTTP is also reachable without this command, by the
 name the manifest gave its port: `/v1/sandboxes/dev/ports/web/` on the
 control plane, under your bearer, forwards every method, path and query to
-it, and a WebSocket upgrade as well.
+it, and a WebSocket upgrade as well. The path without its trailing slash
+answers a `307` whose `Location` is relative, `web/` with the query kept,
+so it resolves against the address you used and keeps working behind a
+proxy that serves the control plane under a path of its own.
 
 ### Logs, secrets and the boundary
 
