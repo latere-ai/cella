@@ -91,19 +91,52 @@ func (o ListOptions) query(cursor string, page int) url.Values {
 	return q
 }
 
+// CreateOption changes how the server answers a create or an apply.
+type CreateOption func(url.Values)
+
+// Wait holds the answer until the sandbox has started, has failed, or has
+// left its create's phases some other way, for at most timeout; zero takes
+// the server's bound, ten minutes. Without it a create answers as soon as the
+// sandbox is recorded, Pending, and the server brings it up after. A caller
+// whose HTTP client has a timeout shorter than the hold loses the answer and
+// not the sandbox.
+func Wait(timeout time.Duration) CreateOption {
+	return func(q url.Values) {
+		q.Set("wait", "1")
+		if timeout > 0 {
+			q.Set("timeout", timeout.String())
+		}
+	}
+}
+
+// createQuery is the query the options render, or nil for none.
+func createQuery(opts []CreateOption) url.Values {
+	if len(opts) == 0 {
+		return nil
+	}
+	q := url.Values{}
+	for _, opt := range opts {
+		opt(q)
+	}
+	return q
+}
+
 // CreateSandbox creates a Sandbox from a manifest, which names it or leaves
 // the server to. The body is the caller's own bytes in the syntax the
-// manifest carries, so what the server refuses is what the caller wrote.
-func (c *Client) CreateSandbox(ctx context.Context, m Manifest) (v1.Sandbox, []byte, error) {
-	raw, err := c.send(ctx, http.MethodPost, KindSandbox.Path(), nil, m.Body, m.mediaType())
+// manifest carries, so what the server refuses is what the caller wrote. The
+// answer is the sandbox as soon as it is recorded, Pending, unless Wait asks
+// for it held.
+func (c *Client) CreateSandbox(ctx context.Context, m Manifest, opts ...CreateOption) (v1.Sandbox, []byte, error) {
+	raw, err := c.send(ctx, http.MethodPost, KindSandbox.Path(), createQuery(opts), m.Body, m.mediaType())
 	return decodeInto[v1.Sandbox](raw, err)
 }
 
 // ApplySandbox applies a Sandbox manifest under a name: a create when the
 // name is free and an update when the caller holds it. A manifest that names
-// no sandbox takes the name; one that names another is refused.
-func (c *Client) ApplySandbox(ctx context.Context, name string, m Manifest) (v1.Sandbox, []byte, error) {
-	raw, err := c.send(ctx, http.MethodPut, KindSandbox.item(name), nil, m.Body, m.mediaType())
+// no sandbox takes the name; one that names another is refused. A create
+// answers as CreateSandbox does.
+func (c *Client) ApplySandbox(ctx context.Context, name string, m Manifest, opts ...CreateOption) (v1.Sandbox, []byte, error) {
+	raw, err := c.send(ctx, http.MethodPut, KindSandbox.item(name), createQuery(opts), m.Body, m.mediaType())
 	return decodeInto[v1.Sandbox](raw, err)
 }
 

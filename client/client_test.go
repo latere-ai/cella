@@ -809,3 +809,30 @@ func TestWritingToASessionThatEndedFails(t *testing.T) {
 		t.Error("a resize on a session that ended reported success")
 	}
 }
+
+// TestCreateSandboxWait: Wait sends wait=1 and the bound on the create and on
+// the apply, a zero bound leaves the server's own, and a call without options
+// sends neither, which is the create that answers as soon as it is recorded.
+func TestCreateSandboxWait(t *testing.T) {
+	f := newFixture(t, func(w http.ResponseWriter, _ *http.Request) { writeObject(w, 201, "dev", "sbx_1") })
+	c := f.client(client.Config{})
+	m := client.JSON([]byte(`{"apiVersion":"` + v1.APIVersion + `","kind":"Sandbox","spec":{}}`))
+	if _, _, err := c.CreateSandbox(t.Context(), m); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.last(); len(got.Query) != 0 {
+		t.Fatalf("a create without options sent %v", got.Query)
+	}
+	if _, _, err := c.CreateSandbox(t.Context(), m, client.Wait(90*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.last(); got.Query.Get("wait") != "1" || got.Query.Get("timeout") != "1m30s" {
+		t.Fatalf("a held create sent %v", got.Query)
+	}
+	if _, _, err := c.ApplySandbox(t.Context(), "dev", m, client.Wait(0)); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.last(); got.Query.Get("wait") != "1" || got.Query.Has("timeout") || got.Path != "/v1/sandboxes/dev" {
+		t.Fatalf("a held apply with the server's bound sent %s %v", got.Path, got.Query)
+	}
+}
