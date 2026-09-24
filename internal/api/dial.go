@@ -153,11 +153,16 @@ func (h *handler) relay(r *http.Request, conn *websocket.Conn, w *frameWriter, i
 		for {
 			n, err := inside.Read(buf)
 			if n > 0 {
+				// Counted before the write, so a byte the caller has read is
+				// already in the count when the caller's close ends the
+				// session and the record reads it; a write that fails takes
+				// its bytes back out.
+				out.Add(int64(n))
 				if werr := w.write(websocket.BinaryMessage, buf[:n]); werr != nil {
+					out.Add(-int64(n))
 					ended <- errUndelivered
 					return
 				}
-				out.Add(int64(n))
 			}
 			if err != nil {
 				ended <- err
