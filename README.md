@@ -227,7 +227,7 @@ endpoint, and the event sink fit a platform of your own.
 | [The cella command](docs/cli.md) | the client: commands, output, and exit codes |
 | [Manifests](docs/manifest.md) | every field of `Sandbox`, `Secret`, and `Environment`, with defaults |
 | [API](docs/api.md) | the `/v1` routes, authentication, errors, and the OpenAPI document |
-| [Sandboxes on Kubernetes](docs/kubernetes.md) | what a sandbox on a cluster can do and what the Role allows |
+| [Sandboxes on Kubernetes](docs/kubernetes.md) | what a sandbox on a cluster can do, what it can reach, and what the Role allows |
 | [Self-hosting a data plane](docs/workers.md) | running sandboxes on your own machines with `cellad worker` |
 | [Capacity and queues](docs/scheduling.md) | capacity, queues, priority, preemption, and warm pools |
 | [Following events](docs/events.md) | an object's history and the live feed |
