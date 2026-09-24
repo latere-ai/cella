@@ -76,7 +76,7 @@ func TestTheConfigurationPageNamesEveryVariable(t *testing.T) {
 	page := string(body)
 
 	read := namesIn(t, filepath.Join(root, "internal", "config"))
-	for name := range namesIn(t, filepath.Join(root, "internal", "cellaclient")) {
+	for name := range namesIn(t, filepath.Join(root, "client")) {
 		read[name] = true
 	}
 	if len(read) < 50 {

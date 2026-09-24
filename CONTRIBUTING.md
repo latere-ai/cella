@@ -74,7 +74,7 @@ held to the threat model and its tests.
 | Where | What |
 |---|---|
 | `cmd/cellad` | the server binary and its roles: `serve`, `worker`, `egress`, `check`, `version` |
-| `cmd/cella` | the client binary; `internal/cellacli` is the command and `internal/cellaclient` the HTTP client |
+| `cmd/cella` | the client binary; `internal/cellacli` is the command, and the HTTP client is the exported `client` package |
 | `cmd/cella-stubs` | the test stubs `make run` and the kind tier use; `internal/stubs` holds each role |
 | `manifest/`, `manifest/v1` | the kinds, strict decoding, and `Resolve`: defaults, admission, ceilings, capability checks, and the spawn boundary |
 | `runtime/` | the driver contract; `native`, `podman`, `k8s`, and `remote`, the driver that speaks to a worker; `runtimetest`, the suite a driver passes |
