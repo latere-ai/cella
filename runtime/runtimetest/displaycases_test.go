@@ -12,7 +12,6 @@ import (
 	"image/jpeg"
 	"image/png"
 	"io"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -32,10 +31,8 @@ type fakeDesktop struct {
 	mu sync.Mutex
 	// boxes is every sandbox this driver holds, by id.
 	boxes map[string]runtime.CreateSpec
-	// listens reports the port a sandbox's listen command names as held,
-	// and everyListening reports every declared port as held, which is a
-	// probe that reads nothing.
-	listens, everyListening bool
+	// bound is the port the fake reports as held, and 0 reports none.
+	bound int
 	// wrongSize renders a frame of a size nobody asked for.
 	wrongSize bool
 	// acceptsAnything skips validation, which is what a driver with a
@@ -85,13 +82,9 @@ func (d *fakeDesktop) Inspect(_ context.Context, id string) (runtime.State, erro
 	if s.Display != nil && !d.notReady {
 		state.Conditions = []v1.Condition{{Type: v1.ConditionDisplayReady, Status: v1.ConditionTrue}}
 	}
-	bound := 0
-	if len(s.Command) == 2 && s.Command[0] == "listen" && d.listens {
-		bound, _ = strconv.Atoi(s.Command[1])
-	}
 	for _, p := range s.Ports {
 		port := runtime.PortState{Name: p.Name, Port: p.Port, State: runtime.PortClosed}
-		if p.Port == bound || d.everyListening {
+		if p.Port == d.bound {
 			port.State = runtime.PortListening
 		}
 		state.Ports = append(state.Ports, port)
@@ -191,7 +184,7 @@ func runCase(t *testing.T, name string, d runtime.Driver, opts Options) *recorde
 
 func TestDisplayCasesPassAConformingDriver(t *testing.T) {
 	d := newFakeDesktop()
-	d.listens = true
+	d.bound = 18080
 	for _, name := range []string{"DisplayScreenshot", "ScreenStream", "InputAcceptsAndRefuses", "PortsReportListening"} {
 		t.Run(name, func(t *testing.T) {
 			if r := runCase(t, name, d, desktopOptions()); r.failed() {
@@ -258,7 +251,7 @@ func TestDisplayCasesFailEachDefect(t *testing.T) {
 		}, "InputAcceptsAndRefuses"},
 		{"a port nothing holds reported as listening", func() *fakeDesktop {
 			d := newFakeDesktop()
-			d.everyListening = true
+			d.bound = 18081
 			return d
 		}, "PortsReportListening"},
 	} {
