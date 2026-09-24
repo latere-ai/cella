@@ -22,7 +22,8 @@ import (
 // reading a disk into memory.
 const maxDocumentBytes = 1 << 20
 
-// pollInterval is how often -w reads the object it is waiting for.
+// pollInterval is how often --wait reads the object it is waiting for, once
+// the server's hold has answered with a sandbox not yet running.
 const pollInterval = 250 * time.Millisecond
 
 // document is the header of a manifest: what the command needs to send it to
@@ -42,12 +43,13 @@ type document struct {
 // application/json and nothing else, so a YAML file has no route to send it
 // to and is refused here rather than at the server.
 func apply(ctx context.Context, c *invocation, args []string) error {
-	fs := c.flags("cella apply -f <file> [-w] [--value-from-env <name> | --value-file <path>]")
+	fs := c.flags("cella apply -f <file> [-w | --wait] [--timeout <duration>] [--value-from-env <name> | --value-file <path>]")
 	file := fs.String("f", "", "the manifest to apply, or - for standard input")
 	wait := fs.Bool("w", false, "wait for the sandbox to be Running")
+	fs.BoolVar(wait, "wait", false, "wait for the sandbox to be Running, as -w")
 	valueEnv := fs.String("value-from-env", "", "read a Secret's value from this environment variable")
 	valueFile := fs.String("value-file", "", "read a Secret's value from this file")
-	timeout := fs.Duration("timeout", 2*time.Minute, "how long -w waits")
+	timeout := fs.Duration("timeout", 2*time.Minute, "how long --wait waits")
 	rest, err := parse(fs, args)
 	if err != nil {
 		return err
@@ -90,12 +92,20 @@ func apply(ctx context.Context, c *invocation, args []string) error {
 		if *valueEnv != "" || *valueFile != "" {
 			return usagef("a value belongs to a Secret, and this manifest is a Sandbox")
 		}
-		obj, raw, err := client.CreateSandbox(ctx, cellaclient.JSON(body))
+		// A create answers as soon as the sandbox is recorded. --wait asks
+		// the server to hold the answer until it runs, and then reads it
+		// until it does, which is what a server that does not hold needs.
+		var opts []cellaclient.CreateOption
+		if *wait {
+			opts = append(opts, cellaclient.Wait(*timeout))
+		}
+		started := time.Now()
+		obj, raw, err := client.CreateSandbox(ctx, cellaclient.JSON(body), opts...)
 		if err != nil {
 			return err
 		}
 		if *wait {
-			if obj, raw, err = waitForRunning(ctx, client, obj.Status.ID, *timeout); err != nil {
+			if obj, raw, err = waitForRunning(ctx, client, obj, raw, started.Add(*timeout), *timeout); err != nil {
 				return err
 			}
 		}
@@ -175,15 +185,11 @@ func withValue(body []byte, c *invocation, fromEnv, fromFile string) ([]byte, er
 	return out, nil
 }
 
-// waitForRunning is -w: the object is read until its phase is one a caller
-// can use, or until the wait runs out.
-func waitForRunning(ctx context.Context, client *cellaclient.Client, id string, timeout time.Duration) (v1.Sandbox, []byte, error) {
-	deadline := time.Now().Add(timeout)
+// waitForRunning is --wait after the create's answer: the answer is read
+// first, and then the object, until its phase is one a caller can use or the
+// deadline passes.
+func waitForRunning(ctx context.Context, client *cellaclient.Client, obj v1.Sandbox, raw []byte, deadline time.Time, timeout time.Duration) (v1.Sandbox, []byte, error) {
 	for {
-		obj, raw, err := client.GetSandbox(ctx, id)
-		if err != nil {
-			return obj, raw, err
-		}
 		switch obj.Status.Phase {
 		case "Running":
 			return obj, raw, nil
@@ -197,6 +203,10 @@ func waitForRunning(ctx context.Context, client *cellaclient.Client, id string, 
 		case <-ctx.Done():
 			return obj, raw, ctx.Err()
 		case <-time.After(pollInterval):
+		}
+		var err error
+		if obj, raw, err = client.GetSandbox(ctx, obj.Status.ID); err != nil {
+			return obj, raw, err
 		}
 	}
 }

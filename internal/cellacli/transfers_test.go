@@ -241,6 +241,35 @@ func TestApplyWaitsForTheSandboxToRun(t *testing.T) {
 	})
 }
 
+// TestApplyWaits is --wait and its short form -w: the create asks the server
+// to hold its answer with the command's timeout, and a server that answers
+// the sandbox Running ends the command with no read after it. Without the
+// flag the create asks for no hold.
+func TestApplyWaits(t *testing.T) {
+	document := `{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox","metadata":{"name":"dev"},"spec":{"image":"example/image:1"}}`
+	p := newPlane(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		_, _ = io.WriteString(w, sandboxJSON("dev", "sbx_1", "Running"))
+	})
+	for _, flags := range [][]string{{"--wait"}, {"-w", "--timeout", "30s"}} {
+		before := len(p.seen())
+		got := p.run(t, document, append([]string{"apply", "-f", "-"}, flags...)...)
+		if got.code != 0 {
+			t.Fatalf("%v exited %d, stderr %q", flags, got.code, got.stderr)
+		}
+		calls := p.seen()[before:]
+		if len(calls) != 1 || calls[0].Method != http.MethodPost || calls[0].Query.Get("wait") != "1" {
+			t.Fatalf("%v sent %+v, want one held create", flags, calls)
+		}
+		if want := map[bool]string{true: "2m0s", false: "30s"}[flags[0] == "--wait"]; calls[0].Query.Get("timeout") != want {
+			t.Fatalf("%v sent the bound %q, want %q", flags, calls[0].Query.Get("timeout"), want)
+		}
+	}
+	if got := p.run(t, document, "apply", "-f", "-"); got.code != 0 || p.last().Query.Has("wait") {
+		t.Fatalf("a create without --wait exited %d and sent %v", got.code, p.last().Query)
+	}
+}
+
 // failingWriter is a stream that cannot be written, which is what a closed
 // pipe on the other side of the command is.
 type failingWriter struct{}

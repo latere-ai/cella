@@ -3,7 +3,7 @@ cella speaks the /v1 API of a Cella control plane.
 usage: cella <command> [flags] [arguments]
 
 Commands:
-  apply    -f <file> [-w]                          apply a Sandbox or a Secret manifest
+  apply    -f <file> [-w|--wait]                   apply a Sandbox or a Secret manifest
   get      <kind> [<ref>] [-o json|yaml|wide|name] read one object or list a kind
   delete   <kind> <ref>                            delete one object
   start    <ref>                                   start a stopped sandbox
