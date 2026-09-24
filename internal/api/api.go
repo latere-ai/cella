@@ -17,7 +17,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -582,13 +581,8 @@ func (h *handler) list(w http.ResponseWriter, r *http.Request) {
 		if obj.Status.ID <= q.Get("cursor") || (q.Get("owner") != "" && q.Get("owner") != obj.Status.Owner) || (q.Get("environment") != "" && q.Get("environment") != obj.Spec.Environment) || !matches(obj, labels) {
 			continue
 		}
-		if d.Filter != nil {
-			if len(d.Filter.Owners) > 0 && !slices.Contains(d.Filter.Owners, obj.Status.Owner) {
-				continue
-			}
-			if !matches(obj, d.Filter.Labels) {
-				continue
-			}
+		if !admits(d.Filter, obj.Status.Owner, obj.Metadata.Labels) {
+			continue
 		}
 		if _, err = h.decide(r, authorizer.ActionSandboxRead, resource(obj)); err != nil {
 			if auth.CodeOf(err) == auth.CodeForbidden {

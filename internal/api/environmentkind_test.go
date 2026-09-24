@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"latere.ai/x/pkg/authkit/issuertest"
+	"latere.ai/x/pkg/authz"
 
 	"latere.ai/x/cella/controller"
 	"latere.ai/x/cella/internal/auth"
@@ -29,6 +30,7 @@ import (
 // the object and its routes rather than about where a sandbox runs.
 type kinds struct {
 	*fixture
+	issuer        *issuertest.Server
 	mu            sync.Mutex
 	registrations []controller.Registration
 }
@@ -42,6 +44,14 @@ func setupEnvironments(t *testing.T) *kinds {
 // environment behind a wrapped driver, so the default and an applied
 // environment can declare different capabilities over one native runtime.
 func setupEnvironmentsOn(t *testing.T, own func(runtime.Driver) runtime.Driver) *kinds {
+	t.Helper()
+	return setupEnvironmentsWith(t, own, nil)
+}
+
+// setupEnvironmentsWith is setupEnvironmentsOn decided by the policy given,
+// and by the owner policy with the subject "admin" as its administrator when
+// the policy is nil.
+func setupEnvironmentsWith(t *testing.T, own func(runtime.Driver) runtime.Driver, policy authz.Authorizer) *kinds {
 	t.Helper()
 	issuer := issuertest.New(t, issuertest.WithDefaultAudience("cella"))
 	verifier, err := auth.NewVerifier(t.Context(), auth.VerifierOptions{
@@ -65,7 +75,9 @@ func setupEnvironmentsOn(t *testing.T, own func(runtime.Driver) runtime.Driver) 
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = c.Close() })
-	policy := &auth.OwnerPolicy{DefaultEnvironment: "default", Admins: []string{issuer.URL() + "|admin"}}
+	if policy == nil {
+		policy = &auth.OwnerPolicy{DefaultEnvironment: "default", Admins: []string{issuer.URL() + "|admin"}}
+	}
 	h, err := New(Options{
 		Controller: c, Verifier: verifier, Authorizer: auth.NewAuthorizer(policy),
 		Log: slog.New(slog.DiscardHandler),
@@ -75,6 +87,7 @@ func setupEnvironmentsOn(t *testing.T, own func(runtime.Driver) runtime.Driver) 
 	}
 	server := httptest.NewServer(h)
 	t.Cleanup(server.Close)
+	k.issuer = issuer
 	k.fixture = &fixture{
 		t: t, url: server.URL, issuerURL: issuer.URL(),
 		alice: issuer.Mint(issuertest.Claims{Sub: "admin"}),

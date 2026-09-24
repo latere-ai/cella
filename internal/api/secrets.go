@@ -7,7 +7,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"slices"
 	"strconv"
 
 	"latere.ai/x/pkg/authz"
@@ -192,7 +191,7 @@ func (h *handler) listSecrets(w http.ResponseWriter, r *http.Request) {
 		if obj.Status.ID <= cursor {
 			continue
 		}
-		if d.Filter != nil && len(d.Filter.Owners) > 0 && !slices.Contains(d.Filter.Owners, obj.Status.Owner) {
+		if !admits(d.Filter, obj.Status.Owner, obj.Metadata.Labels) {
 			continue
 		}
 		if _, err = h.decide(r, authorizer.ActionSecretRead, secretResource(obj)); err != nil {

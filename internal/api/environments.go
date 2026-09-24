@@ -58,13 +58,32 @@ func (h *handler) environmentItem(w http.ResponseWriter, r *http.Request) {
 	respondEnvironment(w, http.StatusOK, obj)
 }
 
-// environmentList answers the environments this control plane holds.
+// environmentList answers the environments the caller may read, under the list
+// rule every list route follows: the list decision, its filter over each
+// environment's owner and labels, then environment.read on each environment
+// the filter admits. A refused read leaves the environment out; a read that
+// produced no decision refuses the page, which is never answered around it.
+// The default environment is decided by its read alone (admitsEnvironment).
 func (h *handler) environmentList(w http.ResponseWriter, r *http.Request) {
-	if _, err := h.decide(r, authorizer.ActionEnvironmentList, auth.List(authorizer.ActionEnvironmentList)); err != nil {
+	d, err := h.decide(r, authorizer.ActionEnvironmentList, auth.List(authorizer.ActionEnvironmentList))
+	if err != nil {
 		respondError(w, err)
 		return
 	}
-	items := h.Controller.ListEnvironments()
+	items := []v1.Environment{}
+	for _, obj := range h.Controller.ListEnvironments() {
+		if !admitsEnvironment(d.Filter, h.Controller.Environment(), obj.Metadata.Name, obj.Status.Owner, obj.Metadata.Labels) {
+			continue
+		}
+		if _, err = h.decide(r, authorizer.ActionEnvironmentRead, environmentResource(obj)); err != nil {
+			if auth.CodeOf(err) == auth.CodeForbidden {
+				continue
+			}
+			respondError(w, err)
+			return
+		}
+		items = append(items, obj)
+	}
 	respond(w, http.StatusOK, map[string]any{"items": items, "next": ""})
 }
 

@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"math"
 	"net/http"
-	"slices"
 	"strconv"
 	"time"
 
@@ -81,7 +80,8 @@ func (h *handler) followFeed(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		f, err = h.Events.FollowAll()
-		gate = &recordGate{h: h, r: r, lists: map[string]listVerdict{}, reads: map[string]bool{}}
+		gate = &recordGate{h: h, r: r, defaultEnvironment: h.Controller.Environment(),
+			lists: map[string]listVerdict{}, reads: map[string]bool{}}
 	} else {
 		after := events.FromNow
 		if raw := q.Get("cursor"); raw != "" {
@@ -256,15 +256,18 @@ type listVerdict struct {
 // recordGate applies the list route's rule to a feed of every object, one
 // record at a time: the kind's list decision and its filter on owner and
 // labels, then the kind's read on the record's own object. Each decision is
-// asked once per kind or per object and held for the feed.
+// asked once per kind or per object and held for the feed. A record about the
+// default environment passes the filter as that environment does in the list,
+// and its read decides it.
 //
 // The resource is built from the record and never from a read of the object,
 // because the object a deleted record is about no longer exists.
 type recordGate struct {
-	h     *handler
-	r     *http.Request
-	lists map[string]listVerdict
-	reads map[string]bool
+	h                  *handler
+	r                  *http.Request
+	defaultEnvironment string
+	lists              map[string]listVerdict
+	reads              map[string]bool
 }
 
 // allows reports whether the caller may read the record. A refusal is a
@@ -285,7 +288,7 @@ func (g *recordGate) allows(record events.Record) (bool, error) {
 		}
 		g.lists[list] = verdict
 	}
-	if !verdict.allowed || !passes(verdict.filter, record.Object) {
+	if !verdict.allowed || !g.admits(verdict.filter, record.Object) {
 		return false, nil
 	}
 	key := fmt.Sprint(record.Object.Kind, "\x00", record.Object.ID, "\x00", record.Object.Owner, "\x00", record.Object.Labels)
@@ -306,21 +309,13 @@ func (g *recordGate) allows(record events.Record) (bool, error) {
 	return allowed, nil
 }
 
-// passes is a list decision's filter over one record's object: an owner the
-// filter names, and every label it names with the value it names.
-func passes(filter *authz.Filter, o events.Object) bool {
-	if filter == nil {
-		return true
+// admits is the list's filter step over one record's object, the same step
+// the list route takes over one row.
+func (g *recordGate) admits(filter *authz.Filter, o events.Object) bool {
+	if o.Kind == events.KindEnvironment {
+		return admitsEnvironment(filter, g.defaultEnvironment, o.Name, o.Owner, o.Labels)
 	}
-	if len(filter.Owners) > 0 && !slices.Contains(filter.Owners, o.Owner) {
-		return false
-	}
-	for k, v := range filter.Labels {
-		if got, ok := o.Labels[k]; !ok || got != v {
-			return false
-		}
-	}
-	return true
+	return admits(filter, o.Owner, o.Labels)
 }
 
 // actionsOf is the list and read actions of a record's kind and the resource
