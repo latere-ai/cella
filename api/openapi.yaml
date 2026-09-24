@@ -200,28 +200,86 @@ paths:
     get:
       operationId: exportFiles
       summary: Read the named paths as one tar stream.
-      description: Authorized as `sandbox.exec`.
+      description: >-
+        Authorized as `sandbox.exec`. Every path is absolute and at or below
+        the sandbox's workspace. A failure after the first byte ends the
+        stream and names the error in the `X-Cella-Error` trailer.
+      parameters:
+        - name: path
+          in: query
+          required: true
+          description: A path to include; repeat it for more than one.
+          schema:
+          type: array
+          items:
+            type: string
       responses:
         "200":
-          description: The answer this route serves.
+          description: The archive.
+          content:
+            application/x-tar:
+              schema:
+                type: string
+                format: binary
         default:
           $ref: "#/components/responses/Error"
     put:
       operationId: importFiles
       summary: Write one file, or extract a tar archive under a destination.
-      description: Authorized as `sandbox.exec`.
+      description: >-
+        Authorized as `sandbox.exec`. With `path` the body is one file's
+        bytes. With `dest` the body is a tar archive, sent as
+        `application/x-tar`, extracted below that directory. The two are
+        exclusive.
+      parameters:
+        - name: path
+          in: query
+          required: false
+          description: The file to write, at or below the sandbox's workspace.
+          schema:
+          type: string
+        - name: dest
+          in: query
+          required: false
+          description: The directory an archive is extracted below, at or below the sandbox's workspace.
+          schema:
+            type: string
+        - name: mode
+          in: query
+          required: false
+          description: The written file's permission bits as octal text, at most `0777`.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/x-tar:
+            schema:
+              type: string
+              format: binary
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
       responses:
-        "200":
-          description: The answer this route serves.
+        "204":
+          description: Written.
         default:
           $ref: "#/components/responses/Error"
     delete:
       operationId: removeFile
       summary: Remove a file or a directory tree.
       description: Authorized as `sandbox.exec`.
+      parameters:
+        - name: path
+          in: query
+          required: true
+          description: The file or directory to remove, below the sandbox's workspace.
+          schema:
+          type: string
       responses:
-        "200":
-          description: The answer this route serves.
+        "204":
+          description: Removed.
         default:
           $ref: "#/components/responses/Error"
   /v1/sandboxes/{id}/files/content:
@@ -236,9 +294,21 @@ paths:
       operationId: readFile
       summary: Read one file's body.
       description: Authorized as `sandbox.exec`.
+      parameters:
+        - name: path
+          in: query
+          required: true
+          description: The file to read, at or below the sandbox's workspace.
+          schema:
+          type: string
       responses:
         "200":
-          description: The answer this route serves.
+          description: The file's bytes.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
         default:
           $ref: "#/components/responses/Error"
   /v1/sandboxes/{id}/files/stat:
@@ -253,9 +323,20 @@ paths:
       operationId: statFile
       summary: Read one entry.
       description: Authorized as `sandbox.exec`.
+      parameters:
+        - name: path
+          in: query
+          required: true
+          description: The entry to read, at or below the sandbox's workspace.
+          schema:
+          type: string
       responses:
         "200":
-          description: The answer this route serves.
+          description: The entry.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileInfo"
         default:
           $ref: "#/components/responses/Error"
   /v1/sandboxes/{id}/files/list:
@@ -270,9 +351,27 @@ paths:
       operationId: listFiles
       summary: List a directory's immediate entries, sorted by name.
       description: Authorized as `sandbox.exec`.
+      parameters:
+        - name: path
+          in: query
+          required: true
+          description: The directory to list, at or below the sandbox's workspace.
+          schema:
+          type: string
       responses:
         "200":
-          description: The answer this route serves.
+          description: The entries.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/FileInfo"
+                  next:
+                    type: string
         default:
           $ref: "#/components/responses/Error"
   /v1/sandboxes/{id}/files/mkdir:
@@ -287,9 +386,20 @@ paths:
       operationId: makeDirectory
       summary: Make a directory and its missing parents.
       description: Authorized as `sandbox.exec`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [path]
+              properties:
+                path:
+                  type: string
+                  description: The directory to make, below the sandbox's workspace.
       responses:
-        "200":
-          description: The answer this route serves.
+        "204":
+          description: Made.
         default:
           $ref: "#/components/responses/Error"
   /v1/sandboxes/{id}/files/move:
@@ -304,9 +414,23 @@ paths:
       operationId: moveFile
       summary: Move a file or a directory to an exact destination.
       description: Authorized as `sandbox.exec`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [from, to]
+              properties:
+                from:
+                  type: string
+                  description: The path to move, below the sandbox's workspace.
+                to:
+                  type: string
+                  description: The exact destination, below the sandbox's workspace.
       responses:
-        "200":
-          description: The answer this route serves.
+        "204":
+          description: Moved.
         default:
           $ref: "#/components/responses/Error"
   /v1/sandboxes/{id}/logs:
@@ -829,6 +953,24 @@ components:
           schema:
             $ref: "#/components/schemas/Error"
   schemas:
+    FileInfo:
+      type: object
+      properties:
+        name:
+          type: string
+        path:
+          type: string
+        size:
+          type: integer
+          format: int64
+        mode:
+          type: integer
+          description: The permission and type bits.
+        modTime:
+          type: string
+          format: date-time
+        isDir:
+          type: boolean
     Error:
       type: object
       required: [error]
