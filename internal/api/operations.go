@@ -4,6 +4,7 @@
 package api
 
 import (
+	"cmp"
 	"errors"
 	"io"
 	"log/slog"
@@ -40,8 +41,18 @@ func (h *handler) touch(r *http.Request, obj v1.Sandbox) {
 		slog.WarnContext(r.Context(), "activity stamp failed", "sandbox", obj.Status.ID, "error", err)
 	}
 }
-func validWorkspacePath(p string) bool {
-	return path.Clean(p) == p && !strings.ContainsRune(p, 0) && (p == "/workspace" || strings.HasPrefix(p, "/workspace/"))
+
+// workspaceOf is the directory a sandbox's files live in: the path its
+// manifest resolved to, which the driver roots the workspace at, or the
+// default for an object written before the field was resolved.
+func workspaceOf(obj v1.Sandbox) string {
+	return cmp.Or(obj.Spec.Workspace.Path, runtime.DefaultWorkdir)
+}
+
+// validWorkspacePath reports whether p is a clean absolute path at or below
+// root, the sandbox's workspace.
+func validWorkspacePath(root, p string) bool {
+	return path.Clean(p) == p && !strings.ContainsRune(p, 0) && (p == root || strings.HasPrefix(p, root+"/"))
 }
 func (h *handler) files(w http.ResponseWriter, r *http.Request) {
 	obj, err := h.authorizedObject(r, authorizer.ActionSandboxExec)
@@ -61,8 +72,8 @@ func (h *handler) files(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		dest := r.URL.Query().Get("dest")
-		if !validWorkspacePath(dest) {
-			respondError(w, &manifest.Error{Code: "invalid_field", Detail: "dest must be an absolute path below /workspace"})
+		if !validWorkspacePath(workspaceOf(obj), dest) {
+			respondError(w, &manifest.Error{Code: "invalid_field", Detail: "dest must be an absolute path below the workspace, " + workspaceOf(obj)})
 			return
 		}
 		// Validate total request size before extraction begins. A tar reader may stop
@@ -99,8 +110,8 @@ func (h *handler) files(w http.ResponseWriter, r *http.Request) {
 	}
 	paths := r.URL.Query()["path"]
 	for _, p := range paths {
-		if !validWorkspacePath(p) {
-			respondError(w, &manifest.Error{Code: "invalid_field", Detail: "path must be an absolute path below /workspace"})
+		if !validWorkspacePath(workspaceOf(obj), p) {
+			respondError(w, &manifest.Error{Code: "invalid_field", Detail: "path must be an absolute path below the workspace, " + workspaceOf(obj)})
 			return
 		}
 	}

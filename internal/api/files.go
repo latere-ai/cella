@@ -86,22 +86,23 @@ func (h *handler) fileStore(obj v1.Sandbox) (runtime.FileStore, error) {
 	return h.Controller.Files(obj.Status.ID)
 }
 
-// queryPath reads the one path a route takes. A repeated selector is refused
-// rather than answered for one of its values.
-func queryPath(r *http.Request, key string) (string, error) {
+// queryPath reads the one path a route takes, held to the sandbox's
+// workspace. A repeated selector is refused rather than answered for one of
+// its values.
+func queryPath(r *http.Request, key string, obj v1.Sandbox) (string, error) {
 	values := r.URL.Query()[key]
 	if len(values) != 1 {
 		return "", &manifest.Error{Code: "invalid_field", Detail: "exactly one " + key + " is required"}
 	}
-	return values[0], workspacePathError(values[0])
+	return values[0], workspacePathError(obj, values[0])
 }
 
 // workspacePathError is the lexical half of the containment rule of design
 // 033, which the API applies before a driver is called at all. The half that
 // resolves symbolic links belongs where the filesystem is.
-func workspacePathError(p string) error {
-	if !validWorkspacePath(p) {
-		return &manifest.Error{Code: "invalid_field", Detail: "the path must be absolute and below " + runtime.DefaultWorkdir}
+func workspacePathError(obj v1.Sandbox, p string) error {
+	if root := workspaceOf(obj); !validWorkspacePath(root, p) {
+		return &manifest.Error{Code: "invalid_field", Detail: "the path must be absolute and below the workspace, " + root}
 	}
 	return nil
 }
@@ -112,7 +113,7 @@ func (h *handler) fileContent(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	path, err := queryPath(r, "path")
+	path, err := queryPath(r, "path", obj)
 	if err != nil {
 		respondError(w, err)
 		return
@@ -141,7 +142,7 @@ func (h *handler) fileStat(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	path, err := queryPath(r, "path")
+	path, err := queryPath(r, "path", obj)
 	if err != nil {
 		respondError(w, err)
 		return
@@ -162,7 +163,7 @@ func (h *handler) fileList(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	path, err := queryPath(r, "path")
+	path, err := queryPath(r, "path", obj)
 	if err != nil {
 		respondError(w, err)
 		return
@@ -210,7 +211,7 @@ func (h *handler) fileWrite(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	path, err := queryPath(r, "path")
+	path, err := queryPath(r, "path", obj)
 	if err != nil {
 		respondError(w, err)
 		return
@@ -255,7 +256,7 @@ func (h *handler) fileRemove(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	path, err := queryPath(r, "path")
+	path, err := queryPath(r, "path", obj)
 	if err != nil {
 		respondError(w, err)
 		return
@@ -279,7 +280,7 @@ func (h *handler) fileMkdir(w http.ResponseWriter, r *http.Request) {
 		respondError(w, err)
 		return
 	}
-	if err := workspacePathError(req.Path); err != nil {
+	if err := workspacePathError(obj, req.Path); err != nil {
 		respondError(w, err)
 		return
 	}
@@ -302,7 +303,7 @@ func (h *handler) fileMove(w http.ResponseWriter, r *http.Request) {
 		respondError(w, err)
 		return
 	}
-	if err := errors.Join(workspacePathError(req.From), workspacePathError(req.To)); err != nil {
+	if err := errors.Join(workspacePathError(obj, req.From), workspacePathError(obj, req.To)); err != nil {
 		respondError(w, firstError(err))
 		return
 	}

@@ -416,3 +416,108 @@ func TestFilesRecords(t *testing.T) {
 		t.Errorf("the records report %d written and %d read, for %d bytes", bytesWritten, bytesRead, len(canary))
 	}
 }
+
+// elsewhere is a driver whose sandboxes keep their workspace at another path,
+// as the container drivers do when a manifest names one. It carries the
+// native driver underneath, translating the workspace to the native one's.
+type elsewhere struct {
+	runtime.Driver
+	store runtime.FileStore
+}
+
+const elsewhereRoot = "/home/agent/work"
+
+func (d elsewhere) Isolation() string { return "container" }
+
+func (d elsewhere) Create(ctx context.Context, spec runtime.CreateSpec) (runtime.Ref, error) {
+	spec.Image, spec.Workspace.Path, spec.Workdir = "", "", ""
+	return d.Driver.Create(ctx, spec)
+}
+
+func (d elsewhere) native(p string) string {
+	return runtime.DefaultWorkdir + strings.TrimPrefix(p, elsewhereRoot)
+}
+
+func (d elsewhere) Stat(ctx context.Context, id, p string) (runtime.FileInfo, error) {
+	return d.store.Stat(ctx, id, d.native(p))
+}
+
+func (d elsewhere) ReadDir(ctx context.Context, id, p string) ([]runtime.FileInfo, error) {
+	return d.store.ReadDir(ctx, id, d.native(p))
+}
+
+func (d elsewhere) Open(ctx context.Context, id, p string) (io.ReadCloser, runtime.FileInfo, error) {
+	return d.store.Open(ctx, id, d.native(p))
+}
+
+func (d elsewhere) Write(ctx context.Context, id string, req runtime.WriteRequest) (int64, error) {
+	req.Path = d.native(req.Path)
+	return d.store.Write(ctx, id, req)
+}
+
+func (d elsewhere) Mkdir(ctx context.Context, id, p string) error {
+	return d.store.Mkdir(ctx, id, d.native(p))
+}
+
+func (d elsewhere) Remove(ctx context.Context, id, p string) error {
+	return d.store.Remove(ctx, id, d.native(p))
+}
+
+func (d elsewhere) Move(ctx context.Context, id, from, to string) error {
+	return d.store.Move(ctx, id, d.native(from), d.native(to))
+}
+
+// TestFilesFollowTheSandboxWorkspace: the file routes hold a path to the
+// workspace the sandbox's manifest resolved to, which is where the driver
+// roots it, and not to the default one.
+func TestFilesFollowTheSandboxWorkspace(t *testing.T) {
+	f := setupDriver(t, nil, func(d runtime.Driver) runtime.Driver {
+		return elsewhere{Driver: d, store: d.(runtime.FileStore)}
+	})
+	body := `{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox","metadata":{"name":"elsewhere"},` +
+		`"spec":{"image":"registry.example/tools:1","command":["sleep","300"],"workspace":{"path":"` + elsewhereRoot + `"}}}`
+	var obj v1.Sandbox
+	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes", f.alice, body, 201), &obj); err != nil {
+		t.Fatal(err)
+	}
+	if obj.Spec.Workspace.Path != elsewhereRoot {
+		t.Fatalf("the workspace resolved to %q", obj.Spec.Workspace.Path)
+	}
+	base := "/v1/sandboxes/" + obj.Status.ID + "/files"
+	f.expect(204, "POST", base+"/mkdir", f.alice, "application/json", `{"path":"`+elsewhereRoot+`/notes"}`)
+	f.expect(204, "PUT", base+"?path="+query(elsewhereRoot+"/notes/a.txt"), f.alice, "text/plain", "hello")
+	if got := f.expect(200, "GET", base+"/content?path="+query(elsewhereRoot+"/notes/a.txt"), f.alice, "", ""); string(got) != "hello" {
+		t.Fatalf("the file reads %q", got)
+	}
+	f.expect(200, "GET", base+"/list?path="+query(elsewhereRoot), f.alice, "", "")
+	f.expect(204, "POST", base+"/move", f.alice, "application/json",
+		`{"from":"`+elsewhereRoot+`/notes/a.txt","to":"`+elsewhereRoot+`/b.txt"}`)
+	// The default workspace is not this sandbox's, and a sibling that only
+	// shares the prefix is outside it.
+	for _, p := range []string{"/workspace/b.txt", elsewhereRoot + "x/b.txt", "/home/agent"} {
+		f.expect(400, "GET", base+"/stat?path="+query(p), f.alice, "", "")
+	}
+}
+
+// TestAnUploadOfTheWrongTypeIsRefusedInItsOwnWords: the refusal's sentence
+// is the route-neutral one, since an archive upload is not a manifest, and
+// the detail names the type the route takes.
+func TestAnUploadOfTheWrongTypeIsRefusedInItsOwnWords(t *testing.T) {
+	f, base := filesFixture(t)
+	body := f.expect(415, "PUT", base+"?dest="+query("/workspace"), f.alice, "text/plain", "not a tar")
+	var got struct {
+		Error struct {
+			Message string         `json:"message"`
+			Details map[string]any `json:"details"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(got.Error.Message, "manifest") {
+		t.Errorf("an archive upload is refused with %q, which speaks of a manifest", got.Error.Message)
+	}
+	if detail, _ := got.Error.Details["detail"].(string); !strings.Contains(detail, "application/x-tar") {
+		t.Errorf("the detail %q does not name the type the route takes", detail)
+	}
+}
