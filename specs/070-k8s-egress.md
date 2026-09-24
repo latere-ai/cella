@@ -251,11 +251,13 @@ The kind tier gains three tests of what the API cannot see:
 ## Not in this slice
 
 The per-Pod gateway sidecar of `CELLA_EGRESS_SIDECAR=1`. The control plane
-as an admitted peer. The proxy variables of an adopted pool entry. The
-reverse door on the cluster, whose upstream is reached over TLS on port 443
-and needs an upstream with a certificate the gateway trusts. Narrowing a
-mesh's ingress to the ports a member declares `mesh`. The `<name>.mesh`
-address podman gives a peer.
+as an admitted peer. The proxy variables in the running container of an
+adopted pool entry, which arrive with its next start. The reverse door on
+the cluster, whose upstream is reached over TLS on port 443 and needs an
+upstream with a certificate the gateway trusts. Narrowing a mesh's ingress
+to the ports a member declares `mesh`. The `<name>.mesh` address podman
+gives a peer. A preflight check that the gateway's selector matches a
+running Pod.
 
 ## Acceptance criteria
 
@@ -270,9 +272,9 @@ address podman gives a peer.
 | The workload container carries the proxy, trust and reverse door variables, the authority is a key of the sandbox's Secret projected at the reserved path, a rotation keeps it, an adoption writes it, and a sandbox with no gateway carries none of it | `TestThePodCarriesTheGatewayProjection`, `TestTheAuthoritySurvivesARotation`, `TestAnAdoptionWritesTheAuthority`, `TestNoGatewayProjectsNothing` | passing |
 | A malformed peer is refused at `New`; the five variables are read with their defaults, and each malformed or orphaned one is a start-up problem naming it | `TestNewRefusesAMalformedPeer`, `TestK8sEgressVariables`, `TestTheConfigurationPageNamesEveryVariable` | passing |
 | The Role and the preflight table are unchanged | `TestRoleMatchesTheDriversVerbs`, `TestEveryDialRequestIsInTheVerbTable` | passing |
-| A sandbox allowed one upstream reaches it through its proxy door, is refused a host off its list, reaches nothing directly, and its refusal is recorded | conformance case `case018EgressEnforced`, run by `TestContract` | built: both kind jobs run it; the unit suite runs it against the fake |
-| The same through the kind stack, with the upstream's answer read through the tunnel | `TestClusterEgressBoundary` | built: both kind jobs run it and require its pass; skipped here, where no cluster is reachable |
-| A sandbox reaches no other sandbox's Pod, directly or through the gateway | `TestClusterNoLateralMovement` | built: both kind jobs run it and require its pass; skipped here, where no cluster is reachable |
-| Two members of one mesh reach each other by name under confinement | `TestClusterMeshReachability` | built: both kind jobs run it and require its pass; skipped here, where no cluster is reachable |
+| A sandbox allowed one upstream reaches it through its proxy door, is refused a host off its list, reaches nothing directly, and its refusal is recorded | conformance case `case018EgressEnforced`, run by `TestContract`; every branch by `TestTheEgressCaseReadsEveryAnswer` | passing against the fake in the unit suite and against a local kind cluster; both kind jobs run it |
+| The same through the kind stack, with the upstream's answer read through the tunnel | `TestClusterEgressBoundary` | passing against a local kind cluster; both kind jobs run it and require its pass |
+| A sandbox reaches no other sandbox's Pod, directly or through the gateway | `TestClusterNoLateralMovement` | passing against a local kind cluster; both kind jobs run it and require its pass |
+| Two members of one mesh reach each other by name under confinement | `TestClusterMeshReachability` | passing against a local kind cluster; both kind jobs run it and require its pass |
 | The kind stack runs the gateway with a minted key and an upstream, its ConfigMap names the gateway's Pods by the labels they carry, and both kind conformance runs declare `egress`, pass the upstream and require the three cluster tests | `TestKindRunsTheGateway` | passing |
 | No file this slice adds names a Latere host, image, pool or namespace | `TestNoLatereCoordinates`, `TestNoLatereCoordinatesInReleasedArtifacts` | passing |
