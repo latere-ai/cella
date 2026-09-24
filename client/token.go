@@ -43,6 +43,7 @@ func StaticToken(token string) TokenSource { return staticToken(token) }
 
 type staticToken string
 
+// Token is the fixed bearer.
 func (s staticToken) Token(context.Context) (string, error) { return string(s), nil }
 
 // TokenFile is a source that reads the bearer from a file on every request,
@@ -54,6 +55,7 @@ func TokenFile(path string) TokenSource { return tokenFile(path) }
 
 type tokenFile string
 
+// Token reads the file.
 func (f tokenFile) Token(context.Context) (string, error) {
 	data, err := os.ReadFile(string(f))
 	if err != nil {
@@ -77,6 +79,7 @@ type NoBearer struct {
 	Err error
 }
 
+// Error names the file and why it yields no bearer.
 func (e *NoBearer) Error() string {
 	if e.Err != nil {
 		return fmt.Sprintf("no bearer: %v", e.Err)

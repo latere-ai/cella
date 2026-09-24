@@ -137,6 +137,7 @@ type closeError struct {
 	Reason string
 }
 
+// Error names the code and the reason the peer closed with.
 func (e *closeError) Error() string {
 	if e.Reason == "" {
 		return fmt.Sprintf("the session closed with code %d", e.Code)

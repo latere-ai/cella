@@ -16,6 +16,7 @@ const (
 // Manifest is a document to create or apply: its bytes and the media type
 // they are written in.
 type Manifest struct {
+	// Body is the document's bytes, sent unchanged.
 	Body []byte
 	// ContentType is the body's media type, MediaJSON when empty.
 	ContentType string

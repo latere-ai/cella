@@ -1,14 +1,21 @@
 // SPDX-FileCopyrightText: 2026 Latere AI
 // SPDX-License-Identifier: Apache-2.0
 
-// Package client is the typed client of the /v1 API: one method per route of
-// design 008, the error envelope decoded into one error type, and the streams
-// of the exec, attach and dial sockets over the package's own WebSocket
-// implementation.
+// Package client is the typed client of a Cella control plane's /v1 API: one
+// method per route of design 008, the error envelope decoded into one error
+// type, and the exec, attach and dial sockets over the package's own
+// WebSocket framing. It is what the cella command is built on, and what a
+// program outside this module imports to create and drive sandboxes.
 //
-// It reaches the standard library, this module's contract types and the
-// error envelope of latere.ai/x/pkg/httpjson, which is what design 011 fixes
-// the agent client's build list to.
+// A Client is built from a Config the caller writes: the base address, a
+// TokenSource asked once per request, and optionally an http.Client that
+// carries every call, the sockets included. Nothing is read from the
+// environment unless the caller asks with Environment, which is how code
+// inside a sandbox reaches the control plane that runs it.
+//
+// The build list is the standard library, this module's manifest/v1 contract
+// types, and the error envelope of latere.ai/x/pkg/httpjson: a program that
+// imports it builds no part of the server.
 package client
 
 import (

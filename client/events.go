@@ -27,20 +27,26 @@ const eventsPath = "/v1/events"
 // record type; these are the fields of the wire, and Raw is the record's own
 // bytes for a caller that forwards them.
 type Event struct {
+	// ID names the record across every object.
 	ID string `json:"id"`
 	// Seq counts one object's records from 1 without a gap, which is what a
 	// following feed resumes from.
-	Seq  int64     `json:"seq"`
-	Type string    `json:"type"`
+	Seq int64 `json:"seq"`
+	// Type is design 009's type, such as sandbox.started.
+	Type string `json:"type"`
+	// Time is when the act committed.
 	Time time.Time `json:"time"`
 	// Object is what the record is about. Sandbox names the sandbox in
 	// context where the object is not itself the whole story, which is
 	// every operation.
-	Object  EventObject  `json:"object"`
+	Object EventObject `json:"object"`
+	// Sandbox is the sandbox in context, nil where Object is itself one.
 	Sandbox *EventObject `json:"sandbox,omitempty"`
 	// Subject is who asked, and Workload the sandbox whose own token asked
 	// where one did.
-	Subject  string         `json:"subject"`
+	Subject string `json:"subject"`
+	// Workload is the sandbox whose own token asked, nil where a subject
+	// asked.
 	Workload *EventWorkload `json:"workload,omitempty"`
 	// RequestID is the request that caused the act, empty for an act the
 	// control plane took on its own.
@@ -56,23 +62,30 @@ type Event struct {
 // EventObject is the identity of the object a record is about, with the
 // labels it carried.
 type EventObject struct {
-	Kind   string            `json:"kind"`
-	ID     string            `json:"id"`
-	Name   string            `json:"name"`
-	Owner  string            `json:"owner"`
+	// Kind is the object's kind, such as Sandbox.
+	Kind string `json:"kind"`
+	// ID and Name are the object's id and its name.
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	// Owner is the rendered subject that owns it.
+	Owner string `json:"owner"`
+	// Labels are the labels it carried when the act committed.
 	Labels map[string]string `json:"labels,omitempty"`
 }
 
 // EventWorkload is the sandbox whose own token made a request.
 type EventWorkload struct {
+	// ID is the sandbox's id.
 	ID string `json:"id"`
 }
 
 // EventPage is one page of an object's history, newest first. Next is the
 // cursor of the next older page, empty at the end.
 type EventPage struct {
+	// Items are the page's records, newest first.
 	Items []Event
-	Next  string
+	// Next is the cursor of the next older page.
+	Next string
 }
 
 // EventOptions select one page of an object's history.

@@ -43,8 +43,11 @@ func (c *Client) ListEnvironments(ctx context.Context, o ListOptions) ([]v1.Envi
 // EnvironmentKey is one key a worker or a gateway of an environment connects
 // with. The token is answered once, at the mint, and never again.
 type EnvironmentKey struct {
-	Token   string    `json:"token"`
-	JTI     string    `json:"jti"`
+	// Token is the key itself, which a worker or a gateway presents.
+	Token string `json:"token"`
+	// JTI names the key, which is what revokes it.
+	JTI string `json:"jti"`
+	// Expires is when the key stops working on its own.
 	Expires time.Time `json:"exp"`
 }
 

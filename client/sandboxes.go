@@ -51,18 +51,27 @@ func (k Kind) item(ref string) string { return k.Path() + "/" + url.PathEscape(r
 // the cursor to the next page. The items stay raw so an output that promises
 // the API's bytes can keep them.
 type Page struct {
+	// Items are the page's objects, each its own bytes.
 	Items []json.RawMessage `json:"items"`
-	Next  string            `json:"next"`
+	// Next is the cursor of the following page, empty on the last.
+	Next string `json:"next"`
 }
 
 // ListOptions are the selectors of design 008. Limit is the total a caller
 // wants across pages, not the page size; zero means every object.
 type ListOptions struct {
-	Labels      []string
-	Phase       string
-	Owner       string
+	// Labels are selectors of the form key=value; an object matches when
+	// it carries every one.
+	Labels []string
+	// Phase keeps the objects in that phase.
+	Phase string
+	// Owner keeps the objects of that rendered subject.
+	Owner string
+	// Environment keeps the sandboxes placed on that environment.
 	Environment string
-	Limit       int
+	// Limit is the most objects the call returns across every page; zero
+	// is all of them.
+	Limit int
 }
 
 // query renders the selectors, with the page size the API accepts.
@@ -192,22 +201,35 @@ func listAll[T any](ctx context.Context, c *Client, kind Kind, o ListOptions) ([
 // and Stdin for a command whose input the caller writes; either opens the
 // socket rather than the synchronous route.
 type ExecRequest struct {
-	Command []string          `json:"command,omitempty"`
-	Env     map[string]string `json:"env,omitempty"`
-	Workdir string            `json:"workdir,omitempty"`
-	Timeout string            `json:"timeout,omitempty"`
-	Cols    int               `json:"cols,omitempty"`
-	Rows    int               `json:"rows,omitempty"`
+	// Command is the program and its arguments. An attach with none runs
+	// the sandbox's shell.
+	Command []string `json:"command,omitempty"`
+	// Env is added to the sandbox's environment for this command.
+	Env map[string]string `json:"env,omitempty"`
+	// Workdir is where the command starts, the sandbox's workdir when
+	// empty.
+	Workdir string `json:"workdir,omitempty"`
+	// Timeout is a duration such as 30s after which the server ends the
+	// command and reports exit 124; empty is the server's bound.
+	Timeout string `json:"timeout,omitempty"`
+	// Cols and Rows are the terminal's window; set on a session, they ask
+	// for a terminal.
+	Cols int `json:"cols,omitempty"`
+	Rows int `json:"rows,omitempty"`
 }
 
 // ExecResult is the synchronous route's answer: design 008 caps each output
 // at 1 MiB, keeps the head, and reports 124 for its own timeout.
 type ExecResult struct {
-	ExitCode   int    `json:"exitCode"`
-	Stdout     string `json:"stdout"`
-	Stderr     string `json:"stderr"`
-	Truncated  bool   `json:"truncated"`
-	DurationMS int64  `json:"durationMs"`
+	// ExitCode is the command's, or 124 where the server's timeout ended it.
+	ExitCode int `json:"exitCode"`
+	// Stdout and Stderr are the command's two outputs, each at most 1 MiB.
+	Stdout string `json:"stdout"`
+	Stderr string `json:"stderr"`
+	// Truncated says an output was longer than its cap and lost its tail.
+	Truncated bool `json:"truncated"`
+	// DurationMS is how long the command ran, in milliseconds.
+	DurationMS int64 `json:"durationMs"`
 }
 
 // Exec runs a command and waits for it. This is the ?wait=1 answer of
@@ -233,9 +255,12 @@ type execBody struct {
 
 // LogOptions are the selectors of the log route.
 type LogOptions struct {
+	// Follow keeps the stream open and writes new output as it arrives.
 	Follow bool
-	Since  time.Time
-	Tail   int
+	// Since leaves out what was written before it; zero is everything.
+	Since time.Time
+	// Tail starts that many lines from the end; zero is from the start.
+	Tail int
 }
 
 // Logs opens the sandbox's main process output. The caller closes it.
@@ -260,22 +285,32 @@ func (c *Client) Logs(ctx context.Context, ref string, o LogOptions) (io.ReadClo
 // module's contract types and the error envelope, and a record is a row to
 // read rather than a boundary to compile.
 type EgressRecord struct {
-	Principal string    `json:"principal"`
-	At        time.Time `json:"at"`
-	Door      string    `json:"door"`
-	Host      string    `json:"host"`
-	Port      int       `json:"port"`
-	Decision  string    `json:"decision"`
-	Reason    string    `json:"reason,omitempty"`
+	// Principal is the sandbox the connection was made for.
+	Principal string `json:"principal"`
+	// At is when the gateway decided.
+	At time.Time `json:"at"`
+	// Door is the gateway door the connection came through.
+	Door string `json:"door"`
+	// Host and Port are where the connection was going.
+	Host string `json:"host"`
+	Port int    `json:"port"`
+	// Decision is what the boundary decided, and Reason which rule decided
+	// a connection that was not allowed.
+	Decision string `json:"decision"`
+	Reason   string `json:"reason,omitempty"`
 	// Substituted names the secrets whose values replaced a placeholder on
 	// this connection. Names, never values.
 	Substituted []string `json:"substituted,omitempty"`
-	Method      string   `json:"method,omitempty"`
-	Path        string   `json:"path,omitempty"`
-	Status      int      `json:"status,omitempty"`
-	BytesOut    int64    `json:"bytesOut,omitempty"`
-	BytesIn     int64    `json:"bytesIn,omitempty"`
-	DurationMS  int64    `json:"durationMs,omitempty"`
+	// Method, Path and Status are present only where the gateway saw the
+	// request; the path carries no query string.
+	Method string `json:"method,omitempty"`
+	Path   string `json:"path,omitempty"`
+	Status int    `json:"status,omitempty"`
+	// BytesOut and BytesIn are what the connection carried each way, and
+	// DurationMS how long it was open, in milliseconds.
+	BytesOut   int64 `json:"bytesOut,omitempty"`
+	BytesIn    int64 `json:"bytesIn,omitempty"`
+	DurationMS int64 `json:"durationMs,omitempty"`
 }
 
 // EgressRecords reads what the gateway reported for one sandbox, newest
@@ -298,8 +333,11 @@ func (c *Client) EgressRecords(ctx context.Context, ref string, limit int) ([]Eg
 // Build is the identity the server reports at /version, which needs no
 // bearer.
 type Build struct {
-	Version   string `json:"version"`
-	Commit    string `json:"commit"`
+	// Version is the release, such as v1.2.3.
+	Version string `json:"version"`
+	// Commit is the source revision the server was built from.
+	Commit string `json:"commit"`
+	// BuildTime is when it was built.
 	BuildTime string `json:"buildTime"`
 }
 

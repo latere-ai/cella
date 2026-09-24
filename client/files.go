@@ -21,12 +21,17 @@ const tarMedia = "application/x-tar"
 // octal text: a JSON number for a permission set reads as decimal and is
 // misread.
 type FileEntry struct {
-	Name    string    `json:"name"`
-	Path    string    `json:"path"`
-	Size    int64     `json:"size"`
-	Mode    string    `json:"mode"`
+	// Name is the entry's base name, and Path its path in the workspace.
+	Name string `json:"name"`
+	Path string `json:"path"`
+	// Size is the file's length in bytes.
+	Size int64 `json:"size"`
+	// Mode is the permission set in octal, such as 0644.
+	Mode string `json:"mode"`
+	// ModTime is when the entry last changed.
 	ModTime time.Time `json:"modTime"`
-	IsDir   bool      `json:"isDir"`
+	// IsDir says the entry is a directory.
+	IsDir bool `json:"isDir"`
 }
 
 // filesPath is the file routes of one sandbox.
@@ -158,14 +163,21 @@ func (c *Client) write(ctx context.Context, method, path string, query url.Value
 // the one failure the API can no longer answer with a status: design 008
 // says the trailer carries the code instead.
 type StreamError struct {
+	// Code is the server's code for the failure, where the trailer carried
+	// one.
 	Code string
-	Err  error
+	// Err is the transport's failure, where the stream was cut rather than
+	// ended by the server.
+	Err error
 }
 
+// Error names the failure.
 func (e *StreamError) Error() string {
 	if e.Code != "" {
 		return "the transfer ended early: " + e.Code
 	}
 	return "the transfer ended early: " + e.Err.Error()
 }
+
+// Unwrap is the transport's failure.
 func (e *StreamError) Unwrap() error { return e.Err }
