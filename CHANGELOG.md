@@ -6,6 +6,15 @@ refused before it is pushed.
 
 ## Unreleased
 
+- A create whose caller disconnects while the sandbox is starting is now
+  recorded as `Failed` with its `sandbox.failed` record, and its identity
+  token is revoked. The record and the state used to be written under the
+  caller's request, so a disconnect could leave the sandbox shown as still
+  being created, with no record of the failure.
+- The conformance suite deletes what each case created as the case ends,
+  so a run holds one case's sandboxes at a time. A server with a
+  per-subject sandbox limit, or a small cluster, no longer fills up over
+  the course of a run.
 - A desktop on Kubernetes. Each release publishes
   `ghcr.io/<owner>/cella-display:<tag>` beside `cellad`, built for amd64
   and arm64, signed, and with its bill of materials attached to the
