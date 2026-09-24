@@ -65,6 +65,8 @@ type fake struct {
 	// desktop, as design 023 states.
 	declared    map[string]bool
 	desktopOnly bool
+	// peak is the most sandboxes the fake held at once.
+	peak int
 	// mintFailure is how the issuer route fails: empty mints, "status" for a
 	// refusal, "body" for an answer that is no token, "empty" for a token
 	// that is not there.
@@ -388,6 +390,7 @@ func (f *fake) store(body map[string]any, name string) map[string]any {
 		}
 	}
 	f.objects[id], f.names[name] = body, id
+	f.peak = max(f.peak, len(f.objects))
 	f.files[id] = map[string]string{}
 	f.record(id, "sandbox.created")
 	return body

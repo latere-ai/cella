@@ -247,6 +247,18 @@ func TestRunCleansUp(t *testing.T) {
 			t.Errorf("%s was deleted and not created by this run", id)
 		}
 	}
+	// Each case's objects are deleted as the case ends, so the server never
+	// holds more at once than the case that made the most.
+	most := 0
+	for _, res := range report.Results {
+		most = max(most, len(res.Created))
+	}
+	f.mu.Lock()
+	peak := f.peak
+	f.mu.Unlock()
+	if peak > most {
+		t.Errorf("the fake held %d sandboxes at once; no case made more than %d, so objects outlived their case", peak, most)
+	}
 	first, err := newEnv(t.Context(), f.config())
 	if err != nil {
 		t.Fatal(err)

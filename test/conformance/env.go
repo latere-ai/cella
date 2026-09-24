@@ -53,6 +53,9 @@ type stored struct {
 	path string
 	c    *client
 	id   string
+	// deleted is set once the case that made the object ended and its
+	// delete was sent, so the run's own cleanup does not send it again.
+	deleted bool
 }
 
 // newEnv resolves the identities and reads what the environment declares.
@@ -345,17 +348,40 @@ func (e *Env) created() []string {
 	return out
 }
 
-// cleanup deletes every id this run made and nothing else. A delete that
-// fails is left alone: the run never widens its reach to clean up.
+// cleanup deletes every id this run made and has not deleted yet, and
+// nothing else. A delete that fails is left alone: the run never widens its
+// reach to clean up.
 func (e *Env) cleanup(ctx context.Context) {
+	e.release(ctx, 0)
+}
+
+// mark is the position in the run's objects a case starts at.
+func (e *Env) mark() int {
 	e.mu.Lock()
-	objects := slices.Clone(e.objects)
+	defer e.mu.Unlock()
+	return len(e.objects)
+}
+
+// release deletes the objects made from the mark on, newest first, and
+// returns their ids. Each is deleted once however often release reaches it.
+func (e *Env) release(ctx context.Context, mark int) []string {
+	e.mu.Lock()
+	var objects []stored
+	var ids []string
+	for i := mark; i < len(e.objects); i++ {
+		ids = append(ids, e.objects[i].id)
+		if !e.objects[i].deleted {
+			objects = append(objects, e.objects[i])
+			e.objects[i].deleted = true
+		}
+	}
 	e.mu.Unlock()
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 	for _, o := range slices.Backward(objects) {
 		_, _ = o.c.del(ctx, o.path+"/"+o.id)
 	}
+	return ids
 }
 
 // manifest is the body of one Sandbox apply: the smallest manifest this

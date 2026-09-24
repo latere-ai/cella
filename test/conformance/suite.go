@@ -112,6 +112,8 @@ type Result struct {
 	Reason  string
 	Err     error
 	Elapsed time.Duration
+	// Created is every id the case made, which the case's end deletes.
+	Created []string
 }
 
 // Subtest is the name Run gives this case, <NNN>/<Name>.
@@ -309,9 +311,15 @@ func (e *Env) runCase(ctx context.Context, group Group, c Case) Result {
 	timeout := cmp.Or(e.cfg.Timeout, CaseTimeout)
 	caseCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+	mark := e.mark()
 	started := time.Now()
 	err := c.Run(caseCtx, e)
 	res.Elapsed = time.Since(started)
+	// What the case made is deleted as it ends, so the run holds one case's
+	// objects at a time and not the sum of every case's: a server with a
+	// per-subject limit or a cluster sized for a few sandboxes sees what one
+	// case needs.
+	res.Created = e.release(context.WithoutCancel(ctx), mark)
 	var skip *Skip
 	switch {
 	case err == nil:
