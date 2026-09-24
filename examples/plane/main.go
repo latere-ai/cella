@@ -25,6 +25,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -77,7 +78,18 @@ func run(ctx context.Context, cfg config, out io.Writer) error {
 		return fmt.Errorf("opening the controller: %w", err)
 	}
 	defer func() { _ = core.Close() }()
-	go core.RunReaper(ctx)
+	// A create answers once its desired state is written, and the scheduler
+	// loop is what asks the driver for the sandbox; the reaper ends what
+	// outlives its deadlines. Both have stopped before the controller
+	// closes, so a create in flight settles before its store goes.
+	loopCtx, stopLoops := context.WithCancel(ctx)
+	var loops sync.WaitGroup
+	loops.Go(func() { core.RunScheduler(loopCtx) })
+	loops.Go(func() { core.RunReaper(loopCtx) })
+	defer func() {
+		stopLoops()
+		loops.Wait()
+	}()
 
 	server := &http.Server{
 		Handler:           (&plane{core: core, cfg: cfg}).routes(),

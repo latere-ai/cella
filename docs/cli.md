@@ -39,7 +39,7 @@ and creates a child within its spawn budget, and nothing else.
 ## The commands
 
 ```
-apply    -f <file> [-w]                          apply a Sandbox or a Secret manifest
+apply    -f <file> [-w|--wait]                   apply a Sandbox or a Secret manifest
 get      <kind> [<ref>] [-o json|yaml|wide|name] read one object or list a kind
 delete   <kind> <ref>                            delete one object
 start    <ref>                                   start a stopped sandbox
@@ -74,8 +74,13 @@ JSON
 cella apply -f sandbox.json -w
 ```
 
-`-w` waits until the sandbox is running. `-f -` reads the manifest from
-standard input, which is what a program that builds one does.
+`cella apply` answers as soon as the control plane has recorded the
+sandbox, before its workload runs. `-w`, or `--wait`, holds the command
+until the sandbox is running and exits non-zero when it failed instead,
+for at most `--timeout` (two minutes by default). Use it when the next
+command needs the sandbox up: a `cella exec` against a sandbox that is
+still starting is refused. `-f -` reads the manifest from standard input,
+which is what a program that builds one does.
 
 ### Looking at what you have
 

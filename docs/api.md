@@ -130,6 +130,7 @@ code in the `X-Cella-Error` trailer.
 | `upstream_unavailable` | 502 | nothing listens on the port, or the sandbox is not running |
 | `authorizer_unavailable` | 503 | the authorization endpoint gave no decision; nothing was allowed |
 | `admission_unavailable` | 503 | the admission endpoint gave no answer; nothing was created |
+| `egress_gateway_unavailable` | 503 | the manifest's egress boundary needs a gateway and none is connected; connect one, or set `spec.network.egress.mode` to `open` with no denied host and no mounted secret |
 | `driver_unavailable` | 503 | the environment's runtime did not answer |
 
 ## Routes
@@ -138,7 +139,7 @@ code in the `X-Cella-Error` trailer.
 
 | Route | Action | What it does |
 |---|---|---|
-| `POST /v1/sandboxes` | `sandbox.create` | create a sandbox from a manifest; the answer is the manifest as it runs |
+| `POST /v1/sandboxes` | `sandbox.create` | create a sandbox from a manifest; `201` with the sandbox `Pending` as soon as it is recorded, or held with `?wait=1` |
 | `GET /v1/sandboxes` | `sandbox.list` | list the sandboxes you may read |
 | `PUT /v1/sandboxes/{name}` | `sandbox.create` or `sandbox.update` | apply by name: create when the name is free, update when you hold it |
 | `GET /v1/sandboxes/{id}` | `sandbox.read` | read one sandbox with its status |
@@ -148,6 +149,38 @@ code in the `X-Cella-Error` trailer.
 
 A create also asks `environment.use` on the environment it runs on, and
 `secret.mount` on each secret it mounts.
+
+**A create answers at once.** `POST /v1/sandboxes`, and `PUT
+/v1/sandboxes/{name}` when it creates, answer `201` with `Location` and
+the sandbox as soon as it is recorded, before its workload runs. The
+sandbox is `Pending`; the control plane then pushes its boundary to a
+gateway, mints its identity and asks the environment's runtime for it, and
+the sandbox moves to `Running`, or to `Failed` with its `reason`. Read it,
+or follow its events, to see that happen. On a runtime that provisions and
+attaches storage before a workload starts, that can take tens of seconds,
+and none of it is spent on your request. A sandbox the environment adopts
+from its prewarmed pool answers already running, and one a queued
+environment cannot place yet answers `Queued`, as before.
+
+Everything that refuses a create still refuses it on the request, with
+nothing recorded: a manifest the server rejects, a denied action, your
+sandbox limit, a name you already hold, an environment that is not ready,
+and a boundary that needs an egress gateway while none is connected.
+
+**Holding the answer.** `?wait=1` holds the answer until the sandbox has
+left `Queued`, `Pending` and `Starting`: it is `Running`, `Failed` with
+its reason, or whatever phase the runtime reports after the create.
+`timeout` bounds the hold, a duration such as `90s`, positive and at most
+`1h`, `10m` when absent; when it passes first, the answer is the sandbox
+as it stands. The status is `201` either way, because the sandbox exists
+whatever became of its start. A sandbox deleted while the answer is held
+answers `404 not_found`. Set your HTTP client's timeout above the hold.
+
+Before this, a create answered only once the workload ran, and a runtime
+failure was the answer: an error that did not name the sandbox it left
+`Failed`. A program that reads the create's answer and acts on the sandbox
+at once, running a command or copying files into it, now waits for
+`Running` first, or asks for `?wait=1`.
 
 ### Commands and terminals
 

@@ -30,10 +30,22 @@ paths:
     post:
       operationId: createSandbox
       summary: Create a sandbox from a manifest.
-      description: Authorized as `sandbox.create`.
+      description: >-
+        Answers 201 with `Location` and the sandbox as soon as it is recorded,
+        in phase `Pending`, before its workload runs; the control plane then
+        brings it to `Running`, or to `Failed` with its reason. A sandbox
+        adopted from the environment's pool answers after the adoption, and
+        one a queued environment cannot place yet answers `Queued`. With
+        `wait=1` the answer is held until the sandbox has left `Queued`,
+        `Pending` and `Starting`, for at most `timeout`. A boundary that needs
+        an egress gateway while none is connected is refused with
+        `egress_gateway_unavailable`. Authorized as `sandbox.create`.
+      parameters:
+        - $ref: "#/components/parameters/Wait"
+        - $ref: "#/components/parameters/WaitTimeout"
       responses:
-        "200":
-          description: The answer this route serves.
+        "201":
+          description: The sandbox as recorded, or as it stands when a held answer ends.
         default:
           $ref: "#/components/responses/Error"
     get:
@@ -58,11 +70,18 @@ paths:
       summary: Apply a sandbox by name.
       description: >-
         A create when the name is free and an update when the caller holds it.
-        A body naming another object is refused at metadata.name.
-        Authorized as `sandbox.create` or `sandbox.update`.
+        A body naming another object is refused at metadata.name. A create
+        answers 201 as `POST /v1/sandboxes` does, and an update 200; `wait=1`
+        holds either answer the same way. Authorized as `sandbox.create` or
+        `sandbox.update`.
+      parameters:
+        - $ref: "#/components/parameters/Wait"
+        - $ref: "#/components/parameters/WaitTimeout"
       responses:
         "200":
-          description: The answer this route serves.
+          description: The sandbox the update left.
+        "201":
+          description: The sandbox the create recorded.
         default:
           $ref: "#/components/responses/Error"
   /v1/sandboxes/{id}:
@@ -1146,6 +1165,29 @@ components:
       description: >-
         A token from a configured issuer, a sandbox's own workload token, or,
         on the worker routes alone, an environment key.
+  parameters:
+    Wait:
+      name: wait
+      in: query
+      required: false
+      description: >-
+        `1` holds a create's answer until the sandbox has left `Queued`,
+        `Pending` and `Starting`: it is `Running`, `Failed` with its reason,
+        or in whatever phase its runtime reported after the create. A sandbox
+        deleted while the answer is held answers `not_found`.
+      schema:
+        type: string
+        enum: ["1"]
+    WaitTimeout:
+      name: timeout
+      in: query
+      required: false
+      description: >-
+        How long `wait=1` holds the answer, a duration such as `90s`, positive
+        and at most `1h`, `10m` when absent; anything else is `invalid_field`.
+        When it passes first the answer is the sandbox as it stands.
+      schema:
+        type: string
   responses:
     Error:
       description: "The refusal envelope of design 008: one code, one fixed sentence."

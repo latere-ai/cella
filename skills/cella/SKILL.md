@@ -25,7 +25,9 @@ There is no login and no configuration file. `--url`, `--token` and
 
 ## A sandbox
 
-A manifest is JSON. `-w` waits until it runs.
+A manifest is JSON. `apply` answers once the sandbox is recorded, before
+it runs; `-w` (`--wait`) waits until it runs, which a command that uses
+the sandbox next needs.
 
 ```sh
 cat > sandbox.json <<'JSON'

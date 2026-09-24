@@ -122,6 +122,11 @@ resolved, err := manifest.Resolve(ctx, &object, options) // defaults, admission,
 created, err := core.Create(ctx, resolved.Sandbox, subject, plan.Sandboxes)
 ```
 
+`core.Create` answers as soon as the sandbox is recorded, `Pending`, and the
+core's scheduler loop asks the driver for it, so a server of your own runs
+`core.RunScheduler(ctx)` beside its handler, as it runs `core.RunReaper(ctx)`.
+Without the loop a created sandbox stays `Pending`.
+
 `manifest.Options` is where your platform goes: `Actor` is who is applying,
 as your own identity rendered it; `Defaults` is what an absent field takes;
 `Ceilings` is what the subject's plan may not exceed; `Admit` is the

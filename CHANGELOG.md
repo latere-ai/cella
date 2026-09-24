@@ -6,6 +6,45 @@ refused before it is pushed.
 
 ## Unreleased
 
+- A create answers at once, which changes what every caller of `POST
+  /v1/sandboxes`, and of `PUT /v1/sandboxes/{name}` when it creates, reads.
+  The answer is `201` with `Location` and the sandbox as soon as it is
+  recorded, in phase `Pending`, before its workload runs. The control plane
+  then pushes the boundary to a gateway, mints the identity and asks the
+  runtime for the sandbox, and the sandbox moves to `Running`, or to
+  `Failed` with its reason, which a read or the events feed shows. On a
+  runtime that provisions and attaches storage before a workload starts,
+  that no longer holds the request. A caller that runs a command in the
+  sandbox or copies files into it straight after the create now waits for
+  `Running` first, or asks for the old answer with `?wait=1`: it holds the
+  answer until the sandbox has left `Queued`, `Pending` and `Starting`, for
+  at most `timeout` (`10m` when absent, at most `1h`), and answers `201` in
+  every case, with the sandbox as it stands. A runtime failure used to be
+  the answer, an error that did not name the sandbox it left `Failed`; the
+  sandbox and its reason are the answer now. A sandbox the environment
+  adopts from its pool still answers after the adoption, already running,
+  and a queued create still answers `Queued`.
+- `cella apply --wait` is the long form of `-w`, and both now ask the server
+  to hold the create's answer, then read the sandbox until it runs as
+  before. `client.CreateSandbox` and `client.ApplySandbox` take
+  `...client.CreateOption`, and `client.Wait(timeout)` is the hold; a call
+  without options compiles and answers as the server now does.
+- A create whose egress boundary needs a gateway, an egress mode other than
+  `open`, a denied host or a mounted secret, while no gateway is connected,
+  is refused with `503 egress_gateway_unavailable` and a message that says
+  to connect one or open the boundary. It was `driver_unavailable`, which
+  read as the runtime being down. A gateway that stops answering after the
+  create is accepted fails the sandbox with `CreateFailed` and the
+  condition `EgressEnforced False NoGateway`.
+- For a program that imports `controller`: `Create` and `Spawn` answer once
+  the desired state is written, and `RunScheduler` is what finishes the
+  create, so a server of its own runs it beside `RunReaper`; without it a
+  created sandbox stays `Pending`. The driver's create runs with the
+  controller's lock released, so reads, lists and other creates answer
+  while a runtime brings a sandbox up. A create a restart interrupted is
+  finished by the next process's first scheduler pass, and `Changed`
+  returns a channel closed at the next write of any sandbox.
+
 ## v0.5.0 - 2026-09-24
 
 - `CELLA_BASE_PATH` serves the control plane under a path of an API
