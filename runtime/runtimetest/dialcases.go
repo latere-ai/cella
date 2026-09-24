@@ -13,11 +13,6 @@ import (
 	"latere.ai/x/cella/runtime"
 )
 
-// dialPort is the port the dial case serves inside its sandbox. It is apart
-// from the probe case's two, so a driver whose sandboxes share one network
-// namespace, as the native driver's do, runs both cases without a collision.
-const dialPort = 18090
-
 // dialRoundTrip bounds one line's trip to the echo server and back.
 var dialRoundTrip = 2 * time.Second
 
@@ -36,6 +31,7 @@ func dialReachesAPort(t tb, open func() runtime.Driver, opts Options) {
 		t.Skipf("Options.Echo is nil: this suite has no command that serves a port")
 	}
 	const id = "sbx_cnf_dial"
+	dialPort := freePorts(t, 1)[0]
 	create(t, d, opts, runtime.CreateSpec{
 		ID: id, Name: "dial", Owner: "alice",
 		Command: opts.Echo(dialPort),
@@ -45,7 +41,7 @@ func dialReachesAPort(t tb, open func() runtime.Driver, opts Options) {
 
 	// The server inside comes up after the sandbox reads Running, so the
 	// first connection is retried until a line makes the trip.
-	first := dialUntilEcho(t, dialer, id)
+	first := dialUntilEcho(t, dialer, id, dialPort)
 	defer func() { _ = first.Close() }()
 	second, err := dialer.Dial(ctx, id, dialPort)
 	must(t, err, "a second Dial while the first is open")
@@ -66,11 +62,11 @@ func dialReachesAPort(t tb, open func() runtime.Driver, opts Options) {
 
 // dialUntilEcho dials until one line comes back, or fails the case once the
 // poll window has passed.
-func dialUntilEcho(t tb, dialer runtime.Dialer, id string) net.Conn {
+func dialUntilEcho(t tb, dialer runtime.Dialer, id string, port int) net.Conn {
 	t.Helper()
 	deadline := time.Now().Add(pollTimeout)
 	for {
-		conn, err := dialer.Dial(context.Background(), id, dialPort)
+		conn, err := dialer.Dial(context.Background(), id, port)
 		if err == nil {
 			if err = echoes(conn, "first"); err == nil {
 				return conn
@@ -106,4 +102,29 @@ type echoMismatch struct{ sent, got string }
 
 func (e *echoMismatch) Error() string {
 	return "sent " + e.sent + " and read back " + strings.TrimSpace(e.got)
+}
+
+// freePorts returns n distinct TCP ports free on loopback when asked. Each
+// case picks its own rather than naming a fixed one, because a driver whose
+// sandboxes share the host's network, as the native driver's do, meets every
+// other test the machine runs at once, and a port another run already holds
+// makes the sandbox's server exit before it binds. The listeners are held
+// until every port is chosen, so the n are distinct, and closed before the
+// sandbox starts, so the sandbox can bind them.
+func freePorts(t tb, n int) []int {
+	t.Helper()
+	listeners := make([]net.Listener, 0, n)
+	defer func() {
+		for _, l := range listeners {
+			_ = l.Close()
+		}
+	}()
+	ports := make([]int, 0, n)
+	for range n {
+		l, err := net.Listen("tcp", "127.0.0.1:0")
+		must(t, err, "reserving a free port on loopback")
+		listeners = append(listeners, l)
+		ports = append(ports, l.Addr().(*net.TCPAddr).Port)
+	}
+	return ports
 }
