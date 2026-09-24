@@ -36,6 +36,10 @@ refused before it is pushed.
   read as the runtime being down. A gateway that stops answering after the
   create is accepted fails the sandbox with `CreateFailed` and the
   condition `EgressEnforced False NoGateway`.
+- The conformance suite's browser case reads a sandbox's display until it
+  reports ready before it asks for a screenshot, since a desktop may come
+  up a moment after the workload, and it adds `case008CreateWait`, which
+  holds a create with `?wait=1` and expects `Running`.
 - For a program that imports `controller`: `Create` and `Spawn` answer once
   the desired state is written, and `RunScheduler` is what finishes the
   create, so a server of its own runs it beside `RunReaper`; without it a

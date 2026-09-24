@@ -176,11 +176,11 @@ as it stands. The status is `201` either way, because the sandbox exists
 whatever became of its start. A sandbox deleted while the answer is held
 answers `404 not_found`. Set your HTTP client's timeout above the hold.
 
-Before this, a create answered only once the workload ran, and a runtime
-failure was the answer: an error that did not name the sandbox it left
-`Failed`. A program that reads the create's answer and acts on the sandbox
-at once, running a command or copying files into it, now waits for
-`Running` first, or asks for `?wait=1`.
+A program that acts on the sandbox as soon as the create answers, running
+a command or copying files into it, reads it until `Running` first, or
+asks for `?wait=1`. A runtime that cannot make the sandbox leaves it
+`Failed` with its `reason`, which is what a read, the events and a held
+answer carry.
 
 ### Commands and terminals
 

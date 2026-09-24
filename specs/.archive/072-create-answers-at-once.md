@@ -357,5 +357,6 @@ says, as `TestTheBrowserCaseWaitsForTheDesktop` holds.
 | Realizing two placed sandboxes at once | the loop takes one at a time; a second create answers at once and its driver call begins after the first's ends |
 | The boundary push outside the lock | two pushes of one sandbox must not cross, and a push waits for one gateway's acknowledgment |
 | A create another replica wrote waits for the lease holder's next pass | the loop runs under the scheduler lease, at most `CELLA_SCHEDULE_INTERVAL` |
+| On a replica set, a pass whose driver call outlasts the scheduler lease's 15 seconds can meet a second replica's pass over the same sandbox | `realizing` is per process; the two converge on one object through `ErrAlreadyExists`, and the identity the first minted is not revoked once the second's status write replaces it. One `cellad` holds its own lease and is not affected; renewing the lease across a pass, or a claim in the row, closes it |
 | A failed create's cause on the object beyond its reason | no `Ready` condition is written by the controller; the cause is in the control plane's log |
 | A driver's later phase written without a read | there is no watch |
