@@ -41,6 +41,11 @@ refused before it is pushed.
 - The kind stack in `deploy/examples/kind-stubs` runs `cellad egress`, with
   the environment key `up.sh` mints at the control plane, and an upstream
   a sandbox may be allowed to reach.
+- The driver conformance suite's port probe and dial cases take ports the
+  host has free when they begin, rather than 18080, 18081 and 18090. A
+  runtime whose sandboxes share the host's network, as the native one's
+  do, failed those cases on a machine where another process held one of
+  the three.
 
 - `client.ListEnvironmentKeys` reads an environment's key list: each key's
   jti, when it was minted and by whom, when it expires, and whether it was
