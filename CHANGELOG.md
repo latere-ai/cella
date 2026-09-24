@@ -6,6 +6,20 @@ refused before it is pushed.
 
 ## Unreleased
 
+- The Go client is public: `latere.ai/x/cella/client`, the one the `cella`
+  command is built on. A program outside this module can now create,
+  apply, list, start, stop and delete sandboxes, secrets and environments,
+  run commands and sessions, move files, dial a port, mint and revoke
+  environment keys, and read or follow the events feed. You pass the
+  address, a token source (a fixed token, a file read on every request,
+  or your own function) and, if you want, your own `http.Client`, which
+  also carries the exec, attach and dial sockets. `client.Environment`
+  reads `CELLA_URL` and the token the way the command does, for code
+  running inside a sandbox. Manifests go in JSON or YAML. A refusal's
+  whole `details` object is on the error. `docs/client.md` is the guide.
+- A name or id that needs escaping in a URL path is escaped once. The
+  client escaped it twice, so the server looked up a different name.
+
 ## v0.4.0 - 2026-09-24
 
 - The file routes accept paths in the sandbox's own workspace. A sandbox
