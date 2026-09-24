@@ -91,6 +91,7 @@ later.
 | [067](.archive/067-environment-list-ports-redirect-keys.md) | The environment list applies the authorizer's filter, a port path without its slash redirects relatively, and an environment's keys are listed | medium | complete | 006, 008, 010, 021, 023, 031, 051, 054, 060, 066 |
 | [068](.archive/068-reaper-end-to-end-observation.md) | Reaper end-to-end observation: the native reaper test reads the stop from the act record instead of polling for a state the next rule ends | small | complete | 005, 009, 031, 037 |
 | [069](.archive/069-client-package.md) | Client package: the typed /v1 client exported as latere.ai/x/cella/client, with the calls a consumer outside this module needs | medium | complete | 008, 009, 011, 021, 031, 050, 055, 066 |
+| [070](070-k8s-egress.md) | Egress on the k8s driver: a NetworkPolicy per sandbox, the declared modes, the gateway projected into the Pod, mesh peers under confinement, and the kind tier's gateway | large | in-progress | 004, 012, 013, 015, 018, 022, 031, 036, 039, 065 |
 
 ## Dependency graph
 

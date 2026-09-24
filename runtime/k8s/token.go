@@ -107,19 +107,6 @@ func (d *Driver) putSecret(ctx context.Context, id string, data map[string][]byt
 	return mapErr(err, "token secret update")
 }
 
-// secretData is what a create or an adoption writes into the sandbox's
-// Secret: the token and the gateway's authority, each where it was given.
-func secretData(token []byte, boundary driver.Egress) map[string][]byte {
-	data := map[string][]byte{}
-	if len(token) > 0 {
-		data[tokenKey] = token
-	}
-	if boundary.CAPEM != "" {
-		data[authorityKey] = []byte(boundary.CAPEM)
-	}
-	return data
-}
-
 // deleteToken removes the sandbox's Secret. A Secret that is already gone is
 // the state this asks for.
 func (d *Driver) deleteToken(ctx context.Context, id string) error {
