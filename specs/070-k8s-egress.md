@@ -184,8 +184,9 @@ A prewarmed Pod is rendered with both keys of the projection listed and
 optional, so an adoption that writes the authority into the Secret reaches
 the running entry through the kubelet's sync. The environment variables of a
 running container cannot change, so an adopted entry's workload does not
-carry the proxy variables; it runs confined, and reaches the gateway only
-where it is pointed at it by hand.
+carry the proxy variables until its next start, whose Pod is rendered from
+the adopted record and carries them; until then it runs confined, and
+reaches the gateway only where it is pointed at it by hand.
 
 ### Mesh peers under confinement
 

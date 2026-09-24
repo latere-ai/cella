@@ -239,8 +239,9 @@ variables below, because the runtime would overwrite them.
 
 A sandbox taken from a warm pool on Kubernetes is the exception: its
 container started before it had a gateway, so the three rows above are
-not in its environment, and its commands reach the gateway only where
-they are pointed at it.
+not in its environment until its next start, whose Pod carries them, and
+until then its commands reach the gateway only where they are pointed at
+it.
 | `DISPLAY` | `:0`, the desktop, on a sandbox with a display |
 | `<env>_HEADER` or `<env>_QUERY` | for a mounted secret whose value goes somewhere a client would not look by itself: the header or the query parameter to put the placeholder in |
 

@@ -113,8 +113,9 @@ Two limits hold on this runtime:
   is outside the policy, so `cella` inside a sandbox cannot call the API; a
   child sandbox is created with the sandbox's token from outside it.
 - A sandbox taken from a warm pool started before it had a gateway, so its
-  environment carries none of the variables above. Its commands reach the
-  gateway only where they are pointed at it by hand.
+  environment carries none of the variables above until its next start,
+  whose Pod carries them. Until then its commands reach the gateway only
+  where they are pointed at it by hand.
 
 ### Turning it on
 

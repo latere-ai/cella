@@ -171,7 +171,8 @@ func labelPath(key string) string { return "/metadata/labels/" + jsonPointer(key
 // so a cluster selecting on them sees one sandbox and not an entry beside it.
 // The proxy variables are not projected: a running container's environment
 // cannot change, so the adopted workload runs confined by the entry's rule
-// and is not pointed at the gateway.
+// and is not pointed at the gateway until its next start, whose Pod is
+// rendered from the adopted record and carries them.
 func (d *Driver) projectAdopted(ctx context.Context, id string, adopted driver.CreateSpec, a driver.Adoption) error {
 	data := map[string][]byte{}
 	if len(a.Token) > 0 {

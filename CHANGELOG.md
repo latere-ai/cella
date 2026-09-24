@@ -31,8 +31,8 @@ refused before it is pushed.
   sandbox created before this release takes its policy at its next start.
 - Under that confinement a sandbox does not reach the control plane from
   inside, so `cella` inside it cannot call the API, and a sandbox taken from
-  a warm pool carries none of the proxy variables, because its container
-  started before it had a gateway.
+  a warm pool carries none of the proxy variables until its next start,
+  because its container started before it had a gateway.
 - The conformance suite holds a declared egress boundary: with `egress` in
   `-capabilities` and an `-upstream` host:port, it checks from inside a
   sandbox that the upstream is reached through the sandbox's gateway, a

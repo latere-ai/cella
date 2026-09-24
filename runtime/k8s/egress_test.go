@@ -558,6 +558,21 @@ func TestAnAdoptionWritesTheAuthority(t *testing.T) {
 	if !slices.ContainsFunc(items, func(i corev1.KeyToPath) bool { return i.Key == authorityKey }) {
 		t.Fatalf("the entry's projection lists %v, without the authority", items)
 	}
+	// The running entry's environment cannot change, so the proxy variables
+	// arrive with its next Pod, rendered from the adopted record.
+	if _, ok := envOf(h.podOf(t, "sbx_pool"))["HTTPS_PROXY"]; ok {
+		t.Fatal("the entry's running Pod was rewritten with the proxy variables")
+	}
+	if err := h.Stop(t.Context(), "sbx_pool"); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Start(t.Context(), "sbx_pool"); err != nil {
+		t.Fatal(err)
+	}
+	want := egress.Projection{ProxyAddr: boundary.ProxyAddr, Credential: boundary.Credential}.Env()["HTTPS_PROXY"]
+	if got := envOf(h.podOf(t, "sbx_pool"))["HTTPS_PROXY"]; got != want {
+		t.Fatalf("the adopted sandbox's next Pod carries HTTPS_PROXY %q, want %q", got, want)
+	}
 	// An adoption that carries neither a token nor an authority writes no
 	// Secret key.
 	prewarm(t, h, "sbx_bare")
