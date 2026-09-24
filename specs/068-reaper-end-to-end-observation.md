@@ -98,5 +98,5 @@ sandbox journaled by mutation), so a late probe still sees them.
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| An idle sandbox is stopped with reason `AutoStop` and then deleted with reason `AutoDelete`, read from the act record after the record is gone, and the driver holds nothing afterwards | `TestReaperEndToEndOverNative` | not built |
-| The same run, under the load that reproduced the failure, passes every time | `TestReaperEndToEndOverNative` at `-count=100 -cpu 1,2` under `-race -cover` beside two CPU-saturating processes | not built |
+| An idle sandbox is stopped with reason `AutoStop` and then deleted with reason `AutoDelete`, read from the act record after the record is gone, and the driver holds nothing afterwards | `TestReaperEndToEndOverNative` | built |
+| The same run, under the load that reproduced the failure, passes every time | `TestReaperEndToEndOverNative` at `-count=200 -cpu 1,2` under `-race -cover` beside two CPU-saturating processes | built: 400 of 400 runs passed |

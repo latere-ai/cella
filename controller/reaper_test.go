@@ -695,14 +695,22 @@ func TestRefreshKeepsTheControllerReason(t *testing.T) {
 // TestReaperEndToEndOverNative drives the loop over the native driver with no
 // fakes: a sandbox goes idle, is stopped with reason AutoStop, and is deleted
 // once it has been stopped for longer than its autoDelete.
+//
+// The stopped state lasts one autoDelete, after which the next rule ends the
+// record, so a probe that arrives later than that never sees it. The test
+// therefore waits only for the record to be gone, which stays true once
+// reached, and reads the transitions from the acts the controller emitted,
+// which keep every one of them whatever the scheduling. Its first read comes
+// after the delete on every run.
 func TestReaperEndToEndOverNative(t *testing.T) {
 	d, err := native.New(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = d.Close() })
+	acts := &actRecorder{}
 	c, err := Open(t.Context(), Options{
-		DataDir: t.TempDir(), Driver: d, Environment: "default",
+		DataDir: t.TempDir(), Driver: d, Environment: "default", Events: acts,
 		ReapInterval: 5 * time.Millisecond, Log: slog.New(slog.DiscardHandler),
 		Lifecycle: driver.Lifecycle{AutoStop: 40 * time.Millisecond, AutoDelete: 40 * time.Millisecond},
 	})
@@ -719,14 +727,34 @@ func TestReaperEndToEndOverNative(t *testing.T) {
 	go func() { defer close(done); c.RunReaper(ctx) }()
 	defer func() { cancel(); <-done }()
 
-	waitFor(t, "the idle sandbox to be stopped with reason AutoStop", func() bool {
-		got, err := c.Get(t.Context(), obj.Status.ID, "alice")
-		return err == nil && got.Status.Phase == driver.Stopped && got.Status.Reason == ReasonAutoStop
-	})
-	waitFor(t, "the stopped sandbox to be deleted", func() bool {
+	waitFor(t, "the idle sandbox to be stopped and then deleted", func() bool {
 		_, err := c.Get(t.Context(), obj.Status.ID, "alice")
 		return errors.Is(err, ErrNotFound)
 	})
+	stopped, deleting := -1, -1
+	for i, a := range acts.all() {
+		if a.Object.Status.ID != obj.Status.ID {
+			continue
+		}
+		switch {
+		case a.Type == MutationStopped && stopped < 0:
+			stopped = i
+			if a.Object.Status.Reason != ReasonAutoStop {
+				t.Errorf("the sandbox was stopped with reason %q, want %s", a.Object.Status.Reason, ReasonAutoStop)
+			}
+			if a.Object.Status.Phase != driver.Stopped {
+				t.Errorf("the stop recorded phase %s, want %s", a.Object.Status.Phase, driver.Stopped)
+			}
+		case a.Type == MutationDeleting && deleting < 0:
+			deleting = i
+			if a.Object.Status.Reason != ReasonAutoDelete {
+				t.Errorf("the sandbox was deleted with reason %q, want %s", a.Object.Status.Reason, ReasonAutoDelete)
+			}
+		}
+	}
+	if stopped < 0 || deleting < 0 || stopped > deleting {
+		t.Fatalf("the acts were %v, want the stop before the delete", acts.types())
+	}
 	if _, err = d.Inspect(t.Context(), obj.Status.ID); !errors.Is(err, driver.ErrNotFound) {
 		t.Fatalf("the workspace outlived its record: %v", err)
 	}
