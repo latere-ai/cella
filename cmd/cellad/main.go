@@ -9,6 +9,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"flag"
@@ -456,7 +457,7 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		MaxBodyBytes: cfg.MaxBodyBytes, MaxUploadBytes: cfg.MaxUploadBytes, SpoolDir: spool,
 		Egress: hub, Events: emitter, Keys: keys, Workers: workers,
 		Admit: admit, Defaults: manifest.Defaults{Image: cfg.Admission.DefaultImage},
-		Metrics: registry,
+		Metrics: registry, PublicPath: cfg.PublicPath,
 	})
 	if err != nil {
 		return fail(stderr, fmt.Errorf("API: %w", err))
@@ -500,26 +501,27 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		BuildTime: version.Date,
 	})
 
-	public := http.NewServeMux()
-	// The server span of design 017 starts here and nowhere else: the
-	// probes, the key set and the version line draw none, and an inbound
-	// traceparent joins the caller's trace at this one seam. The route
-	// wrapper behind the mux renames the span once the pattern is known.
-	public.Handle("/v1/", otel.Handler(handler, "cellad"))
-	for _, p := range []string{"/livez", "/readyz", "/version"} {
-		public.Handle("GET "+p, probes)
-	}
-	// The key set every workload token and environment key verifies
-	// against, so a platform or a third service trusts a sandbox without
-	// asking cellad (spec 006).
-	public.Handle("GET "+auth.JWKSPath, identity.Signer.JWKS())
 	// The second public document of design 008: the description a client
 	// generator builds from. It carries no credential either, because a
-	// reader of the contract has none yet.
-	public.Handle("GET "+apidoc.Path, apidoc.Handler())
-	public.HandleFunc("GET /{$}", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		_, _ = fmt.Fprintln(w, version.String())
+	// reader of the contract has none yet. Its paths are the ones a caller
+	// reaches under the public URL.
+	document, err := apidoc.HandlerUnder(cfg.PublicPath)
+	if err != nil {
+		return fail(stderr, fmt.Errorf("API document: %w", err))
+	}
+	public := publicHandler(cfg.BasePath, publicRoutes{
+		// The server span of design 017 starts here and nowhere else: the
+		// probes, the key set and the version line draw none, and an
+		// inbound traceparent joins the caller's trace at this one seam.
+		// The route wrapper behind the mux renames the span once the
+		// pattern is known.
+		api: otel.Handler(handler, "cellad"),
+		// The key set every workload token and environment key verifies
+		// against, so a platform or a third service trusts a sandbox
+		// without asking cellad (spec 006).
+		keySet:   identity.Signer.JWKS(),
+		document: document,
+		probes:   probes,
 	})
 
 	// Design 002's internal listener answers the probes and, from design
@@ -539,9 +541,9 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		_ = publicLn.Close()
 		return fail(stderr, fmt.Errorf("CELLA_INTERNAL_ADDR: %w", err))
 	}
-	_, _ = fmt.Fprintf(stdout, "cellad: %s listening public=%s internal=%s runtime=%s issuers=%d authorizer=%s admission=%s %s telemetry=%s\n",
+	_, _ = fmt.Fprintf(stdout, "cellad: %s listening public=%s internal=%s runtime=%s issuers=%d authorizer=%s admission=%s %s telemetry=%s base=%s\n",
 		version.Version, publicLn.Addr(), internalLn.Addr(), cfg.Runtime, len(cfg.OIDCIssuers), identity.Mode,
-		cfg.Admission.Mode(), recovery(cfg, control), tel.mode)
+		cfg.Admission.Mode(), recovery(cfg, control), tel.mode, cmp.Or(cfg.BasePath, "/"))
 
 	servers := []*http.Server{
 		{Handler: public, ReadHeaderTimeout: 10 * time.Second},

@@ -27,13 +27,14 @@ import (
 // there and the mesh is a status field nothing enforces, which is what makes
 // the two capabilities separate.
 func TestSpawnTreeEndToEnd(t *testing.T) {
-	proxyAddr, reverseAddr := freePort(t), freePort(t)
+	proxyLn, reverseLn := doors(t)
+	proxyAddr, reverseAddr := proxyLn.Addr().String(), reverseLn.Addr().String()
 	plane := startPlane(t, proxyAddr, reverseAddr)
 	// An allowlist boundary is held by a gateway, so one runs: the root's
 	// reach is what its children are held to.
 	ready := make(chan struct{})
 	startGateway(t, plane, egressd.Options{
-		ProxyAddr: proxyAddr, ReverseAddr: reverseAddr, Ready: func() { close(ready) },
+		ProxyListener: proxyLn, ReverseListener: reverseLn, Ready: func() { close(ready) },
 	})
 	select {
 	case <-ready:

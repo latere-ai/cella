@@ -26,6 +26,7 @@ import (
 	"latere.ai/x/pkg/httpjson"
 
 	"latere.ai/x/cella/authorizer"
+	cellaclient "latere.ai/x/cella/client"
 	"latere.ai/x/cella/controller"
 	"latere.ai/x/cella/internal/auth"
 	"latere.ai/x/cella/internal/events"
@@ -79,6 +80,13 @@ type Options struct {
 	// Metrics is design 017's recorder. It is optional: with none the API
 	// counts nothing and answers the same.
 	Metrics Metrics
+	// PublicPath is the path of CELLA_PUBLIC_URL, empty at the root. The
+	// handler serves the rooted routes whatever it is, because the listener
+	// in front rewrites a request under a base to the route it names; every
+	// path the handler writes into a header is under it instead, in the
+	// place of /v1, so a caller that reached the control plane under a
+	// prefix is sent to a path under the same prefix.
+	PublicPath string
 	// Draining closes when the server stops taking requests. Every
 	// following feed of design 009 ends when it does, so a shutdown does not
 	// wait out its grace period for streams that would never end on their
@@ -251,6 +259,11 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx = events.WithActor(ctx, actorOf(w, caller))
 	h.mux.ServeHTTP(w, r.WithContext(ctx))
 }
+
+// public is the path a caller reaches a route at, the route under the public
+// path by the rule every client composes with.
+func (h *handler) public(route string) string { return cellaclient.Route(h.PublicPath, route) }
+
 func caller(r *http.Request) auth.Caller {
 	c, _ := r.Context().Value(callerKey{}).(auth.Caller)
 	return c
@@ -480,7 +493,7 @@ func (h *handler) createNamed(w http.ResponseWriter, r *http.Request, name strin
 		respondError(w, err)
 		return
 	}
-	w.Header().Set("Location", "/v1/sandboxes/"+obj.Status.ID)
+	w.Header().Set("Location", h.public("/v1/sandboxes/"+obj.Status.ID))
 	respond(w, http.StatusCreated, obj)
 }
 

@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"latere.ai/x/cella/client"
 	"latere.ai/x/cella/internal/config"
 	"latere.ai/x/cella/internal/stubs"
 	"latere.ai/x/cella/runtime/native"
@@ -42,7 +43,32 @@ import (
 // fails without being declared fails this test, and a declared case that
 // passes fails it too.
 func TestTheConformanceSuiteHoldsAgainstThisServer(t *testing.T) {
-	stack := startStack(t)
+	holds(t, startStack(t))
+}
+
+// TestTheConformanceSuiteHoldsUnderABasePath is the same run against a node
+// mounted under /v1/environments, the capability's prefix on an origin that
+// serves several services: the suite's URL, the worker's CELLA_URL and the
+// CELLA_URL the agent case hands the built command all carry the base, and
+// every case, the sockets, the port proxy, the tokens the node mints and the
+// worker environment included, holds with no case written for it.
+func TestTheConformanceSuiteHoldsUnderABasePath(t *testing.T) {
+	stack := startStackWith(t, map[string]string{
+		"CELLA_BASE_PATH":  basePath,
+		"CELLA_PUBLIC_URL": "http://127.0.0.1:0" + basePath,
+	})
+	if !strings.HasSuffix(stack.url, basePath) || stack.workerEnvironment == "" {
+		t.Fatalf("the stack serves at %s with the worker environment %q", stack.url, stack.workerEnvironment)
+	}
+	holds(t, stack)
+}
+
+// holds runs the whole suite against a stack and holds the run to what it
+// promises beyond the cases: the agent scenario ran the built command, the
+// marker names the server, something passed, and the run left nothing
+// behind.
+func holds(t *testing.T, stack *stack) {
+	t.Helper()
 	report := conformance.Run(t, stack.suite(t))
 	if !slices.Contains(report.Passed, "case011AgentScenario") {
 		t.Error("the agent scenario did not run through the built command; the run carries the binary so it does")
@@ -135,7 +161,10 @@ func buildCella(t *testing.T) string {
 
 // stack is the node and the stubs one suite run drives.
 type stack struct {
+	// url is the node's public URL, the listener's origin followed by the
+	// base it is mounted under, if any, which are origin and base.
 	url          string
+	origin, base string
 	issuer       string
 	sink         string
 	capabilities []string
@@ -235,7 +264,8 @@ func startStackWith(t *testing.T, extra map[string]string) *stack {
 	deadline := time.Now().Add(30 * time.Second)
 	for s.url == "" {
 		if m := listening.FindStringSubmatch(out.String()); m != nil {
-			s.url = "http://" + m[1]
+			s.origin, s.base = "http://"+m[1], vars["CELLA_BASE_PATH"]
+			s.url = s.origin + s.base
 			break
 		}
 		select {
@@ -304,14 +334,15 @@ func (s *stack) joinWorker(t *testing.T) {
 	t.Fatalf("the worker environment never became ready: %d %s", status, answer)
 }
 
-// call is one request to the node with an administrator's bearer.
+// call is one request to the node with an administrator's bearer, to the
+// route the rooted path names under the node's base.
 func (s *stack) call(t *testing.T, token, method, path, body string) (int, string) {
 	t.Helper()
 	var reader io.Reader
 	if body != "" {
 		reader = strings.NewReader(body)
 	}
-	req, err := http.NewRequestWithContext(t.Context(), method, s.url+path, reader)
+	req, err := http.NewRequestWithContext(t.Context(), method, s.origin+client.Route(s.base, path), reader)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -365,7 +396,7 @@ func (s *stack) read(t *testing.T, path string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, s.url+path, nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, s.origin+client.Route(s.base, path), nil)
 	if err != nil {
 		return 0, err
 	}

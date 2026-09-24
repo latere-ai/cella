@@ -65,6 +65,10 @@ type Identity struct {
 	// PublicURL is CELLA_PUBLIC_URL, the absolute URL callers reach the
 	// public listener at and the iss of every token cellad mints.
 	PublicURL string
+	// PublicPath is the path of PublicURL, empty at the root. Every path the
+	// core writes into a header or a body is under it, in the place of /v1
+	// (client.Route).
+	PublicPath string
 	// TokenKeys is CELLA_TOKEN_KEY parsed: the first signs, and every
 	// key's public half is served at /.well-known/jwks.json.
 	TokenKeys []*rsa.PrivateKey
@@ -111,9 +115,11 @@ func (i *Identity) loadIdentity(getenv Getenv) []string {
 	}
 
 	i.PublicURL = strings.TrimRight(strings.TrimSpace(getenv("CELLA_PUBLIC_URL")), "/")
-	if _, ok := endpoint(i.PublicURL); !ok {
-		problems = append(problems, "CELLA_PUBLIC_URL is "+strconv.Quote(i.PublicURL)+", not an absolute http:// or https:// URL with a host; it is the iss of every token cellad mints")
+	path, problem := publicPath(i.PublicURL)
+	if problem != "" {
+		problems = append(problems, problem)
 	}
+	i.PublicPath = path
 
 	keys, problem := tokenKeys(getenv("CELLA_TOKEN_KEY"))
 	if problem != "" {
@@ -145,6 +151,23 @@ func (i *Identity) loadIdentity(getenv Getenv) []string {
 	}
 	i.DefaultEnvironment = withDefault(getenv("CELLA_DEFAULT_ENVIRONMENT"), DefaultEnvironment)
 	return problems
+}
+
+// publicPath is the path of CELLA_PUBLIC_URL, or the problem that keeps the
+// value from being a public URL: it is the iss of every token cellad mints,
+// so it is an absolute address with no query and no fragment, and its path
+// prefixes every path cellad writes, so it takes the shape of a base path.
+func publicPath(raw string) (path, problem string) {
+	u, ok := endpoint(raw)
+	switch {
+	case !ok:
+		return "", "CELLA_PUBLIC_URL is " + strconv.Quote(raw) + ", not an absolute http:// or https:// URL with a host; it is the iss of every token cellad mints"
+	case u.RawQuery != "" || u.ForceQuery || u.Fragment != "":
+		return "", "CELLA_PUBLIC_URL is " + strconv.Quote(raw) + ", which carries a query or a fragment; it is an address and the iss of every token cellad mints"
+	case u.EscapedPath() != "" && !cleanBasePath(u.EscapedPath()):
+		return "", "CELLA_PUBLIC_URL has the path " + strconv.Quote(u.EscapedPath()) + ", which prefixes every path cellad writes; " + basePathRule
+	}
+	return u.EscapedPath(), ""
 }
 
 // issuerList reads the issuer list: each entry an absolute URL, each one

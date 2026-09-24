@@ -152,7 +152,8 @@ func portsReportListening(t tb, open func() runtime.Driver, opts Options) {
 		t.Skipf("Options.Listen is nil: this suite has no command that binds a port")
 	}
 	const id = "sbx_cnf_ports"
-	const bound, idle = 18080, 18081
+	ports := freePorts(t, 2)
+	bound, idle := ports[0], ports[1]
 	spec := runtime.CreateSpec{
 		ID: id, Name: "ports", Owner: "alice",
 		Command: opts.Listen(bound),

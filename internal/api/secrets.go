@@ -39,7 +39,7 @@ func (h *handler) createSecret(w http.ResponseWriter, r *http.Request) {
 		respondError(w, err)
 		return
 	}
-	w.Header().Set("Location", "/v1/secrets/"+stored.Status.ID)
+	w.Header().Set("Location", h.public("/v1/secrets/"+stored.Status.ID))
 	respond(w, http.StatusCreated, stored)
 }
 
@@ -111,7 +111,7 @@ func (h *handler) createNamedSecret(w http.ResponseWriter, r *http.Request, key 
 		respondError(w, err)
 		return
 	}
-	w.Header().Set("Location", "/v1/secrets/"+stored.Status.ID)
+	w.Header().Set("Location", h.public("/v1/secrets/"+stored.Status.ID))
 	respond(w, http.StatusCreated, stored)
 }
 

@@ -38,7 +38,9 @@ const CaseTimeout = 2 * time.Minute
 // whose input is empty is reported skipped with the input named, never
 // silently and never as a pass.
 type Config struct {
-	// URL is the server under test, without a path.
+	// URL is the server under test: its public URL, with the path it is
+	// served under when it has one. Each case writes its routes as a server
+	// at the root serves them, and a path here takes the place of /v1.
 	URL string
 	// Token mints a token for one subject. It is the stub issuer's mint
 	// route in a tier and a caller's own issuer elsewhere. With none, Caller

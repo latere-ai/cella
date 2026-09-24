@@ -76,6 +76,10 @@ type Getenv func(string) string
 type Config struct {
 	// PublicAddr is where the /v1 API and the public probes listen.
 	PublicAddr string
+	// BasePath is CELLA_BASE_PATH, the prefix the public listener answers
+	// under in the place of /v1, empty at the root. Set, it is the path of
+	// CELLA_PUBLIC_URL.
+	BasePath string
 	// InternalAddr is where the four probes listen for the cluster.
 	InternalAddr string
 	// DataDir holds what cellad keeps on local disk: the native and
@@ -153,6 +157,8 @@ func Load(getenv Getenv) (Config, error) {
 		Runtime:      withDefault(getenv("CELLA_RUNTIME"), DefaultRuntime),
 	}
 	problems := c.loadIdentity(getenv)
+	_, unreadable := publicPath(c.PublicURL)
+	c.BasePath = loadBasePath(getenv, c.PublicPath, unreadable == "", &problems)
 	c.MaxBodyBytes = byteLimit(getenv, "CELLA_MAX_BODY_BYTES", 65536, &problems)
 	c.MaxUploadBytes = byteLimit(getenv, "CELLA_MAX_UPLOAD_BYTES", 1<<30, &problems)
 	c.ReapInterval = interval(getenv, "CELLA_REAP_INTERVAL", DefaultReapInterval, &problems)

@@ -55,8 +55,11 @@ const maxErrorBytes = 1 << 20
 // Config is what a caller supplies. Nothing in it is read from anywhere else:
 // Environment is the call that fills one from the process's environment.
 type Config struct {
-	// URL is the control plane's base address, http or https. It is
-	// required, and a path on it prefixes every route.
+	// URL is the control plane's public address, http or https, and it is
+	// required. A path on it is the base the control plane is served under,
+	// which stands in the place of /v1 (see Route): with
+	// https://api.example.com/v1/environments a sandbox is at
+	// /v1/environments/sandboxes/{id}.
 	URL string
 	// Token is asked for the bearer once per request, with that request's
 	// context. Nil sends no Authorization header, which only /version
@@ -142,8 +145,9 @@ func (c *Client) authorize(req *http.Request) error {
 	return nil
 }
 
-// request builds one call: the path under the base address, the bearer of
-// this moment, a fresh request id, and the identity every request carries.
+// request builds one call: the route under the base address by Route, the
+// bearer of this moment, a fresh request id, and the identity every request
+// carries.
 //
 // The path arrives escaped, each reference in it escaped as one segment, and
 // is set as the URL's escaped form beside its decoded one. Setting only the
@@ -155,8 +159,8 @@ func (c *Client) request(ctx context.Context, method, path string, query url.Val
 		return nil, err
 	}
 	target := *c.base
-	target.Path = c.base.Path + decoded
-	target.RawPath = c.base.EscapedPath() + path
+	target.Path = Route(c.base.Path, decoded)
+	target.RawPath = Route(c.base.EscapedPath(), path)
 	if query != nil {
 		target.RawQuery = query.Encode()
 	}

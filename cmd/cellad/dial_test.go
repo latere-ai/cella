@@ -33,11 +33,18 @@ const serveArg = "cella-test-serve"
 // asked for.
 const servedBody = "served from inside the sandbox at "
 
+// prefixPath is the one path the server inside answers with the
+// X-Forwarded-Prefix it was sent, which is the prefix a caller reached it at.
+const prefixPath = "/forwarded-prefix"
+
 func TestMain(m *testing.M) {
 	if len(os.Args) == 3 && os.Args[1] == serveArg {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 			_, _ = io.WriteString(w, servedBody+r.URL.RequestURI())
+		})
+		mux.HandleFunc(prefixPath, func(w http.ResponseWriter, r *http.Request) {
+			_, _ = io.WriteString(w, r.Header.Get("X-Forwarded-Prefix"))
 		})
 		server := &http.Server{Addr: net.JoinHostPort("127.0.0.1", os.Args[2]), Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 		fmt.Fprintln(os.Stderr, server.ListenAndServe())

@@ -33,6 +33,9 @@ type plane struct {
 	hub    *remote.Hub
 	server *httptest.Server
 	driver *remote.Driver
+	// url is the control plane's public URL a worker is given: the server's
+	// address, and the base it is mounted under where there is one.
+	url string
 
 	mu         sync.Mutex
 	keys       []string
@@ -41,6 +44,14 @@ type plane struct {
 }
 
 func newPlane(t *testing.T) *plane {
+	t.Helper()
+	return newPlaneUnder(t, "")
+}
+
+// newPlaneUnder is newPlane mounted under a base the way cellad mounts its
+// public listener: the base is stripped and /v1 takes its place, so the
+// routes below are the rooted ones either way.
+func newPlaneUnder(t *testing.T, base string) *plane {
 	t.Helper()
 	p := &plane{hub: remote.NewHub(remote.HubOptions{Offline: time.Minute})}
 	upgrader := websocket.Upgrader{Subprotocols: []string{remote.Protocol}, CheckOrigin: func(*http.Request) bool { return true }}
@@ -77,8 +88,17 @@ func newPlane(t *testing.T) *plane {
 		}
 		_ = p.hub.Serve(r.Context(), "env_test", worker.NewSocket(conn))
 	})
-	p.server = httptest.NewServer(mux)
+	var served http.Handler = mux
+	if base != "" {
+		served = http.StripPrefix(base, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			rooted := r.Clone(r.Context())
+			rooted.URL.Path, rooted.URL.RawPath = "/v1"+r.URL.Path, ""
+			mux.ServeHTTP(w, rooted)
+		}))
+	}
+	p.server = httptest.NewServer(served)
 	t.Cleanup(p.server.Close)
+	p.url = p.server.URL + base
 	d, err := remote.New(remote.Options{Environment: "env_test", Transport: p.hub.Transport("env_test")})
 	if err != nil {
 		t.Fatal(err)
@@ -92,7 +112,7 @@ func newPlane(t *testing.T) *plane {
 func (p *plane) start(t *testing.T, host driver.Driver) (*worker.Worker, func()) {
 	t.Helper()
 	w, err := worker.New(worker.Options{
-		URL: p.server.URL, Key: "an-environment-key", Driver: host, Version: "test",
+		URL: p.url, Key: "an-environment-key", Driver: host, Version: "test",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -382,8 +402,8 @@ func TestStreamURL(t *testing.T) {
 			"ws://127.0.0.1:8080/v1/environments/env_a/operations"},
 		{"a trailing slash is not a path segment", "https://cella.example.test/", "env_a",
 			"wss://cella.example.test/v1/environments/env_a/operations"},
-		{"a base path is kept", "https://example.test/cella", "env_a",
-			"wss://example.test/cella/v1/environments/env_a/operations"},
+		{"a base path takes the place of /v1", "https://example.test/cella", "env_a",
+			"wss://example.test/cella/environments/env_a/operations"},
 		{"no environment is the one the key names", "https://cella.example.test", "",
 			"wss://cella.example.test/v1/environments/self/operations"},
 	} {
@@ -573,5 +593,29 @@ func TestSocketRoundTripsAFrame(t *testing.T) {
 	}
 	if _, err = socket.ReadFrame(); err == nil {
 		t.Errorf("a frame was read from a closed socket")
+	}
+}
+
+// TestTheWorkerComposesUnderABasePath: a CELLA_URL with a path is the base the
+// control plane is served under, so the registration and the stream are the
+// rooted routes with the base in the place of /v1, and a worker given such a
+// URL registers and holds its stream.
+func TestTheWorkerComposesUnderABasePath(t *testing.T) {
+	for _, tc := range []struct{ base, environment, want string }{
+		{"https://cella.example.com", "", "wss://cella.example.com/v1/environments/self/operations"},
+		{"http://127.0.0.1:8080/", "eu-gpu", "ws://127.0.0.1:8080/v1/environments/eu-gpu/operations"},
+		{"https://api.example.com/v1/environments", "", "wss://api.example.com/v1/environments/environments/self/operations"},
+		{"https://api.example.com/v1/environments/", "eu-gpu", "wss://api.example.com/v1/environments/environments/eu-gpu/operations"},
+	} {
+		if got, err := worker.StreamURL(tc.base, tc.environment); err != nil || got != tc.want {
+			t.Errorf("StreamURL(%q, %q) = %q, %v, want %q", tc.base, tc.environment, got, err, tc.want)
+		}
+	}
+
+	p := newPlaneUnder(t, "/v1/environments")
+	w, _ := p.start(t, nativeDriver(t))
+	p.waitWorkers(t, 1, "a worker whose URL carries the base")
+	if w.Environment() != "env_test" {
+		t.Errorf("the worker serves %q", w.Environment())
 	}
 }

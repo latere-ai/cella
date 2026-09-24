@@ -4,6 +4,7 @@
 package native
 
 import (
+	"net"
 	"os"
 	"testing"
 
@@ -32,4 +33,20 @@ func TestNativeConformance(t *testing.T) {
 		Listen: echoCommand,
 		Echo:   echoCommand,
 	})
+}
+
+// TestConformanceWhileAnotherRunHoldsPorts: native sandboxes share the host's
+// network, so the port cases meet every other test the machine runs at once.
+// With the ports another run holds taken, and the three ports the suite once
+// named held here, the port and dial cases still pass, because each picks
+// free ports when it runs.
+func TestConformanceWhileAnotherRunHoldsPorts(t *testing.T) {
+	for _, port := range []string{"18080", "18081", "18090"} {
+		// A port already held by something else is the same condition.
+		var lc net.ListenConfig
+		if l, err := lc.Listen(t.Context(), "tcp", net.JoinHostPort("127.0.0.1", port)); err == nil {
+			t.Cleanup(func() { _ = l.Close() })
+		}
+	}
+	TestNativeConformance(t)
 }

@@ -31,8 +31,10 @@ type fakeDesktop struct {
 	mu sync.Mutex
 	// boxes is every sandbox this driver holds, by id.
 	boxes map[string]runtime.CreateSpec
-	// bound is the port the fake reports as held, and 0 reports none.
-	bound int
+	// bound is the name of the declared port the fake reports as held, and
+	// the empty name reports none. A name, not a number, because the case
+	// picks its ports when it runs.
+	bound string
 	// wrongSize renders a frame of a size nobody asked for.
 	wrongSize bool
 	// acceptsAnything skips validation, which is what a driver with a
@@ -84,7 +86,7 @@ func (d *fakeDesktop) Inspect(_ context.Context, id string) (runtime.State, erro
 	}
 	for _, p := range s.Ports {
 		port := runtime.PortState{Name: p.Name, Port: p.Port, State: runtime.PortClosed}
-		if p.Port == d.bound {
+		if p.Name == d.bound {
 			port.State = runtime.PortListening
 		}
 		state.Ports = append(state.Ports, port)
@@ -184,7 +186,7 @@ func runCase(t *testing.T, name string, d runtime.Driver, opts Options) *recorde
 
 func TestDisplayCasesPassAConformingDriver(t *testing.T) {
 	d := newFakeDesktop()
-	d.bound = 18080
+	d.bound = "bound"
 	for _, name := range []string{"DisplayScreenshot", "ScreenStream", "InputAcceptsAndRefuses", "PortsReportListening"} {
 		t.Run(name, func(t *testing.T) {
 			if r := runCase(t, name, d, desktopOptions()); r.failed() {
@@ -251,7 +253,7 @@ func TestDisplayCasesFailEachDefect(t *testing.T) {
 		}, "InputAcceptsAndRefuses"},
 		{"a port nothing holds reported as listening", func() *fakeDesktop {
 			d := newFakeDesktop()
-			d.bound = 18081
+			d.bound = "idle"
 			return d
 		}, "PortsReportListening"},
 	} {

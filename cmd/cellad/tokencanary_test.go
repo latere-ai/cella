@@ -34,7 +34,8 @@ func TestWorkloadTokenNeverLeavesItsSandbox(t *testing.T) {
 	}))
 	defer upstream.Close()
 	sink := newStubSink(t, "only-secret")
-	proxyAddr, reverseAddr := freePort(t), freePort(t)
+	proxyLn, reverseLn := doors(t)
+	proxyAddr, reverseAddr := proxyLn.Addr().String(), reverseLn.Addr().String()
 	plane := startPlaneWith(t, proxyAddr, reverseAddr, map[string]string{
 		"CELLA_EVENTS_URL":    sink.server.URL,
 		"CELLA_EVENTS_SECRET": "only-secret",
@@ -43,7 +44,7 @@ func TestWorkloadTokenNeverLeavesItsSandbox(t *testing.T) {
 	var gatewayLog syncBuffer
 	ready := make(chan struct{})
 	startGateway(t, plane, egressd.Options{
-		ProxyAddr: proxyAddr, ReverseAddr: reverseAddr,
+		ProxyListener: proxyLn, ReverseListener: reverseLn,
 		UpstreamCAPEM: certificatePEM(t, upstream),
 		Dial:          dialTo(upstream.Listener.Addr().String()),
 		Log:           slog.New(slog.NewTextHandler(&gatewayLog, &slog.HandlerOptions{Level: slog.LevelDebug})),

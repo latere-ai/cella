@@ -129,7 +129,10 @@ func (h *handler) proxyTo(dialer runtime.Dialer, id string, port int) *httputil.
 			// workload's to read.
 			out.Header.Del("Authorization")
 			pr.SetXForwarded()
-			out.Header.Set("X-Forwarded-Prefix", prefix)
+			// The prefix is the path the caller reached the port at, under
+			// the public path, so a server inside that writes its own links
+			// writes them where the caller can follow them.
+			out.Header.Set("X-Forwarded-Prefix", h.public(prefix))
 		},
 		Transport: transport,
 		// A response streams as it arrives: a server inside that sends

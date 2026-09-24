@@ -42,6 +42,32 @@ refused before it is pushed.
   the environment key `up.sh` mints at the control plane, and an upstream
   a sandbox may be allowed to reach.
 
+## v0.5.0 - 2026-09-24
+
+- `CELLA_BASE_PATH` serves the control plane under a path of an API
+  address it shares with other services, such as `/v1/environments`. The
+  path takes the place of `/v1`: `/v1/sandboxes` is answered at
+  `/v1/environments/sandboxes`, and the key set, the OpenAPI document and
+  `/version` move under it. Nothing is answered outside it, and the probes
+  stay on the internal listener. It must be the path of
+  `CELLA_PUBLIC_URL`, and the start-up line names it as `base=`. Unset,
+  nothing changes. `docs/install.md` has a section on serving behind a
+  shared origin.
+- Every path the control plane writes is under the path of
+  `CELLA_PUBLIC_URL`: the `Location` of a create or an apply, the
+  `X-Forwarded-Prefix` a server inside a sandbox receives from the port
+  proxy, and the paths of the served OpenAPI document. A public URL with a
+  path and no `CELLA_BASE_PATH` is a control plane behind a proxy that
+  rewrites the path away. A `CELLA_PUBLIC_URL` with a query or a fragment,
+  or with a path that is not a plain path such as `/v1/environments`, now
+  stops `cellad` at start.
+- A path on the address a client is given now takes the place of `/v1`
+  rather than coming before it, in the Go client, `cella`, `cellad
+  worker`, `cellad egress` and the conformance suite's `-url`:
+  `CELLA_URL=https://api.example.com/v1/environments` reaches
+  `/v1/environments/sandboxes`. A client behind a proxy that strips a path
+  of its own before the control plane names the control plane's `/v1` in
+  its address, `https://example.com/cella/v1`.
 - `client.ListEnvironmentKeys` reads an environment's key list: each key's
   jti, when it was minted and by whom, when it expires, and whether it was
   revoked. The token is never part of it.

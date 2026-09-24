@@ -23,6 +23,7 @@ import (
 
 	"latere.ai/x/pkg/authkit/issuertest"
 
+	"latere.ai/x/cella/client"
 	"latere.ai/x/cella/egress"
 	"latere.ai/x/cella/internal/auth"
 	"latere.ai/x/cella/internal/egressd"
@@ -42,7 +43,8 @@ func TestEgressEndToEnd(t *testing.T) {
 	trust := x509.NewCertPool()
 	trust.AddCert(upstream.Certificate())
 
-	proxyAddr, reverseAddr := freePort(t), freePort(t)
+	proxyLn, reverseLn := doors(t)
+	proxyAddr, reverseAddr := proxyLn.Addr().String(), reverseLn.Addr().String()
 	plane := startPlane(t, proxyAddr, reverseAddr)
 
 	// The gateway runs in this process so the test can name where an
@@ -50,7 +52,7 @@ func TestEgressEndToEnd(t *testing.T) {
 	// which is what keeps the tier hermetic.
 	ready := make(chan struct{})
 	gateway := startGateway(t, plane, egressd.Options{
-		ProxyAddr: proxyAddr, ReverseAddr: reverseAddr,
+		ProxyListener: proxyLn, ReverseListener: reverseLn,
 		UpstreamCAPEM: certificatePEM(t, upstream),
 		Dial:          dialTo(upstream.Listener.Addr().String()),
 		Ready:         func() { close(ready) },
@@ -304,7 +306,12 @@ func TestTheEgressSubcommandRefusesABadConfiguration(t *testing.T) {
 // plane is a running control plane with a caller's bearer and the signing key
 // its environment keys are minted with.
 type plane struct {
+	// url is the control plane's public URL, what a role's CELLA_URL
+	// carries: the listener's origin and, where the plane is served under
+	// one, its base. origin and base are the two halves.
 	url    string
+	origin string
+	base   string
 	bearer string
 	signer *auth.Signer
 	stop   func() int
@@ -351,7 +358,7 @@ func startPlaneWith(t *testing.T, proxyAddr, reverseAddr string, extra map[strin
 	go func() { codec <- run(ctx, nil, env(e), &out, &errOut) }()
 	p := &plane{
 		bearer:  issuer.Mint(issuertest.Claims{Sub: "alice", Aud: issuertest.StringList{"cella"}}),
-		signer:  newSigner(t, key, "https://control.example.com"),
+		signer:  newSigner(t, key, e["CELLA_PUBLIC_URL"]),
 		dataDir: dataDir, out: &out, errOut: &errOut,
 		stop: func() int {
 			cancel()
@@ -367,7 +374,8 @@ func startPlaneWith(t *testing.T, proxyAddr, reverseAddr string, extra map[strin
 	deadline := time.Now().Add(15 * time.Second)
 	for {
 		if m := listening.FindStringSubmatch(out.String()); m != nil {
-			p.url = "http://" + m[1]
+			p.origin, p.base = "http://"+m[1], e["CELLA_BASE_PATH"]
+			p.url = p.origin + p.base
 			return p
 		}
 		select {
@@ -506,9 +514,11 @@ func (p *plane) get(t *testing.T, path string) string {
 	return answer
 }
 
+// do is one request under the caller's bearer, to the route the rooted path
+// names under the plane's base.
 func (p *plane) do(t *testing.T, method, path string, body io.Reader) (int, string) {
 	t.Helper()
-	req, err := http.NewRequestWithContext(t.Context(), method, p.url+path, body)
+	req, err := http.NewRequestWithContext(t.Context(), method, p.origin+client.Route(p.base, path), body)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -571,8 +581,26 @@ func workloadClient(t *testing.T, proxy string, trust *x509.CertPool) *http.Clie
 	}
 }
 
-// freePort reserves a loopback address by binding and releasing it, so the
-// control plane can be told where the gateway will be before it is there.
+// doors binds the gateway's two doors on loopback and keeps them bound, so the
+// control plane can be told where the gateway is before it starts and no other
+// test can take either port in between. A gateway run in this process serves
+// on them through Options.ProxyListener and Options.ReverseListener.
+func doors(t *testing.T) (proxy, reverse net.Listener) {
+	t.Helper()
+	var lc net.ListenConfig
+	proxy, err := lc.Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reverse, err = lc.Listen(t.Context(), "tcp", "127.0.0.1:0"); err != nil {
+		_ = proxy.Close()
+		t.Fatal(err)
+	}
+	return proxy, reverse
+}
+
+// freePort reserves a loopback address by binding and releasing it, for the
+// role run through its own variables, which binds the address itself.
 func freePort(t *testing.T) string {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")

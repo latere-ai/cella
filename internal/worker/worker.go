@@ -30,6 +30,7 @@ import (
 
 	"latere.ai/x/pkg/otel"
 
+	"latere.ai/x/cella/client"
 	"latere.ai/x/cella/runtime"
 	"latere.ai/x/cella/runtime/remote"
 )
@@ -172,8 +173,13 @@ func (w *Worker) register(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("worker: the registration did not encode: %w", err)
 	}
-	endpoint := strings.TrimRight(w.options.URL, "/") + "/v1/environments/self/workers"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	endpoint, err := url.Parse(strings.TrimRight(w.options.URL, "/"))
+	if err != nil {
+		return fmt.Errorf("worker: CELLA_URL is not a URL: %w", err)
+	}
+	endpoint.Path = client.Route(endpoint.Path, "/v1/environments/self/workers")
+	endpoint.RawPath = ""
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.String(), bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -239,8 +245,9 @@ func (w *Worker) dial(ctx context.Context) (remote.FrameConn, error) {
 }
 
 // StreamURL turns the control plane's URL into the worker stream's, keeping
-// the scheme's WebSocket equivalent and whatever base path the control plane
-// is served under. An empty environment is the one the key names.
+// the scheme's WebSocket equivalent and composing the route under the URL's
+// path by client.Route, the base the control plane is served under. An empty
+// environment is the one the key names.
 func StreamURL(base, environment string) (string, error) {
 	u, err := url.Parse(strings.TrimRight(base, "/"))
 	if err != nil {
@@ -255,6 +262,7 @@ func StreamURL(base, environment string) (string, error) {
 	if environment == "" {
 		environment = "self"
 	}
-	u.Path = strings.TrimRight(u.Path, "/") + "/v1/environments/" + environment + "/operations"
+	u.Path = client.Route(u.Path, "/v1/environments/"+environment+"/operations")
+	u.RawPath = ""
 	return u.String(), nil
 }
