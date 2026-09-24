@@ -382,13 +382,14 @@ func TestWorkerAndGatewayUnderABasePath(t *testing.T) {
 	// The gateway's stream, opened by the egress role with the public URL:
 	// a boundary that needs a gateway is created only once one acknowledges
 	// the sandbox's map.
+	key := p.environmentKey(t)
 	var out, errOut syncBuffer
 	ctx, cancel := context.WithCancel(t.Context())
 	codec := make(chan int, 1)
 	go func() {
 		codec <- run(ctx, []string{"egress"}, env(map[string]string{
 			"CELLA_URL":                 p.url,
-			"CELLA_ENVIRONMENT_KEY":     p.environmentKey(t),
+			"CELLA_ENVIRONMENT_KEY":     key,
 			"CELLA_EGRESS_PROXY_ADDR":   proxyAddr,
 			"CELLA_EGRESS_REVERSE_ADDR": reverseAddr,
 		}), &out, &errOut)
