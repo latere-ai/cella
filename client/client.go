@@ -137,9 +137,19 @@ func (c *Client) authorize(req *http.Request) error {
 
 // request builds one call: the path under the base address, the bearer of
 // this moment, a fresh request id, and the identity every request carries.
+//
+// The path arrives escaped, each reference in it escaped as one segment, and
+// is set as the URL's escaped form beside its decoded one. Setting only the
+// decoded form would escape the escapes a second time, and the server would
+// read a reference with a space in it as one with "%20" in it.
 func (c *Client) request(ctx context.Context, method, path string, query url.Values, body io.Reader) (*http.Request, error) {
+	decoded, err := url.PathUnescape(path)
+	if err != nil {
+		return nil, err
+	}
 	target := *c.base
-	target.Path = c.base.Path + path
+	target.Path = c.base.Path + decoded
+	target.RawPath = c.base.EscapedPath() + path
 	if query != nil {
 		target.RawQuery = query.Encode()
 	}

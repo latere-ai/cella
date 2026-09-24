@@ -482,6 +482,7 @@ func TestTheRoutesOfEveryObjectCall(t *testing.T) {
 		{"delete an environment", func() error { _, err := c.Delete(ctx, client.KindEnvironment, "gpu"); return err }, "DELETE", "/v1/environments/gpu", ""},
 		{"start", func() error { _, _, err := c.StartSandbox(ctx, "dev"); return err }, "POST", "/v1/sandboxes/dev/start", ""},
 		{"stop", func() error { _, _, err := c.StopSandbox(ctx, "dev"); return err }, "POST", "/v1/sandboxes/dev/stop", ""},
+		{"a reference that needs escaping", func() error { _, _, err := c.GetSandbox(ctx, "a b"); return err }, "GET", "/v1/sandboxes/a b", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if err := tc.run(); err != nil {
