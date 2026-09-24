@@ -636,3 +636,57 @@ func TestTheStartCarriesTheCreatesRequest(t *testing.T) {
 		t.Fatalf("the start was written under %v, want the create's request", got)
 	}
 }
+
+// madeThenHeld is a driver whose create makes the object, running, and then
+// waits for the case to release it, which is a Kubernetes create whose Pod
+// runs before the driver's own wait for readiness has returned.
+type madeThenHeld struct{ gated }
+
+func (d madeThenHeld) Create(ctx context.Context, s driver.CreateSpec) (driver.Ref, error) {
+	ref, err := d.fakeDriver.Create(ctx, s)
+	if err != nil {
+		return ref, err
+	}
+	d.entered <- s.ID
+	select {
+	case <-d.release:
+	case <-ctx.Done():
+		return driver.Ref{}, ctx.Err()
+	}
+	return ref, nil
+}
+
+// TestAReadDuringACreateSaysPending: while the loop's create is in the
+// driver's hands, a read answers the sandbox Pending even where the driver
+// already reports it running, so no reader acts on a sandbox whose create
+// has not settled: a stop, a dial or a screenshot the read would invite is
+// refused or unready until the create's own read is written. Once it is,
+// the read says Running.
+func TestAReadDuringACreateSaysPending(t *testing.T) {
+	clock := newClock()
+	d := madeThenHeld{newGated(clock)}
+	c := withDriver(t, newDurable(true), d, clock, Options{})
+	answered, err := c.Create(t.Context(), workspace(), "alice", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := pass(t, c)
+	<-d.entered
+	within(t, "the read", func() {
+		read, err := c.Refresh(t.Context(), answered)
+		if err != nil || read.Status.Phase != driver.Pending {
+			t.Errorf("a read during the create answered %s and %v, want Pending", read.Status.Phase, err)
+		}
+	})
+	close(d.release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	settled, err := c.Get(t.Context(), answered.Status.ID, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if read, err := c.Refresh(t.Context(), settled); err != nil || read.Status.Phase != driver.Running {
+		t.Fatalf("a read after the create answered %s and %v, want Running", read.Status.Phase, err)
+	}
+}

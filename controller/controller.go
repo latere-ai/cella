@@ -1019,7 +1019,11 @@ func (c *Controller) List() []v1.Sandbox {
 func (c *Controller) refresh(ctx context.Context, obj v1.Sandbox) (v1.Sandbox, error) {
 	// Deleting is this control plane's own act in flight, and no driver
 	// holds a Queued sandbox: asking one would read its absence as a loss.
-	if obj.Status.Phase == PhaseDeleting || obj.Status.Phase == PhaseQueued {
+	// A placed sandbox's create is the loop's until its own read is written,
+	// and a driver that already runs the workload has not finished making
+	// it: a read that said Running there would invite a stop, a dial or a
+	// screenshot the sandbox cannot take yet.
+	if obj.Status.Phase == PhaseDeleting || obj.Status.Phase == PhaseQueued || placed(obj) {
 		return obj, nil
 	}
 	d, err := c.driverFor(obj.Status.Environment)
