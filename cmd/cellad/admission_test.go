@@ -136,7 +136,8 @@ func decide(in *admissionEnvelope) map[string]any {
 // closed rather than letting one through.
 func TestServeWithAdmission(t *testing.T) {
 	endpoint := startAdmission(t)
-	proxyAddr, reverseAddr := freePort(t), freePort(t)
+	proxyLn, reverseLn := doors(t)
+	proxyAddr, reverseAddr := proxyLn.Addr().String(), reverseLn.Addr().String()
 	plane := startPlaneWith(t, proxyAddr, reverseAddr, map[string]string{
 		"CELLA_ADMISSION_URL":   endpoint.URL,
 		"CELLA_ADMISSION_TOKEN": admissionToken,
@@ -148,7 +149,7 @@ func TestServeWithAdmission(t *testing.T) {
 	// boundary a gateway holds, so a gateway of the environment runs.
 	ready := make(chan struct{})
 	startGateway(t, plane, egressd.Options{
-		ProxyAddr: proxyAddr, ReverseAddr: reverseAddr, Ready: func() { close(ready) },
+		ProxyListener: proxyLn, ReverseListener: reverseLn, Ready: func() { close(ready) },
 	})
 	select {
 	case <-ready:

@@ -183,3 +183,43 @@ func TestGatewayID(t *testing.T) {
 		t.Fatalf("gatewayID gave %q and %q", first, second)
 	}
 }
+
+// TestNewServesTheDoorsItIsGiven: a caller that bound the two doors first
+// hands them over, and the gateway serves on those rather than listening
+// again. The addresses it was also given are ignored, so a port something
+// else already holds there does not stop it.
+func TestNewServesTheDoorsItIsGiven(t *testing.T) {
+	var lc net.ListenConfig
+	held, err := lc.Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = held.Close() }()
+	proxy, err := lc.Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reverse, err := lc.Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := newStubPlane(t)
+	gateway, err := New(t.Context(), Options{
+		URL: p.server.URL, Key: token(t, map[string]any{"sub": "environment:default"}),
+		ProxyAddr: held.Addr().String(), ReverseAddr: held.Addr().String(),
+		ProxyListener: proxy, ReverseListener: reverse,
+	})
+	if err != nil {
+		t.Fatalf("New with bound doors: %v", err)
+	}
+	if gateway.ProxyAddr() != proxy.Addr().String() || gateway.ReverseAddr() != reverse.Addr().String() {
+		t.Fatalf("the doors are %s and %s, want the listeners given, %s and %s",
+			gateway.ProxyAddr(), gateway.ReverseAddr(), proxy.Addr(), reverse.Addr())
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	go func() { _ = gateway.Run(ctx) }()
+	if got := connect(t, proxy.Addr().String(), "api.example.com:443", ""); got != http.StatusProxyAuthRequired {
+		t.Fatalf("the given proxy door answered %d", got)
+	}
+}

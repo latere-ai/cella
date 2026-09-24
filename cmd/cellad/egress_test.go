@@ -43,7 +43,8 @@ func TestEgressEndToEnd(t *testing.T) {
 	trust := x509.NewCertPool()
 	trust.AddCert(upstream.Certificate())
 
-	proxyAddr, reverseAddr := freePort(t), freePort(t)
+	proxyLn, reverseLn := doors(t)
+	proxyAddr, reverseAddr := proxyLn.Addr().String(), reverseLn.Addr().String()
 	plane := startPlane(t, proxyAddr, reverseAddr)
 
 	// The gateway runs in this process so the test can name where an
@@ -51,7 +52,7 @@ func TestEgressEndToEnd(t *testing.T) {
 	// which is what keeps the tier hermetic.
 	ready := make(chan struct{})
 	gateway := startGateway(t, plane, egressd.Options{
-		ProxyAddr: proxyAddr, ReverseAddr: reverseAddr,
+		ProxyListener: proxyLn, ReverseListener: reverseLn,
 		UpstreamCAPEM: certificatePEM(t, upstream),
 		Dial:          dialTo(upstream.Listener.Addr().String()),
 		Ready:         func() { close(ready) },
@@ -580,8 +581,26 @@ func workloadClient(t *testing.T, proxy string, trust *x509.CertPool) *http.Clie
 	}
 }
 
-// freePort reserves a loopback address by binding and releasing it, so the
-// control plane can be told where the gateway will be before it is there.
+// doors binds the gateway's two doors on loopback and keeps them bound, so the
+// control plane can be told where the gateway is before it starts and no other
+// test can take either port in between. A gateway run in this process serves
+// on them through Options.ProxyListener and Options.ReverseListener.
+func doors(t *testing.T) (proxy, reverse net.Listener) {
+	t.Helper()
+	var lc net.ListenConfig
+	proxy, err := lc.Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reverse, err = lc.Listen(t.Context(), "tcp", "127.0.0.1:0"); err != nil {
+		_ = proxy.Close()
+		t.Fatal(err)
+	}
+	return proxy, reverse
+}
+
+// freePort reserves a loopback address by binding and releasing it, for the
+// role run through its own variables, which binds the address itself.
 func freePort(t *testing.T) string {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
