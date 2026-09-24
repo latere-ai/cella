@@ -9,14 +9,11 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/binary"
-	"encoding/pem"
 	"errors"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -249,7 +246,7 @@ func closePayload(code int) []byte {
 // returns what it read and how it ended.
 func drive(t *testing.T, address string) (string, int, error) {
 	t.Helper()
-	c, err := client.New(client.Config{URL: address, Token: "t", Getenv: env(nil)})
+	c, err := client.New(client.Config{URL: address, Token: client.StaticToken("t")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -263,22 +260,17 @@ func drive(t *testing.T, address string) (string, int, error) {
 	return string(out), code, err
 }
 
-// TestTLSUsesTheSystemRootsAndTheAuthorityTheCallerNamed: --ca adds one
-// authority, and the socket's handshake pins HTTP/1.1 so the upgrade has an
-// HTTP/1.1 exchange to happen in.
+// TestTLSUsesTheSystemRootsAndTheAuthorityTheCallerNamed: RootCAs replaces
+// the system roots on the package's own transport, and the socket's upgrade
+// travels the same transport, so it trusts what the calls trust.
 func TestTLSUsesTheSystemRootsAndTheAuthorityTheCallerNamed(t *testing.T) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		writeObject(w, 200, "dev", "sbx_1")
 	}))
 	defer server.Close()
-	authority := filepath.Join(t.TempDir(), "ca.pem")
-	certificate := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})
-	if err := os.WriteFile(authority, certificate, 0o600); err != nil {
-		t.Fatal(err)
-	}
 	// Without the authority the handshake fails, which is what a trust
 	// store is for.
-	plain, err := client.New(client.Config{URL: server.URL, Token: "t", Getenv: env(nil)})
+	plain, err := client.New(client.Config{URL: server.URL, Token: client.StaticToken("t")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -289,16 +281,22 @@ func TestTLSUsesTheSystemRootsAndTheAuthorityTheCallerNamed(t *testing.T) {
 	if !errors.As(err, &refused) {
 		t.Fatalf("a TLS failure is %T: %v", err, err)
 	}
+	if _, err = plain.ExecSession(t.Context(), "dev", client.ExecRequest{Command: []string{"sh"}}); !errors.As(err, &refused) {
+		t.Fatalf("a socket's TLS failure is %T: %v", err, err)
+	}
 
-	trusting, err := client.New(client.Config{URL: server.URL, CAFile: authority, Token: "t", Getenv: env(nil)})
+	authority := x509.NewCertPool()
+	authority.AddCert(server.Certificate())
+	trusting, err := client.New(client.Config{URL: server.URL, RootCAs: authority, Token: client.StaticToken("t")})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err = trusting.GetSandbox(t.Context(), "dev"); err != nil {
 		t.Fatalf("the authority the caller named was not trusted: %v", err)
 	}
-	// The same trust store reaches the socket, whose dial is the client's
-	// own and not the transport's.
+	// The same trust store reaches the socket: this server upgrades
+	// nothing, so the session cannot open, and it fails at the server's
+	// answer and not at the handshake.
 	if _, err = trusting.ExecSession(t.Context(), "dev", client.ExecRequest{Command: []string{"sh"}}); err == nil {
 		t.Fatal("this server upgrades nothing, so the session cannot open")
 	}
@@ -315,7 +313,7 @@ func TestTheSystemRootsStandWhenNoAuthorityIsNamed(t *testing.T) {
 	if _, err := x509.SystemCertPool(); err != nil {
 		t.Skip("this platform has no system certificate pool")
 	}
-	c, err := client.New(client.Config{URL: "https://127.0.0.1:1", Token: "t", Getenv: env(nil)})
+	c, err := client.New(client.Config{URL: "https://127.0.0.1:1", Token: client.StaticToken("t")})
 	if err != nil {
 		t.Fatal(err)
 	}

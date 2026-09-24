@@ -8,17 +8,14 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha1"
-	"crypto/tls"
 	"encoding/base64"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"sync"
-	"time"
 )
 
 // The opcodes of RFC 6455 this client speaks. The standard library has no
@@ -48,10 +45,11 @@ const (
 	closeInternal = 1011
 )
 
-// wsConn is one WebSocket. One writer at a time, which the mutex keeps: the
-// input pump, a resize and a pong all write.
+// wsConn is one WebSocket over the connection an upgrade handed back. One
+// writer at a time, which the mutex keeps: the input pump, a resize and a
+// pong all write.
 type wsConn struct {
-	conn net.Conn
+	conn io.ReadWriteCloser
 	br   *bufio.Reader
 	// stop ends the watch that closes the connection with the caller's
 	// context.
@@ -62,21 +60,20 @@ type wsConn struct {
 	closing bool
 }
 
+// errNoUpgrade is an HTTP client that handed back a connection it cannot
+// write to. A client with a Timeout does: it wraps the body to cancel it, and
+// the wrapper reads only.
+var errNoUpgrade = errors.New("the HTTP client handed back an upgraded connection that cannot be written to; " +
+	"a Client.Timeout does that, so bound the call with its context instead")
+
 // dialSocket opens one WebSocket under the control plane's address. The
-// bearer travels in the handshake, so a refusal before the upgrade is an
-// ordinary HTTP response carrying the error envelope, which is what this
-// returns.
+// upgrade is an ordinary request through the caller's HTTP client, so the
+// bearer, the proxy, the trust and the dialer of every other call are the
+// socket's too, and a refusal before the upgrade is an HTTP response carrying
+// the error envelope, which is what this returns. The transport keeps an
+// upgrade on HTTP/1.1, and its answer's body is the connection.
 func (c *Client) dialSocket(ctx context.Context, path string, query url.Values, subprotocol string) (*wsConn, error) {
-	token, err := c.bearer()
-	if err != nil {
-		return nil, err
-	}
-	target := *c.base
-	target.Path = c.base.Path + path
-	if query != nil {
-		target.RawQuery = query.Encode()
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil)
+	req, err := c.request(ctx, http.MethodGet, path, query, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -90,77 +87,33 @@ func (c *Client) dialSocket(ctx context.Context, path string, query url.Values, 
 	req.Header.Set("Sec-WebSocket-Key", nonce)
 	req.Header.Set("Sec-WebSocket-Version", "13")
 	req.Header.Set("Sec-WebSocket-Protocol", subprotocol)
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("User-Agent", c.agent)
-	req.Header.Set("X-Request-Id", RequestID())
-
-	conn, err := c.dialConn(ctx, &target)
+	resp, err := c.http.Do(req)
 	if err != nil {
-		return nil, err
-	}
-	// The handshake carries the one deadline design 011 states; the session
-	// that follows carries none, because a terminal is idle by nature.
-	watch := watchContext(ctx, conn)
-	if err = conn.SetDeadline(time.Now().Add(firstByteTimeout)); err != nil {
-		return nil, closeWith(conn, watch, err)
-	}
-	if err = req.Write(conn); err != nil {
-		return nil, closeWith(conn, watch, unreachable(req, err))
-	}
-	br := bufio.NewReader(conn)
-	resp, err := http.ReadResponse(br, req)
-	if err != nil {
-		return nil, closeWith(conn, watch, unreachable(req, err))
+		return nil, unreachable(req, err)
 	}
 	if resp.StatusCode != http.StatusSwitchingProtocols {
 		defer func() { _ = resp.Body.Close() }()
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBytes))
-		return nil, closeWith(conn, watch, errorFrom(resp, body))
+		return nil, errorFrom(resp, body)
+	}
+	conn, ok := resp.Body.(io.ReadWriteCloser)
+	if !ok {
+		_ = resp.Body.Close()
+		return nil, errNoUpgrade
 	}
 	if got, want := resp.Header.Get("Sec-WebSocket-Accept"), accept(nonce); got != want {
-		return nil, closeWith(conn, watch, fmt.Errorf("the server answered no WebSocket handshake"))
-	}
-	if err = conn.SetDeadline(time.Time{}); err != nil {
-		return nil, closeWith(conn, watch, err)
-	}
-	return &wsConn{conn: conn, br: br, stop: watch}, nil
-}
-
-// dialConn reaches the address, with TLS where the address names it. The
-// handshake pins HTTP/1.1: a WebSocket upgrade is an HTTP/1.1 exchange, and
-// an ALPN that negotiated h2 would leave nothing to upgrade.
-func (c *Client) dialConn(ctx context.Context, target *url.URL) (net.Conn, error) {
-	address := target.Host
-	if target.Port() == "" {
-		if target.Scheme == "https" {
-			address = net.JoinHostPort(target.Hostname(), "443")
-		} else {
-			address = net.JoinHostPort(target.Hostname(), "80")
-		}
-	}
-	dialer := &net.Dialer{Timeout: dialTimeout}
-	conn, err := dialer.DialContext(ctx, "tcp", address)
-	if err != nil {
-		return nil, &Unreachable{Op: "dial " + address, Err: err}
-	}
-	if target.Scheme != "https" {
-		return conn, nil
-	}
-	cfg := c.tls.Clone()
-	cfg.ServerName = target.Hostname()
-	cfg.NextProtos = []string{"http/1.1"}
-	tlsConn := tls.Client(conn, cfg)
-	if err = tlsConn.HandshakeContext(ctx); err != nil {
 		_ = conn.Close()
-		return nil, &Unreachable{Op: "TLS handshake with " + address, Err: err}
+		return nil, errors.New("the server answered no WebSocket handshake")
 	}
-	return tlsConn, nil
+	// The session that follows carries no deadline, because a terminal is
+	// idle by nature; the caller's context is what ends it.
+	return &wsConn{conn: conn, br: bufio.NewReader(conn), stop: watchContext(ctx, conn)}, nil
 }
 
 // watchContext closes the connection when the caller's context ends, which
 // is what cancels a read that is waiting on the far end. The returned
 // function ends the watch.
-func watchContext(ctx context.Context, conn net.Conn) func() {
+func watchContext(ctx context.Context, conn io.Closer) func() {
 	done := make(chan struct{})
 	go func() {
 		select {
@@ -170,13 +123,6 @@ func watchContext(ctx context.Context, conn net.Conn) func() {
 		}
 	}()
 	return func() { close(done) }
-}
-
-// closeWith ends a half-open dial and returns the failure that ended it.
-func closeWith(conn net.Conn, watch func(), err error) error {
-	watch()
-	_ = conn.Close()
-	return err
 }
 
 // accept is the handshake answer for one nonce.
@@ -351,5 +297,5 @@ const subprotocolExec = "cella.exec.v1"
 
 // socketPath is the exec or attach route of one sandbox.
 func socketPath(ref, verb string) string {
-	return KindSandbox.Path() + "/" + url.PathEscape(ref) + "/" + verb
+	return KindSandbox.item(ref) + "/" + verb
 }

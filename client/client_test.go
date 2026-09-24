@@ -8,11 +8,13 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -67,8 +69,8 @@ func (f *fixture) client(cfg client.Config) *client.Client {
 	if cfg.URL == "" {
 		cfg.URL = f.server.URL
 	}
-	if cfg.Token == "" && cfg.TokenFile == "" && cfg.Getenv == nil {
-		cfg.Token = "caller-token"
+	if cfg.Token == nil {
+		cfg.Token = client.StaticToken("caller-token")
 	}
 	c, err := client.New(cfg)
 	if err != nil {
@@ -111,51 +113,37 @@ func writeError(w http.ResponseWriter, status int, code, message string, details
 	httpjson.WriteError(w, status, httpjson.Error{Code: code, Message: message, Details: details})
 }
 
-// env is a Getenv over a map, so a case states the whole environment the
-// client reads.
+// env is a getenv over a map, so a case states the whole environment
+// Environment reads.
 func env(m map[string]string) func(string) string {
 	return func(k string) string { return m[k] }
 }
 
 // TestTheAddressAndTheBearerComeFromTheEnvironment is design 011's reaching
-// rule: the address and the token are read from the two variables, a flag
-// overrides each, and neither is a configuration file or a login.
+// rule read by Environment: the address from its variable, and the bearer
+// from the token variable, else the file variable, else the projection.
 func TestTheAddressAndTheBearerComeFromTheEnvironment(t *testing.T) {
 	f := newFixture(t, func(w http.ResponseWriter, _ *http.Request) { writeObject(w, 200, "dev", "sbx_1") })
-	dir := t.TempDir()
-	file := filepath.Join(dir, "token")
+	file := filepath.Join(t.TempDir(), "token")
 	if err := os.WriteFile(file, []byte("from-the-file\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct {
 		name string
-		cfg  client.Config
+		vars map[string]string
 		want string
 	}{{
-		name: "the flag wins over everything",
-		cfg: client.Config{Token: "from-the-flag", TokenFile: file,
-			Getenv: env(map[string]string{"CELLA_TOKEN": "from-the-variable"})},
-		want: "from-the-flag",
-	}, {
-		name: "the variable wins over the file",
-		cfg: client.Config{TokenFile: file,
-			Getenv: env(map[string]string{"CELLA_TOKEN": "from-the-variable"})},
+		name: "the token variable wins over the file",
+		vars: map[string]string{"CELLA_TOKEN": "from-the-variable", "CELLA_TOKEN_FILE": file},
 		want: "from-the-variable",
 	}, {
-		name: "the file flag is read when neither is set",
-		cfg:  client.Config{TokenFile: file, Getenv: env(nil)},
-		want: "from-the-file",
-	}, {
-		name: "the file variable is read when no flag names one",
-		cfg:  client.Config{Getenv: env(map[string]string{"CELLA_TOKEN_FILE": file})},
+		name: "the file variable is read when no token is set",
+		vars: map[string]string{"CELLA_TOKEN_FILE": file},
 		want: "from-the-file",
 	}} {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg := tc.cfg
-			if cfg.URL == "" {
-				cfg.URL = f.server.URL
-			}
-			c, err := client.New(cfg)
+			tc.vars["CELLA_URL"] = f.server.URL
+			c, err := client.New(client.Environment(env(tc.vars)))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -167,15 +155,13 @@ func TestTheAddressAndTheBearerComeFromTheEnvironment(t *testing.T) {
 			}
 		})
 	}
-	// The address comes from the variable when no flag names one.
-	c, err := client.New(client.Config{Getenv: env(map[string]string{
-		"CELLA_URL": f.server.URL, "CELLA_TOKEN": "from-the-variable",
-	})})
-	if err != nil {
-		t.Fatal(err)
+	if cfg := client.Environment(env(map[string]string{"CELLA_URL": "https://cella.example.com"})); cfg.URL != "https://cella.example.com" {
+		t.Errorf("the address of %s read as %q", client.URLEnv, cfg.URL)
 	}
-	if _, _, err = c.GetSandbox(t.Context(), "dev"); err != nil {
-		t.Fatalf("the address of %s was not read: %v", client.URLEnv, err)
+	// A nil getenv is the process's own environment.
+	t.Setenv(client.URLEnv, "https://from-the-process.example.com")
+	if cfg := client.Environment(nil); cfg.URL != "https://from-the-process.example.com" {
+		t.Errorf("the process's environment read as %q", cfg.URL)
 	}
 }
 
@@ -188,7 +174,7 @@ func TestTheTokenFileIsReadPerRequest(t *testing.T) {
 	if err := os.WriteFile(file, []byte("first"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	c := f.client(client.Config{TokenFile: file, Getenv: env(nil)})
+	c := f.client(client.Config{Token: client.TokenFile(file)})
 	if _, _, err := c.GetSandbox(t.Context(), "dev"); err != nil {
 		t.Fatal(err)
 	}
@@ -210,70 +196,125 @@ func TestTheTokenFileIsReadPerRequest(t *testing.T) {
 	}
 }
 
-// TestNoBearerIsNamedByItsVariables: a client with no token anywhere names
-// what to set rather than sending a request without one.
-func TestNoBearerIsNamedByItsVariables(t *testing.T) {
+// TestATokenSourceIsAskedPerRequestWithTheCallersContext: a caller with its
+// own issuer hands each request the token of that moment, and the source
+// sees the request's own context, so a refresh it makes is bounded by the
+// call. A nil source sends no bearer, and a source that fails sends nothing.
+func TestATokenSourceIsAskedPerRequestWithTheCallersContext(t *testing.T) {
 	f := newFixture(t, func(w http.ResponseWriter, _ *http.Request) { writeObject(w, 200, "dev", "sbx_1") })
-	c := f.client(client.Config{TokenFile: filepath.Join(t.TempDir(), "absent"), Getenv: env(nil)})
-	_, _, err := c.GetSandbox(t.Context(), "dev")
-	if err == nil {
-		t.Fatal("a client with no bearer sent a request")
+	type key struct{}
+	asked := 0
+	source := client.TokenFunc(func(ctx context.Context) (string, error) {
+		if ctx.Value(key{}) != "the call's" {
+			t.Errorf("the source was asked with a context that is not the call's")
+		}
+		asked++
+		return "minted-" + strconv.Itoa(asked), nil
+	})
+	c := f.client(client.Config{Token: source})
+	ctx := context.WithValue(t.Context(), key{}, "the call's")
+	for range 2 {
+		if _, _, err := c.GetSandbox(ctx, "dev"); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if !strings.Contains(err.Error(), client.TokenEnv) || !strings.Contains(err.Error(), client.TokenFileEnv) {
-		t.Fatalf("the failure is %q, and it names neither variable", err)
+	calls := f.seen()
+	if got := calls[1].Header.Get("Authorization"); asked != 2 || got != "Bearer minted-2" {
+		t.Fatalf("the source was asked %d times and the second request carried %q", asked, got)
+	}
+
+	// A source that yields nothing, and no source at all, send no header.
+	for name, source := range map[string]client.TokenSource{
+		"an empty token": client.StaticToken(""),
+		"no source":      nil,
+	} {
+		c, err := client.New(client.Config{URL: f.server.URL, Token: source})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err = c.GetSandbox(t.Context(), "dev"); err != nil {
+			t.Fatal(err)
+		}
+		if got := f.last().Header.Get("Authorization"); got != "" {
+			t.Errorf("%s sent the header %q", name, got)
+		}
+	}
+
+	failing := errors.New("the issuer is down")
+	before := len(f.seen())
+	c = f.client(client.Config{Token: client.TokenFunc(func(context.Context) (string, error) { return "", failing })})
+	if _, _, err := c.GetSandbox(t.Context(), "dev"); !errors.Is(err, failing) {
+		t.Fatalf("a failing source ended the call with %v", err)
+	}
+	if _, err := c.ExecSession(t.Context(), "dev", client.ExecRequest{Command: []string{"sh"}}); !errors.Is(err, failing) {
+		t.Fatalf("a failing source ended the socket with %v", err)
+	}
+	if len(f.seen()) != before {
+		t.Fatal("a request went out without the bearer its source failed to yield")
+	}
+}
+
+// TestATokenFileThatYieldsNothingIsNoBearer: a missing file and an empty one
+// are the caller's configuration, reported as NoBearer with the path, and no
+// request is sent without the bearer.
+func TestATokenFileThatYieldsNothingIsNoBearer(t *testing.T) {
+	f := newFixture(t, func(w http.ResponseWriter, _ *http.Request) { writeObject(w, 200, "dev", "sbx_1") })
+	missing := filepath.Join(t.TempDir(), "absent")
+	c := f.client(client.Config{Token: client.TokenFile(missing)})
+	_, _, err := c.GetSandbox(t.Context(), "dev")
+	var none *client.NoBearer
+	if !errors.As(err, &none) || none.Path != missing || !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("a missing token file failed with %v", err)
 	}
 	empty := filepath.Join(t.TempDir(), "token")
 	if err = os.WriteFile(empty, []byte("  \n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	c = f.client(client.Config{TokenFile: empty, Getenv: env(nil)})
-	if _, _, err = c.GetSandbox(t.Context(), "dev"); err == nil {
-		t.Fatal("an empty token file was sent as a bearer")
+	c = f.client(client.Config{Token: client.TokenFile(empty)})
+	if _, _, err = c.GetSandbox(t.Context(), "dev"); !errors.As(err, &none) || none.Err != nil {
+		t.Fatalf("an empty token file failed with %v", err)
+	}
+	if len(f.seen()) != 0 {
+		t.Fatal("a client with no bearer sent a request")
 	}
 }
 
-// TestTheDefaultTokenFileIsTheProjection: inside a sandbox the command needs
-// no flag, because the file the driver projects is the default.
+// TestTheDefaultTokenFileIsTheProjection: inside a sandbox nothing needs
+// configuring, because the file the driver projects is the last source
+// Environment reads.
 func TestTheDefaultTokenFileIsTheProjection(t *testing.T) {
 	if client.DefaultTokenPath != "/run/cella/token" {
 		t.Fatalf("the default token file is %q; design 045 projects /run/cella/token", client.DefaultTokenPath)
 	}
-	c, err := client.New(client.Config{URL: "http://127.0.0.1:1", Getenv: env(nil)})
+	c, err := client.New(client.Environment(env(map[string]string{"CELLA_URL": "http://127.0.0.1:1"})))
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Nothing is projected here, so the failure names the file it tried.
-	if _, _, err = c.GetSandbox(t.Context(), "dev"); err == nil {
-		t.Fatal("a request was sent with no token")
+	var none *client.NoBearer
+	if _, _, err = c.GetSandbox(t.Context(), "dev"); !errors.As(err, &none) || none.Path != client.DefaultTokenPath {
+		t.Fatalf("a client with nothing projected failed with %v", err)
 	}
 }
 
-// TestABadConfigurationIsRefusedAtOnce: the address and the trust store are
-// read when the client is built, so a mistake is reported before a call.
+// TestABadConfigurationIsRefusedAtOnce: the address is read when the client
+// is built, so a mistake is reported before a call.
 func TestABadConfigurationIsRefusedAtOnce(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		cfg  client.Config
 		want string
 	}{
-		{"no address", client.Config{Getenv: env(nil)}, client.URLEnv},
-		{"an address that is no URL", client.Config{URL: "://nowhere", Getenv: env(nil)}, "no http or https address"},
-		{"an address of another scheme", client.Config{URL: "ftp://example.com", Getenv: env(nil)}, "no http or https address"},
-		{"a certificate authority that is not there", client.Config{URL: "https://example.com", CAFile: filepath.Join(t.TempDir(), "absent"), Getenv: env(nil)}, "certificate authority"},
+		{"no address", client.Config{}, "no control plane address"},
+		{"an address that is no URL", client.Config{URL: "://nowhere"}, "no http or https address"},
+		{"an address with no host", client.Config{URL: "https://"}, "no http or https address"},
+		{"an address of another scheme", client.Config{URL: "ftp://example.com"}, "no http or https address"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := client.New(tc.cfg); err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("New() = %v, want a failure naming %q", err, tc.want)
 			}
 		})
-	}
-	// A file that is no certificate is refused as well.
-	pem := filepath.Join(t.TempDir(), "ca.pem")
-	if err := os.WriteFile(pem, []byte("not a certificate"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := client.New(client.Config{URL: "https://example.com", CAFile: pem, Getenv: env(nil)}); err == nil {
-		t.Fatal("a file holding no certificate was accepted as a trust store")
 	}
 }
 
@@ -321,7 +362,7 @@ func TestARefusalDecodesToTheEnvelope(t *testing.T) {
 	f := newFixture(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Retry-After", "30")
 		writeError(w, 409, "immutable_field", "This field cannot be changed after the object is created.",
-			map[string]any{"paths": []any{"spec.image"}, "detail": "image changed", "request_id": "req_theservers"})
+			map[string]any{"paths": []any{"spec.image"}, "detail": "image changed", "request_id": "req_theservers", "current": float64(7)})
 	})
 	c := f.client(client.Config{})
 	_, _, err := c.GetSandbox(t.Context(), "dev")
@@ -343,6 +384,11 @@ func TestARefusalDecodesToTheEnvelope(t *testing.T) {
 	}
 	if refusal.Detail != "image changed" || refusal.RetryAfter != "30" {
 		t.Errorf("the detail is %q and Retry-After is %q", refusal.Detail, refusal.RetryAfter)
+	}
+	// The details reach the caller whole, a member this client names no
+	// field for included.
+	if refusal.Details["current"] != float64(7) || refusal.Details["request_id"] != "req_theservers" {
+		t.Errorf("the details are %v", refusal.Details)
 	}
 	if client.CodeOf(err) != "immutable_field" {
 		t.Errorf("CodeOf() = %q", client.CodeOf(err))
@@ -383,7 +429,7 @@ func TestABodyThatIsNoEnvelopeStillHasAStatus(t *testing.T) {
 // TestAServerThatIsNotThereIsUnreachable: the exit scheme separates a
 // refusal from an address nothing answers, so the client does too.
 func TestAServerThatIsNotThereIsUnreachable(t *testing.T) {
-	c, err := client.New(client.Config{URL: "http://127.0.0.1:1", Token: "t", Getenv: env(nil)})
+	c, err := client.New(client.Config{URL: "http://127.0.0.1:1", Token: client.StaticToken("t")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -398,32 +444,44 @@ func TestAServerThatIsNotThereIsUnreachable(t *testing.T) {
 }
 
 // TestTheRoutesOfEveryObjectCall holds each method to the route of its row
-// in design 008.
+// in design 008, and a manifest's body to the media type it was written in.
 func TestTheRoutesOfEveryObjectCall(t *testing.T) {
 	f := newFixture(t, func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/v1/secrets") {
-			w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/v1/secrets"):
 			_, _ = w.Write([]byte(`{"apiVersion":"` + v1.APIVersion + `","kind":"Secret","metadata":{"name":"api"},"spec":{"kind":"static"},"status":{"id":"sec_1","owner":"alice","version":2}}`))
-			return
+		case strings.HasPrefix(r.URL.Path, "/v1/environments"):
+			_, _ = w.Write([]byte(`{"apiVersion":"` + v1.APIVersion + `","kind":"Environment","metadata":{"name":"gpu"},"spec":{"mode":"workers"},"status":{"id":"gpu","phase":"Ready"}}`))
+		default:
+			writeObject(w, 200, "dev", "sbx_1")
 		}
-		writeObject(w, 200, "dev", "sbx_1")
 	})
 	c := f.client(client.Config{})
 	ctx := t.Context()
-	body := []byte(`{"apiVersion":"` + v1.APIVersion + `","kind":"Sandbox","metadata":{"name":"dev"},"spec":{}}`)
+	sandbox := client.JSON([]byte(`{"apiVersion":"` + v1.APIVersion + `","kind":"Sandbox","metadata":{"name":"dev"},"spec":{}}`))
+	secret := client.YAML([]byte("apiVersion: " + v1.APIVersion + "\nkind: Secret\nmetadata:\n  name: api\n"))
+	environment := client.Manifest{Body: []byte(`{"kind":"Environment"}`)}
 	for _, tc := range []struct {
 		name         string
 		run          func() error
 		method, path string
+		media        string
 	}{
-		{"apply a sandbox", func() error { _, _, err := c.CreateSandbox(ctx, body); return err }, "POST", "/v1/sandboxes"},
-		{"apply a secret", func() error { _, _, err := c.ApplySecret(ctx, "api", body); return err }, "PUT", "/v1/secrets/api"},
-		{"get a sandbox", func() error { _, _, err := c.GetSandbox(ctx, "sbx_1"); return err }, "GET", "/v1/sandboxes/sbx_1"},
-		{"get a secret", func() error { _, _, err := c.GetSecret(ctx, "api"); return err }, "GET", "/v1/secrets/api"},
-		{"delete a sandbox", func() error { _, err := c.Delete(ctx, client.KindSandbox, "dev"); return err }, "DELETE", "/v1/sandboxes/dev"},
-		{"delete a secret", func() error { _, err := c.Delete(ctx, client.KindSecret, "api"); return err }, "DELETE", "/v1/secrets/api"},
-		{"start", func() error { _, _, err := c.Act(ctx, "dev", "start"); return err }, "POST", "/v1/sandboxes/dev/start"},
-		{"stop", func() error { _, _, err := c.Act(ctx, "dev", "stop"); return err }, "POST", "/v1/sandboxes/dev/stop"},
+		{"create a sandbox", func() error { _, _, err := c.CreateSandbox(ctx, sandbox); return err }, "POST", "/v1/sandboxes", client.MediaJSON},
+		{"apply a sandbox", func() error { _, _, err := c.ApplySandbox(ctx, "dev", sandbox); return err }, "PUT", "/v1/sandboxes/dev", client.MediaJSON},
+		{"create a secret", func() error { _, _, err := c.CreateSecret(ctx, secret); return err }, "POST", "/v1/secrets", client.MediaYAML},
+		{"apply a secret", func() error { _, _, err := c.ApplySecret(ctx, "api", secret); return err }, "PUT", "/v1/secrets/api", client.MediaYAML},
+		{"create an environment", func() error { _, _, err := c.CreateEnvironment(ctx, environment); return err }, "POST", "/v1/environments", client.MediaJSON},
+		{"apply an environment", func() error { _, _, err := c.ApplyEnvironment(ctx, "gpu", environment); return err }, "PUT", "/v1/environments/gpu", client.MediaJSON},
+		{"get a sandbox", func() error { _, _, err := c.GetSandbox(ctx, "sbx_1"); return err }, "GET", "/v1/sandboxes/sbx_1", ""},
+		{"get a secret", func() error { _, _, err := c.GetSecret(ctx, "api"); return err }, "GET", "/v1/secrets/api", ""},
+		{"get an environment", func() error { _, _, err := c.GetEnvironment(ctx, "gpu"); return err }, "GET", "/v1/environments/gpu", ""},
+		{"delete a sandbox", func() error { _, err := c.Delete(ctx, client.KindSandbox, "dev"); return err }, "DELETE", "/v1/sandboxes/dev", ""},
+		{"delete a secret", func() error { _, err := c.Delete(ctx, client.KindSecret, "api"); return err }, "DELETE", "/v1/secrets/api", ""},
+		{"delete an environment", func() error { _, err := c.Delete(ctx, client.KindEnvironment, "gpu"); return err }, "DELETE", "/v1/environments/gpu", ""},
+		{"start", func() error { _, _, err := c.StartSandbox(ctx, "dev"); return err }, "POST", "/v1/sandboxes/dev/start", ""},
+		{"stop", func() error { _, _, err := c.StopSandbox(ctx, "dev"); return err }, "POST", "/v1/sandboxes/dev/stop", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if err := tc.run(); err != nil {
@@ -433,7 +491,45 @@ func TestTheRoutesOfEveryObjectCall(t *testing.T) {
 			if got.Method != tc.method || got.Path != tc.path {
 				t.Fatalf("the call was %s %s, want %s %s", got.Method, got.Path, tc.method, tc.path)
 			}
+			if media := got.Header.Get("Content-Type"); media != tc.media {
+				t.Fatalf("the call carried the media type %q, want %q", media, tc.media)
+			}
 		})
+	}
+}
+
+// TestAManifestTravelsInItsOwnSyntax: the body is the caller's bytes
+// unchanged, under the media type that names its syntax, and a typed object
+// is encoded as JSON.
+func TestAManifestTravelsInItsOwnSyntax(t *testing.T) {
+	f := newFixture(t, func(w http.ResponseWriter, _ *http.Request) { writeObject(w, 201, "dev", "sbx_1") })
+	c := f.client(client.Config{})
+	yaml := "apiVersion: " + v1.APIVersion + "\nkind: Sandbox\n# a comment the server reads past\nspec: {}\n"
+	obj, raw, err := c.ApplySandbox(t.Context(), "dev", client.YAML([]byte(yaml)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := f.last(); got.Body != yaml || got.Header.Get("Content-Type") != client.MediaYAML || got.Path != "/v1/sandboxes/dev" {
+		t.Fatalf("the apply sent %s %q under %q", got.Path, got.Body, got.Header.Get("Content-Type"))
+	}
+	if obj.Status.ID != "sbx_1" || !strings.Contains(string(raw), `"id":"sbx_1"`) {
+		t.Fatalf("the answer decoded as %+v from %s", obj, raw)
+	}
+
+	typed := v1.Sandbox{APIVersion: v1.APIVersion, Kind: "Sandbox", Metadata: v1.Metadata{Name: "dev"}}
+	m, err := client.Encode(typed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = c.CreateSandbox(t.Context(), m); err != nil {
+		t.Fatal(err)
+	}
+	var sent v1.Sandbox
+	if got := f.last(); got.Header.Get("Content-Type") != client.MediaJSON || json.Unmarshal([]byte(got.Body), &sent) != nil || sent.Metadata.Name != "dev" {
+		t.Fatalf("the typed object was sent as %q under %q", got.Body, got.Header.Get("Content-Type"))
+	}
+	if _, err = client.Encode(func() {}); err == nil {
+		t.Fatal("a value JSON cannot encode became a manifest")
 	}
 }
 
@@ -610,7 +706,7 @@ func TestTheServerIdentityNeedsNoBearer(t *testing.T) {
 		}
 		_, _ = w.Write([]byte(`{"version":"v1.2.3","commit":"abc1234","buildTime":"2026-09-20"}`))
 	})
-	c := f.client(client.Config{TokenFile: filepath.Join(t.TempDir(), "absent"), Getenv: env(nil)})
+	c := f.client(client.Config{Token: client.TokenFile(filepath.Join(t.TempDir(), "absent"))})
 	build, err := c.ServerVersion(t.Context())
 	if err != nil {
 		t.Fatalf("the identity was not read without a bearer: %v", err)
@@ -627,30 +723,24 @@ func TestTheServerIdentityNeedsNoBearer(t *testing.T) {
 	}
 }
 
-// TestKindsAreReadSingularOrPlural: a caller writes either and the route is
-// the plural.
-func TestKindsAreReadSingularOrPlural(t *testing.T) {
+// TestEveryKindNamesItsCollection: a kind's routes are its plural under /v1,
+// and its manifest kind is the name a document declares.
+func TestEveryKindNamesItsCollection(t *testing.T) {
 	for _, tc := range []struct {
-		in   string
-		want client.Kind
-	}{{"sandbox", client.KindSandbox}, {"sandboxes", client.KindSandbox}, {"Sandbox", client.KindSandbox},
-		{"secret", client.KindSecret}, {"secrets", client.KindSecret}, {"volume", ""}, {"sandboxs", ""}} {
-		got, ok := client.ParseKind(tc.in)
-		if tc.want == "" {
-			if ok {
-				t.Errorf("ParseKind(%q) = %q, and this API serves no such kind", tc.in, got)
-			}
-			continue
-		}
-		if !ok || got != tc.want {
-			t.Errorf("ParseKind(%q) = %q, %v", tc.in, got, ok)
+		kind         client.Kind
+		plural, path string
+		manifestKind string
+	}{
+		{client.KindSandbox, "sandboxes", "/v1/sandboxes", "Sandbox"},
+		{client.KindSecret, "secrets", "/v1/secrets", "Secret"},
+		{client.KindEnvironment, "environments", "/v1/environments", "Environment"},
+	} {
+		if tc.kind.Plural() != tc.plural || tc.kind.Path() != tc.path || tc.kind.ManifestKind() != tc.manifestKind {
+			t.Errorf("%s names %q, %q and %q", tc.kind, tc.kind.Plural(), tc.kind.Path(), tc.kind.ManifestKind())
 		}
 	}
-	if client.KindSandbox.Path() != "/v1/sandboxes" || client.KindSecret.Path() != "/v1/secrets" {
-		t.Errorf("the collection routes are %q and %q", client.KindSandbox.Path(), client.KindSecret.Path())
-	}
-	if client.KindSandbox.ManifestKind() != "Sandbox" || client.KindSecret.ManifestKind() != "Secret" {
-		t.Error("the manifest kinds are not the names a document declares")
+	if client.Kind("").ManifestKind() != "" {
+		t.Error("no kind declared a manifest kind")
 	}
 }
 
@@ -694,9 +784,6 @@ func TestSecretsListLikeSandboxesDo(t *testing.T) {
 	seen := f.last()
 	if seen.Path != "/v1/secrets" || seen.Query.Get("limit") != "10" {
 		t.Fatalf("the list called %s?%s", seen.Path, seen.Query.Encode())
-	}
-	if client.KindSecret.Plural() != "secrets" || client.KindSandbox.Plural() != "sandboxes" {
-		t.Error("the collection names are not the plural of the kinds")
 	}
 }
 

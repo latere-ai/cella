@@ -30,11 +30,11 @@ func TestTheSyntaxACallerNamesIsPassedThrough(t *testing.T) {
 		_, _ = io.WriteString(w, "accept: "+r.Header.Get("Accept")+"\nat: "+r.URL.RequestURI()+"\n")
 	}))
 	t.Cleanup(server.Close)
-	c, err := client.New(client.Config{URL: server.URL, Token: "caller-token", UserAgent: "cella-test"})
+	c, err := client.New(client.Config{URL: server.URL, Token: client.StaticToken("caller-token"), UserAgent: "cella-test"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	one, err := c.GetObjectAs(t.Context(), client.KindSandbox, "dev", "application/yaml")
+	one, err := c.GetAs(t.Context(), client.KindSandbox, "dev", "application/yaml")
 	if err != nil || string(one) != "accept: application/yaml\nat: /v1/sandboxes/dev\n" {
 		t.Fatalf("one object read as %q, %v", one, err)
 	}
@@ -42,7 +42,7 @@ func TestTheSyntaxACallerNamesIsPassedThrough(t *testing.T) {
 	if err != nil || !strings.HasPrefix(string(page), "accept: text/yaml\nat: /v1/sandboxes?") || !strings.Contains(string(page), "phase=Running") {
 		t.Fatalf("one page read as %q, %v", page, err)
 	}
-	if _, err = c.GetObjectAs(t.Context(), client.KindSandbox, "missing", "application/yaml"); client.CodeOf(err) != "not_found" {
+	if _, err = c.GetAs(t.Context(), client.KindSandbox, "missing", "application/yaml"); client.CodeOf(err) != "not_found" {
 		t.Fatalf("a refusal read as %v", err)
 	}
 }
@@ -51,7 +51,7 @@ func TestTheSyntaxACallerNamesIsPassedThrough(t *testing.T) {
 // unwrap to their cause.
 func TestTheErrorsSayWhatWentWrong(t *testing.T) {
 	unreadable := &client.NoBearer{Path: "/run/cella/token", Err: fs.ErrPermission}
-	if !strings.Contains(unreadable.Error(), client.TokenFileEnv) || !errors.Is(unreadable, fs.ErrPermission) {
+	if !strings.Contains(unreadable.Error(), fs.ErrPermission.Error()) || !errors.Is(unreadable, fs.ErrPermission) {
 		t.Errorf("an unreadable token file reads %q", unreadable.Error())
 	}
 	empty := &client.NoBearer{Path: "/run/cella/token"}

@@ -17,31 +17,18 @@ import (
 	v1 "latere.ai/x/cella/manifest/v1"
 )
 
-// Kind is a kind this API serves. The command takes it singular or plural
-// and the routes are the plural.
+// Kind is a kind this API serves, which names its collection route.
 type Kind string
 
+// The kinds of /v1.
 const (
-	KindSandbox Kind = "sandbox"
-	KindSecret  Kind = "secret"
+	KindSandbox     Kind = "sandbox"
+	KindSecret      Kind = "secret"
+	KindEnvironment Kind = "environment"
 )
 
-// Kinds is every kind, in the order a listing shows them.
-var Kinds = []Kind{KindSandbox, KindSecret}
-
 // plurals is each kind's collection, which is the segment of its routes.
-var plurals = map[Kind]string{KindSandbox: "sandboxes", KindSecret: "secrets"}
-
-// ParseKind reads a kind written singular or plural. The second result says
-// whether it is one.
-func ParseKind(s string) (Kind, bool) {
-	for _, k := range Kinds {
-		if strings.EqualFold(s, string(k)) || strings.EqualFold(s, plurals[k]) {
-			return k, true
-		}
-	}
-	return "", false
-}
+var plurals = map[Kind]string{KindSandbox: "sandboxes", KindSecret: "secrets", KindEnvironment: "environments"}
 
 // Plural is the collection name of a kind.
 func (k Kind) Plural() string { return plurals[k] }
@@ -51,8 +38,14 @@ func (k Kind) Path() string { return "/v1/" + plurals[k] }
 
 // ManifestKind is the kind a manifest of this kind declares.
 func (k Kind) ManifestKind() string {
+	if k == "" {
+		return ""
+	}
 	return strings.ToUpper(string(k)[:1]) + string(k)[1:]
 }
+
+// item is the route of one object of a kind.
+func (k Kind) item(ref string) string { return k.Path() + "/" + url.PathEscape(ref) }
 
 // Page is one page of a list as the API answers it: the items' own bytes and
 // the cursor to the next page. The items stay raw so an output that promises
@@ -89,58 +82,63 @@ func (o ListOptions) query(cursor string, page int) url.Values {
 	return q
 }
 
-// CreateSandbox applies a Sandbox manifest. The body is the caller's own
-// bytes: the command reads the kind from the document and sends the rest
-// unchanged, so what the server refuses is what the caller wrote.
-func (c *Client) CreateSandbox(ctx context.Context, body []byte) (v1.Sandbox, []byte, error) {
-	raw, err := c.send(ctx, http.MethodPost, KindSandbox.Path(), nil, body, "application/json")
+// CreateSandbox creates a Sandbox from a manifest, which names it or leaves
+// the server to. The body is the caller's own bytes in the syntax the
+// manifest carries, so what the server refuses is what the caller wrote.
+func (c *Client) CreateSandbox(ctx context.Context, m Manifest) (v1.Sandbox, []byte, error) {
+	raw, err := c.send(ctx, http.MethodPost, KindSandbox.Path(), nil, m.Body, m.mediaType())
 	return decodeInto[v1.Sandbox](raw, err)
 }
 
-// ApplySecret applies a Secret manifest by name: a create when the name is
-// free and an update when the caller holds it.
-func (c *Client) ApplySecret(ctx context.Context, name string, body []byte) (v1.Secret, []byte, error) {
-	raw, err := c.send(ctx, http.MethodPut, KindSecret.Path()+"/"+url.PathEscape(name), nil, body, "application/json")
-	return decodeInto[v1.Secret](raw, err)
+// ApplySandbox applies a Sandbox manifest under a name: a create when the
+// name is free and an update when the caller holds it. A manifest that names
+// no sandbox takes the name; one that names another is refused.
+func (c *Client) ApplySandbox(ctx context.Context, name string, m Manifest) (v1.Sandbox, []byte, error) {
+	raw, err := c.send(ctx, http.MethodPut, KindSandbox.item(name), nil, m.Body, m.mediaType())
+	return decodeInto[v1.Sandbox](raw, err)
 }
 
 // GetSandbox reads one Sandbox by id or by name.
 func (c *Client) GetSandbox(ctx context.Context, ref string) (v1.Sandbox, []byte, error) {
-	raw, err := c.send(ctx, http.MethodGet, KindSandbox.Path()+"/"+url.PathEscape(ref), nil, nil, "")
+	raw, err := c.send(ctx, http.MethodGet, KindSandbox.item(ref), nil, nil, "")
 	return decodeInto[v1.Sandbox](raw, err)
 }
 
-// GetObjectAs reads one object in the syntax the caller names: the answer's
-// own bytes, undecoded. Design 008 renders one object as YAML where the
-// request names one of the three YAML types, so the syntax is the server's to
-// produce and this client's to pass through.
-func (c *Client) GetObjectAs(ctx context.Context, kind Kind, ref, accept string) ([]byte, error) {
-	return c.accepting(ctx, kind.Path()+"/"+url.PathEscape(ref), nil, accept)
+// GetAs reads one object in the syntax the caller names: the answer's own
+// bytes, undecoded. Design 008 renders one object as YAML where the request
+// names one of the three YAML types, so the syntax is the server's to produce
+// and this client's to pass through.
+func (c *Client) GetAs(ctx context.Context, kind Kind, ref, accept string) ([]byte, error) {
+	return c.accepting(ctx, kind.item(ref), nil, accept)
 }
 
 // ListAs reads one page of a kind in the syntax the caller names, with the
-// selectors of design 008. It is one page and not the whole list: the pages
-// are concatenated by re-encoding an envelope, and this command holds no
-// encoder for a syntax the server rendered.
+// selectors of design 008. It is one page and not the whole list: pages are
+// joined by re-encoding an envelope, and this client holds no encoder for a
+// syntax the server rendered.
 func (c *Client) ListAs(ctx context.Context, kind Kind, o ListOptions, accept string) ([]byte, error) {
 	return c.accepting(ctx, kind.Path(), o.query("", o.Limit), accept)
 }
 
-// GetSecret reads one Secret. No response carries its value.
-func (c *Client) GetSecret(ctx context.Context, ref string) (v1.Secret, []byte, error) {
-	raw, err := c.send(ctx, http.MethodGet, KindSecret.Path()+"/"+url.PathEscape(ref), nil, nil, "")
-	return decodeInto[v1.Secret](raw, err)
-}
-
 // Delete removes one object of a kind. The body is the object as the API
-// answered, which a delete carries in every phase.
+// answered, which a sandbox's delete carries in every phase.
 func (c *Client) Delete(ctx context.Context, kind Kind, ref string) ([]byte, error) {
-	return c.send(ctx, http.MethodDelete, kind.Path()+"/"+url.PathEscape(ref), nil, nil, "")
+	return c.send(ctx, http.MethodDelete, kind.item(ref), nil, nil, "")
 }
 
-// Act runs one verb of a sandbox: start or stop.
-func (c *Client) Act(ctx context.Context, ref, verb string) (v1.Sandbox, []byte, error) {
-	raw, err := c.send(ctx, http.MethodPost, KindSandbox.Path()+"/"+url.PathEscape(ref)+"/"+verb, nil, nil, "")
+// StartSandbox starts a stopped sandbox and answers it as it stands after.
+func (c *Client) StartSandbox(ctx context.Context, ref string) (v1.Sandbox, []byte, error) {
+	return c.act(ctx, ref, "start")
+}
+
+// StopSandbox stops a running sandbox and answers it as it stands after.
+func (c *Client) StopSandbox(ctx context.Context, ref string) (v1.Sandbox, []byte, error) {
+	return c.act(ctx, ref, "stop")
+}
+
+// act runs one verb of a sandbox.
+func (c *Client) act(ctx context.Context, ref, verb string) (v1.Sandbox, []byte, error) {
+	raw, err := c.send(ctx, http.MethodPost, KindSandbox.item(ref)+"/"+verb, nil, nil, "")
 	return decodeInto[v1.Sandbox](raw, err)
 }
 
@@ -150,11 +148,6 @@ func (c *Client) Act(ctx context.Context, ref, verb string) (v1.Sandbox, []byte,
 // one call.
 func (c *Client) ListSandboxes(ctx context.Context, o ListOptions) ([]v1.Sandbox, []json.RawMessage, error) {
 	return listAll[v1.Sandbox](ctx, c, KindSandbox, o)
-}
-
-// ListSecrets is the same over the Secret kind.
-func (c *Client) ListSecrets(ctx context.Context, o ListOptions) ([]v1.Secret, []json.RawMessage, error) {
-	return listAll[v1.Secret](ctx, c, KindSecret, o)
 }
 
 // listAll pages a collection. A page is asked for at the API's ceiling or
@@ -225,7 +218,7 @@ func (c *Client) Exec(ctx context.Context, ref string, req ExecRequest) (ExecRes
 		return ExecResult{}, nil, err
 	}
 	q := url.Values{"wait": []string{"1"}}
-	raw, err := c.send(ctx, http.MethodPost, KindSandbox.Path()+"/"+url.PathEscape(ref)+"/exec", q, body, "application/json")
+	raw, err := c.send(ctx, http.MethodPost, KindSandbox.item(ref)+"/exec", q, body, "application/json")
 	return decodeInto[ExecResult](raw, err)
 }
 
@@ -257,7 +250,7 @@ func (c *Client) Logs(ctx context.Context, ref string, o LogOptions) (io.ReadClo
 	if o.Tail > 0 {
 		q.Set("tail", strconv.Itoa(o.Tail))
 	}
-	body, _, err := c.stream(ctx, http.MethodGet, KindSandbox.Path()+"/"+url.PathEscape(ref)+"/logs", q, nil, "")
+	body, _, err := c.stream(ctx, http.MethodGet, KindSandbox.item(ref)+"/logs", q, nil, "")
 	return body, err
 }
 
@@ -289,7 +282,7 @@ type EgressRecord struct {
 // first.
 func (c *Client) EgressRecords(ctx context.Context, ref string, limit int) ([]EgressRecord, []byte, error) {
 	q := url.Values{"limit": []string{limitValue(limit)}}
-	raw, err := c.send(ctx, http.MethodGet, KindSandbox.Path()+"/"+url.PathEscape(ref)+"/egress", q, nil, "")
+	raw, err := c.send(ctx, http.MethodGet, KindSandbox.item(ref)+"/egress", q, nil, "")
 	if err != nil {
 		return nil, nil, err
 	}
@@ -320,7 +313,7 @@ func (c *Client) ServerVersion(ctx context.Context) (Build, error) {
 		return Build{}, err
 	}
 	req.Header.Set("User-Agent", c.agent)
-	req.Header.Set("X-Request-Id", RequestID())
+	req.Header.Set("X-Request-Id", requestID())
 	resp, err := c.do(req)
 	if err != nil {
 		return Build{}, err

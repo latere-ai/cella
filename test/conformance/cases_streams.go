@@ -475,7 +475,7 @@ func case008Dial(ctx context.Context, e *Env) error {
 // socketClient is the typed client the two socket cases speak, which is the
 // client every caller of those streams speaks.
 func (e *Env) socketClient() (*cellaclient.Client, error) {
-	return cellaclient.New(cellaclient.Config{URL: e.caller.base, Token: e.caller.token, UserAgent: "cella-conformance"})
+	return cellaclient.New(cellaclient.Config{URL: e.caller.base, Token: cellaclient.StaticToken(e.caller.token), UserAgent: "cella-conformance"})
 }
 
 // tarOf is one file as an archive. It writes into memory, where a write does

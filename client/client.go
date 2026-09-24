@@ -23,25 +23,14 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"time"
 )
 
-// The environment design 011 reads, and nothing else: no configuration file
-// and no login, because a token comes from the caller's issuer or, inside a
-// sandbox, from the projection.
-const (
-	URLEnv       = "CELLA_URL"
-	TokenEnv     = "CELLA_TOKEN"
-	TokenFileEnv = "CELLA_TOKEN_FILE"
-)
-
-// DefaultTokenPath is where a driver projects a sandbox's own token
-// (design 045). It is the default of --token-file, so a workload inside a
-// sandbox authenticates with no flag at all.
-const DefaultTokenPath = "/run/cella/token"
+// DefaultUserAgent is the identity a request carries when the caller names
+// none.
+const DefaultUserAgent = "cella-client"
 
 // firstByteTimeout is design 011's one deadline: ten seconds to the first
 // response byte and none on the stream that follows. It is expressed as
@@ -56,158 +45,99 @@ const dialTimeout = 10 * time.Second
 // and never a stream.
 const maxErrorBytes = 1 << 20
 
-// Config is what a caller supplies. Every field has an environment default
-// design 011 names; a field set here overrides it.
+// Config is what a caller supplies. Nothing in it is read from anywhere else:
+// Environment is the call that fills one from the process's environment.
 type Config struct {
-	// URL is the control plane's address, CELLA_URL when empty.
+	// URL is the control plane's base address, http or https. It is
+	// required, and a path on it prefixes every route.
 	URL string
-	// Token is the bearer, CELLA_TOKEN when empty, and the token file when
-	// both are.
-	Token string
-	// TokenFile is the file the bearer is read from per request,
-	// CELLA_TOKEN_FILE when empty and DefaultTokenPath when both are.
-	TokenFile string
-	// CAFile adds one certificate authority to the system roots.
-	CAFile string
-	// UserAgent is the identity every request carries.
+	// Token is asked for the bearer once per request, with that request's
+	// context. Nil sends no Authorization header, which only /version
+	// answers.
+	Token TokenSource
+	// HTTPClient carries every call, the upgrade of the exec, attach and
+	// dial sockets included, so a caller's proxy, dialer, trust and
+	// instrumentation reach all of them. Nil is a client over the
+	// package's own transport. A Timeout on it bounds a whole exchange,
+	// which cuts a followed stream short and leaves a socket nothing to
+	// write to; bound a call with its context instead.
+	HTTPClient *http.Client
+	// RootCAs are the authorities the package's own transport trusts, the
+	// system roots when nil. A caller that supplies HTTPClient sets its
+	// trust there instead.
+	RootCAs *x509.CertPool
+	// UserAgent is the identity every request carries, DefaultUserAgent
+	// when empty.
 	UserAgent string
-	// Getenv reads the environment. Nil is os.Getenv.
-	Getenv func(string) string
 }
 
 // Client speaks /v1. It is safe for concurrent use.
 type Client struct {
-	base      *url.URL
-	http      *http.Client
-	tls       *tls.Config
-	token     string
-	tokenFile string
-	agent     string
+	base  *url.URL
+	http  *http.Client
+	token TokenSource
+	agent string
 }
 
-// New builds a client. It resolves the address and the token source and
-// refuses a configuration that names neither.
+// New builds a client. It refuses a configuration with no address or with an
+// address that is not http or https, so a mistake is reported before the
+// first call rather than by it.
 func New(cfg Config) (*Client, error) {
-	getenv := cfg.Getenv
-	if getenv == nil {
-		getenv = os.Getenv
+	if cfg.URL == "" {
+		return nil, errors.New("the configuration names no control plane address")
 	}
-	raw := cfg.URL
-	if raw == "" {
-		raw = getenv(URLEnv)
-	}
-	if raw == "" {
-		return nil, fmt.Errorf("no control plane address: set %s or --url", URLEnv)
-	}
-	base, err := url.Parse(raw)
+	base, err := url.Parse(cfg.URL)
 	if err != nil || base.Host == "" || (base.Scheme != "http" && base.Scheme != "https") {
-		return nil, fmt.Errorf("%s is no http or https address: %s", URLEnv, raw)
+		return nil, fmt.Errorf("%s is no http or https address", cfg.URL)
 	}
 	base.Path = strings.TrimSuffix(base.Path, "/")
-	token := cfg.Token
-	if token == "" {
-		token = getenv(TokenEnv)
+	carrier := cfg.HTTPClient
+	if carrier == nil {
+		carrier = &http.Client{Transport: transport(cfg.RootCAs)}
 	}
-	file := cfg.TokenFile
-	if file == "" {
-		file = getenv(TokenFileEnv)
+	agent := cfg.UserAgent
+	if agent == "" {
+		agent = DefaultUserAgent
 	}
-	if token == "" && file == "" {
-		file = DefaultTokenPath
-	}
-	trust, err := roots(cfg.CAFile)
-	if err != nil {
-		return nil, err
-	}
-	// The transport reads no proxy and no trust-store variable: a run
-	// inside a sandbox reaches CELLA_URL through the driver's own rule and
-	// not through the egress gateway, whose map has no entry for the
-	// control plane (design 018).
-	tlsConfig := &tls.Config{RootCAs: trust, MinVersion: tls.VersionTLS12}
-	transport := &http.Transport{
+	return &Client{base: base, http: carrier, token: cfg.Token, agent: agent}, nil
+}
+
+// transport is the package's own: it reads no proxy and no trust-store
+// variable, because a run inside a sandbox reaches the control plane through
+// the driver's own rule and not through the egress gateway, whose map has no
+// entry for the control plane (design 018). HTTP/2 is not attempted; an
+// upgrade is an HTTP/1.1 exchange, and a connection that negotiated h2 would
+// leave nothing to upgrade.
+func transport(roots *x509.CertPool) *http.Transport {
+	return &http.Transport{
 		Proxy:                 nil,
 		DialContext:           (&net.Dialer{Timeout: dialTimeout, KeepAlive: 30 * time.Second}).DialContext,
-		TLSClientConfig:       tlsConfig,
+		TLSClientConfig:       &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12},
 		TLSHandshakeTimeout:   dialTimeout,
 		ResponseHeaderTimeout: firstByteTimeout,
 		ForceAttemptHTTP2:     false,
 	}
-	agent := cfg.UserAgent
-	if agent == "" {
-		agent = "cella"
-	}
-	return &Client{
-		base:      base,
-		http:      &http.Client{Transport: transport},
-		tls:       tlsConfig,
-		token:     token,
-		tokenFile: file,
-		agent:     agent,
-	}, nil
 }
 
-// roots are the system authorities plus the one a caller named.
-func roots(caFile string) (*x509.CertPool, error) {
-	if caFile == "" {
-		return nil, nil
+// authorize puts the bearer of this moment on a request, where the caller
+// configured a source. An empty token is no bearer.
+func (c *Client) authorize(req *http.Request) error {
+	if c.token == nil {
+		return nil
 	}
-	pem, err := os.ReadFile(caFile)
+	token, err := c.token.Token(req.Context())
 	if err != nil {
-		return nil, fmt.Errorf("reading the certificate authority: %w", err)
+		return err
 	}
-	pool, err := x509.SystemCertPool()
-	if err != nil || pool == nil {
-		pool = x509.NewCertPool()
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	if !pool.AppendCertsFromPEM(pem) {
-		return nil, fmt.Errorf("%s holds no certificate", caFile)
-	}
-	return pool, nil
-}
-
-// NoBearer reports that no token could be resolved: neither flag, neither
-// variable, and no readable file at the projection's path. It is a separate
-// type because a command invoked without a credential is a usage error and
-// not a server that refused.
-type NoBearer struct {
-	// Path is the file that was read, where one was.
-	Path string
-	Err  error
-}
-
-func (e *NoBearer) Error() string {
-	if e.Err != nil {
-		return fmt.Sprintf("no bearer: set %s, or %s to a readable file (%v)", TokenEnv, TokenFileEnv, e.Err)
-	}
-	return fmt.Sprintf("no bearer: %s holds none and %s names none", e.Path, TokenEnv)
-}
-func (e *NoBearer) Unwrap() error { return e.Err }
-
-// bearer resolves the token for one request. The file is read per request
-// and never once at start: the controller re-projects it before expiry and
-// a followed log outlives one token.
-func (c *Client) bearer() (string, error) {
-	if c.token != "" {
-		return c.token, nil
-	}
-	data, err := os.ReadFile(c.tokenFile)
-	if err != nil {
-		return "", &NoBearer{Path: c.tokenFile, Err: err}
-	}
-	token := strings.TrimSpace(string(data))
-	if token == "" {
-		return "", &NoBearer{Path: c.tokenFile}
-	}
-	return token, nil
+	return nil
 }
 
 // request builds one call: the path under the base address, the bearer of
 // this moment, a fresh request id, and the identity every request carries.
 func (c *Client) request(ctx context.Context, method, path string, query url.Values, body io.Reader) (*http.Request, error) {
-	token, err := c.bearer()
-	if err != nil {
-		return nil, err
-	}
 	target := *c.base
 	target.Path = c.base.Path + path
 	if query != nil {
@@ -217,15 +147,17 @@ func (c *Client) request(ctx context.Context, method, path string, query url.Val
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+token)
+	if err = c.authorize(req); err != nil {
+		return nil, err
+	}
 	req.Header.Set("User-Agent", c.agent)
-	req.Header.Set("X-Request-Id", RequestID())
+	req.Header.Set("X-Request-Id", requestID())
 	return req, nil
 }
 
-// RequestID is the id a request carries, within the rule of design 008: a
+// requestID is the id a request carries, within the rule of design 008: a
 // prefix and printable ASCII.
-func RequestID() string { return "req_" + rand.Text() }
+func requestID() string { return "req_" + rand.Text() }
 
 // do sends a request and turns anything that is not a 2xx into an Error and
 // anything that reached no status into an Unreachable.

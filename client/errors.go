@@ -15,13 +15,16 @@ import (
 
 // Error is one refusal of the API, decoded from the envelope of design 008:
 // the code a caller decides on, the fixed user sentence, the request id the
-// server stamped, and the paths a field error names. The status is kept
-// beside the code because the exit scheme maps an unknown code by its class.
+// server stamped, and the details the code carries. The status is kept beside
+// the code, because a caller that meets a code it does not know can still
+// decide by the status's class.
 type Error struct {
+	// Status is the response's status: 500 for a failure reported inside a
+	// stream or a socket, which carries no status of its own.
 	Status int
-	Code   string
-	// Message is the API's sentence for the code, the one line a refusal
-	// prints.
+	// Code is the API's code, which is what a caller decides on.
+	Code string
+	// Message is the API's sentence for the code, written for a person.
 	Message string
 	// RequestID is the response's own id, which is what identifies the call
 	// in the server's journal. It is the server's and not the one the
@@ -29,12 +32,18 @@ type Error struct {
 	RequestID string
 	// Paths are the fields a code that names fields named.
 	Paths []string
-	// Detail is the developer sentence, printed only under -v.
+	// Detail is the developer sentence, which says what about this request
+	// the code refers to.
 	Detail string
+	// Details is the envelope's details object as it was decoded, the three
+	// fields above included, so a code that carries more reaches the
+	// caller whole.
+	Details map[string]any
 	// RetryAfter is the header a 429 carries.
 	RetryAfter string
 }
 
+// Error is the API's sentence, or the status where the answer carried none.
 func (e *Error) Error() string {
 	if e.Message != "" {
 		return e.Message
@@ -44,14 +53,19 @@ func (e *Error) Error() string {
 
 // Unreachable is a request that reached no status: the dial, the TLS
 // handshake, or the wait for the first response byte failed. It is a
-// separate type because the exit scheme separates a server that refused
-// from a server that was not there.
+// separate type because a server that refused and a server that was not
+// there call for different decisions.
 type Unreachable struct {
-	Op  string
+	// Op is the method and the path of the request.
+	Op string
+	// Err is the transport's failure.
 	Err error
 }
 
+// Error names the request and the failure.
 func (e *Unreachable) Error() string { return e.Op + ": " + e.Err.Error() }
+
+// Unwrap is the transport's failure.
 func (e *Unreachable) Unwrap() error { return e.Err }
 
 // CodeOf is the API's code for an error, or the empty string for anything
@@ -77,6 +91,7 @@ func errorFrom(resp *http.Response, body []byte) *Error {
 		e.RequestID, _ = envelope.Error.Details["request_id"].(string)
 		e.Detail, _ = envelope.Error.Details["detail"].(string)
 		e.Paths = append(e.Paths, list(envelope.Error.Details["paths"])...)
+		e.Details = envelope.Error.Details
 	}
 	if e.Message == "" {
 		e.Message = strings.TrimSpace(string(body))

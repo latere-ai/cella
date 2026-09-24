@@ -88,7 +88,7 @@ func newSocketFixture(t *testing.T, session func(*socketFixture, *websocket.Conn
 // client is a client pointed at the socket fixture.
 func (f *socketFixture) client() *client.Client {
 	f.t.Helper()
-	c, err := client.New(client.Config{URL: f.server.URL, Token: "caller-token", Getenv: env(nil)})
+	c, err := client.New(client.Config{URL: f.server.URL, Token: client.StaticToken("caller-token")})
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -251,7 +251,7 @@ func TestAnErrorFrameIsTheSameErrorAnHTTPRefusalIs(t *testing.T) {
 	if refusal.Code != "capability_unsupported" || refusal.RequestID != "req_theservers" {
 		t.Fatalf("the refusal is %+v", refusal)
 	}
-	if refusal.Detail != "no terminal" || strings.Join(refusal.Paths, ",") != "spec.image" {
+	if refusal.Detail != "no terminal" || strings.Join(refusal.Paths, ",") != "spec.image" || refusal.Details["detail"] != "no terminal" {
 		t.Fatalf("the refusal is %+v", refusal)
 	}
 	if s.Started() {
@@ -267,7 +267,7 @@ func TestARefusalBeforeTheUpgradeIsAnHTTPStatus(t *testing.T) {
 		writeError(w, 422, "capability_unsupported", "The environment cannot provide this.", nil)
 	}))
 	defer server.Close()
-	c, err := client.New(client.Config{URL: server.URL, Token: "t", Getenv: env(nil)})
+	c, err := client.New(client.Config{URL: server.URL, Token: client.StaticToken("t")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -297,7 +297,7 @@ func TestAServerThatIsNoWebSocketIsRefused(t *testing.T) {
 		_, _ = conn.Write([]byte("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: wrong\r\n\r\n"))
 	}))
 	defer server.Close()
-	c, err := client.New(client.Config{URL: server.URL, Token: "t", Getenv: env(nil)})
+	c, err := client.New(client.Config{URL: server.URL, Token: client.StaticToken("t")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -309,7 +309,7 @@ func TestAServerThatIsNoWebSocketIsRefused(t *testing.T) {
 // TestASocketOnAnAddressNothingAnswersIsUnreachable: the socket separates a
 // refusal from an address that is not there, as every other call does.
 func TestASocketOnAnAddressNothingAnswersIsUnreachable(t *testing.T) {
-	c, err := client.New(client.Config{URL: "http://127.0.0.1:1", Token: "t", Getenv: env(nil)})
+	c, err := client.New(client.Config{URL: "http://127.0.0.1:1", Token: client.StaticToken("t")})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -131,6 +131,7 @@ func frameError(e httpjson.Error) *Error {
 	out.RequestID, _ = e.Details["request_id"].(string)
 	out.Detail, _ = e.Details["detail"].(string)
 	out.Paths = list(e.Details["paths"])
+	out.Details = e.Details
 	return out
 }
 

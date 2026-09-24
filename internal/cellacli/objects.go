@@ -81,7 +81,7 @@ func apply(ctx context.Context, c *invocation, args []string) error {
 		if body, err = withValue(body, c, *valueEnv, *valueFile); err != nil {
 			return err
 		}
-		obj, raw, err := client.ApplySecret(ctx, header.Metadata.Name, body)
+		obj, raw, err := client.ApplySecret(ctx, header.Metadata.Name, cellaclient.JSON(body))
 		if err != nil {
 			return err
 		}
@@ -90,7 +90,7 @@ func apply(ctx context.Context, c *invocation, args []string) error {
 		if *valueEnv != "" || *valueFile != "" {
 			return usagef("a value belongs to a Secret, and this manifest is a Sandbox")
 		}
-		obj, raw, err := client.CreateSandbox(ctx, body)
+		obj, raw, err := client.CreateSandbox(ctx, cellaclient.JSON(body))
 		if err != nil {
 			return err
 		}
@@ -234,7 +234,7 @@ func get(ctx context.Context, c *invocation, args []string) error {
 	if len(rest) == 0 {
 		return usagef("get needs a kind: %s", kindList())
 	}
-	kind, ok := cellaclient.ParseKind(rest[0])
+	kind, ok := parseKind(rest[0])
 	if !ok {
 		return usagef("this server serves no kind %q; it serves %s", rest[0], kindList())
 	}
@@ -260,7 +260,7 @@ func (c *invocation) one(ctx context.Context, client *cellaclient.Client, kind c
 	// and writes the answer through, so the field order is the API's and no
 	// encoder of this command's stands between the two.
 	if output == outputYAML {
-		raw, err := client.GetObjectAs(ctx, kind, ref, yamlAccept)
+		raw, err := client.GetAs(ctx, kind, ref, yamlAccept)
 		if err != nil {
 			return err
 		}
@@ -348,7 +348,7 @@ func remove(ctx context.Context, c *invocation, args []string) error {
 	if len(rest) != 2 {
 		return usagef("delete needs a kind and a reference")
 	}
-	kind, ok := cellaclient.ParseKind(rest[0])
+	kind, ok := parseKind(rest[0])
 	if !ok {
 		return usagef("this server serves no kind %q; it serves %s", rest[0], kindList())
 	}
@@ -368,15 +368,17 @@ func remove(ctx context.Context, c *invocation, args []string) error {
 }
 
 func start(ctx context.Context, c *invocation, args []string) error {
-	return act(ctx, c, args, "start", "started")
+	return act(ctx, c, args, "start", "started", (*cellaclient.Client).StartSandbox)
 }
 
 func stop(ctx context.Context, c *invocation, args []string) error {
-	return act(ctx, c, args, "stop", "stopped")
+	return act(ctx, c, args, "stop", "stopped", (*cellaclient.Client).StopSandbox)
 }
 
-// act runs one verb of a sandbox.
-func act(ctx context.Context, c *invocation, args []string, verb, done string) error {
+// act runs one verb of a sandbox through the client call that sends it.
+func act(ctx context.Context, c *invocation, args []string, verb, done string,
+	call func(*cellaclient.Client, context.Context, string) (v1.Sandbox, []byte, error),
+) error {
 	fs := c.flags("cella " + verb + " <ref>")
 	rest, err := parse(fs, args)
 	if err != nil {
@@ -389,7 +391,7 @@ func act(ctx context.Context, c *invocation, args []string, verb, done string) e
 	if err != nil {
 		return err
 	}
-	obj, raw, err := client.Act(ctx, rest[0], verb)
+	obj, raw, err := call(client, ctx, rest[0])
 	if err != nil {
 		return err
 	}
@@ -470,10 +472,25 @@ func names[T any](items []T, of func(T) string) []string {
 	return out
 }
 
-// kindList names the kinds this server serves, for a usage line.
+// kinds are the kinds this command reads, writes and lists, in the order a
+// listing shows them.
+var kinds = []cellaclient.Kind{cellaclient.KindSandbox, cellaclient.KindSecret}
+
+// parseKind reads a kind written singular or plural. The second result says
+// whether it is one this command serves.
+func parseKind(s string) (cellaclient.Kind, bool) {
+	for _, k := range kinds {
+		if strings.EqualFold(s, string(k)) || strings.EqualFold(s, k.Plural()) {
+			return k, true
+		}
+	}
+	return "", false
+}
+
+// kindList names the kinds this command serves, for a usage line.
 func kindList() string {
-	out := make([]string, 0, len(cellaclient.Kinds))
-	for _, k := range cellaclient.Kinds {
+	out := make([]string, 0, len(kinds))
+	for _, k := range kinds {
 		out = append(out, string(k))
 	}
 	return strings.Join(out, ", ")

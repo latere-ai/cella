@@ -48,7 +48,7 @@ func dialPlane(t *testing.T, session func(*websocket.Conn)) (*httptest.Server, *
 
 func dialClient(t *testing.T, server *httptest.Server) *client.Client {
 	t.Helper()
-	c, err := client.New(client.Config{URL: server.URL, Token: "caller-token", UserAgent: "cella-test"})
+	c, err := client.New(client.Config{URL: server.URL, Token: client.StaticToken("caller-token"), UserAgent: "cella-test"})
 	if err != nil {
 		t.Fatal(err)
 	}

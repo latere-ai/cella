@@ -31,7 +31,7 @@ type FileEntry struct {
 
 // filesPath is the file routes of one sandbox.
 func filesPath(ref, suffix string) string {
-	return KindSandbox.Path() + "/" + url.PathEscape(ref) + "/files" + suffix
+	return KindSandbox.item(ref) + "/files" + suffix
 }
 
 // FileList reads a directory's immediate entries, sorted by name and whole:
