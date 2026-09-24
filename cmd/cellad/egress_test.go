@@ -425,7 +425,7 @@ func (p *plane) environmentKey(t *testing.T) string {
 func (p *plane) create(t *testing.T, egressJSON string) string {
 	t.Helper()
 	body := `{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox","spec":{"network":{"egress":` + egressJSON + `}}}`
-	status, answer := p.do(t, http.MethodPost, "/v1/sandboxes", strings.NewReader(body))
+	status, answer := p.do(t, http.MethodPost, "/v1/sandboxes?wait=1", strings.NewReader(body))
 	if status != http.StatusCreated {
 		t.Fatalf("POST /v1/sandboxes = %d %s", status, answer)
 	}

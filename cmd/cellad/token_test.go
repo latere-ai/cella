@@ -53,7 +53,7 @@ func TestWorkloadTokenEndToEnd(t *testing.T) {
 	}
 	create := func(name string) string {
 		t.Helper()
-		body := call("POST", "/v1/sandboxes", alice,
+		body := call("POST", "/v1/sandboxes?wait=1", alice,
 			`{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox","metadata":{"name":"`+name+`"},"spec":{}}`, 201)
 		var obj struct {
 			Status struct {

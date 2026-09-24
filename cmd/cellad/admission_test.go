@@ -157,7 +157,7 @@ func TestServeWithAdmission(t *testing.T) {
 	}
 
 	t.Run("theMutationIsWhatTheCallerReadsBack", func(t *testing.T) {
-		status, answer := plane.do(t, http.MethodPost, "/v1/sandboxes", strings.NewReader(
+		status, answer := plane.do(t, http.MethodPost, "/v1/sandboxes?wait=1", strings.NewReader(
 			`{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox",`+
 				`"metadata":{"name":"admitted","labels":{"team":"research"}},"spec":{}}`))
 		if status != http.StatusCreated {
@@ -239,7 +239,7 @@ func TestServeWithAdmission(t *testing.T) {
 	})
 
 	t.Run("aRefusalCarriesTheEndpointsCode", func(t *testing.T) {
-		status, answer := plane.do(t, http.MethodPost, "/v1/sandboxes", strings.NewReader(
+		status, answer := plane.do(t, http.MethodPost, "/v1/sandboxes?wait=1", strings.NewReader(
 			`{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox",`+
 				`"metadata":{"name":"too-big"},"spec":{"resources":{"cpu":"8"}}}`))
 		if status != http.StatusUnprocessableEntity {
@@ -253,7 +253,7 @@ func TestServeWithAdmission(t *testing.T) {
 
 	t.Run("anEndpointThatStoppedFailsEveryCreateClosed", func(t *testing.T) {
 		endpoint.Close()
-		status, answer := plane.do(t, http.MethodPost, "/v1/sandboxes", strings.NewReader(
+		status, answer := plane.do(t, http.MethodPost, "/v1/sandboxes?wait=1", strings.NewReader(
 			`{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox","metadata":{"name":"orphan"},"spec":{}}`))
 		if status != http.StatusServiceUnavailable {
 			t.Fatalf("POST /v1/sandboxes = %d %s", status, answer)
@@ -277,7 +277,7 @@ func TestServeWithoutAdmissionSaysBuiltin(t *testing.T) {
 	if !strings.Contains(plane.out.String(), "admission=builtin") {
 		t.Fatalf("the start-up line = %q", plane.out.String())
 	}
-	status, answer := plane.do(t, http.MethodPost, "/v1/sandboxes", strings.NewReader(
+	status, answer := plane.do(t, http.MethodPost, "/v1/sandboxes?wait=1", strings.NewReader(
 		`{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox","metadata":{"name":"plain"},"spec":{}}`))
 	if status != http.StatusCreated {
 		t.Fatalf("POST /v1/sandboxes = %d %s", status, answer)

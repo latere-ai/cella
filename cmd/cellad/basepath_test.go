@@ -184,7 +184,7 @@ func TestAnEmptyBasePathIsTheRoot(t *testing.T) {
 	if got := fetch(t, http.MethodGet, m.origin+"/openapi.yaml", "", ""); got.body != string(apidoc.Document) {
 		t.Error("the document served at the root is not the carried one")
 	}
-	created := fetch(t, http.MethodPost, m.origin+"/v1/sandboxes", m.alice,
+	created := fetch(t, http.MethodPost, m.origin+"/v1/sandboxes?wait=1", m.alice,
 		`{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox","metadata":{"name":"rooted"},"spec":{}}`)
 	if created.status != http.StatusCreated || !strings.HasPrefix(created.header.Get("Location"), "/v1/sandboxes/sbx_") {
 		t.Errorf("the create answered %d with the Location %q", created.status, created.header.Get("Location"))
@@ -205,7 +205,7 @@ func TestBehindARewriteTheListenerStaysAtTheRoot(t *testing.T) {
 		{path: "/openapi.yaml", status: http.StatusOK, holds: "\n  " + basePath + "/sandboxes:\n"},
 		{path: "/livez", status: http.StatusOK, holds: "ok"},
 	})
-	created := fetch(t, http.MethodPost, m.origin+"/v1/sandboxes", m.alice,
+	created := fetch(t, http.MethodPost, m.origin+"/v1/sandboxes?wait=1", m.alice,
 		`{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox","metadata":{"name":"rewritten"},"spec":{}}`)
 	if created.status != http.StatusCreated || !strings.HasPrefix(created.header.Get("Location"), basePath+"/sandboxes/sbx_") {
 		t.Errorf("the create answered %d with the Location %q", created.status, created.header.Get("Location"))
@@ -430,7 +430,7 @@ func TestWorkerAndGatewayUnderABasePath(t *testing.T) {
 	})
 	create := `{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox",` +
 		`"metadata":{"name":"there"},"spec":{"environment":"eu-gpu","command":["sleep","300"]}}`
-	status, answer = p.do(t, http.MethodPost, "/v1/sandboxes", strings.NewReader(create))
+	status, answer = p.do(t, http.MethodPost, "/v1/sandboxes?wait=1", strings.NewReader(create))
 	var sandbox struct {
 		Status struct {
 			ID string `json:"id"`

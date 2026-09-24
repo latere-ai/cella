@@ -216,7 +216,7 @@ func TestEventsEndToEnd(t *testing.T) {
 		}
 		return data
 	}
-	created := call("POST", "/v1/sandboxes", `{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox",`+
+	created := call("POST", "/v1/sandboxes?wait=1", `{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox",`+
 		`"metadata":{"name":"events","labels":{"tenant":"acme"}},`+
 		`"spec":{"env":{"API_TOKEN":"`+canarySecret+`"}}}`, "application/json", 201)
 	var obj struct {
@@ -353,7 +353,7 @@ func TestNoContentInEvents(t *testing.T) {
 		}
 		return data
 	}
-	created := call("POST", "/v1/sandboxes", `{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox",`+
+	created := call("POST", "/v1/sandboxes?wait=1", `{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox",`+
 		`"metadata":{"name":"canary"},"spec":{"env":{"API_TOKEN":"`+canarySecret+`"},`+
 		`"command":["sh","-c","sleep 60"]}}`, "application/json", 201)
 	var obj struct {

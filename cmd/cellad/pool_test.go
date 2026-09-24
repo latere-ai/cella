@@ -103,10 +103,20 @@ func TestPoolEndToEnd(t *testing.T) {
 	waitFor(t, "the refill loop to replace the adopted entry", func() bool { return len(entries()) == 2 })
 }
 
-// create posts one manifest and returns the sandbox the API answered with.
+// create posts one manifest with the answer held until the sandbox has
+// started, which is what a case that uses the sandbox next needs, and returns
+// the sandbox the API answered with.
 func create(t *testing.T, base, token, body string) v1.Sandbox {
 	t.Helper()
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, base+"/v1/sandboxes", strings.NewReader(body))
+	return submit(t, base+"/v1/sandboxes?wait=1", token, body)
+}
+
+// submit posts one manifest to a create route as it is and returns the
+// sandbox the API answered with. Without the hold the answer is the sandbox
+// as soon as it is recorded, which is the answer a queued create reads.
+func submit(t *testing.T, route, token, body string) v1.Sandbox {
+	t.Helper()
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, route, strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +132,7 @@ func create(t *testing.T, base, token, body string) v1.Sandbox {
 		t.Fatal(err)
 	}
 	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("POST /v1/sandboxes: %d %s", resp.StatusCode, data)
+		t.Fatalf("POST %s: %d %s", route, resp.StatusCode, data)
 	}
 	var obj v1.Sandbox
 	if err := json.Unmarshal(data, &obj); err != nil {

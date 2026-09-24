@@ -356,7 +356,7 @@ func TestWorkerEnvironmentEndToEnd(t *testing.T) {
 	// driver, and an exec runs there.
 	create := `{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox",` +
 		`"metadata":{"name":"there"},"spec":{"environment":"eu-gpu","command":["sleep","300"]}}`
-	status, answer = p.do(t, http.MethodPost, "/v1/sandboxes", strings.NewReader(create))
+	status, answer = p.do(t, http.MethodPost, "/v1/sandboxes?wait=1", strings.NewReader(create))
 	if status != http.StatusCreated {
 		t.Fatalf("the create on the worker's environment answered %d: %s", status, answer)
 	}
@@ -395,7 +395,7 @@ func TestWorkerEnvironmentEndToEnd(t *testing.T) {
 	})
 	// An offline environment takes no new sandbox and keeps the one it has.
 	again := strings.Replace(create, `"name":"there"`, `"name":"after"`, 1)
-	if status, answer = p.do(t, http.MethodPost, "/v1/sandboxes", strings.NewReader(again)); status != http.StatusServiceUnavailable {
+	if status, answer = p.do(t, http.MethodPost, "/v1/sandboxes?wait=1", strings.NewReader(again)); status != http.StatusServiceUnavailable {
 		t.Errorf("a create on an offline environment answered %d: %s", status, answer)
 	}
 	if status, _ = p.do(t, http.MethodGet, "/v1/sandboxes/"+sandbox.Status.ID, nil); status != http.StatusOK {
@@ -407,7 +407,7 @@ func TestWorkerEnvironmentEndToEnd(t *testing.T) {
 	waitFor(t, "the environment to return to Ready", func() bool {
 		return p.environmentNamed(t, "eu-gpu").Status.Phase == v1.EnvironmentReady
 	})
-	if status, answer = p.do(t, http.MethodPost, "/v1/sandboxes", strings.NewReader(again)); status != http.StatusCreated {
+	if status, answer = p.do(t, http.MethodPost, "/v1/sandboxes?wait=1", strings.NewReader(again)); status != http.StatusCreated {
 		t.Errorf("a create on the environment that returned answered %d: %s", status, answer)
 	}
 }

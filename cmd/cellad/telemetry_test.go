@@ -162,7 +162,7 @@ func TestObservabilityEndToEnd(t *testing.T) {
 	}
 
 	before := scrape(t, internalURL)
-	created := request("POST", "/v1/sandboxes",
+	created := request("POST", "/v1/sandboxes?wait=1",
 		`{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox","metadata":{"name":"observed"},"spec":{}}`, 201)
 	var obj struct {
 		Status struct{ ID string } `json:"status"`

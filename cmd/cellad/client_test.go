@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"latere.ai/x/pkg/authkit/issuertest"
 
@@ -18,10 +19,11 @@ import (
 
 // TestTheExportedClientDrivesARunningNode is the exported client against a
 // running node, the way a program outside this module uses it: it applies a
-// YAML manifest under a name, finds the sandbox by label, runs a command and
-// a session, writes and reads a file, follows the sandbox's records from the
-// newest one it read, deletes the sandbox and reads the feed to its end, and
-// mints and revokes an environment key.
+// YAML manifest under a name with the answer held until it runs, finds the
+// sandbox by label, runs a command and a session, writes and reads a file,
+// follows the sandbox's records from the newest one it read, deletes the
+// sandbox and reads the feed to its end, and mints and revokes an
+// environment key.
 func TestTheExportedClientDrivesARunningNode(t *testing.T) {
 	issuer := issuertest.New(t)
 	base, _, _, stop := startServeWithLog(t, map[string]string{
@@ -37,7 +39,7 @@ func TestTheExportedClientDrivesARunningNode(t *testing.T) {
 	ctx := t.Context()
 
 	manifest := "apiVersion: " + v1.APIVersion + "\nkind: Sandbox\nmetadata:\n  labels:\n    team: core\nspec: {}\n"
-	obj, _, err := c.ApplySandbox(ctx, "driven", client.YAML([]byte(manifest)))
+	obj, _, err := c.ApplySandbox(ctx, "driven", client.YAML([]byte(manifest)), client.Wait(time.Minute))
 	if err != nil {
 		t.Fatalf("applying the YAML manifest: %v", err)
 	}

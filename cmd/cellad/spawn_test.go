@@ -146,7 +146,7 @@ func spawnRoot(t *testing.T, p *plane) sandboxRead {
 	body := `{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox","spec":{` +
 		`"network":{"egress":{"mode":"allowlist","allowedHosts":["upstream.example.com"]}},` +
 		`"mesh":{"spawn":{"budget":2,"depth":1}}}}`
-	status, answer := p.do(t, http.MethodPost, "/v1/sandboxes", strings.NewReader(body))
+	status, answer := p.do(t, http.MethodPost, "/v1/sandboxes?wait=1", strings.NewReader(body))
 	if status != http.StatusCreated {
 		t.Fatalf("POST the root = %d %s", status, answer)
 	}
@@ -201,7 +201,7 @@ func spawnRefusal(t *testing.T, p *plane, token, name, extraSpec string) refusal
 // the person's bearer.
 func asWorkload(t *testing.T, p *plane, token, body string) (int, string) {
 	t.Helper()
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, p.url+"/v1/sandboxes", strings.NewReader(body))
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, p.url+"/v1/sandboxes?wait=1", strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}

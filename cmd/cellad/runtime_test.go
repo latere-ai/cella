@@ -92,7 +92,7 @@ func TestNativeServerEndToEnd(t *testing.T) {
 		return data
 	}
 	request("GET", "/v1/sandboxes", "", "", 401)
-	body := request("POST", "/v1/sandboxes", alice, `{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox","metadata":{"name":"e2e"},"spec":{}}`, 201)
+	body := request("POST", "/v1/sandboxes?wait=1", alice, `{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox","metadata":{"name":"e2e"},"spec":{}}`, 201)
 	var obj struct {
 		Status struct {
 			ID    string `json:"id"`

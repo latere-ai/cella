@@ -62,7 +62,7 @@ func TestQueuedEnvironmentEndToEnd(t *testing.T) {
 	if first.Status.Phase != runtime.Running {
 		t.Fatalf("the first create on an empty queue is %s", first.Status.Phase)
 	}
-	second := create(t, base, alice, manifest("second"))
+	second := submit(t, base+"/v1/sandboxes", alice, manifest("second"))
 	if second.Status.Phase != "Queued" || second.Spec.Scheduling.Queue != v1.DefaultQueueName {
 		t.Fatalf("the second create is %s in the queue %q", second.Status.Phase, second.Spec.Scheduling.Queue)
 	}
@@ -153,7 +153,7 @@ func TestPreemptionEndToEnd(t *testing.T) {
 		t.Fatalf("the preemptible create on an empty queue is %s", low.Status.Phase)
 	}
 	exec(t, call, low.Status.ID, alice, "echo kept > marker")
-	high := create(t, base, alice, manifest("high", `{"priority":5}`))
+	high := submit(t, base+"/v1/sandboxes", alice, manifest("high", `{"priority":5}`))
 	if high.Status.Phase != "Queued" {
 		t.Fatalf("the higher create is answered %s", high.Status.Phase)
 	}
