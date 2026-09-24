@@ -626,6 +626,12 @@ func (c *Controller) realize(ctx context.Context, obj v1.Sandbox, d driver.Drive
 ) (v1.Sandbox, error) {
 	id, environment, now := obj.Status.ID, obj.Status.Environment, time.Now().UTC()
 	var err error
+	// The undo and the record of what became of the sandbox run to the end
+	// whether or not the caller is still there. A caller that hangs up mid
+	// create leaves a sandbox half made, and the store, the journal, the
+	// token list and the parent's budget must still say what happened to it;
+	// the driver's own work stops with the caller.
+	settle := context.WithoutCancel(ctx)
 	// The boundary is put in a gateway before the driver is called, so a
 	// sandbox never starts before a gateway knows it (spec 018). A boundary
 	// that no gateway will hold is a refusal here, with nothing created.
@@ -634,13 +640,13 @@ func (c *Controller) realize(ctx context.Context, obj v1.Sandbox, d driver.Drive
 		// The map may already sit in a gateway that took the put and never
 		// answered, so the principal is purged with the object: every map a
 		// gateway holds is a map desired state has.
-		c.purgeEgress(ctx, id)
+		c.purgeEgress(settle, id)
 		if later {
 			obj.Status.Phase = PhaseFailed
 			obj.Status.Reason = ReasonCreateFailed
-			return export(obj), errors.Join(err, c.persist(ctx, obj, MutationFailed), c.credit(ctx, parent))
+			return export(obj), errors.Join(err, c.persist(settle, obj, MutationFailed), c.credit(settle, parent))
 		}
-		return obj, errors.Join(err, c.forget(ctx, id, MutationDeleted), c.credit(ctx, parent))
+		return obj, errors.Join(err, c.forget(settle, id, MutationDeleted), c.credit(settle, parent))
 	}
 	obj.Status.Secrets = boundary.Secrets
 	obj.Status.Conditions = setCondition(obj.Status.Conditions, c.egressCondition(environment, boundary.Map, boundary.Held, now))
@@ -651,8 +657,8 @@ func (c *Controller) realize(ctx context.Context, obj v1.Sandbox, d driver.Drive
 	if err = mintErr; err != nil {
 		obj.Status.Phase = PhaseFailed
 		obj.Status.Reason = ReasonCreateFailed
-		c.purgeEgress(ctx, id)
-		return export(obj), errors.Join(err, c.persist(ctx, obj, MutationFailed), c.credit(ctx, parent))
+		c.purgeEgress(settle, id)
+		return export(obj), errors.Join(err, c.persist(settle, obj, MutationFailed), c.credit(settle, parent))
 	}
 	obj.Status.TokenState = tokenState
 	if entry != nil {
@@ -662,25 +668,25 @@ func (c *Controller) realize(ctx context.Context, obj v1.Sandbox, d driver.Drive
 		_, err = d.Create(ctx, specOf(obj, lifecycle, c.egressSpec(boundary.Map), boundary.Env, token))
 	}
 	if err != nil {
-		c.purgeEgress(ctx, id)
-		revoked := c.revokeToken(ctx, tokenState)
+		c.purgeEgress(settle, id)
+		revoked := c.revokeToken(settle, tokenState)
 		obj.Status.TokenState = nil
 		if entry != nil && adoptionLost(err) {
 			// The entry is another caller's now, or it cannot carry this
 			// manifest. Nothing of this attempt survives: no map, no
 			// identity and no row, so the create that follows is an
 			// ordinary first create under an id of its own.
-			return obj, errors.Join(err, revoked, c.forget(ctx, id, MutationDeleted), c.credit(ctx, parent))
+			return obj, errors.Join(err, revoked, c.forget(settle, id, MutationDeleted), c.credit(settle, parent))
 		}
 		obj.Status.Phase = PhaseFailed
 		obj.Status.Reason = ReasonCreateFailed
-		return export(obj), errors.Join(err, revoked, c.persist(ctx, obj, MutationFailed), c.credit(ctx, parent))
+		return export(obj), errors.Join(err, revoked, c.persist(settle, obj, MutationFailed), c.credit(settle, parent))
 	}
 	obj.Status.Conditions = setCondition(obj.Status.Conditions, scheduledCondition(entry != nil, c.clock.Now()))
-	obj, err = c.refresh(ctx, obj)
-	err = errors.Join(err, c.persist(ctx, obj, phaseMutation(obj.Status.Phase)))
+	obj, err = c.refresh(settle, obj)
+	err = errors.Join(err, c.persist(settle, obj, phaseMutation(obj.Status.Phase)))
 	if parent != nil {
-		err = errors.Join(err, c.spawned(ctx, obj, parent.Status.ID))
+		err = errors.Join(err, c.spawned(settle, obj, parent.Status.ID))
 	}
 	return export(obj), err
 }

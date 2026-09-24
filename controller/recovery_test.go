@@ -32,6 +32,9 @@ type durableStore struct {
 
 	durable                         bool
 	writeErr, removeErr, rebuildErr error
+	// live refuses a write under an ended context, as a database connection
+	// does, where the zero store takes any context.
+	live bool
 }
 
 type journalRow struct{ object, mutation string }
@@ -55,22 +58,28 @@ func (s *durableStore) Save(objects map[string]v1.Sandbox) error {
 
 func (s *durableStore) Close() error  { return nil }
 func (s *durableStore) Durable() bool { return s.durable }
-func (s *durableStore) Write(_ context.Context, obj v1.Sandbox, mutation string) error {
+func (s *durableStore) Write(ctx context.Context, obj v1.Sandbox, mutation string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.writeErr != nil {
 		return s.writeErr
+	}
+	if s.live && ctx.Err() != nil {
+		return ctx.Err()
 	}
 	s.objects[obj.Status.ID] = obj
 	s.journal = append(s.journal, journalRow{obj.Status.ID, mutation})
 	return nil
 }
 
-func (s *durableStore) Remove(_ context.Context, id, mutation string) error {
+func (s *durableStore) Remove(ctx context.Context, id, mutation string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.removeErr != nil {
 		return s.removeErr
+	}
+	if s.live && ctx.Err() != nil {
+		return ctx.Err()
 	}
 	delete(s.objects, id)
 	s.journal = append(s.journal, journalRow{id, mutation})
@@ -521,5 +530,42 @@ func TestRecoveryEndToEndOverNative(t *testing.T) {
 	want := []string{MutationLost, MutationRecovering, MutationRecovered}
 	if got := st.mutations(id); len(got) < 3 || !slices.Equal(got[len(got)-3:], want) {
 		t.Fatalf("the journal reads %v, want it to end %v", got, want)
+	}
+}
+
+// hangUp is a driver whose create is where the caller hangs up: it ends the
+// caller's context and answers what the Kubernetes driver answers then.
+type hangUp struct {
+	*fakeDriver
+	cancel context.CancelFunc
+}
+
+func (d hangUp) Create(ctx context.Context, _ driver.CreateSpec) (driver.Ref, error) {
+	d.cancel()
+	return driver.Ref{}, ctx.Err()
+}
+
+// TestAHungUpCreateStillRecordsTheFailure: a caller that hangs up while the
+// driver creates leaves the sandbox Failed in the store with its failure in
+// the journal, rather than a row that says it is still being created.
+func TestAHungUpCreateStillRecordsTheFailure(t *testing.T) {
+	clock := newClock()
+	st := newDurable(true)
+	st.live = true
+	ctx, cancel := context.WithCancel(t.Context())
+	c := withDriver(t, st, hangUp{fakeDriver: newDriver(clock), cancel: cancel}, clock, Options{})
+	obj, err := c.Create(ctx, workspace(), "alice", 0)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("a create the caller hung up on answered %v", err)
+	}
+	id := obj.Status.ID
+	st.mu.Lock()
+	stored, ok := st.objects[id]
+	st.mu.Unlock()
+	if !ok || stored.Status.Phase != PhaseFailed || stored.Status.Reason != ReasonCreateFailed {
+		t.Fatalf("the store holds %+v (present %v), want the sandbox Failed with CreateFailed", stored.Status, ok)
+	}
+	if got := st.mutations(id); !slices.Contains(got, MutationFailed) {
+		t.Fatalf("the journal holds %v for the sandbox, without %s", got, MutationFailed)
 	}
 }
