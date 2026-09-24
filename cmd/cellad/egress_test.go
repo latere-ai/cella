@@ -23,6 +23,7 @@ import (
 
 	"latere.ai/x/pkg/authkit/issuertest"
 
+	"latere.ai/x/cella/client"
 	"latere.ai/x/cella/egress"
 	"latere.ai/x/cella/internal/auth"
 	"latere.ai/x/cella/internal/egressd"
@@ -304,7 +305,12 @@ func TestTheEgressSubcommandRefusesABadConfiguration(t *testing.T) {
 // plane is a running control plane with a caller's bearer and the signing key
 // its environment keys are minted with.
 type plane struct {
+	// url is the control plane's public URL, what a role's CELLA_URL
+	// carries: the listener's origin and, where the plane is served under
+	// one, its base. origin and base are the two halves.
 	url    string
+	origin string
+	base   string
 	bearer string
 	signer *auth.Signer
 	stop   func() int
@@ -351,7 +357,7 @@ func startPlaneWith(t *testing.T, proxyAddr, reverseAddr string, extra map[strin
 	go func() { codec <- run(ctx, nil, env(e), &out, &errOut) }()
 	p := &plane{
 		bearer:  issuer.Mint(issuertest.Claims{Sub: "alice", Aud: issuertest.StringList{"cella"}}),
-		signer:  newSigner(t, key, "https://control.example.com"),
+		signer:  newSigner(t, key, e["CELLA_PUBLIC_URL"]),
 		dataDir: dataDir, out: &out, errOut: &errOut,
 		stop: func() int {
 			cancel()
@@ -367,7 +373,8 @@ func startPlaneWith(t *testing.T, proxyAddr, reverseAddr string, extra map[strin
 	deadline := time.Now().Add(15 * time.Second)
 	for {
 		if m := listening.FindStringSubmatch(out.String()); m != nil {
-			p.url = "http://" + m[1]
+			p.origin, p.base = "http://"+m[1], e["CELLA_BASE_PATH"]
+			p.url = p.origin + p.base
 			return p
 		}
 		select {
@@ -506,9 +513,11 @@ func (p *plane) get(t *testing.T, path string) string {
 	return answer
 }
 
+// do is one request under the caller's bearer, to the route the rooted path
+// names under the plane's base.
 func (p *plane) do(t *testing.T, method, path string, body io.Reader) (int, string) {
 	t.Helper()
-	req, err := http.NewRequestWithContext(t.Context(), method, p.url+path, body)
+	req, err := http.NewRequestWithContext(t.Context(), method, p.origin+client.Route(p.base, path), body)
 	if err != nil {
 		t.Fatal(err)
 	}
