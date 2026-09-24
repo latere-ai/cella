@@ -42,6 +42,20 @@ basic=$(printf %s "$auth" | base64 | tr -d '\n')
   nc -w 5 "${door%:*}" "${door##*:}" 2>/dev/null | tr -d '\r'
 `
 
+// askScript opens one CONNECT through the sandbox's own proxy door to the
+// destination in $1, sends nothing through it, and prints the gateway's
+// answer. Closing the write side is what tells the gateway the caller has
+// gone, so a destination the gateway cannot reach is answered 502 at once
+// rather than when the dial gives up.
+const askScript = `door=${HTTPS_PROXY#*://}
+auth=${door%@*}
+door=${door##*@}
+door=${door%/}
+basic=$(printf %s "$auth" | base64 | tr -d '\n')
+{ printf 'CONNECT %s HTTP/1.1\r\nHost: %s\r\nProxy-Authorization: Basic %s\r\n\r\n' "$1" "$1" "$basic"; sleep 3; } |
+  nc -w 10 "${door%:*}" "${door##*:}" 2>/dev/null | head -n 1 | tr -d '\r'
+`
+
 // directScript sends the line in $3 straight to $1:$2, around every door,
 // and prints how many bytes came back.
 const directScript = `{ printf '%s\n' "$3"; sleep 2; } | nc -w 5 "$1" "$2" 2>/dev/null | wc -c | tr -d ' '`
@@ -91,9 +105,11 @@ func TestClusterEgressBoundary(t *testing.T) {
 }
 
 // TestClusterNoLateralMovement: a sandbox reaches no other sandbox's Pod,
-// neither straight from its own network nor through the gateway, whose own
-// egress this stack leaves open, so the second half is the other sandbox's
-// ingress rule alone.
+// neither straight from its own network nor through the gateway. The
+// gateway's own egress is open on this stack and the prober's boundary is
+// `open`, so the gateway admits the destination and dials it, which its 502
+// and the record of the attempt show: what refuses that connection is the
+// other sandbox's ingress rule alone.
 func TestClusterNoLateralMovement(t *testing.T) {
 	url, token := stack(t)
 	client := &http.Client{Timeout: 2 * time.Minute}
@@ -119,10 +135,11 @@ func TestClusterNoLateralMovement(t *testing.T) {
 	if got := execIn(t, client, url, token, prober, "/bin/sh", "-c", directScript, "direct", ip, strconv.Itoa(dialPort), "lateral"); strings.TrimSpace(got) != "0" {
 		t.Fatalf("a sandbox reached another sandbox's Pod at %s and brought back %s bytes", ip, got)
 	}
-	through := execIn(t, client, url, token, prober, "/bin/sh", "-c", connectScript, "connect", net.JoinHostPort(ip, strconv.Itoa(dialPort)), "lateral")
-	if strings.Contains(through, "HTTP/1.1 200") || strings.Contains(through, "lateral") {
-		t.Fatalf("the gateway reached another sandbox's Pod at %s: %q", ip, through)
+	through := execIn(t, client, url, token, prober, "/bin/sh", "-c", askScript, "ask", net.JoinHostPort(ip, strconv.Itoa(dialPort)))
+	if !strings.HasPrefix(through, "HTTP/1.1 502") {
+		t.Fatalf("the gateway answered %q for another sandbox's Pod at %s, want 502: admitted and not reached", through, ip)
 	}
+	awaitEgressRecord(t, client, url, token, prober, ip, "passthrough")
 }
 
 // TestClusterMeshReachability: a parent and the child spawned with its token
