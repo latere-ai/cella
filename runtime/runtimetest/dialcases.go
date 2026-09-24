@@ -93,11 +93,14 @@ func freePorts(t tb, n int) []int {
 			_ = l.Close()
 		}
 	}()
+	var config net.ListenConfig
 	for range n {
-		l, err := net.Listen("tcp", "127.0.0.1:0")
+		l, err := config.Listen(context.Background(), "tcp", "127.0.0.1:0")
 		must(t, err, "asking the host for a free port")
 		listeners = append(listeners, l)
-		ports = append(ports, l.Addr().(*net.TCPAddr).Port)
+		addr, ok := l.Addr().(*net.TCPAddr)
+		need(t, ok, "the host answered a TCP listen with the address %v", l.Addr())
+		ports = append(ports, addr.Port)
 	}
 	return ports
 }
