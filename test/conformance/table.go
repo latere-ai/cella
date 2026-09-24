@@ -15,7 +15,7 @@ type row struct {
 // answers a code with another status or another sentence fails the case that
 // provoked it.
 var errorTable = map[string]row{
-	"unsupported_media_type": {415, "Send the manifest as JSON or YAML."},
+	"unsupported_media_type": {415, "Send the body in a media type this route accepts."},
 	"not_acceptable":         {406, "This endpoint answers in JSON or YAML."},
 	"multi_document":         {400, "Send one manifest per request."},
 	"unsupported_version":    {400, "This server serves cella.latere.ai/v1beta1."},

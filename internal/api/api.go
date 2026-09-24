@@ -851,7 +851,7 @@ func errorEnvelope(err error, requestID string) (int, httpjson.Error) {
 		message = "The request body is larger than this server accepts."
 	case "unsupported_media_type":
 		status = 415
-		message = "Send the manifest as JSON or YAML."
+		message = "Send the body in a media type this route accepts."
 	case "not_acceptable":
 		status = 406
 		message = "This endpoint answers in JSON or YAML."
