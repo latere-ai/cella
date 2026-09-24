@@ -9,10 +9,12 @@ package cella_test
 import (
 	"bufio"
 	"context"
+	"errors"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"io/fs"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
@@ -84,6 +86,66 @@ func TestRootPackagesDialNothing(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// clientReaches is the client package's whole build list beyond the standard
+// library: the contract types it decodes into, and the error envelope of
+// design 008 with the one package that envelope reaches.
+var clientReaches = []string{
+	module + "/manifest/v1",
+	"latere.ai/x/pkg/httpjson",
+	"github.com/google/uuid",
+}
+
+// TestTheClientPackageReachesNoServer holds the exported client to what a
+// program outside this module can carry: importing it to speak /v1 builds the
+// client and the contract types, and no store, driver, policy or package
+// under internal/ arrives with it. The list is exact, so an entry the package
+// stopped reaching fails as well and the list shrinks with it.
+func TestTheClientPackageReachesNoServer(t *testing.T) {
+	goBin, err := exec.LookPath("go")
+	if err != nil {
+		t.Fatalf("the Go toolchain is not on PATH, so the build list cannot be read: %v", err)
+	}
+	got := deps(t, goBin, "./client")
+	for _, dep := range got {
+		switch {
+		case dep == module+"/client", slices.Contains(clientReaches, dep):
+		case strings.HasPrefix(dep, module+"/internal/"):
+			t.Errorf("the client reaches %s: a consumer outside this module cannot build a package under internal/", dep)
+		default:
+			t.Errorf("the client reaches %s, which is neither the standard library nor %v", dep, clientReaches)
+		}
+	}
+	for _, want := range clientReaches {
+		if !slices.Contains(got, want) {
+			t.Errorf("the client no longer reaches %s; drop it from the list", want)
+		}
+	}
+}
+
+// TestTheCommandSpeaksThroughTheExportedClient: the command and every other
+// caller in this module use the one client a consumer outside it imports, so
+// there is no second copy under internal/ for the two to drift apart in.
+func TestTheCommandSpeaksThroughTheExportedClient(t *testing.T) {
+	goBin, err := exec.LookPath("go")
+	if err != nil {
+		t.Fatalf("the Go toolchain is not on PATH, so the build list cannot be read: %v", err)
+	}
+	for _, pkg := range []string{"./cmd/cella", "./test/conformance"} {
+		got := deps(t, goBin, pkg)
+		if !slices.Contains(got, module+"/client") {
+			t.Errorf("%s does not reach the exported client", pkg)
+		}
+		for _, dep := range got {
+			if strings.HasSuffix(dep, "/cellaclient") {
+				t.Errorf("%s reaches %s, a client beside the exported one", pkg, dep)
+			}
+		}
+	}
+	if _, err := os.Stat(filepath.Join("internal", "cellaclient")); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("internal/cellaclient is still in the tree: %v", err)
 	}
 }
 
