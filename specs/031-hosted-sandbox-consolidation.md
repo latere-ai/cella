@@ -7,7 +7,7 @@ depends_on:
 affects: [runtime/, controller/, egress/, manifest/, internal/, specs/]
 effort: large
 created: 2026-09-19
-updated: 2026-09-19
+updated: 2026-09-24
 author: changkun
 ---
 
@@ -274,7 +274,8 @@ spec's slices touches `sandbox/deploy` or the live cluster.
 
 Dependent legs outside both repositories, not carried by any slice
 here: `topos/sandbox/cella` and `latere-cli`'s cella commands switch to
-`/v1` on the platform's origin; `managed-agents` drops its hosted
+`/v1` on the platform's origin, through the exported client
+`latere.ai/x/cella/client` ([[069-client-package]]); `managed-agents` drops its hosted
 client; the sandbox user docs move under the platform's `docs/cella`.
 
 ## Not in this spec

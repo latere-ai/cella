@@ -1,6 +1,6 @@
 ---
 title: "Client package: the typed /v1 client exported as latere.ai/x/cella/client, with the calls a consumer outside this module needs"
-status: in-progress
+status: complete
 track: core
 depends_on:
   - specs/008-api.md
@@ -181,18 +181,72 @@ apply`, which is the command's decision and not the client's.
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| The package's build list is the standard library, `manifest/v1`, `pkg/httpjson` and `uuid`, and nothing under `internal/` | `TestTheClientPackageReachesNoServer` | not built |
-| The command is built on the exported package, and no copy stays under `internal/` | `TestTheCommandSpeaksThroughTheExportedClient` | not built |
-| `New` refuses a missing or non-http address; a nil token source sends no bearer; a token source is asked per request with the request's context; a token file is read per request | `TestABadConfigurationIsRefusedAtOnce`, `TestATokenSourceIsAskedPerRequestWithTheCallersContext`, `TestTheTokenFileIsReadPerRequest` | not built |
-| `Environment` reads the address and the bearer in design 011's order, with the projected token last | `TestTheAddressAndTheBearerComeFromTheEnvironment` | not built |
-| A caller's `http.Client` carries the calls and the sockets; one that cannot hand over an upgrade is refused with a sentence | `TestTheCallersHTTPClientCarriesEveryCall` | not built |
-| The package's transport reads no proxy variable and trusts the authorities the caller named | `TestTheClientIgnoresProxyVariables`, `TestTLSUsesTheSystemRootsAndTheAuthorityTheCallerNamed` | not built |
-| A refusal decodes to the envelope's code, message, details, request id and paths | `TestARefusalDecodesToTheEnvelope` | not built |
-| A manifest travels in its own syntax, by create or by apply under a name | `TestAManifestTravelsInItsOwnSyntax` | not built |
-| Every object call reaches its route, start and stop and the three kinds' reads and deletes included | `TestTheRoutesOfEveryObjectCall` | not built |
-| Environments list, read, apply and delete, and a key is minted and revoked | `TestEnvironmentsAndTheirKeys` | not built |
-| A page of events is one object's history with its cursor | `TestAnEventPageIsOneObjectsHistory` | not built |
-| A followed feed hands over each record with its bytes, passes over heartbeats, ends at the close, and returns the error line as an `Error` | `TestAFollowedFeedReadsRecordsAsTheyArrive`, `TestAFeedThatEndsOnAFailureIsTheError` | not built |
-| The documented use compiles | `ExampleNew`, `ExampleClient_FollowEvents` | not built |
-| Against a running node, the exported client applies a YAML manifest, execs, moves a file, follows the sandbox's records and deletes it | `TestTheExportedClientDrivesARunningNode` | not built |
+| The package's build list is the standard library, `manifest/v1`, `pkg/httpjson` and `uuid`, and nothing under `internal/` | `TestTheClientPackageReachesNoServer` | built |
+| The command is built on the exported package, and no copy stays under `internal/` | `TestTheCommandSpeaksThroughTheExportedClient` | built |
+| `New` refuses a missing or non-http address; a nil token source sends no bearer; a token source is asked per request with the request's context; a token file is read per request | `TestABadConfigurationIsRefusedAtOnce`, `TestATokenSourceIsAskedPerRequestWithTheCallersContext`, `TestTheTokenFileIsReadPerRequest` | built |
+| `Environment` reads the address and the bearer in design 011's order, with the projected token last | `TestTheAddressAndTheBearerComeFromTheEnvironment`, and on the command `TestTheFlagsOverrideTheVariables` | built |
+| A caller's `http.Client` carries the calls and the sockets; one that cannot hand over an upgrade is refused with a sentence | `TestTheCallersHTTPClientCarriesEveryCall` | built |
+| The package's transport reads no proxy variable and trusts the authorities the caller named | `TestTheClientIgnoresProxyVariables`, `TestTLSUsesTheSystemRootsAndTheAuthorityTheCallerNamed`, and on the command `TestTheCertificateAuthorityFlagIsReadBeforeACall` | built |
+| A refusal decodes to the envelope's code, message, details, request id and paths | `TestARefusalDecodesToTheEnvelope` | built |
+| A manifest travels in its own syntax, by create or by apply under a name | `TestAManifestTravelsInItsOwnSyntax` | built |
+| Every object call reaches its route, start and stop and the three kinds' reads and deletes included | `TestTheRoutesOfEveryObjectCall` | built |
+| Environments list, read, apply and delete, and a key is minted and revoked | `TestEnvironmentsAndTheirKeys` | built |
+| A page of events is one object's history with its cursor | `TestAnEventPageIsOneObjectsHistory` | built |
+| A followed feed hands over each record with its bytes, passes over heartbeats, ends at the close, and returns the error line as an `Error` | `TestAFollowedFeedReadsRecordsAsTheyArrive`, `TestAFeedThatEndsOnAFailureIsTheError` | built |
+| The documented use compiles | `ExampleNew`, `ExampleEnvironment`, `ExampleClient_FollowEvents` | built |
+| Against a running node, the exported client applies a YAML manifest, execs, moves a file, follows the sandbox's records and deletes it | `TestTheExportedClientDrivesARunningNode` | built |
 | No Latere coordinate in the package or its page | `TestNoLatereCoordinatesInReleasedArtifacts` | built: the check walks every tracked file |
+
+## Outcome
+
+The client is `latere.ai/x/cella/client`, and it is the only one: the
+command, the conformance suite and the running-node test import it, and
+nothing stays under `internal/`.
+
+| Piece | Where |
+|---|---|
+| `Config`, `New`, the package's transport, the request plumbing | `client/client.go` |
+| `TokenSource`, `StaticToken`, `TokenFile`, `TokenFunc`, `NoBearer`, `Environment` | `client/token.go` |
+| `Manifest`, `JSON`, `YAML`, `Encode` | `client/manifest.go` |
+| Sandbox, secret and environment calls, the key mint and revocation | `client/sandboxes.go`, `client/secrets.go`, `client/environments.go` |
+| `Events`, `FollowEvents`, `EventStream` | `client/events.go` |
+| The socket upgrade through the caller's `http.Client` | `client/websocket.go` |
+| `Error.Details` | `client/errors.go`, `client/session.go` |
+| The command's reading of flags over variables, `--ca`, and the kinds it serves | `internal/cellacli/cli.go`, `internal/cellacli/objects.go` |
+| The build-list tests | `arch_test.go` |
+| The page for consumers | `docs/client.md` |
+
+Coverage on the cover gate: `client` 95.0%, `internal/cellacli` 90.6%,
+`cmd/cellad` 90.7%. The end-to-end that ran is
+`TestTheExportedClientDrivesARunningNode`: `cellad serve` on loopback,
+a YAML manifest applied under a name, a label selection, a waited exec
+and a socket session, a file written and read back, the sandbox's
+records followed from the newest one read to the delete record and the
+end of the feed, and an environment key minted and revoked.
+
+### What diverges from the specs above
+
+| Spec | What it said | What was built | Why |
+|---|---|---|---|
+| [[011-agent-client]] | the package is internal, because an importer building on the packages has no HTTP hop and a platform generates its own client from the OpenAPI document | the package is exported as `client` | two consumers outside this module speak `/v1` over HTTP, and a generated client would be a second implementation of the sockets and the envelope; 011 is amended |
+| [[011-agent-client]] | the WebSocket is dialed by the package over `net/http`'s hijack, with the one deadline on the handshake | the upgrade is a request through the caller's `http.Client`, whose transport hands back the connection; the package's own transport keeps the 10 second first-byte deadline | a caller's proxy, dialer, trust and instrumentation reach the sockets as well as the calls, and the separate dial and TLS setup are gone |
+| [[011-agent-client]] | the client reads `CELLA_URL` and the token variables | `New` reads nothing; `Environment` reads them when called, and the command calls it | a library caller's configuration is what it wrote |
+| this spec | `Config` as listed | `RootCAs` replaces the certificate authority file, and the command reads `--ca` into a pool | a library caller holds a pool, not a path |
+| this spec | the calls as listed | `After(seq)` builds a follow cursor from a record's sequence | a page's `Next` points the other way, and a cursor from `Seq` is the one a follower resumes from |
+
+### Unspecified work
+
+A reference that needs escaping in a URL path was escaped twice: the
+client put the escaped segment into the URL's decoded path, which
+escaped it again, so the server looked up a name with `%20` in it rather
+than one with a space. The path is now set in both forms. The row of
+`TestTheRoutesOfEveryObjectCall` that sends such a reference fails
+without the fix.
+
+### What this leaves open
+
+| Open | Why |
+|---|---|
+| The display calls, the framed exec stream, `If-Match` on an apply | no consumer named them; each is one method over a route that exists |
+| The environment key listing | its route lands with another slice; the call follows it |
+| `cella apply` of a YAML file, `cella get environments`, `cella events` | the command's decisions, not the client's; the client already has each call |

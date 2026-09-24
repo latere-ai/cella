@@ -1,6 +1,6 @@
 ---
 title: "Reaper end-to-end observation: the native reaper test reads the stop from the act record instead of polling for a state the next rule ends"
-status: in-progress
+status: complete
 track: core
 depends_on:
   - specs/005-lifecycle-controller.md
@@ -100,3 +100,33 @@ sandbox journaled by mutation), so a late probe still sees them.
 |---|---|---|
 | An idle sandbox is stopped with reason `AutoStop` and then deleted with reason `AutoDelete`, read from the act record after the record is gone, and the driver holds nothing afterwards | `TestReaperEndToEndOverNative` | built |
 | The same run, under the load that reproduced the failure, passes every time | `TestReaperEndToEndOverNative` at `-count=200 -cpu 1,2` under `-race -cover` beside two CPU-saturating processes | built: 400 of 400 runs passed |
+
+## Outcome
+
+The defect was the test's, not the reaper's: its first wait polled for a
+state that lasts one `autoDelete` and that no later probe can see once
+the next rule has ended the record. The test now reads that state from
+the act record and waits only for the terminal one.
+
+| Piece | Where |
+|---|---|
+| The end-to-end test reading the stop and the delete from the act record | `controller/reaper_test.go` |
+| `all` and `types` on the test's act recorder | `controller/spawn_test.go` |
+
+No production code changed. `controller` is at 92.5% on the cover
+gate. The run that proves the fix is the one that reproduced the
+failure: the instrumented binary beside two processes that each keep 72
+threads busy, `-count=200 -cpu 1,2`, passed 400 of 400, each run between
+0.11s and 0.30s. The same load had stopped the old test at its 30 second
+bound within one `-count=100` run.
+
+### What diverges from the specs above
+
+None. [[005-lifecycle-controller]]'s reaper row now names this test as
+the end-to-end proof of the `autoStop` and `autoDelete` rules.
+
+### What this leaves open
+
+| Open | Why |
+|---|---|
+| A driver phase change, such as a main process that exits, producing a record | the observation loop's, as [[042-events]] recorded; this test's sandbox has no main process |

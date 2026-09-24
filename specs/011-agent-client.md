@@ -12,10 +12,10 @@ depends_on:
   - specs/020-scheduling-and-sets.md
   - specs/021-data-plane-workers.md
   - specs/023-computer-use-operations.md
-affects: [cmd/cella/, internal/cellacli/, internal/cellaclient/, skills/cella/, docs/cli.md, internal/config/]
+affects: [cmd/cella/, internal/cellacli/, client/, skills/cella/, docs/cli.md, docs/client.md, internal/config/]
 effort: medium
 created: 2026-09-12
-updated: 2026-09-23
+updated: 2026-09-24
 author: changkun
 ---
 
@@ -51,7 +51,7 @@ control plane ([[004-runtime-contract]]) and the token is at
 `/run/cella/token`, the default of `--token-file` when `CELLA_TOKEN` is
 unset; the file is read per request, never once at start, because the
 controller re-projects it before expiry and a `logs -f` must outlive
-one token. `internal/cellaclient` builds its transport with `Proxy: nil`
+one token. The client package builds its own transport with `Proxy: nil`
 and reads no proxy or trust-store variable, so a `cella` run inside a
 sandbox reaches `CELLA_URL` directly through the driver's rule rather
 than through the egress gateway, whose allow list has no entry for the
@@ -170,18 +170,25 @@ them, so a newer server is usable from an older client.
 
 ### The client package
 
-`internal/cellaclient` is the typed client the command uses, one method
-per route. Streams are typed: `Exec` returns `{Stdin io.WriteCloser,
-Stdout, Stderr io.Reader, Resize(cols, rows int) error, Wait(ctx)
-(int, error)}`, `Attach` the same with one output, `Dial` an
-`io.ReadWriteCloser`, `Screen` a channel of frames. The WebSocket
-client is the package's own RFC 6455 implementation over `net/http`'s
-hijack, so `./cmd/cella` reaches the standard library and
-`latere.ai/x/pkg/httpjson`'s envelope and nothing else, recorded as a
-`depcheck` row in `.lateregate.yaml` ([[002-repository-scaffold]]). The
-package is internal because an importer building on the packages has
-no HTTP hop; a platform with its own client generates one from the
-OpenAPI document.
+`latere.ai/x/cella/client` is the typed client the command uses, one
+method per route, and the one a program outside this module imports
+([[069-client-package]]). It is exported because two consumers outside
+this module speak `/v1` over HTTP, and a client generated from the
+OpenAPI document would be a second implementation of the sockets and the
+error envelope. Its configuration is the caller's: a base address, a
+token source asked once per request, and optionally an `http.Client`
+that carries every call. `client.Environment` is this spec's reading of
+`CELLA_URL`, `CELLA_TOKEN`, `CELLA_TOKEN_FILE` and the projected token,
+which the command calls with a getenv its flags override. Streams are
+typed: `ExecSession` and `AttachSession` return a `Session` with `Read`,
+`Write`, `Resize(cols, rows int)` and `Wait() (int, error)`, `Dial` an
+`io.ReadWriteCloser`. The WebSocket framing is the package's own RFC
+6455 implementation, and the upgrade travels through the same
+`http.Client` as every other call, so `./cmd/cella` reaches the standard
+library and `latere.ai/x/pkg/httpjson`'s envelope and nothing else,
+recorded as a `depcheck` row in `.lateregate.yaml`
+([[002-repository-scaffold]]), and a caller's transport reaches the
+sockets as well as the calls.
 
 ### The skill and the document
 
@@ -219,3 +226,4 @@ semantics ([[008-api]]).
 | The skill's frontmatter is under 256 bytes and an agent given only the skill completes the agent scenario | `TestTheSkillIsSmallEnoughToBeResident`, conformance case `case011AgentScenario` | built: the bound passes, as `TestTheSkillIsSmallEnoughToBeResident` ([[050-cella-command]]); the scenario the skill teaches, apply, exec, copy a file out, get and delete through the built `cella`, passes as conformance case `case011AgentScenario` against `cellad serve` in `TestTheConformanceSuiteHoldsAgainstThisServer` on every push ([[059-conformance-closure]]). The case runs the scenario; whether a model given the skill alone chooses those commands is not a property a test of this tree holds |
 | `docs/cli.md` equals the binary's `--help` for every command | `TestTheDocumentCarriesTheCommandsHelp` | passing, as `TestTheDocumentCarriesTheCommandsHelp` ([[050-cella-command]]) |
 | `./cmd/cella`'s build list is the standard library plus `pkg/httpjson` | the `depcheck` gate | passing: the list is the standard library, `latere.ai/x/pkg/httpjson` and the `github.com/google/uuid` it reaches ([[050-cella-command]]) |
+| A program outside this module imports the client, whose build list holds none of the server, and drives a running node with it | `TestTheClientPackageReachesNoServer`, `TestTheExportedClientDrivesARunningNode` | passing: the package is `latere.ai/x/cella/client`, its build list is held exact, and the command reaches it and no copy ([[069-client-package]]) |
