@@ -59,6 +59,7 @@ var table = []struct {
 	{"admission_unavailable", 503, 1},
 	{"authorizer_unavailable", 503, 1},
 	{"driver_unavailable", 503, 1},
+	{"egress_gateway_unavailable", 503, 1},
 	{"upstream_unavailable", 502, 1},
 	// A code this client has never seen exits by its status class, which is
 	// what makes the scheme survive a newer server.

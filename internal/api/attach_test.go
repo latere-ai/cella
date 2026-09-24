@@ -26,7 +26,7 @@ func (f *fixture) sandbox(name string) v1.Sandbox {
 	f.t.Helper()
 	body := strings.Replace(createBody, `"name":"work"`, `"name":"`+name+`"`, 1)
 	var obj v1.Sandbox
-	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes", f.alice, body, 201), &obj); err != nil {
+	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice, body, 201), &obj); err != nil {
 		f.t.Fatal(err)
 	}
 	return obj

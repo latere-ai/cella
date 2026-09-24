@@ -176,7 +176,7 @@ func desk(t *testing.T, configure func(*deskDriver)) (*fixture, *deskDriver, str
 		return d
 	})
 	var obj v1.Sandbox
-	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes", f.alice, desktopBody, 201), &obj); err != nil {
+	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice, desktopBody, 201), &obj); err != nil {
 		t.Fatal(err)
 	}
 	return f, d, obj.Status.ID
@@ -263,7 +263,7 @@ func TestDisplayCapabilityGate(t *testing.T) {
 	// An environment with no screen refuses the manifest field at resolve,
 	// where the refusal names it, and every route at the gate.
 	plain := setup(t, nil)
-	refused := plain.request("POST", "/v1/sandboxes", plain.alice, desktopBody, 422)
+	refused := plain.request("POST", "/v1/sandboxes?wait=1", plain.alice, desktopBody, 422)
 	if !strings.Contains(string(refused), "capability_unsupported") {
 		t.Fatalf("a desktop on an environment with none: %s", refused)
 	}
@@ -441,7 +441,7 @@ func TestDisplayOperationsAreRecorded(t *testing.T) {
 		return d
 	})
 	var obj v1.Sandbox
-	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes", f.alice, desktopBody, 201), &obj); err != nil {
+	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice, desktopBody, 201), &obj); err != nil {
 		t.Fatal(err)
 	}
 	base := "/v1/sandboxes/" + obj.Status.ID
@@ -523,7 +523,7 @@ func TestScreenSessionEndsWithTheClient(t *testing.T) {
 	})
 	t.Cleanup(func() { close(d.hold) })
 	var obj v1.Sandbox
-	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes", f.alice, desktopBody, 201), &obj); err != nil {
+	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice, desktopBody, 201), &obj); err != nil {
 		t.Fatal(err)
 	}
 	conn := f.openScreen("/v1/sandboxes/"+obj.Status.ID+"/screen", f.alice)

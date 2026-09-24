@@ -53,7 +53,7 @@ func tree(t *testing.T, f *fixture, budget, depth int) (v1.Sandbox, string) {
 	signer := signing(t, f, rows{})
 	body := rootBody("planner", budget, depth)
 	var parent v1.Sandbox
-	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes", f.alice, body, 201), &parent); err != nil {
+	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice, body, 201), &parent); err != nil {
 		t.Fatal(err)
 	}
 	token, err := signer.MintWorkload(auth.Workload{
@@ -74,7 +74,7 @@ func TestSpawnOverTheAPI(t *testing.T) {
 	parent, token := tree(t, f, 2, 1)
 
 	var first v1.Sandbox
-	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes", token, spawnBody("worker", 0, 0), 201), &first); err != nil {
+	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", token, spawnBody("worker", 0, 0), 201), &first); err != nil {
 		t.Fatal(err)
 	}
 	if first.Status.Parent != parent.Status.ID || first.Status.Root != parent.Status.ID {
@@ -83,10 +83,10 @@ func TestSpawnOverTheAPI(t *testing.T) {
 	if first.Status.Owner != parent.Status.Owner {
 		t.Fatalf("the child's owner is %q, want the root's %q", first.Status.Owner, parent.Status.Owner)
 	}
-	f.request("POST", "/v1/sandboxes", token, spawnBody("second", 0, 0), 201)
+	f.request("POST", "/v1/sandboxes?wait=1", token, spawnBody("second", 0, 0), 201)
 
 	// The third exceeds the budget the root declared.
-	body := f.request("POST", "/v1/sandboxes", token, spawnBody("third", 0, 0), 422)
+	body := f.request("POST", "/v1/sandboxes?wait=1", token, spawnBody("third", 0, 0), 422)
 	if !strings.Contains(string(body), "spawn_budget_exhausted") {
 		t.Fatalf("the third spawn answered %s", body)
 	}
@@ -99,7 +99,7 @@ func TestClaimsAreTheGrant(t *testing.T) {
 	f := setup(t, allowAll{})
 	signer := signing(t, f, rows{})
 	var parent v1.Sandbox
-	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes", f.alice, rootBody("planner", 1, 1), 201), &parent); err != nil {
+	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice, rootBody("planner", 1, 1), 201), &parent); err != nil {
 		t.Fatal(err)
 	}
 	forged, err := signer.MintWorkload(auth.Workload{
@@ -109,8 +109,8 @@ func TestClaimsAreTheGrant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.request("POST", "/v1/sandboxes", forged.Value, spawnBody("one", 0, 0), 201)
-	body := f.request("POST", "/v1/sandboxes", forged.Value, spawnBody("two", 0, 0), 422)
+	f.request("POST", "/v1/sandboxes?wait=1", forged.Value, spawnBody("one", 0, 0), 201)
+	body := f.request("POST", "/v1/sandboxes?wait=1", forged.Value, spawnBody("two", 0, 0), 422)
 	if !strings.Contains(string(body), "spawn_budget_exhausted") {
 		t.Fatalf("a forged budget raised the ledger: %s", body)
 	}
@@ -127,7 +127,7 @@ func TestSpawnBoundaryOverTheAPI(t *testing.T) {
 	// gateway to be enforced and the rule is the same containment.
 	wider := `{"apiVersion":"` + v1.APIVersion + `","kind":"Sandbox","metadata":{"name":"wider"},` +
 		`"spec":{"resources":{"cpu":"8"}}}`
-	body := f.request("POST", "/v1/sandboxes", token, wider, 422)
+	body := f.request("POST", "/v1/sandboxes?wait=1", token, wider, 422)
 	var refusal struct {
 		Error struct {
 			Code    string `json:"code"`
@@ -149,7 +149,7 @@ func TestSpawnBoundaryOverTheAPI(t *testing.T) {
 	// The child that does fit gets a depth of zero, so its own token creates
 	// nothing: the grandchild is refused at the depth.
 	var first v1.Sandbox
-	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes", token, spawnBody("worker", 0, 0), 201), &first); err != nil {
+	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", token, spawnBody("worker", 0, 0), 201), &first); err != nil {
 		t.Fatal(err)
 	}
 	signer := signing(t, f, rows{})
@@ -157,7 +157,7 @@ func TestSpawnBoundaryOverTheAPI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body = f.request("POST", "/v1/sandboxes", childToken.Value, spawnBody("grandchild", 0, 0), 422)
+	body = f.request("POST", "/v1/sandboxes?wait=1", childToken.Value, spawnBody("grandchild", 0, 0), 422)
 	if err = json.Unmarshal(body, &refusal); err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +174,7 @@ func TestOnlyWorkloadsSpawn(t *testing.T) {
 	body := `{"apiVersion":"` + v1.APIVersion + `","kind":"Sandbox","metadata":{"name":"claimed"},` +
 		`"spec":{},"status":{"parent":"` + parent.Status.ID + `","root":"` + parent.Status.ID + `"}}`
 	var obj v1.Sandbox
-	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes", f.alice, body, 201), &obj); err != nil {
+	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice, body, 201), &obj); err != nil {
 		t.Fatal(err)
 	}
 	if obj.Status.Parent != "" || obj.Status.Root != obj.Status.ID {
@@ -195,9 +195,9 @@ func TestOnlyWorkloadsSpawn(t *testing.T) {
 func TestRootQuery(t *testing.T) {
 	f := setup(t, allowAll{})
 	parent, token := tree(t, f, 2, 1)
-	f.request("POST", "/v1/sandboxes", token, spawnBody("worker", 0, 0), 201)
+	f.request("POST", "/v1/sandboxes?wait=1", token, spawnBody("worker", 0, 0), 201)
 	// A sandbox of another tree is not in this one's page.
-	f.request("POST", "/v1/sandboxes", f.alice, spawnBody("stranger", 0, 0), 201)
+	f.request("POST", "/v1/sandboxes?wait=1", f.alice, spawnBody("stranger", 0, 0), 201)
 
 	var page struct {
 		Items []v1.Sandbox `json:"items"`
@@ -228,7 +228,7 @@ func TestCascadeOverTheAPI(t *testing.T) {
 	f := setup(t, allowAll{})
 	parent, token := tree(t, f, 2, 1)
 	var first v1.Sandbox
-	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes", token, spawnBody("worker", 0, 0), 201), &first); err != nil {
+	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", token, spawnBody("worker", 0, 0), 201), &first); err != nil {
 		t.Fatal(err)
 	}
 	f.request("DELETE", "/v1/sandboxes/"+parent.Status.ID, f.alice, "", 202)

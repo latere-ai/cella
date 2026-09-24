@@ -75,6 +75,7 @@ func setupEnvironmentsWith(t *testing.T, own func(runtime.Driver) runtime.Driver
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = c.Close() })
+	runScheduler(t, c)
 	if policy == nil {
 		policy = &auth.OwnerPolicy{DefaultEnvironment: "default", Admins: []string{issuer.URL() + "|admin"}}
 	}
@@ -280,7 +281,7 @@ func TestEnvironmentRefusals(t *testing.T) {
 	// be left with nothing driving them.
 	created := `{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox",` +
 		`"metadata":{"name":"there"},"spec":{"environment":"eu-gpu"}}`
-	k.send(http.MethodPost, "/v1/sandboxes", k.alice, created, nil, http.StatusCreated)
+	k.send(http.MethodPost, "/v1/sandboxes?wait=1", k.alice, created, nil, http.StatusCreated)
 	k.send(http.MethodDelete, "/v1/environments/eu-gpu", k.alice, "", nil, http.StatusConflict)
 
 	// Every field rule of spec 021's table is the resolver's, and the route
@@ -327,13 +328,13 @@ func TestEnvironmentAuthorization(t *testing.T) {
 	// Every subject may use the environment a manifest that names none gets,
 	// and none but an administrator may use another.
 	onTheDefault := `{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox","metadata":{"name":"here"},"spec":{}}`
-	k.send(http.MethodPost, "/v1/sandboxes", k.bob, onTheDefault, nil, http.StatusCreated)
+	k.send(http.MethodPost, "/v1/sandboxes?wait=1", k.bob, onTheDefault, nil, http.StatusCreated)
 	// A deny on environment.use is not_found: a caller learns no more about
 	// an environment it may not use than that there is none (spec 021).
 	elsewhere := `{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox",` +
 		`"metadata":{"name":"there"},"spec":{"environment":"eu-gpu"}}`
-	k.send(http.MethodPost, "/v1/sandboxes", k.bob, elsewhere, nil, http.StatusNotFound)
-	k.send(http.MethodPost, "/v1/sandboxes", k.alice, elsewhere, nil, http.StatusCreated)
+	k.send(http.MethodPost, "/v1/sandboxes?wait=1", k.bob, elsewhere, nil, http.StatusNotFound)
+	k.send(http.MethodPost, "/v1/sandboxes?wait=1", k.alice, elsewhere, nil, http.StatusCreated)
 }
 
 // TestASandboxNamesAnEnvironmentThisServerDoesNotHold: the resolver answers
@@ -343,7 +344,7 @@ func TestASandboxNamesAnEnvironmentThisServerDoesNotHold(t *testing.T) {
 	k := setupEnvironments(t)
 	body := `{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox",` +
 		`"metadata":{"name":"nowhere"},"spec":{"environment":"us-east"}}`
-	answer, _ := k.send(http.MethodPost, "/v1/sandboxes", k.alice, body, nil, http.StatusNotFound)
+	answer, _ := k.send(http.MethodPost, "/v1/sandboxes?wait=1", k.alice, body, nil, http.StatusNotFound)
 	if !strings.Contains(string(answer), "spec.environment") {
 		t.Errorf("the refusal does not name the field: %s", answer)
 	}
@@ -379,7 +380,7 @@ func TestTheGatesReadTheSandboxsOwnEnvironment(t *testing.T) {
 		t.Helper()
 		body := `{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox","metadata":{"name":"` + name + `"},` +
 			`"spec":{"environment":"` + environment + `"}}`
-		out, _ := k.send(http.MethodPost, "/v1/sandboxes", k.alice, body, nil, http.StatusCreated)
+		out, _ := k.send(http.MethodPost, "/v1/sandboxes?wait=1", k.alice, body, nil, http.StatusCreated)
 		var obj v1.Sandbox
 		if err := json.Unmarshal(out, &obj); err != nil {
 			t.Fatal(err)
@@ -446,6 +447,9 @@ func TestSchedulingOverHTTP(t *testing.T) {
 		t.Helper()
 		body := `{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox","metadata":{"name":"` + name + `"},` +
 			`"spec":{"environment":"` + environment + `","command":["sh","-c","sleep 60"]` + scheduling + `}}`
+		// The answer is read as the create gives it, without the hold: a
+		// placed sandbox holds its capacity from its create on, so the next
+		// create is judged against it whether or not it runs yet.
 		out, _ := k.send(http.MethodPost, "/v1/sandboxes", k.alice, body, nil, status)
 		var obj v1.Sandbox
 		if status == http.StatusCreated {

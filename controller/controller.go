@@ -219,6 +219,10 @@ type Controller struct {
 	// in flight with the controller's lock released. An act that would reach
 	// the driver for one of them waits for the settle instead of crossing it.
 	realizing map[string]struct{}
+	// changed is closed and replaced at every write of a sandbox, so a caller
+	// that holds a create's answer waits on the write that moves it rather
+	// than reading it on a timer.
+	changed chan struct{}
 }
 
 // Open restores desired state from an operator-supplied store, or the provisional
@@ -275,7 +279,7 @@ func Open(ctx context.Context, o Options) (*Controller, error) {
 		scheduleInterval: cmp.Or(o.ScheduleInterval, DefaultScheduleInterval), wake: make(chan struct{}, 1), maxPreemptions: cmp.Or(o.MaxPreemptions, DefaultMaxPreemptions),
 		newDriver: o.NewDriver, releaseDriver: o.ReleaseDriver, registrations: o.Registrations,
 		offline: o.EnvironmentOffline, answered: map[string]time.Time{},
-		realizing: map[string]struct{}{},
+		realizing: map[string]struct{}{}, changed: make(chan struct{}),
 	}
 	// A store of design 010 takes one conditional write per object and
 	// carries the journal; one that is also durable is what lets the lost
@@ -389,7 +393,24 @@ func (c *Controller) persist(ctx context.Context, obj v1.Sandbox, mutation strin
 	if held && releases(previous, &obj) {
 		c.wakeScheduler()
 	}
+	c.notify()
 	return nil
+}
+
+// notify tells every caller waiting on Changed that a sandbox was written. It
+// runs under the controller's lock.
+func (c *Controller) notify() {
+	close(c.changed)
+	c.changed = make(chan struct{})
+}
+
+// Changed returns a channel closed at the next write of any sandbox. A caller
+// takes it before it reads the object it waits on, so a write between the two
+// is not missed.
+func (c *Controller) Changed() <-chan struct{} {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.changed
 }
 
 // forget drops one object and records the mutation that ended it.
@@ -414,6 +435,7 @@ func (c *Controller) forget(ctx context.Context, id, mutation string) error {
 	if held && releases(previous, nil) {
 		c.wakeScheduler()
 	}
+	c.notify()
 	return nil
 }
 

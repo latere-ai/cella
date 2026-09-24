@@ -53,16 +53,16 @@ func TestWrittenPathsCarryThePublicPath(t *testing.T) {
 	t.Run("a sandbox", func(t *testing.T) {
 		f := setup(t, nil)
 		underPublicPath(t, f)
-		status, location := f.located(http.MethodPost, "/v1/sandboxes", createBody)
+		status, location := f.located(http.MethodPost, "/v1/sandboxes?wait=1", createBody)
 		if status != http.StatusCreated || !strings.HasPrefix(location, publicPath+"/sandboxes/sbx_") {
 			t.Errorf("the create answered %d with the Location %q", status, location)
 		}
-		status, location = f.located(http.MethodPut, "/v1/sandboxes/named", strings.Replace(createBody, `"work"`, `"named"`, 1))
+		status, location = f.located(http.MethodPut, "/v1/sandboxes/named?wait=1", strings.Replace(createBody, `"work"`, `"named"`, 1))
 		if status != http.StatusCreated || !strings.HasPrefix(location, publicPath+"/sandboxes/sbx_") {
 			t.Errorf("the apply answered %d with the Location %q", status, location)
 		}
 		rooted := setup(t, nil)
-		if status, location = rooted.located(http.MethodPost, "/v1/sandboxes", createBody); !strings.HasPrefix(location, "/v1/sandboxes/sbx_") {
+		if status, location = rooted.located(http.MethodPost, "/v1/sandboxes?wait=1", createBody); !strings.HasPrefix(location, "/v1/sandboxes/sbx_") {
 			t.Errorf("with no public path the create answered %d with the Location %q", status, location)
 		}
 	})
@@ -118,7 +118,7 @@ func TestWrittenPathsCarryThePublicPath(t *testing.T) {
 		f := setup(t, nil)
 		underPublicPath(t, f)
 		var obj v1.Sandbox
-		if err := json.Unmarshal(f.request(http.MethodPost, "/v1/sandboxes", f.alice, createBody, http.StatusCreated), &obj); err != nil {
+		if err := json.Unmarshal(f.request(http.MethodPost, "/v1/sandboxes?wait=1", f.alice, createBody, http.StatusCreated), &obj); err != nil {
 			t.Fatal(err)
 		}
 		raw := string(f.request(http.MethodGet, "/v1/sandboxes/"+obj.Status.ID, f.alice, "", http.StatusOK))

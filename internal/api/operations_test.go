@@ -60,7 +60,7 @@ func (f *fixture) upload(path, token, media string, body []byte, status int) []b
 func TestWorkspaceFilesEndToEnd(t *testing.T) {
 	f := setup(t, nil)
 	var obj v1.Sandbox
-	_ = json.Unmarshal(f.request("POST", "/v1/sandboxes", f.alice, createBody, 201), &obj)
+	_ = json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice, createBody, 201), &obj)
 	base := "/v1/sandboxes/" + obj.Status.ID
 	f.upload(base+"/files?dest=/workspace", f.alice, "application/x-tar", archive(t, "input.txt", "hello"), 204)
 	f.request("POST", base+"/stop", f.alice, "", 200)
@@ -108,7 +108,7 @@ func TestWorkspaceFilesEndToEnd(t *testing.T) {
 func TestLogSelectorValidation(t *testing.T) {
 	f := setup(t, nil)
 	var obj v1.Sandbox
-	_ = json.Unmarshal(f.request("POST", "/v1/sandboxes", f.alice, createBody, 201), &obj)
+	_ = json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice, createBody, 201), &obj)
 	base := "/v1/sandboxes/" + obj.Status.ID + "/logs"
 	for _, q := range []string{"?follow=bad", "?since=bad", "?tail=-1", "?tail=100001", "?tail=bad"} {
 		f.request("GET", base+q, f.alice, "", 400)
@@ -141,7 +141,7 @@ func TestMainProcessLogsEndToEnd(t *testing.T) {
 	f := setup(t, nil)
 	body := `{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox","metadata":{"name":"app"},"spec":{"command":["sh"],"args":["-c","printf 'first\\n'; sleep 0.1; printf 'second\\n'"]}}`
 	var obj v1.Sandbox
-	_ = json.Unmarshal(f.request("POST", "/v1/sandboxes", f.alice, body, 201), &obj)
+	_ = json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice, body, 201), &obj)
 	base := "/v1/sandboxes/" + obj.Status.ID
 	logs := f.request("GET", base+"/logs?follow=1", f.alice, "", 200)
 	if string(logs) != "first\nsecond\n" {
@@ -167,18 +167,18 @@ func TestMainProcessLogsEndToEnd(t *testing.T) {
 func TestDefaultManifestBodyLimit(t *testing.T) {
 	f := setup(t, nil)
 	padded := createBody + strings.Repeat(" ", 65537-len(createBody))
-	f.request("POST", "/v1/sandboxes", f.alice, padded, 413)
+	f.request("POST", "/v1/sandboxes?wait=1", f.alice, padded, 413)
 	if len(f.c.List()) != 0 {
 		t.Fatal("oversized body created workspace")
 	}
-	f.request("POST", "/v1/sandboxes", f.alice, padded[:65536], 201)
+	f.request("POST", "/v1/sandboxes?wait=1", f.alice, padded[:65536], 201)
 }
 
 func TestFollowLogsFlushesBeforeProcessExits(t *testing.T) {
 	f := setup(t, nil)
 	body := `{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox","metadata":{"name":"stream"},"spec":{"command":["sh","-c","printf ready; sleep 30"]}}`
 	var obj v1.Sandbox
-	_ = json.Unmarshal(f.request("POST", "/v1/sandboxes", f.alice, body, 201), &obj)
+	_ = json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice, body, 201), &obj)
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, f.url+"/v1/sandboxes/"+obj.Status.ID+"/logs?follow=1", nil)
@@ -241,7 +241,7 @@ func TestActivityIsStamped(t *testing.T) {
 		t.Helper()
 		var obj v1.Sandbox
 		body := strings.Replace(createBody, `"name":"work"`, `"name":"`+name+`"`, 1)
-		if err := json.Unmarshal(f.request("POST", "/v1/sandboxes", f.alice, body, 201), &obj); err != nil {
+		if err := json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice, body, 201), &obj); err != nil {
 			t.Fatal(err)
 		}
 		return obj

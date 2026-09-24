@@ -395,7 +395,7 @@ func waitUntil(t *testing.T, done func() bool, what string) {
 // under the same decision that serves the sandbox itself.
 func TestTheRecordsRouteIsTheSandboxOwnersToRead(t *testing.T) {
 	f := setup(t, nil)
-	body := f.request("POST", "/v1/sandboxes", f.alice, createBody, 201)
+	body := f.request("POST", "/v1/sandboxes?wait=1", f.alice, createBody, 201)
 	var obj v1.Sandbox
 	if err := json.Unmarshal(body, &obj); err != nil {
 		t.Fatal(err)

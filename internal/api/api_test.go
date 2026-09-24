@@ -84,6 +84,7 @@ func setupDriver(t *testing.T, policy authz.Authorizer, wrap func(runtime.Driver
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = c.Close() })
+	runScheduler(t, c)
 	if policy == nil {
 		policy = &auth.OwnerPolicy{DefaultEnvironment: "default"}
 	}
@@ -99,6 +100,18 @@ func setupDriver(t *testing.T, policy authz.Authorizer, wrap func(runtime.Driver
 	t.Cleanup(server.Close)
 	return &fixture{t: t, url: server.URL, issuerURL: issuer.URL(), alice: issuer.Mint(issuertest.Claims{Sub: "alice"}), bob: issuer.Mint(issuertest.Claims{Sub: "bob"}), h: h, c: c, metrics: rec}
 }
+
+// runScheduler runs the controller's scheduler loop for the life of the
+// test, which is what finishes every create the API answers: cellad runs the
+// same loop beside the handler. It stops before the controller closes.
+func runScheduler(t *testing.T, c *controller.Controller) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { defer close(done); c.RunScheduler(ctx) }()
+	t.Cleanup(func() { cancel(); <-done })
+}
+
 func (f *fixture) request(method, path, token, body string, status int) []byte {
 	f.t.Helper()
 	req, err := http.NewRequest(method, f.url+path, strings.NewReader(body))
@@ -132,7 +145,7 @@ const spawningBody = `{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox","
 
 func TestNativeHTTPWorkspaceEndToEnd(t *testing.T) {
 	f := setup(t, nil)
-	body := f.request("POST", "/v1/sandboxes", f.alice, createBody, 201)
+	body := f.request("POST", "/v1/sandboxes?wait=1", f.alice, createBody, 201)
 	var obj v1.Sandbox
 	if err := json.Unmarshal(body, &obj); err != nil {
 		t.Fatal(err)
@@ -167,14 +180,14 @@ func TestNativeHTTPWorkspaceEndToEnd(t *testing.T) {
 	}
 	f.request("DELETE", base, f.alice, "", 202)
 	f.request("GET", base, f.alice, "", 404)
-	f.request("POST", "/v1/sandboxes", f.alice, createBody, 201)
+	f.request("POST", "/v1/sandboxes?wait=1", f.alice, createBody, 201)
 }
 func TestAuthorizationCannotCrossOwners(t *testing.T) {
 	f := setup(t, nil)
-	f.request("POST", "/v1/sandboxes", "", createBody, 401)
-	f.request("POST", "/v1/sandboxes", "invalid", createBody, 401)
+	f.request("POST", "/v1/sandboxes?wait=1", "", createBody, 401)
+	f.request("POST", "/v1/sandboxes?wait=1", "invalid", createBody, 401)
 	var obj v1.Sandbox
-	_ = json.Unmarshal(f.request("POST", "/v1/sandboxes", f.alice, createBody, 201), &obj)
+	_ = json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice, createBody, 201), &obj)
 	base := "/v1/sandboxes/" + obj.Status.ID
 	for _, tc := range []struct{ method, path, body string }{{"GET", base, ""}, {"DELETE", base, ""}, {"POST", base + "/stop", ""}, {"POST", base + "/start", ""}, {"POST", base + "/exec?wait=1", `{"command":["true"]}`}} {
 		f.request(tc.method, tc.path, f.bob, tc.body, 403)
@@ -188,7 +201,7 @@ func TestAuthorizationCannotCrossOwners(t *testing.T) {
 	if b := f.request("GET", "/v1/sandboxes?label=team%3Da&phase=Running&environment=default", f.alice, "", 200); !bytes.Contains(b, []byte(obj.Status.ID)) {
 		t.Fatal(string(b))
 	}
-	f.request("POST", "/v1/sandboxes", f.alice, createBody, 409)
+	f.request("POST", "/v1/sandboxes?wait=1", f.alice, createBody, 409)
 }
 
 type decisionFunc func(context.Context, authz.Request) (authz.Decision, error)
@@ -204,7 +217,7 @@ func TestPolicyFiltersAndFailures(t *testing.T) {
 		return authz.Decision{Allow: true}, nil
 	})
 	f := setup(t, policy)
-	f.request("POST", "/v1/sandboxes", f.alice, createBody, 201)
+	f.request("POST", "/v1/sandboxes?wait=1", f.alice, createBody, 201)
 	if b := f.request("GET", "/v1/sandboxes?label=team%3Da", f.alice, "", 200); !bytes.Contains(b, []byte(`"items":[]`)) {
 		t.Fatal(string(b))
 	}
@@ -225,7 +238,7 @@ func TestPolicyFiltersAndFailures(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := setup(t, tc.policy)
-			f.request("POST", "/v1/sandboxes", f.alice, createBody, tc.status)
+			f.request("POST", "/v1/sandboxes?wait=1", f.alice, createBody, tc.status)
 			if len(f.c.List()) != 0 {
 				t.Fatal("denial created a runtime")
 			}
@@ -234,21 +247,21 @@ func TestPolicyFiltersAndFailures(t *testing.T) {
 	f = setup(t, decisionFunc(func(context.Context, authz.Request) (authz.Decision, error) {
 		return authz.Decision{Allow: true, Limits: json.RawMessage(`{"max_sandboxes":1}`)}, nil
 	}))
-	f.request("POST", "/v1/sandboxes", f.alice, createBody, 201)
-	f.request("POST", "/v1/sandboxes", f.alice, strings.Replace(createBody, `"work"`, `"other"`, 1), 422)
+	f.request("POST", "/v1/sandboxes?wait=1", f.alice, createBody, 201)
+	f.request("POST", "/v1/sandboxes?wait=1", f.alice, strings.Replace(createBody, `"work"`, `"other"`, 1), 422)
 }
 func TestRequestValidation(t *testing.T) {
 	f := setup(t, nil)
 	var obj v1.Sandbox
-	_ = json.Unmarshal(f.request("POST", "/v1/sandboxes", f.alice, createBody, 201), &obj)
+	_ = json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice, createBody, 201), &obj)
 	base := "/v1/sandboxes/" + obj.Status.ID
 	for _, tc := range []struct {
 		method, path, body string
 		status             int
 	}{
-		{"POST", "/v1/sandboxes", "{", 400}, {"POST", "/v1/sandboxes", strings.Replace(createBody, `"spec":{}`, `"spec":{"scheduling":{"mode":"direct"}}`, 1), 400},
-		{"POST", "/v1/sandboxes", strings.Replace(createBody, `"spec":{}`, `"spec":{"image":"ubuntu"}`, 1), 422},
-		{"POST", "/v1/sandboxes", strings.Repeat("x", (1<<20)+1), 413}, {"GET", "/v1/sandboxes?limit=0", "", 400}, {"GET", "/v1/sandboxes?limit=201", "", 400}, {"GET", "/v1/sandboxes?limit=no", "", 400}, {"GET", "/v1/sandboxes?label=invalid", "", 400},
+		{"POST", "/v1/sandboxes?wait=1", "{", 400}, {"POST", "/v1/sandboxes?wait=1", strings.Replace(createBody, `"spec":{}`, `"spec":{"scheduling":{"mode":"direct"}}`, 1), 400},
+		{"POST", "/v1/sandboxes?wait=1", strings.Replace(createBody, `"spec":{}`, `"spec":{"image":"ubuntu"}`, 1), 422},
+		{"POST", "/v1/sandboxes?wait=1", strings.Repeat("x", (1<<20)+1), 413}, {"GET", "/v1/sandboxes?limit=0", "", 400}, {"GET", "/v1/sandboxes?limit=201", "", 400}, {"GET", "/v1/sandboxes?limit=no", "", 400}, {"GET", "/v1/sandboxes?label=invalid", "", 400},
 		{"POST", base + "/unknown", "", 404}, {"POST", base + "/exec", "{", 400}, {"POST", base + "/exec?wait=1", "{", 400}, {"POST", base + "/exec?wait=1", `{} {}`, 400}, {"POST", base + "/exec?wait=1", `{"unknown":1}`, 400}, {"POST", base + "/exec?wait=1", `{"command":[]}`, 400}, {"POST", base + "/exec?wait=1", `{"command":["true"],"timeout":"bad"}`, 400}, {"POST", base + "/exec?wait=1", `{"command":["true"],"timeout":"0s"}`, 400}, {"POST", base + "/exec?wait=1", `{"command":["true"],"timeout":"2h"}`, 400}, {"POST", base + "/exec?wait=1", strings.Repeat("x", (1<<20)+1), 413},
 	} {
 		f.request(tc.method, tc.path, f.alice, tc.body, tc.status)
@@ -258,7 +271,7 @@ func TestRequestValidation(t *testing.T) {
 			t.Fatal(string(b))
 		}
 	}
-	f.request("POST", "/v1/sandboxes", f.alice, strings.Replace(createBody, `"work"`, `"second"`, 1), 201)
+	f.request("POST", "/v1/sandboxes?wait=1", f.alice, strings.Replace(createBody, `"work"`, `"second"`, 1), 201)
 	var page struct {
 		Items []v1.Sandbox `json:"items"`
 		Next  string       `json:"next"`
@@ -294,7 +307,7 @@ func TestLifecycleAuthorizesUnchangedProposal(t *testing.T) {
 		return authz.Decision{Allow: true}, nil
 	}))
 	var obj v1.Sandbox
-	_ = json.Unmarshal(f.request("POST", "/v1/sandboxes", f.alice, createBody, 201), &obj)
+	_ = json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice, createBody, 201), &obj)
 	f.request("POST", "/v1/sandboxes/"+obj.Status.ID+"/stop", f.alice, "", 200)
 	f.request("POST", "/v1/sandboxes/"+obj.Status.ID+"/start", f.alice, "", 200)
 	if seen != 2 {
@@ -347,7 +360,7 @@ func TestExecStreamFailureCannotReportSuccess(t *testing.T) {
 	execution := newBrokenExec()
 	f := setupDriver(t, nil, func(d runtime.Driver) runtime.Driver { return failingExecDriver{d, execution} })
 	var obj v1.Sandbox
-	_ = json.Unmarshal(f.request("POST", "/v1/sandboxes", f.alice, createBody, 201), &obj)
+	_ = json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice, createBody, 201), &obj)
 	b := f.request("POST", "/v1/sandboxes/"+obj.Status.ID+"/exec?wait=1", f.alice, `{"command":["true"]}`, 503)
 	if !bytes.Contains(b, []byte("driver_unavailable")) {
 		t.Fatal(string(b))
@@ -387,10 +400,10 @@ func TestEnvironmentKeysCannotAccessSandboxRoutes(t *testing.T) {
 		t.Fatal(err)
 	}
 	var obj v1.Sandbox
-	_ = json.Unmarshal(f.request("POST", "/v1/sandboxes", f.alice, createBody, 201), &obj)
+	_ = json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice, createBody, 201), &obj)
 	base := "/v1/sandboxes/" + obj.Status.ID
 	before := decisions.Load()
-	for _, tc := range []struct{ method, path, body string }{{"POST", "/v1/sandboxes", strings.Replace(createBody, `"work"`, `"worker-owned"`, 1)}, {"GET", "/v1/sandboxes", ""}, {"GET", base, ""}, {"DELETE", base, ""}, {"POST", base + "/stop", ""}, {"POST", base + "/start", ""}, {"POST", base + "/exec?wait=1", `{"command":["true"]}`}, {"GET", base + "/files", ""}, {"PUT", base + "/files?dest=/workspace", ""}, {"GET", base + "/logs", ""}} {
+	for _, tc := range []struct{ method, path, body string }{{"POST", "/v1/sandboxes?wait=1", strings.Replace(createBody, `"work"`, `"worker-owned"`, 1)}, {"GET", "/v1/sandboxes", ""}, {"GET", base, ""}, {"DELETE", base, ""}, {"POST", base + "/stop", ""}, {"POST", base + "/start", ""}, {"POST", base + "/exec?wait=1", `{"command":["true"]}`}, {"GET", base + "/files", ""}, {"PUT", base + "/files?dest=/workspace", ""}, {"GET", base + "/logs", ""}} {
 		f.request(tc.method, tc.path, token.Value, tc.body, 403)
 	}
 	if decisions.Load() != before || len(f.c.List()) != 1 {
@@ -404,7 +417,7 @@ const sizedBody = `{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox","met
 func TestNativeManifestFieldsEndToEnd(t *testing.T) {
 	f := setup(t, nil)
 	var created v1.Sandbox
-	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes", f.alice, sizedBody, 201), &created); err != nil {
+	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice, sizedBody, 201), &created); err != nil {
 		t.Fatal(err)
 	}
 	if created.Spec.User != "1000" || created.Spec.Resources.CPU != "500m" || created.Spec.Resources.Memory != "2Gi" || created.Spec.Resources.Disk != "10Gi" {
@@ -435,7 +448,7 @@ func TestNativeManifestFieldsEndToEnd(t *testing.T) {
 	// the object, the API's own name generator not being wired yet.
 	var unnamed v1.Sandbox
 	body := `{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox","spec":{"resources":{"cpu":"1"}}}`
-	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes", f.alice, body, 201), &unnamed); err != nil {
+	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice, body, 201), &unnamed); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.HasPrefix(unnamed.Metadata.Name, "sandbox-") || unnamed.Spec.Resources.CPU != "1" {
@@ -455,7 +468,7 @@ func TestNativeManifestFieldsEndToEnd(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var body struct{ Error struct{ Code string } }
-			if err := json.Unmarshal(f.request("POST", "/v1/sandboxes", f.alice, tc.body, tc.status), &body); err != nil {
+			if err := json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice, tc.body, tc.status), &body); err != nil {
 				t.Fatal(err)
 			}
 			if body.Error.Code != tc.code {

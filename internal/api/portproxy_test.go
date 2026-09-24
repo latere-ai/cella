@@ -142,7 +142,7 @@ func proxyFixture(t *testing.T) (*fixture, *recordingDialer, v1.Sandbox, *httpte
 		return d
 	})
 	var obj v1.Sandbox
-	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes", f.alice, webBody("site"), 201), &obj); err != nil {
+	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice, webBody("site"), 201), &obj); err != nil {
 		t.Fatal(err)
 	}
 	server := upstream(t, obj.Status.ID)
@@ -306,7 +306,7 @@ func TestPortProxyGates(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f := setupDriver(t, nil, tc.wrap)
 			var obj v1.Sandbox
-			if err := json.Unmarshal(f.request("POST", "/v1/sandboxes", f.alice, webBody("site"), 201), &obj); err != nil {
+			if err := json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice, webBody("site"), 201), &obj); err != nil {
 				t.Fatal(err)
 			}
 			body := f.request("GET", "/v1/sandboxes/"+obj.Status.ID+"/ports/web/", f.alice, "", 422)
@@ -333,7 +333,7 @@ func TestPortProxyIsConfined(t *testing.T) {
 	})
 	create := func(name string) v1.Sandbox {
 		var obj v1.Sandbox
-		if err := json.Unmarshal(f.request("POST", "/v1/sandboxes", f.alice, webBody(name), 201), &obj); err != nil {
+		if err := json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice, webBody(name), 201), &obj); err != nil {
 			t.Fatal(err)
 		}
 		return obj

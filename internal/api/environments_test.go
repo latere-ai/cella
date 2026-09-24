@@ -86,6 +86,7 @@ func setupKeyed(t *testing.T, policy authz.Authorizer) *keyed {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = c.Close() })
+	runScheduler(t, c)
 	keys, err := auth.NewEnvironmentKeys(signer, revocations, store.NewKeyRegistry(journal), time.Hour)
 	if err != nil {
 		t.Fatal(err)

@@ -357,7 +357,7 @@ func TestFollowedFeedOfEveryObject(t *testing.T) {
 	f := setupRecorded(t)
 	mine := f.sandbox("mine")
 	var theirs v1.Sandbox
-	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes", f.bob, createBody, 201), &theirs); err != nil {
+	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.bob, createBody, 201), &theirs); err != nil {
 		t.Fatal(err)
 	}
 	alice, bob := f.follow("follow=1", f.alice), f.follow("follow=1", f.bob)

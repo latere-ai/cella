@@ -144,7 +144,7 @@ func TestNotAcceptableIsRefusedBeforeTheAct(t *testing.T) {
 	if envelope.Error.Code != "not_acceptable" || envelope.Error.Message != "This endpoint answers in JSON or YAML." {
 		t.Fatalf("the refusal is %+v", envelope.Error)
 	}
-	status, _, body = f.answer("POST", "/v1/sandboxes", f.alice, "application/xml", createBody)
+	status, _, body = f.answer("POST", "/v1/sandboxes?wait=1", f.alice, "application/xml", createBody)
 	if status != http.StatusNotAcceptable {
 		t.Fatalf("a create answered %d: %s", status, body)
 	}

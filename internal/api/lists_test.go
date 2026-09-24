@@ -199,7 +199,7 @@ func TestListsRefuseWhatTheyCannotApply(t *testing.T) {
 		return authz.Decision{Allow: true}, nil
 	})
 	k := setupEnvironmentsWith(t, func(d runtime.Driver) runtime.Driver { return d }, policy)
-	k.send(http.MethodPost, "/v1/sandboxes", k.alice, createBody, nil, http.StatusCreated)
+	k.send(http.MethodPost, "/v1/sandboxes?wait=1", k.alice, createBody, nil, http.StatusCreated)
 	for _, path := range []string{"/v1/environments", "/v1/sandboxes"} {
 		failRead, rateLimited = true, false
 		body, _ := k.send(http.MethodGet, path, k.alice, "", nil, http.StatusServiceUnavailable)

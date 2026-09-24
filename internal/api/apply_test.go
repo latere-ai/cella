@@ -28,7 +28,7 @@ func TestApplyByName(t *testing.T) {
 
 	// A free name creates, and the object is the path's and not the body's.
 	var created v1.Sandbox
-	if err := json.Unmarshal(f.request("PUT", "/v1/sandboxes/first", f.alice, named("first"), 201), &created); err != nil {
+	if err := json.Unmarshal(f.request("PUT", "/v1/sandboxes/first?wait=1", f.alice, named("first"), 201), &created); err != nil {
 		t.Fatal(err)
 	}
 	if created.Metadata.Name != "first" || created.Status.ID == "" {
@@ -39,7 +39,7 @@ func TestApplyByName(t *testing.T) {
 	// be applied under several names.
 	nameless := strings.Replace(createBody, `"name":"work",`, "", 1)
 	var second v1.Sandbox
-	if err := json.Unmarshal(f.request("PUT", "/v1/sandboxes/second", f.alice, nameless, 201), &second); err != nil {
+	if err := json.Unmarshal(f.request("PUT", "/v1/sandboxes/second?wait=1", f.alice, nameless, 201), &second); err != nil {
 		t.Fatal(err)
 	}
 	if second.Metadata.Name != "second" {
@@ -48,7 +48,7 @@ func TestApplyByName(t *testing.T) {
 
 	// A body naming another object is refused at the field, and nothing is
 	// created under either name.
-	body := f.request("PUT", "/v1/sandboxes/third", f.alice, named("elsewhere"), 400)
+	body := f.request("PUT", "/v1/sandboxes/third?wait=1", f.alice, named("elsewhere"), 400)
 	var envelope struct {
 		Error struct {
 			Code    string         `json:"code"`
@@ -72,7 +72,7 @@ func TestApplyByName(t *testing.T) {
 	// specification the second apply resolved.
 	updated := strings.Replace(named("first"), `"labels":{"team":"a"}`, `"labels":{"team":"b"}`, 1)
 	var applied v1.Sandbox
-	if err := json.Unmarshal(f.request("PUT", "/v1/sandboxes/first", f.alice, updated, 200), &applied); err != nil {
+	if err := json.Unmarshal(f.request("PUT", "/v1/sandboxes/first?wait=1", f.alice, updated, 200), &applied); err != nil {
 		t.Fatal(err)
 	}
 	if applied.Status.ID != created.Status.ID {
@@ -92,7 +92,7 @@ func TestApplyByName(t *testing.T) {
 	// An update that changes a field design 003 marks immutable is refused
 	// with the field named, and the object is unchanged.
 	frozen := strings.Replace(named("first"), `"spec":{}`, `"spec":{"mesh":{"enabled":true}}`, 1)
-	f.request("PUT", "/v1/sandboxes/first", f.alice, frozen, 409)
+	f.request("PUT", "/v1/sandboxes/first?wait=1", f.alice, frozen, 409)
 	if err := json.Unmarshal(f.request("GET", "/v1/sandboxes/first", f.alice, "", 200), &read); err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func TestApplyByName(t *testing.T) {
 	// The name is the caller's own namespace, so the same name applied by
 	// another subject is that subject's own object.
 	var bobs v1.Sandbox
-	if err := json.Unmarshal(f.request("PUT", "/v1/sandboxes/first", f.bob, named("first"), 201), &bobs); err != nil {
+	if err := json.Unmarshal(f.request("PUT", "/v1/sandboxes/first?wait=1", f.bob, named("first"), 201), &bobs); err != nil {
 		t.Fatal(err)
 	}
 	if bobs.Status.ID == created.Status.ID {
@@ -126,7 +126,7 @@ func TestApplyRefusals(t *testing.T) {
 		{"a field the schema does not know", strings.Replace(named("one"), `"spec":{}`, `"spec":{"nonesuch":1}`, 1), 400, "unknown_field"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			body := f.request("PUT", "/v1/sandboxes/one", f.alice, tc.body, tc.status)
+			body := f.request("PUT", "/v1/sandboxes/one?wait=1", f.alice, tc.body, tc.status)
 			if !strings.Contains(string(body), tc.code) {
 				t.Fatalf("the refusal is %q, want %s", body, tc.code)
 			}

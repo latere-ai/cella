@@ -96,6 +96,7 @@ func setupRecordedWith(t *testing.T, o recordedOptions) *recorded {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = c.Close() })
+	runScheduler(t, c)
 	options := Options{
 		Controller: c, Verifier: verifier,
 		Authorizer: auth.NewAuthorizer(&auth.OwnerPolicy{DefaultEnvironment: "default"}),
@@ -148,7 +149,7 @@ func TestOperationsAreRecorded(t *testing.T) {
 	var obj struct {
 		Status struct{ ID string } `json:"status"`
 	}
-	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes", f.alice, createBody, 201), &obj); err != nil {
+	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice, createBody, 201), &obj); err != nil {
 		t.Fatal(err)
 	}
 	base := "/v1/sandboxes/" + obj.Status.ID
@@ -218,7 +219,7 @@ func TestNoContentInOperationRecords(t *testing.T) {
 	var obj struct {
 		Status struct{ ID string } `json:"status"`
 	}
-	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes", f.alice, created, 201), &obj); err != nil {
+	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice, created, 201), &obj); err != nil {
 		t.Fatalf("%v; body was %s", err, created)
 	}
 	base := "/v1/sandboxes/" + obj.Status.ID
@@ -252,7 +253,7 @@ func TestRecordsAreOffWithoutAnEmitter(t *testing.T) {
 	var obj struct {
 		Status struct{ ID string } `json:"status"`
 	}
-	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes", f.alice, createBody, 201), &obj); err != nil {
+	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice, createBody, 201), &obj); err != nil {
 		t.Fatal(err)
 	}
 	f.request("POST", "/v1/sandboxes/"+obj.Status.ID+"/exec?wait=1", f.alice, `{"command":["true"]}`, 200)

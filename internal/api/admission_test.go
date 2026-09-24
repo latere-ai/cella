@@ -33,7 +33,7 @@ func TestCreatePassesTheCallerToAdmission(t *testing.T) {
 		return &out, []string{"The policy had something to say."}, nil
 	})
 	var obj v1.Sandbox
-	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes", f.alice, createBody, 201), &obj); err != nil {
+	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice, createBody, 201), &obj); err != nil {
 		t.Fatal(err)
 	}
 	if seen.Action != "create" || seen.Existing != nil || seen.Workload != nil {
@@ -83,7 +83,7 @@ func TestAdmissionRefusalAndOutageAreTheirOwnAnswers(t *testing.T) {
 			admitting(f, func(context.Context, *v1.Sandbox, manifest.AdmitRequest) (*v1.Sandbox, []string, error) {
 				return nil, nil, tc.err
 			})
-			body := f.request("POST", "/v1/sandboxes", f.alice, createBody, tc.status)
+			body := f.request("POST", "/v1/sandboxes?wait=1", f.alice, createBody, tc.status)
 			var envelope struct {
 				Error struct {
 					Code    string         `json:"code"`
@@ -125,7 +125,7 @@ func TestAdmissionMutationIsWhatTheCallerReadsBack(t *testing.T) {
 		return &out, nil, nil
 	})
 	var obj v1.Sandbox
-	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes", f.alice, createBody, 201), &obj); err != nil {
+	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice, createBody, 201), &obj); err != nil {
 		t.Fatal(err)
 	}
 	if obj.Metadata.Annotations["example.org/tier"] != "warm" || obj.Spec.Lifecycle.TTL != "1h" {
@@ -149,7 +149,7 @@ func TestAdmissionSeesAWorkload(t *testing.T) {
 	var mine v1.Sandbox
 	// The parent declares a budget, because an apply by a workload is a
 	// spawn and a sandbox with no budget creates nothing (design 022).
-	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes", f.alice, spawningBody, 201), &mine); err != nil {
+	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice, spawningBody, 201), &mine); err != nil {
 		t.Fatal(err)
 	}
 	token, err := signer.MintWorkload(auth.Workload{Sandbox: mine.Status.ID, Environment: "default"})
@@ -163,7 +163,7 @@ func TestAdmissionSeesAWorkload(t *testing.T) {
 		return &out, nil, nil
 	})
 	child := strings.Replace(createBody, `"work"`, `"child"`, 1)
-	f.request("POST", "/v1/sandboxes", token.Value, child, 201)
+	f.request("POST", "/v1/sandboxes?wait=1", token.Value, child, 201)
 	if !seen.Actor.Workload || seen.Workload == nil || seen.Workload.ID != mine.Status.ID {
 		t.Fatalf("request = %+v, workload = %+v", seen.Actor, seen.Workload)
 	}
@@ -180,7 +180,7 @@ func TestAdmissionSeesAWorkload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.request("POST", "/v1/sandboxes", gone.Value, strings.Replace(createBody, `"work"`, `"orphan"`, 1), 404)
+	f.request("POST", "/v1/sandboxes?wait=1", gone.Value, strings.Replace(createBody, `"work"`, `"orphan"`, 1), 404)
 }
 
 // allowAll answers every question yes, for a case about what reaches the
@@ -200,7 +200,7 @@ func TestDefaultImageReachesTheResolver(t *testing.T) {
 	// The native environment runs no image, so the default is not applied
 	// and the create still passes.
 	var obj v1.Sandbox
-	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes", f.alice, createBody, 201), &obj); err != nil {
+	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice, createBody, 201), &obj); err != nil {
 		t.Fatal(err)
 	}
 	if obj.Spec.Image != "" {
@@ -212,7 +212,7 @@ func TestDefaultImageReachesTheResolver(t *testing.T) {
 		out.Spec.Image = "registry.example/base:1"
 		return &out, nil, nil
 	})
-	body := f.request("POST", "/v1/sandboxes", f.alice, strings.Replace(createBody, `"work"`, `"imaged"`, 1), 422)
+	body := f.request("POST", "/v1/sandboxes?wait=1", f.alice, strings.Replace(createBody, `"work"`, `"imaged"`, 1), 422)
 	if !strings.Contains(string(body), "capability_unsupported") {
 		t.Fatalf("body = %s", body)
 	}
@@ -225,26 +225,26 @@ func TestDefaultImageReachesTheResolver(t *testing.T) {
 func TestCountCeilingCountsEveryDesiredSandbox(t *testing.T) {
 	f := setup(t, limit(2))
 	var first, second v1.Sandbox
-	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes", f.alice, createBody, 201), &first); err != nil {
+	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice, createBody, 201), &first); err != nil {
 		t.Fatal(err)
 	}
-	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes", f.alice,
+	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice,
 		strings.Replace(createBody, `"work"`, `"second"`, 1), 201), &second); err != nil {
 		t.Fatal(err)
 	}
 	third := strings.Replace(createBody, `"work"`, `"third"`, 1)
-	body := f.request("POST", "/v1/sandboxes", f.alice, third, 422)
+	body := f.request("POST", "/v1/sandboxes?wait=1", f.alice, third, 422)
 	if !strings.Contains(string(body), "quota_exceeded") {
 		t.Fatalf("body = %s", body)
 	}
 	// A stopped sandbox holds a workspace and a name, so it counts.
 	f.request("POST", "/v1/sandboxes/"+second.Status.ID+"/stop", f.alice, "", 200)
-	f.request("POST", "/v1/sandboxes", f.alice, third, 422)
+	f.request("POST", "/v1/sandboxes?wait=1", f.alice, third, 422)
 	// A delete frees the slot.
 	f.request("DELETE", "/v1/sandboxes/"+second.Status.ID, f.alice, "", 202)
-	f.request("POST", "/v1/sandboxes", f.alice, third, 201)
+	f.request("POST", "/v1/sandboxes?wait=1", f.alice, third, 201)
 	// Another subject's sandboxes are not this subject's count.
-	f.request("POST", "/v1/sandboxes", f.bob, createBody, 201)
+	f.request("POST", "/v1/sandboxes?wait=1", f.bob, createBody, 201)
 }
 
 // limit is an authorizer that allows everything and grants one ceiling.

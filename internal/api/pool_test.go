@@ -44,6 +44,7 @@ func setupPool(t *testing.T, policy authz.Authorizer) (*fixture, *native.Driver)
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = c.Close() })
+	runScheduler(t, c)
 	if _, err := c.Refill(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -104,13 +105,13 @@ func TestPoolIsBehindTheAuthorizer(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f, d := setupPool(t, tc.policy)
 			if tc.held {
-				f.request(http.MethodPost, "/v1/sandboxes", f.alice, other, http.StatusCreated)
+				f.request(http.MethodPost, "/v1/sandboxes?wait=1", f.alice, other, http.StatusCreated)
 			}
 			before := prewarmed(t, d)
 			if len(before) != 1 {
 				t.Fatalf("the environment keeps %d entries, want one", len(before))
 			}
-			f.request(http.MethodPost, "/v1/sandboxes", f.alice, served, tc.status)
+			f.request(http.MethodPost, "/v1/sandboxes?wait=1", f.alice, served, tc.status)
 			after := prewarmed(t, d)
 			if len(after) != 1 || after[0].ID != before[0].ID || after[0].Owner != "" {
 				t.Fatalf("a refused create touched the entry: %+v, was %+v", after, before)
@@ -128,7 +129,7 @@ func TestPoolIsBehindTheAuthorizer(t *testing.T) {
 	f, d := setupPool(t, nil)
 	entry := prewarmed(t, d)[0]
 	var obj v1.Sandbox
-	if err := json.Unmarshal(f.request(http.MethodPost, "/v1/sandboxes", f.alice, served, http.StatusCreated), &obj); err != nil {
+	if err := json.Unmarshal(f.request(http.MethodPost, "/v1/sandboxes?wait=1", f.alice, served, http.StatusCreated), &obj); err != nil {
 		t.Fatal(err)
 	}
 	if obj.Status.ID != entry.ID {

@@ -64,7 +64,7 @@ func filesFixture(t *testing.T) (*fixture, string) {
 	t.Helper()
 	f := setup(t, nil)
 	var obj v1.Sandbox
-	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes", f.alice, createBody, 201), &obj); err != nil {
+	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice, createBody, 201), &obj); err != nil {
 		t.Fatal(err)
 	}
 	return f, "/v1/sandboxes/" + obj.Status.ID + "/files"
@@ -275,7 +275,7 @@ func (failingBody) Read([]byte) (int, error) { return 0, errors.New("the transfe
 func TestFileContentThatFailsBeforeItsFirstByte(t *testing.T) {
 	f := setupDriver(t, nil, func(d runtime.Driver) runtime.Driver { return brokenOpen{d} })
 	var obj v1.Sandbox
-	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes", f.alice, createBody, 201), &obj); err != nil {
+	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice, createBody, 201), &obj); err != nil {
 		t.Fatal(err)
 	}
 	out := f.expect(503, "GET", "/v1/sandboxes/"+obj.Status.ID+"/files/content?path=/workspace/a.txt", f.alice, "", "")
@@ -339,7 +339,7 @@ func TestFilesCapabilityGate(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f := setupDriver(t, nil, tc.wrap)
 			var obj v1.Sandbox
-			if err := json.Unmarshal(f.request("POST", "/v1/sandboxes", f.alice, createBody, 201), &obj); err != nil {
+			if err := json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice, createBody, 201), &obj); err != nil {
 				t.Fatal(err)
 			}
 			base := "/v1/sandboxes/" + obj.Status.ID + "/files"
@@ -367,7 +367,7 @@ func TestFilesRecords(t *testing.T) {
 	const canary = "a-file-body-nobody-should-see"
 	f := setupRecorded(t)
 	var obj v1.Sandbox
-	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes", f.alice, createBody, 201), &obj); err != nil {
+	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice, createBody, 201), &obj); err != nil {
 		t.Fatal(err)
 	}
 	base := "/v1/sandboxes/" + obj.Status.ID + "/files"
@@ -477,7 +477,7 @@ func TestFilesFollowTheSandboxWorkspace(t *testing.T) {
 	body := `{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox","metadata":{"name":"elsewhere"},` +
 		`"spec":{"image":"registry.example/tools:1","command":["sleep","300"],"workspace":{"path":"` + elsewhereRoot + `"}}}`
 	var obj v1.Sandbox
-	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes", f.alice, body, 201), &obj); err != nil {
+	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice, body, 201), &obj); err != nil {
 		t.Fatal(err)
 	}
 	if obj.Spec.Workspace.Path != elsewhereRoot {

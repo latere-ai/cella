@@ -371,6 +371,11 @@ func (h *handler) apply(w http.ResponseWriter, r *http.Request) {
 // workload to the boundary it was given, and the accepted result becomes
 // desired state.
 func (h *handler) update(w http.ResponseWriter, r *http.Request, existing v1.Sandbox) {
+	wait, timeout, err := createWait(r)
+	if err != nil {
+		respondError(w, err)
+		return
+	}
 	obj, ok := h.applyBody(w, r, existing.Metadata.Name)
 	if !ok {
 		return
@@ -398,6 +403,9 @@ func (h *handler) update(w http.ResponseWriter, r *http.Request, existing v1.San
 		return
 	}
 	stored, err := h.Controller.Update(r.Context(), obj)
+	if err == nil && wait {
+		stored, err = h.awaitStart(r.Context(), stored, timeout)
+	}
 	if err != nil {
 		respondError(w, err)
 		return
@@ -439,6 +447,11 @@ func (h *handler) applyBody(w http.ResponseWriter, r *http.Request, name string)
 // where it named one and empty on the collection, where the body carries it
 // or the server generates one.
 func (h *handler) createNamed(w http.ResponseWriter, r *http.Request, name string) {
+	wait, timeout, err := createWait(r)
+	if err != nil {
+		respondError(w, err)
+		return
+	}
 	obj, ok := h.applyBody(w, r, name)
 	if !ok {
 		return
@@ -493,8 +506,103 @@ func (h *handler) createNamed(w http.ResponseWriter, r *http.Request, name strin
 		respondError(w, err)
 		return
 	}
+	// The create answers once its desired state is written, and the loop
+	// finishes it. A caller that asked for the old answer is held until the
+	// sandbox has started or failed.
+	if wait {
+		if obj, err = h.awaitStart(r.Context(), obj, timeout); err != nil {
+			respondError(w, err)
+			return
+		}
+	}
 	w.Header().Set("Location", h.public("/v1/sandboxes/"+obj.Status.ID))
 	respond(w, http.StatusCreated, obj)
+}
+
+// defaultCreateWait is how long a held create waits when the request names no
+// timeout, which is the bounded exec's default.
+const defaultCreateWait = 10 * time.Minute
+
+// createPoll is how often a held create reads the driver once the sandbox is
+// in the driver's hands, for a driver that reports a phase before Running:
+// nothing writes a driver's own transition until something reads it.
+const createPoll = 250 * time.Millisecond
+
+// createWait is the hold a create or an apply asks for: ?wait=1, bounded by
+// ?timeout=, a duration that is positive and at most an hour, which is the
+// rule of the bounded exec. It is read before anything is written, so a
+// malformed bound refuses the request rather than the answer.
+func createWait(r *http.Request) (bool, time.Duration, error) {
+	q := r.URL.Query()
+	timeout := defaultCreateWait
+	if v := q.Get("timeout"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d <= 0 || d > time.Hour {
+			return false, 0, &manifest.Error{Code: "invalid_field", Detail: "timeout must be positive and at most 1h"}
+		}
+		timeout = d
+	}
+	return q.Get("wait") == "1", timeout, nil
+}
+
+// awaitStart holds a create's answer until the sandbox has left Queued,
+// Pending and Starting, or the bound passes, or the caller hangs up, and
+// answers the sandbox as it then stands. Each write the controller makes
+// wakes it. A sandbox the controller has handed to its driver is also read
+// from the driver each createPoll, since the driver's own move from Pending
+// to Running is written by nobody until a read. A sandbox deleted while the
+// answer is held is not_found.
+func (h *handler) awaitStart(ctx context.Context, obj v1.Sandbox, timeout time.Duration) (v1.Sandbox, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	tick := time.NewTicker(createPoll)
+	defer tick.Stop()
+	for !started(obj) {
+		changed := h.Controller.Changed()
+		cur, err := h.Controller.Get(ctx, obj.Status.ID, obj.Status.Owner)
+		if err != nil {
+			return obj, err
+		}
+		if handedOn(cur) {
+			// A read the driver could not answer says nothing new; the
+			// object as desired state holds it is the answer until one does.
+			if read, err := h.Controller.Refresh(ctx, cur); err == nil {
+				cur = read
+			}
+		}
+		obj = cur
+		if started(obj) {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return obj, nil
+		case <-changed:
+		case <-tick.C:
+		}
+	}
+	return obj, nil
+}
+
+// started reports whether a sandbox has left the phases of a create in
+// flight: waiting in a queue, placed or coming up.
+func started(obj v1.Sandbox) bool {
+	switch obj.Status.Phase {
+	case controller.PhaseQueued, driver.Pending, "Starting":
+		return false
+	}
+	return true
+}
+
+// handedOn reports whether the controller has handed the sandbox to its
+// driver, which is what its Scheduled condition being True says.
+func handedOn(obj v1.Sandbox) bool {
+	for _, cond := range obj.Status.Conditions {
+		if cond.Type == v1.ConditionScheduled {
+			return cond.Status == v1.ConditionTrue
+		}
+	}
+	return false
 }
 
 // execRoute serves POST /v1/sandboxes/{id}/exec. It is its own pattern rather
@@ -829,6 +937,8 @@ func errorEnvelope(err error, requestID string) (int, httpjson.Error) {
 		code = "cursor_expired"
 	case errors.Is(err, events.ErrNoJournal):
 		code = "capability_unsupported"
+	case errors.Is(err, controller.ErrNoGateway):
+		code = "egress_gateway_unavailable"
 	}
 	switch code {
 	case "unauthenticated":
@@ -906,6 +1016,9 @@ func errorEnvelope(err error, requestID string) (int, httpjson.Error) {
 	case "admission_unavailable":
 		status = 503
 		message = "The policy service is unavailable; retry shortly."
+	case "egress_gateway_unavailable":
+		status = 503
+		message = "No gateway is connected to enforce this sandbox's egress boundary; connect one, or open the boundary."
 	case "missing_field":
 		status = 400
 		message = "A required field is missing."

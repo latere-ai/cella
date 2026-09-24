@@ -102,6 +102,7 @@ func setupWithStore(t *testing.T, policy authz.Authorizer, open func(string) (co
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = c.Close() })
+	runScheduler(t, c)
 	if policy == nil {
 		policy = &auth.OwnerPolicy{DefaultEnvironment: "default"}
 	}
@@ -274,7 +275,7 @@ func TestMountingASecret(t *testing.T) {
 	f.request(http.MethodPost, "/v1/secrets", f.alice,
 		secretBody("github", "api.github.com", "ghp_canary"), http.StatusCreated)
 
-	body := f.request(http.MethodPost, "/v1/sandboxes", f.alice,
+	body := f.request(http.MethodPost, "/v1/sandboxes?wait=1", f.alice,
 		`{"apiVersion":"`+v1.APIVersion+`","kind":"Sandbox","metadata":{"name":"work"},`+
 			`"spec":{"command":["/bin/sh","-c","sleep 30"],"secrets":[{"name":"github","env":"GITHUB_TOKEN"}]}}`,
 		http.StatusCreated)
@@ -308,7 +309,7 @@ func TestAMountTheAuthorizerRefusesIsNotFound(t *testing.T) {
 	f := setupSealed(t, refusing(authorizer.ActionSecretMount))
 	f.request(http.MethodPost, "/v1/secrets", f.alice,
 		secretBody("github", "api.github.com", "ghp_canary"), http.StatusCreated)
-	body := f.request(http.MethodPost, "/v1/sandboxes", f.alice,
+	body := f.request(http.MethodPost, "/v1/sandboxes?wait=1", f.alice,
 		`{"apiVersion":"`+v1.APIVersion+`","kind":"Sandbox","metadata":{"name":"work"},`+
 			`"spec":{"command":["/bin/sh","-c","sleep 30"],"secrets":[{"name":"github","env":"GITHUB_TOKEN"}]}}`,
 		http.StatusNotFound)
@@ -343,7 +344,7 @@ func TestLiveUpdateAndRevoke(t *testing.T) {
 	f := setupSealed(t, nil)
 	f.request(http.MethodPost, "/v1/secrets", f.alice,
 		secretBody("github", "api.github.com", "ghp_first"), http.StatusCreated)
-	body := f.request(http.MethodPost, "/v1/sandboxes", f.alice,
+	body := f.request(http.MethodPost, "/v1/sandboxes?wait=1", f.alice,
 		`{"apiVersion":"`+v1.APIVersion+`","kind":"Sandbox","metadata":{"name":"work"},`+
 			`"spec":{"command":["/bin/sh","-c","sleep 30"],"secrets":[{"name":"github","env":"GITHUB_TOKEN"}]}}`,
 		http.StatusCreated)
@@ -456,7 +457,7 @@ func TestSecretRouteRefusals(t *testing.T) {
 		broken := setupSealed(t, failing(authorizer.ActionSecretMount))
 		broken.request(http.MethodPost, "/v1/secrets", broken.alice,
 			secretBody("github", "api.github.com", "ghp_canary"), http.StatusCreated)
-		broken.request(http.MethodPost, "/v1/sandboxes", broken.alice,
+		broken.request(http.MethodPost, "/v1/sandboxes?wait=1", broken.alice,
 			`{"apiVersion":"`+v1.APIVersion+`","kind":"Sandbox","metadata":{"name":"work"},`+
 				`"spec":{"command":["/bin/sh","-c","sleep 30"],"secrets":[{"name":"github","env":"GITHUB_TOKEN"}]}}`,
 			http.StatusServiceUnavailable)

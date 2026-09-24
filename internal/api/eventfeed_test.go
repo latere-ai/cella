@@ -39,14 +39,14 @@ func TestObjectFeed(t *testing.T) {
 	var obj struct {
 		Status struct{ ID string } `json:"status"`
 	}
-	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes", f.alice, createBody, 201), &obj); err != nil {
+	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice, createBody, 201), &obj); err != nil {
 		t.Fatal(err)
 	}
 	other := strings.Replace(createBody, `"name":"work"`, `"name":"other"`, 1)
 	var second struct {
 		Status struct{ ID string } `json:"status"`
 	}
-	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes", f.alice, other, 201), &second); err != nil {
+	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice, other, 201), &second); err != nil {
 		t.Fatal(err)
 	}
 	f.request("POST", "/v1/sandboxes/"+obj.Status.ID+"/exec?wait=1", f.alice, `{"command":["true"]}`, 200)
@@ -140,7 +140,7 @@ func TestObjectFeedAuthorizesTheObjectsKind(t *testing.T) {
 	var obj struct {
 		Status struct{ ID string } `json:"status"`
 	}
-	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes", f.alice, createBody, 201), &obj); err != nil {
+	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice, createBody, 201), &obj); err != nil {
 		t.Fatal(err)
 	}
 	// The feed is read after the object and under the object's own action,

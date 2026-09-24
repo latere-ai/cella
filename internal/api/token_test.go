@@ -55,8 +55,8 @@ func TestWorkloadReachesItsOwnSandbox(t *testing.T) {
 	signer := signing(t, f, rows{})
 
 	var mine, other v1.Sandbox
-	_ = json.Unmarshal(f.request("POST", "/v1/sandboxes", f.alice, createBody, 201), &mine)
-	_ = json.Unmarshal(f.request("POST", "/v1/sandboxes", f.alice, strings.Replace(createBody, `"work"`, `"other"`, 1), 201), &other)
+	_ = json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice, createBody, 201), &mine)
+	_ = json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice, strings.Replace(createBody, `"work"`, `"other"`, 1), 201), &other)
 
 	token, err := signer.MintWorkload(auth.Workload{Sandbox: mine.Status.ID, Environment: "default"})
 	if err != nil {
@@ -97,7 +97,7 @@ func TestRevokedWorkloadTokenIsRefusedByTheAPI(t *testing.T) {
 	signer := signing(t, f, revoked)
 
 	var mine v1.Sandbox
-	_ = json.Unmarshal(f.request("POST", "/v1/sandboxes", f.alice, createBody, 201), &mine)
+	_ = json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice, createBody, 201), &mine)
 	token, err := signer.MintWorkload(auth.Workload{
 		Sandbox: mine.Status.ID, Environment: "default", ExpiresAt: time.Now().Add(time.Hour),
 	})

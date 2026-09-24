@@ -102,7 +102,7 @@ func (r *apiRecorder) timed() []string {
 // carries design 008's code.
 func TestRequestsAreCountedByRoute(t *testing.T) {
 	f := setup(t, nil)
-	f.request(http.MethodPost, "/v1/sandboxes", f.alice, createBody, http.StatusCreated)
+	f.request(http.MethodPost, "/v1/sandboxes?wait=1", f.alice, createBody, http.StatusCreated)
 	f.request(http.MethodGet, "/v1/sandboxes/sbx_00000000000000000000000000", f.alice, "", http.StatusNotFound)
 	f.request(http.MethodGet, "/v1/sandboxes", "", "", http.StatusUnauthorized)
 

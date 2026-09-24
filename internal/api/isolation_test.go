@@ -46,7 +46,7 @@ func TestAContainerEnvironmentRunsAnImage(t *testing.T) {
 	})
 	body := strings.Replace(strings.Replace(createBody, `"name":"work"`, `"name":"imaged"`, 1), `"spec":{}`, `"spec":{"image":"registry.example/app:1"}`, 1)
 	var obj v1.Sandbox
-	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes", f.alice, body, 201), &obj); err != nil {
+	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice, body, 201), &obj); err != nil {
 		t.Fatal(err)
 	}
 	if obj.Status.Isolation != v1.IsolationContainer || obj.Status.Driver != "fake-container" {
