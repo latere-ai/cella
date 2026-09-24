@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.6.0 - 2026-09-25
+
 - A create answers at once, which changes what every caller of `POST
   /v1/sandboxes`, and of `PUT /v1/sandboxes/{name}` when it creates, reads.
   The answer is `201` with `Location` and the sandbox as soon as it is
