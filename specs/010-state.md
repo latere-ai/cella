@@ -9,7 +9,7 @@ depends_on:
 affects: [internal/store/, internal/config/, migrations/]
 effort: large
 created: 2026-09-12
-updated: 2026-09-21
+updated: 2026-09-24
 author: changkun
 ---
 
@@ -66,6 +66,7 @@ type Tx interface {
 	Observed() Observed
 	Values() Values
 	Revocations() Revocations
+	Keys() Keys
 	Ledger() Ledger
 	Journal() Journal
 	Operations() Operations
@@ -105,6 +106,13 @@ type Revocations interface {
 	Revoke(ctx context.Context, jti string, exp time.Time) error
 	Revoked(ctx context.Context, jti string) (bool, error)
 	Forget(ctx context.Context, before time.Time) (n int, err error) // rows whose exp passed
+}
+
+type Keys interface { // the registry of environment keys (021): one row per minted key, never the token
+	Record(ctx context.Context, k Key) error                                  // jti, environment, subject, mintedAt, expiresAt
+	Revoke(ctx context.Context, jti string, at time.Time) error               // marks the row; the earliest mark is kept
+	List(ctx context.Context, environment string, p Page) ([]Key, string, error) // jti order, which is mint order
+	Forget(ctx context.Context, before time.Time) (n int, err error)           // rows whose key expired
 }
 
 type Ledger interface {
@@ -190,7 +198,11 @@ ciphertext under the same KEK, so no store keeps a plaintext at rest.
 
 Revocations are `jti` and `exp`; `Forget` runs on the reaper's tick
 and drops rows whose `exp` passed, environment keys included, since
-they carry an `exp` ([[006-identity]]). The ledger is one row per
+they carry an `exp` ([[006-identity]]). The key registry keeps one
+row per environment key the control plane minted until the key's
+`exp` passes; a revocation marks the row and writes the revocation in
+one transaction, and the same `Forget` tick forgets the expired rows
+([[067-environment-list-ports-redirect-keys]]). The ledger is one row per
 sandbox with `budget` and `used`; `Debit` is `UPDATE ... WHERE used <
 budget` and reports exhaustion from the row count, so two concurrent
 debits at one remaining unit yield one success, and `Credit` is its
@@ -256,7 +268,7 @@ replica; two in-memory replicas cannot detect each other.
 ### Postgres
 
 Selected by `CELLA_DB_URL`, a `postgres://` URL. Tables: `objects`,
-`observed`, `secret_values`, `revocations`, `ledger`, `events`,
+`observed`, `secret_values`, `revocations`, `environment_keys`, `ledger`, `events`,
 `egress_records`, `operations`, `workers`, `leases`. Migrations are embedded
 under `migrations/` and applied at start through
 `latere.ai/x/pkg/pgxmigrate.Up`, which imports no driver, so
@@ -276,7 +288,7 @@ deleted_at is null`; `objects (kind, owner, phase)` for lists and the
 count; `objects (kind, environment)`; `objects (kind, root)`; a GIN
 index on `objects.labels` for `?label=`; `observed (environment)`;
 `events (object_id, seq)` and `events (next_attempt_at) where acked_at
-is null`; `revocations (exp)`; `egress_records (sandbox_id, at desc)`; `operations (environment, state, created_at)`;
+is null`; `revocations (exp)`; `environment_keys (environment, jti)` and `environment_keys (expires_at)`; `egress_records (sandbox_id, at desc)`; `operations (environment, state, created_at)`;
 `workers (environment, last_heartbeat)`.
 
 ### Leases
@@ -309,7 +321,7 @@ table ([[021-data-plane-workers]]); the `v1.Object` interface
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| Both stores pass one suite over every method of every interface; the memory store is exempt only from durability across a restart and the schema check | `TestSuiteHoldsTheMemoryAdapter` and `TestPostgresStore` over one `storetest` suite, the second in a test container | built for `Desired`, `Observed`, `Journal`, `Values` and `Leases` ([[043-postgres-store]], [[046-secret-kind]]); the seams have no accessor yet |
+| Both stores pass one suite over every method of every interface; the memory store is exempt only from durability across a restart and the schema check | `TestSuiteHoldsTheMemoryAdapter` and `TestPostgresStore` over one `storetest` suite, the second in a test container | built for `Desired`, `Observed`, `Journal`, `Values` and `Leases` ([[043-postgres-store]], [[046-secret-kind]]), and for `Keys` as the suite's `Keys` case ([[067-environment-list-ports-redirect-keys]]); the seams have no accessor yet |
 | Writes inside `Tx` commit together or not at all: a desired put plus a debit, and a desired put plus a count check, under a failure injected between them | the `Transactions` case of `TestSuiteHoldsTheMemoryAdapter` and `TestPostgresStore`, `TestSpawnDebitIsAtomic` | built ([[040-mesh-and-spawn]] closed the ledger half: a spawn's debit, the child's row and its record commit together) |
 | `Put` with a stale version is `ErrVersionConflict`; with the current version it advances it | the `Versions` case of `TestSuiteHoldsTheMemoryAdapter` and `TestPostgresStore` | built ([[043-postgres-store]]) |
 | `(kind, owner, name)` is unique among live rows and reusable after delete | the `Names` case of `TestSuiteHoldsTheMemoryAdapter` and `TestPostgresStore` | built ([[043-postgres-store]]) |

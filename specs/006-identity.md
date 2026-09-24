@@ -8,7 +8,7 @@ depends_on:
 affects: [authorizer/, internal/auth/, internal/config/, internal/api/, test/stubs/]
 effort: medium
 created: 2026-09-12
-updated: 2026-09-21
+updated: 2026-09-24
 author: changkun
 ---
 
@@ -182,6 +182,21 @@ list. A token `cellad` minted that carries no `jti` is refused, because
 a credential that cannot be revoked is not one this control plane
 issued.
 
+Amended on 2026-09-24 by [[067-environment-list-ports-redirect-keys]]:
+the `filter` of a list decision narrows every list, not the sandbox list
+alone. Each list holds every row to the filter's owners and labels and
+then asks the kind's read on each row the filter admits, leaving out a
+row the read refuses; a read that produced no decision refuses the whole
+list. The default environment is the one row the filter does not narrow:
+every subject may use it, it carries no caller's owner or labels, so no
+filter over owners and labels names it without naming what the filter
+hides, and it is listed whenever `environment.read` on it is allowed. An
+authorizer that narrows `environment.list` to a tenant keeps the default
+visible by allowing that read, and hides it by denying it, which hides it
+from the read by id as well. `environment.key` also authorizes `GET
+/v1/environments/{id}/keys`, the listing of an environment's keys, which
+the control plane now records at mint with the subject that minted them.
+
 What is left of this spec waits on other specs rather than on a
 decision, and the acceptance table says which per row: the
 routes an environment key authorizes ([[008-api]],
@@ -295,7 +310,8 @@ that reaps the sandboxes ([[010-state]]).
 
 Environment keys: `POST /v1/environments/{id}/keys` mints one, shown
 once, and an environment may hold several so that each worker on it
-carries its own; `DELETE .../keys/{jti}` revokes one. A key authorizes
+carries its own; `GET .../keys` lists them, never the token, and
+`DELETE .../keys/{jti}` revokes one. A key authorizes
 registration, claiming, and reporting for its environment and is
 refused on every other route.
 
@@ -360,8 +376,10 @@ subject whose phase is not `Deleting`, a queued and a stopped one
 included, because each holds a name and a workspace;
 `max_priority` caps `scheduling.priority` and
 reaches `Resolve` as `Limits.MaxPriority` ([[003-manifest-contract]]).
-`filter`, on `sandbox.list` only, narrows the list to the owners and
-labels named.
+`filter`, on a list action, narrows the list to the owners and labels
+named, and each row it admits is then decided by the kind's read; the
+default environment is decided by its `environment.read` alone (amended
+2026-09-24).
 
 Rules:
 
@@ -472,11 +490,12 @@ the HTTP envelope of 401 and 403 ([[008-api]]); the revocation store
 | A workload token is refused by `cellad` after its sandbox is deleted and after its `jti` is revoked; a recovered sandbox's new token verifies and the old `jti` is revoked | `TestRevokedTokenIsRefused`, `TestRecoveryMintsAndRevokes`, `TestDeleteRevokes`, and the `cellad` run of `TestWorkloadTokenEndToEnd` | built ([[045-workload-tokens]]): the delete revokes, so a deleted sandbox's token is refused by the list and no phase is read |
 | A token is re-minted and re-projected at two thirds of its lifetime | `TestTokenReprojection` under a fake clock; the `TokenProjection` case of the conformance suite | built ([[045-workload-tokens]]) |
 | An environment key registers and claims for its environment, is refused on every other route, and is refused at once after `DELETE .../keys/{jti}`; two keys on one environment work independently | `TestMintedTokensCarryTheirOwnSubject`, `TestTwoKeysOnOneEnvironmentAreTwoJTIs`, `TestEnvironmentKeyRoutes` | built in part: a key is minted, verified, and read back as its environment's, and two on one environment are two jtis; the routes are [[008-api]]'s and [[021-data-plane-workers]]'s and the revocation list is [[010-state]]'s |
+| The keys of an environment are listed under `environment.key` with each key's `jti`, mint time, `exp`, revocation and minter, and never the token | `TestEnvironmentKeyList`, `TestEnvironmentKeysRecordAndList` | built ([[067-environment-list-ports-redirect-keys]]) |
 | Every failure mode in the rules list is `authorizer_unavailable` and never an allow, and unavailability fails the request without flipping readiness; a connection failure before a response line is retried once and nothing else is | `TestAuthorizerFailsClosed`, table-driven over six modes; `TestAuthorizerRetriesOnlyBeforeAResponseLine` | built: the six modes, the one retry and the readiness rule hold; the 503 they render as is [[008-api]]'s |
 | Every action in the table reaches the authorizer with the resource shape in its row, `workload` set for a sandbox caller, `issuer` and `sub` apart, and every claim of the token in `claims` verbatim | `TestAuthorizerRequestShapes` against the stub | built ([[040-mesh-and-spawn]]): every row's shape holds, and `workload` carries the caller's sandbox with its `parent`, `root`, `mesh` and `spawn` read from the store |
 | A deny on an own action is `forbidden`; a deny through `Lookup` is `not_found` and identical to a missing object | `TestDenyMapping` | built: the two codes hold at the guard; the 403 and the 404 they render as are [[008-api]]'s |
 | The cache serves a second identical decision without a call, expires an allow at the answer's `ttl` and at the `600s` cap, a deny at `5s`, never caches unavailability, and keys `create` and `list` without a resource id | `TestDecisionCache` | built |
 | The probe id is denied by the stub authorizer and by the owner policy for every subject and action, and `cellad check` reports an authorizer that allows it | `TestProbeIdIsAlwaysDenied` | built in part: the stub and the owner policy deny it for every subject and action, and the client reads an allow as a misconfiguration; the `cellad check` subcommand is [[014-release-and-installation]]'s |
-| `limits` override the rate limit, the count ceiling, and the priority cap; `filter` narrows a list | `TestLimitsAndFilterReachTheCaller`, `TestCountCeilingCountsEveryDesiredSandbox` | partial: `max_sandboxes` is honored at create as the count [[007-admission]] defines, and the filter narrows a list; there is still no rate limit ([[008-api]]) and no `Resolve` option carrying `max_priority` ([[003-manifest-contract]]) to override |
+| `limits` override the rate limit, the count ceiling, and the priority cap; `filter` narrows a list | `TestLimitsAndFilterReachTheCaller`, `TestCountCeilingCountsEveryDesiredSandbox`, `TestEnvironmentListAppliesTheFilter`, `TestTheDefaultEnvironmentIsListedByItsRead`, `TestSecretListAppliesTheWholeFilter` | partial: `max_sandboxes` is honored at create as the count [[007-admission]] defines, and the filter narrows the sandbox, secret and environment lists by owners and labels, with the default environment decided by its read alone ([[067-environment-list-ports-redirect-keys]]); there is still no rate limit ([[008-api]]) and no `Resolve` option carrying `max_priority` ([[003-manifest-contract]]) to override |
 | The owner policy's rules hold for every kind and action, including that only an admin creates an environment and only the default environment is usable by a non-admin | `TestOwnerPolicy`, table-driven | built |
 | A sandbox's token reads and execs itself, reads its descendants, cannot read a sibling or delete itself, and cannot mount a secret its parent did not | `TestWorkloadIsLeastPrivileged`; `TestWorkloadReachesItsOwnSandbox` over the served routes | built, and held over the API as well as over the policy ([[045-workload-tokens]]); a sandbox creating a child is [[040-mesh-and-spawn]]'s `TestSpawnOverTheAPI`, and the secret a child's parent mounts is not reachable through the API yet |

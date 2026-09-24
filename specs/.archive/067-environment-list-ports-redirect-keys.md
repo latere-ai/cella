@@ -1,6 +1,6 @@
 ---
 title: "The environment list applies the authorizer's filter, a port path without its slash redirects relatively, and an environment's keys are listed"
-status: in-progress
+status: complete
 track: core
 depends_on:
   - specs/006-identity.md
@@ -205,16 +205,57 @@ against.
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| The environment list narrows by the decision's filter on owners and labels and decides each admitted row by `environment.read`: a member sees the environments the filter admits and the read allows and no other, a filter on labels alone admits every environment carrying them, and no filter admits every readable row | `TestEnvironmentListAppliesTheFilter` | not built |
-| The default environment is listed whenever `environment.read` on it is allowed, whatever the filter names, and is left out when that read is denied | `TestTheDefaultEnvironmentIsListedByItsRead` | not built |
-| A list that cannot apply its decision refuses rather than answering around it, on the environment list as on the sandbox list: a per-row read with no decision is 503 `authorizer_unavailable`, and an allow carrying a rate limit is 422 `capability_unsupported` | `TestListsRefuseWhatTheyCannotApply` | not built |
-| The secret list applies the filter's labels as well as its owners | `TestSecretListAppliesTheWholeFilter` | not built |
-| The feed gate passes a record about the default environment by `environment.read` alone, and holds every other environment's record to the filter | `TestRecordGateDecidesEachRecord` | not built |
-| A port path without its trailing slash answers 307 with a relative `Location` that keeps the query, for any method, before any read | `TestPortPathWithoutItsSlashRedirectsRelatively` | not built |
-| Behind a proxy that serves the control plane under another prefix, a client that follows the redirect reaches the server inside the sandbox with its path and query | `TestPortRedirectThroughAPrefixProxy` | not built |
-| The store keeps one row per minted key, lists an environment's rows in `jti` order by page, marks a revocation with the earliest instant, and forgets a row once its expiry passes, on both adapters | `TestSuiteHoldsTheMemoryAdapter` and `TestPostgresStore`, case `Keys` | not built |
-| The registry revokes in one transaction with the revocation list, revokes a `jti` it holds no row for, and its rows are swept with the expired revocations | `TestKeyRegistry` | not built |
-| The mint records the key with the caller's subject, the revocation marks it, and without a registry the mint and the revocation work as before and the list is empty | `TestEnvironmentKeysRecordAndList` | not built |
-| `GET /v1/environments/{id}/keys` lists each key's `jti`, mint time, `exp`, whether it is revoked and who minted it, never the token, by page; it is refused to a caller without `environment.key`, is `not_found` for an environment this server does not hold, and is `capability_unsupported` without a signer | `TestEnvironmentKeyList`, `TestEnvironmentKeyRoutesWithoutASigner` | not built |
-| `cellad serve` lists a key minted through its route, and lists it revoked after the revocation | `TestEnvironmentKeysAreListedEndToEnd` | not built |
-| The API document describes the key list and the redirect, and the document and the mux agree | `TestTheDocumentAndTheMuxAgree` | not built |
+| The environment list narrows by the decision's filter on owners and labels and decides each admitted row by `environment.read`: a member sees the environments the filter admits and the read allows and no other, a filter on labels alone admits every environment carrying them, and no filter admits every readable row | `TestEnvironmentListAppliesTheFilter` | built |
+| The default environment is listed whenever `environment.read` on it is allowed, whatever the filter names, and is left out when that read is denied | `TestTheDefaultEnvironmentIsListedByItsRead` | built |
+| A list that cannot apply its decision refuses rather than answering around it, on the environment list as on the sandbox list: a per-row read with no decision is 503 `authorizer_unavailable`, and an allow carrying a rate limit is 422 `capability_unsupported` | `TestListsRefuseWhatTheyCannotApply` | built |
+| The secret list applies the filter's labels as well as its owners | `TestSecretListAppliesTheWholeFilter` | built |
+| The feed gate passes a record about the default environment by `environment.read` alone, and holds every other environment's record to the filter | `TestRecordGateDecidesEachRecord` | built |
+| A port path without its trailing slash answers 307 with a relative `Location` that keeps the query, for any method, before any read | `TestPortPathWithoutItsSlashRedirectsRelatively` | built |
+| Behind a proxy that serves the control plane under another prefix, a client that follows the redirect reaches the server inside the sandbox with its path and query | `TestPortRedirectThroughAPrefixProxy` | built |
+| The store keeps one row per minted key, lists an environment's rows in `jti` order by page, marks a revocation with the earliest instant, and forgets a row once its expiry passes, on both adapters | `TestSuiteHoldsTheMemoryAdapter` and `TestPostgresStore`, case `Keys` | built |
+| The registry revokes in one transaction with the revocation list, revokes a `jti` it holds no row for, and its rows are swept with the expired revocations | `TestKeyRegistry` | built |
+| The mint records the key with the caller's subject, the revocation marks it, and without a registry the mint and the revocation work as before and the list is empty | `TestEnvironmentKeysRecordAndList` | built |
+| `GET /v1/environments/{id}/keys` lists each key's `jti`, mint time, `exp`, whether it is revoked and who minted it, never the token, by page; it is refused to a caller without `environment.key`, is `not_found` for an environment this server does not hold, and is `capability_unsupported` without a signer | `TestEnvironmentKeyList`, `TestEnvironmentKeyRoutesWithoutASigner` | built |
+| `cellad serve` lists a key minted through its route, and lists it revoked after the revocation | `TestEnvironmentKeysAreListedEndToEnd` | built |
+| The API document describes the key list and the redirect, and the document and the mux agree | `TestTheDocumentAndTheMuxAgree` | built |
+
+## Outcome
+
+The three defects are fixed, each with a test that fails without its fix.
+
+| Piece | Where |
+|---|---|
+| `admits`, the filter step every list and the feed gate share, `admitsEnvironment`, and `pageLimit` | `internal/api/lists.go` |
+| The environment list under the list rule | `environmentList` in `internal/api/environments.go` |
+| The sandbox list, the secret list and the feed gate on `admits` | `internal/api/api.go`, `internal/api/secrets.go`, `internal/api/follow.go` |
+| The relative port redirect | `portRedirect` in `internal/api/portproxy.go` |
+| The `Keys` facet on both adapters, and migration `000005` | `internal/store/store.go`, `internal/store/memory/memory.go`, `internal/store/postgres/statements.go`, `internal/store/postgres/migrations/000005_environment_keys.*.sql` |
+| `store.KeyRegistry`, and the expired key rows forgotten with the revocations | `internal/store/keys.go`, `internal/store/revocations.go` |
+| `auth.KeyRecord`, `auth.KeyLog`, the mint's record with its subject and the revocation's mark | `internal/auth/environmentkeys.go`, `Token.IssuedAt` in `internal/auth/mint.go` |
+| `GET /v1/environments/{id}/keys` | `environmentKeyList` in `internal/api/environments.go` |
+| The registry over the store the revocation list is in | `cmd/cellad/main.go` |
+| The redirect and the key list in the API document | `api/openapi.yaml` |
+
+Coverage on `go test -cover`: `internal/api` 92.4%, `internal/auth`
+95.7%, `internal/store` 91.1%, memory 93.1%, postgres 91.0%. The
+end-to-end that ran is `TestEnvironmentKeysAreListedEndToEnd`: a key
+minted through a running `cellad serve`, listed live with its minter and
+without its token, then listed revoked.
+
+### What diverges from the specs above
+
+| Spec | What it said | What was built | Why |
+|---|---|---|---|
+| [[006-identity]] | `filter`, on `sandbox.list` only, narrows the list | the filter narrows every list, and the default environment is decided by its `environment.read` alone | the environment list discarded its decision, and the default carries no caller's owner or labels, so a filter that narrows to a tenant excluded it |
+| [[006-identity]], [[021-data-plane-workers]] | the control plane keeps no copy of a key; two key routes | it keeps a record of each key and never the key; a third route lists the records | a console lists and revokes a key without having kept the `jti` its mint returned |
+| This slice's overview | three defects | the secret list's filter now applies its labels as well | the defect is the environment list's in part, and one function is now the filter step of every list |
+
+### What this leaves open
+
+| Open | Why |
+|---|---|
+| A filter member outside `owners` and `labels` is dropped by the shared client's decoder before a list reads it, so no list can refuse one | the decoder is `latere.ai/x/pkg/authz`'s `ParseDecision`; refusing such a member there, as that package's conformance suite already flags it at the authorizer, closes it for every core that shares the client |
+| Paging the environment list by `limit` and `cursor` | the list is small and answers whole |
+| A revocation that checks the `jti` belongs to the environment the path names | a key minted before the registry has no record to check against |
+| The owner policy refuses `environment.list` to a subject that is not an administrator, so without an authorizer such a subject cannot list the default environment it may use | the owner policy's rows are [[006-identity]]'s and unchanged here |
+| The `X-Forwarded-Prefix` the port proxy sends to the server inside names this server's path, not a prefix a proxy in front serves it under | the proxy in front owns its prefix; the relative redirect needs no knowledge of it |

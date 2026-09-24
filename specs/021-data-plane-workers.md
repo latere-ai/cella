@@ -10,7 +10,7 @@ depends_on:
 affects: [manifest/v1/, runtime/remote/, internal/worker/, internal/api/, internal/auth/, internal/config/, controller/, internal/store/]
 effort: large
 created: 2026-09-12
-updated: 2026-09-23
+updated: 2026-09-24
 author: changkun
 ---
 
@@ -134,7 +134,13 @@ refuses every sandbox apply with `not_found` at `spec.environment`.
 [[006-identity]]: `sub: environment:<env_ id>`, an `exp` of
 `CELLA_ENVIRONMENT_KEY_TTL`, a `jti` that `DELETE .../keys/{jti}`
 revokes, shown once; an environment holds several so each worker and
-gateway carries its own. A key authorizes the registration route, the
+gateway carries its own. The control plane keeps a record of each key,
+never the key: its `jti`, the environment, the subject that minted it,
+when, its `exp`, and when it was revoked. `GET .../keys` lists those
+records oldest first, a page at a time, under `environment.key`; a
+record is kept until its key's `exp` passes and is forgotten by the
+sweep that forgets the expired revocations
+([[067-environment-list-ports-redirect-keys]]). A key authorizes the registration route, the
 worker stream, and the gateway stream of its environment, and is
 refused everywhere else.
 
@@ -239,7 +245,8 @@ into `Offline` and `.updated` once per return to `Ready`; `.keyed` and
 Desired state for every sandbox on every environment, so a worker that
 returns is told what should exist; observed state as workers report
 it; the operations and workers tables; the queue and capacity per
-environment ([[010-state]]).
+environment; and the record of every environment key until it expires
+([[010-state]]).
 
 ## Not in this spec
 
@@ -256,6 +263,7 @@ connection ([[012-test-stubs-and-tiers]]).
 | Every field rule in the table has a refusing case; `auto` on `mode: worker` is `invalid_field`; a missing `gateway` with enforced egress is `missing_field` | `TestEnvironmentFieldRules` | built, [[051-environments-and-workers]] |
 | Each phase transition fires on its trigger, is written by the lease holder, and gates what the table says; `Degraded NoGateway` fails a create with `driver_unavailable` | `TestEnvironmentPhases` under a fake clock | built for Pending, Ready and Offline as `TestEnvironmentPhases`, `TestTheInProcessEnvironmentAnswersFromItsDriver` and `TestTheLoopRunsUnderItsLease`, with the gate proved by `TestCreateOnAnEnvironmentBelowReady` ([[054-environments-desired-state]]); `Degraded` and its two reasons are not built, because the gateway hub serves one environment |
 | The default environment is created from the variables at first start, is authoritative afterwards, is not deletable, and with `CELLA_RUNTIME=none` the named default is what a manifest gets and non-admins may use | `TestDefaultEnvironment`, three cases | built as `TestDefaultEnvironment` and `TestDefaultEnvironmentDeclaresAutoWithNoFigures` for the seed, the edit that outlives a changed variable, and the two immutable fields ([[054-environments-desired-state]]); the `CELLA_RUNTIME=none` case is not built, because every driver but `none` is selectable today |
+| `GET /v1/environments/{id}/keys` lists each key minted for the environment with its `jti`, mint time, `exp`, revocation and minter, never the token, by page; the record is written at mint, marked at revocation in the transaction that revokes, and forgotten once the key expires | `TestEnvironmentKeyList`, `TestEnvironmentKeysRecordAndList`, `TestKeyRegistry`, the `Keys` case of `TestSuiteHoldsTheMemoryAdapter` and `TestPostgresStore`, `TestEnvironmentKeysAreListedEndToEnd` | built ([[067-environment-list-ports-redirect-keys]]) |
 | A worker with a valid key registers and receives a `wrk_` id; a revoked key, a mismatched isolation, and a mismatched driver are refused with their codes; a failed `Preflight` exits 1 without registering | `TestWorkerRegistrationRoute`, `TestRegistrationMismatch`, `TestRevokedKeyIsRefusedOnTheWorkerRoutes`, `TestWorkerRefusals` | built as `TestWorkerRegistrationRoute`, `TestRegistrationMismatch`, `TestRevokedKeyIsRefusedOnTheWorkerRoutes` and `TestWorkerRefusals`, [[051-environments-and-workers]] |
 | Placement admits against the lesser of `spec.capacity` and the live workers' reports; `capabilities` is the intersection | `TestRegistrationMismatch`, `TestCapacityInUse`, `TestSchedulingOverHTTP` | the intersection is built as `TestRegistrationMismatch`, [[051-environments-and-workers]]; placement admits against `spec.capacity` by every quantity it declares, `TestCapacityInUse` and `TestSchedulingOverHTTP` ([[057-scheduling-queue]]), and the lesser of that and what the live workers report is not read |
 | Every driver method and optional-interface method, issued through `runtime/remote`, executes on a worker running `native` and returns the same result as the direct call; the framing per row holds | `TestWorkerConformance` in `runtimetest`, `TestStreamFraming` | built, [[051-environments-and-workers]] |
