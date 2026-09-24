@@ -19,6 +19,10 @@ export CELLA_TOKEN="$(your-issuer print-token)"
 cella get sandboxes
 ```
 
+A control plane served under a path is named with it,
+`CELLA_URL=https://api.example.com/v1/environments`, and every command
+reaches its routes under that path.
+
 The token comes from the OpenID Connect issuer the control plane verifies
 against; there is no `cella login`. `--url` and `--token` override the two
 variables, `--token-file` reads the token from a file instead, and `--ca`

@@ -298,11 +298,24 @@ func TestEnvironmentOf(t *testing.T) {
 	}
 }
 
+// TestTheGatewayComposesUnderABasePath: the gateway's one stream is the
+// rooted route under the path of CELLA_URL, with that path in the place of
+// /v1, and an environment name that needs escaping is escaped once.
+func TestTheGatewayComposesUnderABasePath(t *testing.T) {
+	got, err := streamURL("https://api.example.com/v1/environments", "a b")
+	if want := "wss://api.example.com/v1/environments/environments/a%20b/egress"; err != nil || got != want {
+		t.Errorf("streamURL = %q, %v, want %q", got, err, want)
+	}
+}
+
 func TestStreamURL(t *testing.T) {
 	for _, tc := range []struct{ in, want string }{
 		{"https://cella.example.com", "wss://cella.example.com/v1/environments/default/egress"},
 		{"http://127.0.0.1:8080", "ws://127.0.0.1:8080/v1/environments/default/egress"},
-		{"https://cella.example.com/base/", "wss://cella.example.com/base/v1/environments/default/egress"},
+		// A path on the URL is the base the control plane is served under,
+		// and it takes the place of /v1.
+		{"https://cella.example.com/base/", "wss://cella.example.com/base/environments/default/egress"},
+		{"https://api.example.com/v1/environments", "wss://api.example.com/v1/environments/environments/default/egress"},
 	} {
 		got, err := streamURL(tc.in, "default")
 		if err != nil || got != tc.want {

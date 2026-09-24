@@ -1,7 +1,10 @@
 # The /v1 surface of cellad, as design 008 states it.
 #
 # This document is carried in the repository and served at /openapi.yaml under
-# no bearer. internal/api holds it to the routes the server registers, in both
+# no bearer. A control plane served under a base path, CELLA_BASE_PATH, serves
+# it under that path, and each path below then carries the base in the place of
+# /v1: /v1/sandboxes is served as /v1/environments/sandboxes under the base
+# /v1/environments. internal/api holds it to the routes the server registers, in both
 # directions: a route with no operation here and an operation with no route
 # both fail the build. The field schemas of each kind are generated from the Go
 # types by the generator design 008 names, which is not built; what this
@@ -16,7 +19,10 @@ info:
     identifier: Apache-2.0
 servers:
   - url: /
-    description: The control plane this document was served from.
+    description: >-
+      The control plane this document was served from. Under a base path the
+      paths below carry the base in the place of /v1, as the control plane
+      serves them.
 security:
   - bearer: []
 paths:

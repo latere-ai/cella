@@ -130,7 +130,7 @@ func (h *handler) environmentApply(w http.ResponseWriter, r *http.Request) {
 	status := http.StatusOK
 	if created {
 		status = http.StatusCreated
-		w.Header().Set("Location", "/v1/environments/"+stored.Metadata.Name)
+		w.Header().Set("Location", h.public("/v1/environments/"+stored.Metadata.Name))
 	}
 	respondEnvironment(w, status, stored)
 }
@@ -169,7 +169,7 @@ func (h *handler) environmentCreate(w http.ResponseWriter, r *http.Request) {
 		respondError(w, err)
 		return
 	}
-	w.Header().Set("Location", "/v1/environments/"+stored.Metadata.Name)
+	w.Header().Set("Location", h.public("/v1/environments/"+stored.Metadata.Name))
 	respondEnvironment(w, http.StatusCreated, stored)
 }
 

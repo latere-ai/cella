@@ -91,6 +91,7 @@ later.
 | [067](.archive/067-environment-list-ports-redirect-keys.md) | The environment list applies the authorizer's filter, a port path without its slash redirects relatively, and an environment's keys are listed | medium | complete | 006, 008, 010, 021, 023, 031, 051, 054, 060, 066 |
 | [068](.archive/068-reaper-end-to-end-observation.md) | Reaper end-to-end observation: the native reaper test reads the stop from the act record instead of polling for a state the next rule ends | small | complete | 005, 009, 031, 037 |
 | [069](.archive/069-client-package.md) | Client package: the typed /v1 client exported as latere.ai/x/cella/client, with the calls a consumer outside this module needs | medium | complete | 008, 009, 011, 021, 031, 050, 055, 066 |
+| [071](.archive/071-serving-under-a-base-path.md) | Serving under a base path: `CELLA_BASE_PATH`, the paths the core writes under its public URL, and every client composing under it | medium | complete | 002, 006, 008, 011, 015, 018, 021, 067, 069 |
 
 ## Dependency graph
 
@@ -318,3 +319,4 @@ The map, the order, and the rule for a slice are in 031.
 | [067-environment-list-ports-redirect-keys.md](.archive/067-environment-list-ports-redirect-keys.md) | complete | The environment list narrowed by the authorizer's filter with the default environment decided by its read, the port redirect made relative, and `GET /v1/environments/{id}/keys` over a key registry in the store |
 | [068-reaper-end-to-end-observation.md](.archive/068-reaper-end-to-end-observation.md) | complete | The native reaper test reads the `AutoStop` stop and the `AutoDelete` delete from the act record after the record is gone, which removes a probe that could miss a state lasting one `autoDelete` |
 | [069-client-package.md](.archive/069-client-package.md) | complete | `latere.ai/x/cella/client`: the typed `/v1` client exported with a token source, the caller's HTTP client under the sockets too, apply by name in JSON or YAML, the environments and their keys, and the events page and following feed |
+| [071-serving-under-a-base-path.md](.archive/071-serving-under-a-base-path.md) | complete | `CELLA_BASE_PATH` mounts the public listener under a prefix of the origin's `/v1`, the path of `CELLA_PUBLIC_URL` prefixes every path the core writes, and the client, the worker, the gateway and the conformance suite compose under a URL with a path |

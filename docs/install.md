@@ -219,6 +219,62 @@ Each line is a requirement:
 | `data directory` | `CELLA_DATA_DIR` is not writable, so readiness fails from the first request |
 | `admission`, `sink`, `store`, `gateway` | each is reported as not configured when its variable is unset, and answered for when it is set |
 
+## Serving behind a shared origin
+
+An installation that serves several services under one API address gives
+each a path under `/v1`, and Cella's is `/v1/environments`: a sandbox is
+`https://api.example.com/v1/environments/sandboxes/{id}`. The control
+plane mounts itself there. The path takes the place of `/v1`, so the
+public path carries one version, and the key set, the OpenAPI document
+and `/version` move under it too:
+
+| At the root | Under `/v1/environments` |
+|---|---|
+| `/v1/sandboxes` | `/v1/environments/sandboxes` |
+| `/v1/environments/{id}` | `/v1/environments/environments/{id}` |
+| `/.well-known/jwks.json` | `/v1/environments/.well-known/jwks.json` |
+| `/openapi.yaml` | `/v1/environments/openapi.yaml` |
+| `/version` | `/v1/environments/version` |
+
+`environments/environments` is the capability's path followed by the
+`Environment` kind's own collection; every kind keeps its name under the
+path.
+
+Each role gets the public URL with its path. The control plane sets the
+path twice, once as where it listens and once in the address it writes:
+
+```text
+# cellad serve
+CELLA_BASE_PATH=/v1/environments
+CELLA_PUBLIC_URL=https://api.example.com/v1/environments
+
+# cellad worker and cellad egress, beside CELLA_ENVIRONMENT_KEY
+CELLA_URL=https://api.example.com/v1/environments
+
+# cella, and any program on the Go client
+CELLA_URL=https://api.example.com/v1/environments
+```
+
+The proxy in front claims `/v1/environments` and forwards the path
+unchanged; it rewrites nothing. Outside the path the public listener
+answers `404`. The probes are not public under a path: the Deployment
+reads `/livez` and `/readyz` on the internal listener, which does not
+change.
+
+`CELLA_PUBLIC_URL` is the issuer of every token the control plane mints,
+so moving an installation under a path changes the issuer. Mint each
+worker's and gateway's environment key again after the move; a running
+sandbox's own token is replaced at its next rotation and refused until
+then.
+
+A proxy that must rewrite the path away instead, sending
+`/v1/environments/sandboxes` to `/v1/sandboxes`, is served by leaving
+`CELLA_BASE_PATH` unset and keeping the path on `CELLA_PUBLIC_URL`: the
+control plane then listens at the root and still writes every path under
+the public one. That proxy also has to send the three documents to the
+root, `/v1/environments/openapi.yaml` to `/openapi.yaml` and the other two
+alike, which the first form needs no rule for.
+
 ## What next
 
 - [deploy/README.md](../deploy/README.md) is the reference for the

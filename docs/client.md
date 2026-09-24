@@ -27,7 +27,7 @@ c, err := client.New(client.Config{
 
 | Field | What it is |
 |---|---|
-| `URL` | The control plane's address, `http` or `https`. Required; nothing is read in its place. A path on it prefixes every route. |
+| `URL` | The control plane's address, `http` or `https`: its `CELLA_PUBLIC_URL`. Required; nothing is read in its place. A path on it is where the control plane is served, and it takes the place of `/v1`: with `https://api.example.com/v1/environments` a sandbox is at `/v1/environments/sandboxes/{id}`. |
 | `Token` | Where each request's bearer comes from. `nil` sends no bearer. |
 | `HTTPClient` | Carries every call, including the exec, attach and dial sockets. `nil` uses the package's own transport. |
 | `RootCAs` | Certificate authorities the package's own transport trusts instead of the system roots. Ignored when you pass `HTTPClient`. |

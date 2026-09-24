@@ -282,6 +282,14 @@ no valid RSA block is a start-up failure.
 | `environment` | the `env_` id the sandbox runs in | absent |
 | `spawn` | `{budget, depth, mesh}` from desired state at mint, a copy the control plane never trusts over the store ([[022-mesh-and-spawn]]) | absent |
 
+`CELLA_PUBLIC_URL` may carry a path, the base the control plane is
+served under ([[071-serving-under-a-base-path]]). The `iss` is the URL
+with its path, the key set is served at the `iss` followed by
+`/.well-known/jwks.json`, and the verifier's local issuer is the same
+value, so a token minted under a base verifies with no rule of its own.
+A change of `CELLA_PUBLIC_URL`, a move under a base included, changes
+the issuer and refuses every token minted under the old one.
+
 Both tokens verify with any conforming JWT library against the key
 set, which is what lets a platform or a third service trust a
 sandbox's or a worker's identity without asking `cellad`. The egress
@@ -499,3 +507,4 @@ the HTTP envelope of 401 and 403 ([[008-api]]); the revocation store
 | `limits` override the rate limit, the count ceiling, and the priority cap; `filter` narrows a list | `TestLimitsAndFilterReachTheCaller`, `TestCountCeilingCountsEveryDesiredSandbox`, `TestEnvironmentListAppliesTheFilter`, `TestTheDefaultEnvironmentIsListedByItsRead`, `TestSecretListAppliesTheWholeFilter` | partial: `max_sandboxes` is honored at create as the count [[007-admission]] defines, and the filter narrows the sandbox, secret and environment lists by owners and labels, with the default environment decided by its read alone ([[067-environment-list-ports-redirect-keys]]); there is still no rate limit ([[008-api]]) and no `Resolve` option carrying `max_priority` ([[003-manifest-contract]]) to override |
 | The owner policy's rules hold for every kind and action, including that only an admin creates an environment and only the default environment is usable by a non-admin | `TestOwnerPolicy`, table-driven | built |
 | A sandbox's token reads and execs itself, reads its descendants, cannot read a sibling or delete itself, and cannot mount a secret its parent did not | `TestWorkloadIsLeastPrivileged`; `TestWorkloadReachesItsOwnSandbox` over the served routes | built, and held over the API as well as over the policy ([[045-workload-tokens]]); a sandbox creating a child is [[040-mesh-and-spawn]]'s `TestSpawnOverTheAPI`, and the secret a child's parent mounts is not reachable through the API yet |
+| A workload token and an environment key minted under a public URL with a path name the URL with its path as `iss`, and the control plane accepts both under the base it is served at | `TestServingUnderABasePathEndToEnd` | built ([[071-serving-under-a-base-path]]) |

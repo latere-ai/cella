@@ -18,6 +18,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	cellaclient "latere.ai/x/cella/client"
 )
 
 // APIVersion is the group and version of every manifest the suite sends. It
@@ -98,9 +100,14 @@ func newEnv(ctx context.Context, cfg Config) (*Env, error) {
 // client is one identity's HTTP client. The suite reads the wire, so every
 // request is built here and no helper hides a header.
 type client struct {
-	base  string
-	token string
-	http  *http.Client
+	// base is the address the client was given, a server's public URL with
+	// its path. origin is its scheme and host, and prefix its path: a case
+	// writes each route as a server at the root serves it, and the request
+	// goes to the route under the prefix by the rule every client composes
+	// with, so a server mounted under a base runs the same cases.
+	base, origin, prefix string
+	token                string
+	http                 *http.Client
 }
 
 // newClient builds one identity's client. The transport is the suite's own:
@@ -115,7 +122,12 @@ func newClient(base, token string) *client {
 		TLSHandshakeTimeout:   10 * time.Second,
 		ResponseHeaderTimeout: 30 * time.Second,
 	}
-	return &client{base: base, token: token, http: &http.Client{Transport: transport}}
+	c := &client{base: base, origin: base, token: token, http: &http.Client{Transport: transport}}
+	if u, err := url.Parse(base); err == nil && u.Host != "" {
+		c.prefix = strings.TrimSuffix(u.EscapedPath(), "/")
+		c.origin = strings.TrimSuffix(base, u.EscapedPath())
+	}
+	return c
 }
 
 // request is one call's inputs. A zero request is a GET with no body.
@@ -147,7 +159,7 @@ func (c *client) build(ctx context.Context, method, path string, req request) (*
 	if body == nil && req.Body != nil {
 		body = bytes.NewReader(req.Body)
 	}
-	r, err := http.NewRequestWithContext(ctx, method, c.base+path, body)
+	r, err := http.NewRequestWithContext(ctx, method, c.origin+cellaclient.Route(c.prefix, path), body)
 	if err != nil {
 		return nil, err
 	}

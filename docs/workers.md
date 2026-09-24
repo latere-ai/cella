@@ -219,7 +219,7 @@ holds no database, no issuer and no authorizer.
 
 | Variable | Required | Default | What it is |
 |---|---|---|---|
-| `CELLA_URL` | yes | none | the control plane's public URL, which the worker connects outbound to |
+| `CELLA_URL` | yes | none | the control plane's public URL, which the worker connects outbound to, with its path when it is served under one: `https://api.example.com/v1/environments` |
 | `CELLA_ENVIRONMENT_KEY` | yes | none | the key that authenticates the registration and the stream |
 | `CELLA_RUNTIME` | no | `k8s` | the driver this worker runs: `k8s`, `podman` or `native` |
 | `CELLA_DATA_DIR` | no | `/var/lib/cella` | where the native driver keeps its sandboxes |

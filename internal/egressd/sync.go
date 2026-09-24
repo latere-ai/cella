@@ -17,6 +17,7 @@ import (
 
 	"latere.ai/x/pkg/authkit/jwt"
 
+	"latere.ai/x/cella/client"
 	"latere.ai/x/cella/egress"
 )
 
@@ -237,7 +238,11 @@ func streamURL(controlPlane, environment string) (string, error) {
 	default:
 		return "", errors.New("CELLA_URL is reached over http or https")
 	}
-	u.Path = strings.TrimRight(u.Path, "/") + "/v1/environments/" + url.PathEscape(environment) + "/egress"
+	// The route is composed under the URL's path by client.Route, the base
+	// the control plane is served under, in the decoded and the escaped form.
+	base, escapedBase := u.Path, u.EscapedPath()
+	u.Path = client.Route(base, "/v1/environments/"+environment+"/egress")
+	u.RawPath = client.Route(escapedBase, "/v1/environments/"+url.PathEscape(environment)+"/egress")
 	u.RawQuery = ""
 	return u.String(), nil
 }

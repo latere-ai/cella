@@ -5,7 +5,13 @@ command is built on the same routes; [The cella command](cli.md) is the
 shorter way from a shell.
 
 Every route below is under the control plane's public URL,
-`CELLA_PUBLIC_URL`. The authoritative description of the surface is the
+`CELLA_PUBLIC_URL`. When that URL has a path, the control plane is served
+under it and the path takes the place of `/v1`: with
+`https://api.example.com/v1/environments`, `/v1/sandboxes` is
+`https://api.example.com/v1/environments/sandboxes`, and the key set and
+the OpenAPI document are under the path as well. The Go client, `cella`
+and the conformance suite compose every route that way from the URL they
+are given. The authoritative description of the surface is the
 OpenAPI 3.1 document every installation serves at `GET /openapi.yaml`
 with no credential, and which this repository carries as
 [`api/openapi.yaml`](../api/openapi.yaml). This page is the orientation

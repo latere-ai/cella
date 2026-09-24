@@ -345,7 +345,8 @@ type Build struct {
 // because the route carries none.
 func (c *Client) ServerVersion(ctx context.Context) (Build, error) {
 	target := *c.base
-	target.Path = c.base.Path + "/version"
+	target.Path = Route(c.base.Path, "/version")
+	target.RawPath = Route(c.base.EscapedPath(), "/version")
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil)
 	if err != nil {
 		return Build{}, err
