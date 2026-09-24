@@ -360,14 +360,17 @@ jobs:
           go test -tags=e2e -count=1 -v -timeout 30m -run '^TestCluster' ./test/kind/... 2>&1 | tee /tmp/kind.log
           grep -q -- '--- PASS: TestClusterLifecycle' /tmp/kind.log
           grep -q -- '--- PASS: TestClusterDial' /tmp/kind.log
+          grep -q -- '--- PASS: TestClusterEgressBoundary' /tmp/kind.log
+          grep -q -- '--- PASS: TestClusterNoLateralMovement' /tmp/kind.log
+          grep -q -- '--- PASS: TestClusterMeshReachability' /tmp/kind.log
       - name: The conformance suite against the published images
         shell: bash
         run: |
           set -o pipefail
           go test -tags=e2e -count=1 -v -timeout 30m -run '^TestContract$' ./test/conformance -args \
             -url "${CELLA_TEST_URL}" -issuer http://localhost:30081 -sink "${CELLA_TEST_SINK}" \
-            -image docker.io/library/alpine:3.22 -capabilities files,pool,mesh,attach,dial,display,input \
-            -display-image cella-display:dev \
+            -image docker.io/library/alpine:3.22 -capabilities files,pool,mesh,attach,dial,display,input,egress \
+            -display-image cella-display:dev -upstream cella-upstream.cella.svc:80 \
             -known known.json 2>&1 | tee /tmp/conformance.log
           grep -q -- '--- PASS: TestContract' /tmp/conformance.log
       - name: The cluster's state, for a failed run
@@ -376,6 +379,7 @@ jobs:
           kubectl -n cella get all || true
           kubectl -n cella logs deploy/cellad --tail=200 || true
           kubectl -n cella logs deploy/cellad -c stubs --tail=200 || true
+          kubectl -n cella logs deploy/cellad-egress --tail=200 || true
 
   # 4. Only now the digest gets the :<tag> reference, and the release is
   # created with every artifact and the CHANGELOG section as its body, read
@@ -556,6 +560,7 @@ jobs:
           kubectl -n cella get all || true
           kubectl -n cella logs deploy/cellad --tail=200 || true
           kubectl -n cella logs deploy/cellad -c stubs --tail=200 || true
+          kubectl -n cella logs deploy/cellad-egress --tail=200 || true
 
   # 6. From a clean runner with no checkout: every asset downloaded in one
   # call, the checksums and their signature, the image's signature and
