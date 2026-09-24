@@ -651,6 +651,139 @@ paths:
           description: The answer the server inside the sandbox gave.
         default:
           $ref: "#/components/responses/Error"
+  /v1/sandboxes/{id}/ports/{name}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The object's prefixed identifier, or a name among the caller's own.
+        schema:
+          type: string
+      - name: name
+        in: path
+        required: true
+        description: The name of a port the sandbox declares.
+        schema:
+          type: string
+    get:
+      operationId: redirectPortGet
+      summary: Redirect a GET request to the port's path with its trailing slash.
+      description: &portRedirectDescription >-
+        A 307 whose Location is relative: the port's name as the request
+        escaped it and a slash, then the query when there is one, written
+        after `./` when the name holds a colon. It resolves against the path
+        the client asked for, so a client that reached this server through a
+        proxy serving it under another prefix stays under that prefix. 307
+        keeps the method and the body. Nothing is read and nothing is asked;
+        the path it points at is authorized as `sandbox.exec`.
+      responses:
+        "307":
+          description: The port's path with its trailing slash, in the Location header.
+          headers:
+            Location:
+              description: The relative reference the client follows.
+              schema:
+                type: string
+        default:
+          $ref: "#/components/responses/Error"
+    put:
+      operationId: redirectPortPut
+      summary: Redirect a PUT request to the port's path with its trailing slash.
+      description: *portRedirectDescription
+      responses:
+        "307":
+          description: The port's path with its trailing slash, in the Location header.
+          headers:
+            Location:
+              description: The relative reference the client follows.
+              schema:
+                type: string
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      operationId: redirectPortPost
+      summary: Redirect a POST request to the port's path with its trailing slash.
+      description: *portRedirectDescription
+      responses:
+        "307":
+          description: The port's path with its trailing slash, in the Location header.
+          headers:
+            Location:
+              description: The relative reference the client follows.
+              schema:
+                type: string
+        default:
+          $ref: "#/components/responses/Error"
+    delete:
+      operationId: redirectPortDelete
+      summary: Redirect a DELETE request to the port's path with its trailing slash.
+      description: *portRedirectDescription
+      responses:
+        "307":
+          description: The port's path with its trailing slash, in the Location header.
+          headers:
+            Location:
+              description: The relative reference the client follows.
+              schema:
+                type: string
+        default:
+          $ref: "#/components/responses/Error"
+    options:
+      operationId: redirectPortOptions
+      summary: Redirect a OPTIONS request to the port's path with its trailing slash.
+      description: *portRedirectDescription
+      responses:
+        "307":
+          description: The port's path with its trailing slash, in the Location header.
+          headers:
+            Location:
+              description: The relative reference the client follows.
+              schema:
+                type: string
+        default:
+          $ref: "#/components/responses/Error"
+    head:
+      operationId: redirectPortHead
+      summary: Redirect a HEAD request to the port's path with its trailing slash.
+      description: *portRedirectDescription
+      responses:
+        "307":
+          description: The port's path with its trailing slash, in the Location header.
+          headers:
+            Location:
+              description: The relative reference the client follows.
+              schema:
+                type: string
+        default:
+          $ref: "#/components/responses/Error"
+    patch:
+      operationId: redirectPortPatch
+      summary: Redirect a PATCH request to the port's path with its trailing slash.
+      description: *portRedirectDescription
+      responses:
+        "307":
+          description: The port's path with its trailing slash, in the Location header.
+          headers:
+            Location:
+              description: The relative reference the client follows.
+              schema:
+                type: string
+        default:
+          $ref: "#/components/responses/Error"
+    trace:
+      operationId: redirectPortTrace
+      summary: Redirect a TRACE request to the port's path with its trailing slash.
+      description: *portRedirectDescription
+      responses:
+        "307":
+          description: The port's path with its trailing slash, in the Location header.
+          headers:
+            Location:
+              description: The relative reference the client follows.
+              schema:
+                type: string
+        default:
+          $ref: "#/components/responses/Error"
   /v1/events:
     get:
       operationId: objectEvents
@@ -860,6 +993,68 @@ paths:
       responses:
         "200":
           description: The answer this route serves.
+        default:
+          $ref: "#/components/responses/Error"
+    get:
+      operationId: listEnvironmentKeys
+      summary: List the keys minted for an environment, oldest first.
+      description: >-
+        One page of the environment's keys in the order they were minted: each
+        key's `jti`, when it was minted, its `exp`, whether it is revoked and
+        since when, and the subject that minted it. The token is never listed,
+        because the control plane keeps no copy of it. A key stays listed
+        until its `exp` passes. A control plane that signs no environment keys
+        answers `capability_unsupported`. Authorized as `environment.key`.
+      parameters:
+        - name: cursor
+          in: query
+          description: The `next` of the previous page.
+          schema:
+            type: string
+        - name: limit
+          in: query
+          description: The keys one page holds, 1 to 200; 50 when absent.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+      responses:
+        "200":
+          description: One page of the environment's keys.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [jti, mintedAt, exp, revoked]
+                      properties:
+                        jti:
+                          type: string
+                          description: The key's identifier, which revokes it.
+                        mintedAt:
+                          type: string
+                          format: date-time
+                        exp:
+                          type: string
+                          format: date-time
+                          description: When the key stops verifying, as the mint returned it.
+                        revoked:
+                          type: boolean
+                        revokedAt:
+                          type: string
+                          format: date-time
+                          description: Present on a revoked key.
+                        mintedBy:
+                          type: string
+                          description: The rendered subject that minted the key.
+                  next:
+                    type: string
+                    description: The cursor of the next page, empty on the last.
         default:
           $ref: "#/components/responses/Error"
   /v1/environments/{id}/keys/{jti}:

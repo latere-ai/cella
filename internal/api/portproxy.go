@@ -23,6 +23,12 @@ import (
 // the proxy forwards whichever one the caller sends.
 const portProxyPattern = "/v1/sandboxes/{id}/ports/{name}/{path...}"
 
+// portRedirectPattern is a port's path without the slash that opens the path
+// the server inside receives. The mux would answer it with a redirect of its
+// own whose Location is this server's absolute path, which leaves any prefix a
+// proxy serves the control plane under.
+const portRedirectPattern = "/v1/sandboxes/{id}/ports/{name}"
+
 // proxyHeaderTimeout is how long the proxy waits for the response headers of
 // the server inside, design 023's figure. The body that follows streams for
 // as long as the server sends it.
@@ -59,6 +65,28 @@ func (h *handler) portProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	h.touch(r, obj)
 	h.proxyTo(dialer, obj.Status.ID, port).ServeHTTP(w, r)
+}
+
+// portRedirect sends a caller that named a port without the trailing slash to
+// the same path with it. The Location is relative, the last segment as the
+// caller escaped it and a slash, then the query, so it resolves against the
+// path the client asked for, a prefix a proxy put in front of this server
+// included. A segment holding a colon is written after "./", so no client
+// reads it as a scheme. 307 keeps the method and the body, as the mux's own
+// redirect does. Nothing is read and nothing is asked: the answer is made of
+// the request's own path, and the route it points at reads, authorizes and
+// gates as it always does.
+func (h *handler) portRedirect(w http.ResponseWriter, r *http.Request) {
+	escaped := r.URL.EscapedPath()
+	location := escaped[strings.LastIndex(escaped, "/")+1:] + "/"
+	if strings.Contains(location, ":") {
+		location = "./" + location
+	}
+	if r.URL.RawQuery != "" {
+		location += "?" + r.URL.RawQuery
+	}
+	w.Header().Set("Location", location)
+	w.WriteHeader(http.StatusTemporaryRedirect)
 }
 
 // declaredPort is the number the sandbox declared under a name. The list is

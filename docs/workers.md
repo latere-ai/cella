@@ -93,12 +93,41 @@ curl -sS -X POST \
 }
 ```
 
-The key is shown **once**. The control plane signs it and keeps no copy,
-so a key that is lost is replaced rather than retrieved. Keep the `jti`:
-it is what ends the key.
+The key is shown **once**. The control plane keeps a record of every key
+it mints, and never the key itself, so a key that is lost is replaced
+rather than retrieved. The `jti` is what ends a key.
 
 An environment holds several keys, so each worker and each gateway
 carries its own and one is revoked without ending the others.
+
+List the keys an environment holds, oldest first:
+
+```sh
+curl -sS -H "Authorization: Bearer $ADMIN_TOKEN" \
+  https://cella.example.com/v1/environments/eu-gpu/keys
+```
+
+```json
+{
+  "items": [
+    {
+      "jti": "01JBQ7...",
+      "mintedAt": "2026-09-20T10:00:00Z",
+      "exp": "2027-09-20T10:00:00Z",
+      "revoked": false,
+      "mintedBy": "https://login.example.com|ops"
+    }
+  ],
+  "next": ""
+}
+```
+
+A revoked key is listed with `"revoked": true` and the `revokedAt` it was
+revoked at. A key leaves the list once its `exp` passes. The list pages
+like every other: `?limit=` takes 1 to 200 and is 50 when absent, and a
+non-empty `next` is the `?cursor=` of the page after. Listing the keys
+needs the same right as minting one. A key minted before the control
+plane kept this record is not listed, and is still revoked by its `jti`.
 
 Revoke one:
 

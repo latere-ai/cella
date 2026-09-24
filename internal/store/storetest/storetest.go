@@ -64,6 +64,7 @@ var cases = []struct {
 	{"Delivery", delivery},
 	{"Leases", leases},
 	{"Revocations", revocations},
+	{"Keys", keys},
 	{"Ledger", ledger},
 	{"Operations", operations},
 	{"Redelivery", redelivery},
@@ -1187,6 +1188,107 @@ func revocations(t TB, open Opener) {
 	}
 	if !revoked(t, s, "01JLIVE") {
 		t.Errorf("the sweep dropped a revocation whose exp has not passed")
+	}
+}
+
+// keys: the registry of environment keys of design 021. A minted key is
+// recorded once and listed by its environment in jti order, a page at a time;
+// a revocation marks it with the earliest instant and leaves a jti with no row
+// alone; and the sweep forgets a row once its key has expired.
+func keys(t TB, open Opener) {
+	s := opened(t, open, Key)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+	record := func(jti, environment string, exp time.Time) store.Key {
+		return store.Key{JTI: jti, Environment: environment, Subject: "https://issuer.example|ops",
+			MintedAt: now, ExpiresAt: exp}
+	}
+	with(t, s, func(tx store.Tx) error {
+		for _, k := range []store.Key{
+			record("01JKEY3", "eu-gpu", now.Add(time.Hour)),
+			record("01JKEY1", "eu-gpu", now.Add(time.Hour)),
+			record("01JKEY2", "eu-gpu", now.Add(-time.Minute)),
+			record("01JKEY4", "us-east", now.Add(time.Hour)),
+		} {
+			if err := tx.Keys().Record(ctx, k); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	refuses(t, s, "a jti recorded twice", func(tx store.Tx) error {
+		return tx.Keys().Record(ctx, record("01JKEY1", "eu-gpu", now.Add(time.Hour)))
+	})
+	refuses(t, s, "a key record with no jti", func(tx store.Tx) error {
+		return tx.Keys().Record(ctx, record("", "eu-gpu", now.Add(time.Hour)))
+	})
+
+	list := func(environment string, p store.Page) ([]store.Key, string) {
+		var (
+			rows []store.Key
+			next string
+		)
+		err := s.Tx(ctx, func(tx store.Tx) error {
+			var err error
+			rows, next, err = tx.Keys().List(ctx, environment, p)
+			return err
+		})
+		if err != nil {
+			t.Fatalf("listing the keys of %s: %v", environment, err)
+		}
+		return rows, next
+	}
+	jtis := func(rows []store.Key) []string {
+		out := make([]string, 0, len(rows))
+		for _, k := range rows {
+			out = append(out, k.JTI)
+		}
+		return out
+	}
+	first, next := list("eu-gpu", store.Page{Limit: 2})
+	if !equal(jtis(first), []string{"01JKEY1", "01JKEY2"}) || next != "01JKEY2" {
+		t.Fatalf("the first page is %v with the cursor %q, want the two oldest and a cursor", jtis(first), next)
+	}
+	if k := first[0]; k.Environment != "eu-gpu" || k.Subject != "https://issuer.example|ops" ||
+		!k.MintedAt.Equal(now) || !k.ExpiresAt.Equal(now.Add(time.Hour)) || !k.RevokedAt.IsZero() {
+		t.Errorf("the key reads back as %+v", k)
+	}
+	rest, next := list("eu-gpu", store.Page{Limit: 2, Cursor: next})
+	if !equal(jtis(rest), []string{"01JKEY3"}) || next != "" {
+		t.Errorf("the second page is %v with the cursor %q, want the newest and no cursor", jtis(rest), next)
+	}
+	if other, _ := list("us-east", store.Page{}); !equal(jtis(other), []string{"01JKEY4"}) {
+		t.Errorf("another environment's keys are %v", jtis(other))
+	}
+
+	// A revocation marks the row, and a revocation that retried keeps the
+	// instant of the first. A jti the registry holds no row for is no error.
+	with(t, s, func(tx store.Tx) error {
+		if err := tx.Keys().Revoke(ctx, "01JKEY1", now.Add(time.Minute)); err != nil {
+			return err
+		}
+		if err := tx.Keys().Revoke(ctx, "01JKEY1", now.Add(2*time.Minute)); err != nil {
+			return err
+		}
+		return tx.Keys().Revoke(ctx, "01JNOROW", now)
+	})
+	marked, _ := list("eu-gpu", store.Page{Limit: 1})
+	if len(marked) != 1 || !marked[0].RevokedAt.Equal(now.Add(time.Minute)) {
+		t.Errorf("the revoked key reads back as %+v, marked at the first revocation", marked)
+	}
+
+	// The sweep forgets the key whose expiry has passed and nothing else.
+	var swept int
+	with(t, s, func(tx store.Tx) error {
+		var err error
+		swept, err = tx.Keys().Forget(ctx, now)
+		return err
+	})
+	if swept != 1 {
+		t.Errorf("the sweep forgot %d keys, want the one that expired", swept)
+	}
+	if left, _ := list("eu-gpu", store.Page{}); !equal(jtis(left), []string{"01JKEY1", "01JKEY3"}) {
+		t.Errorf("after the sweep the environment holds %v", jtis(left))
 	}
 }
 

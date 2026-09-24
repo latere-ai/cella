@@ -45,6 +45,7 @@ func (t *txn) Values() store.Values     { return values{t.q, t.env} }
 func (t *txn) Leases() store.Leases     { return leases{t.q, t.store} }
 
 func (t *txn) Revocations() store.Revocations { return revocations{t.q} }
+func (t *txn) Keys() store.Keys               { return keys{t.q} }
 func (t *txn) Ledger() store.Ledger           { return ledger{t.q} }
 func (t *txn) Operations() store.Operations   { return operations{t.q} }
 
@@ -687,6 +688,77 @@ func (x revocations) Forget(ctx context.Context, before time.Time) (int, error) 
 	tag, err := x.q.Exec(ctx, `delete from revocations where exp < $1`, before)
 	if err != nil {
 		return 0, fmt.Errorf("store: forgetting expired revocations: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
+}
+
+// keys is the registry of environment keys: one row per minted key, by jti,
+// in the table environment_keys.
+type keys struct{ q querier }
+
+func (x keys) Record(ctx context.Context, k store.Key) error {
+	if k.JTI == "" || k.Environment == "" {
+		return errors.New("store: a key record names its jti and its environment")
+	}
+	var revoked *time.Time
+	if !k.RevokedAt.IsZero() {
+		at := k.RevokedAt.UTC()
+		revoked = &at
+	}
+	_, err := x.q.Exec(ctx, `insert into environment_keys (jti, environment, subject, minted_at, expires_at, revoked_at)
+		values ($1, $2, $3, $4, $5, $6)`,
+		k.JTI, k.Environment, k.Subject, k.MintedAt.UTC(), k.ExpiresAt.UTC(), revoked)
+	if err != nil {
+		return fmt.Errorf("store: recording the key %s: %w", k.JTI, err)
+	}
+	return nil
+}
+
+func (x keys) Revoke(ctx context.Context, jti string, at time.Time) error {
+	// The earliest mark is kept, so a revocation that retried does not move
+	// the instant a console shows.
+	_, err := x.q.Exec(ctx, `update environment_keys set revoked_at = $2
+		where jti = $1 and (revoked_at is null or revoked_at > $2)`, jti, at.UTC())
+	if err != nil {
+		return fmt.Errorf("store: marking the key %s revoked: %w", jti, err)
+	}
+	return nil
+}
+
+func (x keys) List(ctx context.Context, environment string, p store.Page) ([]store.Key, string, error) {
+	rows, err := x.q.Query(ctx, `select jti, environment, subject, minted_at, expires_at, revoked_at
+		from environment_keys where environment = $1 and jti > $2 order by jti limit $3`,
+		environment, p.Cursor, p.Size()+1)
+	if err != nil {
+		return nil, "", fmt.Errorf("store: listing the keys of %s: %w", environment, err)
+	}
+	defer rows.Close()
+	var out []store.Key
+	for rows.Next() {
+		var (
+			k       store.Key
+			revoked *time.Time
+		)
+		if err := rows.Scan(&k.JTI, &k.Environment, &k.Subject, &k.MintedAt, &k.ExpiresAt, &revoked); err != nil {
+			return nil, "", fmt.Errorf("store: reading a key of %s: %w", environment, err)
+		}
+		if revoked != nil {
+			k.RevokedAt = revoked.UTC()
+		}
+		k.MintedAt, k.ExpiresAt = k.MintedAt.UTC(), k.ExpiresAt.UTC()
+		out = append(out, k)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, "", fmt.Errorf("store: listing the keys of %s: %w", environment, err)
+	}
+	page, next := store.PageOf(out, p, func(k store.Key) string { return k.JTI })
+	return page, next, nil
+}
+
+func (x keys) Forget(ctx context.Context, before time.Time) (int, error) {
+	tag, err := x.q.Exec(ctx, `delete from environment_keys where expires_at < $1`, before)
+	if err != nil {
+		return 0, fmt.Errorf("store: forgetting expired keys: %w", err)
 	}
 	return int(tag.RowsAffected()), nil
 }

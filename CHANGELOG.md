@@ -19,6 +19,32 @@ refused before it is pushed.
   whole `details` object is on the error. `docs/client.md` is the guide.
 - A name or id that needs escaping in a URL path is escaped once. The
   client escaped it twice, so the server looked up a different name.
+- `GET /v1/environments` now applies your authorizer's answer. The list
+  used to return every environment to anyone allowed to list, ignoring the
+  `filter` the `environment.list` decision carried. It now holds each
+  environment to the filter's owners and labels and asks `environment.read`
+  for each one, as the sandbox list does, leaving out the ones the read
+  refuses. The default environment is listed whenever `environment.read` on
+  it is allowed, whatever the filter names, because every subject may use
+  it and no filter over owners and labels can name it. An authorizer that
+  narrows `environment.list` to a tenant keeps showing the default by
+  allowing that read, as it already does for a read by name.
+- `GET /v1/secrets` holds each secret to the `labels` of the list
+  decision's filter as well as its owners; the labels were ignored.
+- A port path without its trailing slash, `/v1/sandboxes/{id}/ports/{name}`,
+  now answers `307` with a relative `Location`, the port's name and a slash
+  with the query kept. The redirect used to name this server's absolute
+  path, which sent a client behind a proxy that serves the control plane
+  under a path of its own out of that path.
+- `GET /v1/environments/{id}/keys` lists the keys minted for an
+  environment, oldest first and a page at a time: each key's `jti`, when it
+  was minted, its `exp`, whether and when it was revoked, and who minted
+  it, never the key itself. It needs the right a mint needs,
+  `environment.key`. The control plane now keeps a record of each key from
+  its mint until its `exp` passes; with Postgres the record is in a new
+  table, `environment_keys`, which the migration at start creates. Keys
+  minted by an earlier release are not listed and are still revoked by
+  their `jti`.
 
 ## v0.4.0 - 2026-09-24
 

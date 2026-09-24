@@ -86,6 +86,7 @@ type Tx interface {
 	Values() Values
 	Leases() Leases
 	Revocations() Revocations
+	Keys() Keys
 	Ledger() Ledger
 	Operations() Operations
 }
@@ -336,6 +337,38 @@ type Revocations interface {
 	// Revoked reports whether this jti was revoked.
 	Revoked(ctx context.Context, jti string) (bool, error)
 	// Forget drops the rows whose exp has passed and reports how many went.
+	Forget(ctx context.Context, before time.Time) (int, error)
+}
+
+// Key is one environment key the control plane minted (design 021): what a
+// listing of an environment's keys shows, and never the token, which is shown
+// once at mint and kept nowhere. RevokedAt is zero while the key is live.
+type Key struct {
+	JTI         string
+	Environment string
+	// Subject is who minted the key, the rendered subject of design 006, and
+	// empty where the mint named nobody.
+	Subject   string
+	MintedAt  time.Time
+	ExpiresAt time.Time
+	RevokedAt time.Time
+}
+
+// Keys is the registry of environment keys: one row per key the control plane
+// minted, kept until the key expires, so an administrator lists and revokes a
+// key without having kept the jti its mint returned.
+type Keys interface {
+	// Record writes one minted key. A jti already recorded is refused,
+	// because a jti names one key.
+	Record(ctx context.Context, k Key) error
+	// Revoke marks the key revoked at the instant given, keeping the earliest
+	// mark. A jti with no row is no error: a key minted before its row could
+	// be kept is ended by the revocation list alone.
+	Revoke(ctx context.Context, jti string, at time.Time) error
+	// List returns one page of an environment's keys in jti order, which is
+	// the order they were minted in, and the cursor of the next page.
+	List(ctx context.Context, environment string, p Page) ([]Key, string, error)
+	// Forget drops the rows whose key has expired and reports how many went.
 	Forget(ctx context.Context, before time.Time) (int, error)
 }
 

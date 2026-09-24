@@ -70,6 +70,23 @@ error is read as "no decision" and refuses the request either way. Carry
 your plan's ceilings on the allow, as `authorizer.WireLimits`, rather than
 enforcing them in a proxy in front.
 
+A list is decided in two steps. The list action (`sandbox.list`,
+`secret.list`, `environment.list`) answers an allow that may carry a
+`filter` of `owners` and `labels`. The core holds every object to that
+filter, then asks the kind's read (`sandbox.read`, and so on) for each
+object the filter lets through, and leaves out the ones the read refuses.
+The filter narrows the list and the read decides each object, so an
+object your filter excludes is never read. A read that fails to answer
+fails the whole list rather than dropping one object from it.
+
+The default environment is the one exception. Every subject may place a
+sandbox in it, and it carries no caller's owner or labels, so no filter can
+name it. The core lists it whenever your `environment.read` on it allows.
+To show a tenant's members their own environments and the shared default,
+narrow `environment.list` to the tenant and allow `environment.read` on the
+default for them; to hide the default from someone, deny that read, which
+hides it from a read by name as well.
+
 ### What a manifest becomes
 
 `CELLA_ADMISSION_URL` points at an endpoint that sees a resolved manifest

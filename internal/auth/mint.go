@@ -49,10 +49,11 @@ type Workload struct {
 }
 
 // Token is one minted credential: the compact JWS, the jti that revokes
-// it, and when it stops verifying anywhere.
+// it, when it was signed, and when it stops verifying anywhere.
 type Token struct {
 	Value     string
 	JTI       string
+	IssuedAt  time.Time
 	ExpiresAt time.Time
 }
 
@@ -208,7 +209,7 @@ func (s *Signer) mint(payload minted, now, exp time.Time) (Token, error) {
 	if err != nil {
 		return Token{}, err
 	}
-	return Token{Value: signing + "." + b64(sig), JTI: jti, ExpiresAt: exp}, nil
+	return Token{Value: signing + "." + b64(sig), JTI: jti, IssuedAt: now, ExpiresAt: exp}, nil
 }
 
 // JWKS serves the public half of every configured key. It is what lets a

@@ -499,4 +499,23 @@ func TestRecordGateDecidesEachRecord(t *testing.T) {
 	if _, err := gate.allows(object(events.KindEnvironment, "default", "", "a")); err == nil {
 		t.Error("an authorizer that failed let the feed go on")
 	}
+
+	// A record about the default environment passes the filter as the
+	// default does in the environment list, and its read decides it; every
+	// other environment's record is held to the filter.
+	policy = &scripted{asked: map[string]int{}}
+	h = &handler{Authorizer: auth.NewAuthorizer(policy)}
+	gate = &recordGate{h: h, r: r, defaultEnvironment: "default", lists: map[string]listVerdict{}, reads: map[string]bool{}}
+	environment := func(name string) events.Record {
+		return events.Record{Object: events.Object{Kind: events.KindEnvironment, ID: name, Name: name, Owner: "controller"}}
+	}
+	if allowed, err := gate.allows(environment("default")); err != nil || !allowed {
+		t.Errorf("a record of the default environment: allowed %v, %v; its read allows it", allowed, err)
+	}
+	if allowed, err := gate.allows(environment("eu-gpu")); err != nil || allowed {
+		t.Errorf("a record of an environment outside the filter: allowed %v, %v", allowed, err)
+	}
+	if n := policy.asked[authorizer.ActionEnvironmentRead]; n != 1 {
+		t.Errorf("the gate asked environment.read %d times; once, for the default", n)
+	}
 }

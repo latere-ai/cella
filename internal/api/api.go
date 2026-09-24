@@ -17,7 +17,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -158,6 +157,7 @@ func New(o Options) (http.Handler, error) {
 	h.handle("PUT /v1/environments/{id}", h.environmentApply)
 	h.handle("DELETE /v1/environments/{id}", h.environmentItem)
 	h.handle("POST /v1/environments/{id}/keys", h.environmentKeyMint)
+	h.handle("GET /v1/environments/{id}/keys", h.environmentKeyList)
 	h.handle("DELETE /v1/environments/{id}/keys/{jti}", h.environmentKeyRevoke)
 	// The routes whose content type is the route's own: an archive, a file
 	// body, a frame, a log, a framed stream and the four sockets. A caller
@@ -174,6 +174,7 @@ func New(o Options) (http.Handler, error) {
 	// The port proxy answers every method: what the server inside accepts is
 	// the server's, so the pattern names none.
 	h.stream(portProxyPattern, h.portProxy)
+	h.stream(portRedirectPattern, h.portRedirect)
 	h.stream("GET /v1/sandboxes/{id}/screenshot", h.screenshot)
 	h.stream("GET /v1/sandboxes/{id}/screen", h.screen)
 	// A page of the feed negotiates its syntax in the handler; a following
@@ -582,13 +583,8 @@ func (h *handler) list(w http.ResponseWriter, r *http.Request) {
 		if obj.Status.ID <= q.Get("cursor") || (q.Get("owner") != "" && q.Get("owner") != obj.Status.Owner) || (q.Get("environment") != "" && q.Get("environment") != obj.Spec.Environment) || !matches(obj, labels) {
 			continue
 		}
-		if d.Filter != nil {
-			if len(d.Filter.Owners) > 0 && !slices.Contains(d.Filter.Owners, obj.Status.Owner) {
-				continue
-			}
-			if !matches(obj, d.Filter.Labels) {
-				continue
-			}
+		if !admits(d.Filter, obj.Status.Owner, obj.Metadata.Labels) {
+			continue
 		}
 		if _, err = h.decide(r, authorizer.ActionSandboxRead, resource(obj)); err != nil {
 			if auth.CodeOf(err) == auth.CodeForbidden {
