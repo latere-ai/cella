@@ -150,5 +150,7 @@ move the thresholds against your own figures.
 | `CelladSandboxesLost` | The driver no longer has sandboxes the control plane still wants, and recovery is not bringing them back. |
 
 Two further rules, `CelladEnvironmentOffline` and
-`CelladOperationsRedelivered`, read metrics the environment and worker
-loops emit. They ship here and stay quiet until those loops run.
+`CelladOperationsRedelivered`, read `cella_environments` and
+`cella_operations_redelivered_total`, which this release does not emit
+yet, so neither fires. Watch an environment's phase through
+`GET /v1/environments` in the meantime.
