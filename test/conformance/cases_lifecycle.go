@@ -17,11 +17,14 @@ func lifecycleCases() []Case {
 		{"lifecycle", "case005StopAndStart", case005StopAndStart},
 		{"lifecycle", "case005PhaseConflict", case005PhaseConflict},
 		{"lifecycle", "case005DeleteInEveryPhase", case005DeleteInEveryPhase},
+		{"lifecycle", "case008CreateWait", case008CreateWait},
 	}
 }
 
 // case005CreateReachesRunning: an applied sandbox reaches Running without
-// anything else being asked for.
+// anything else being asked for. The create answers as soon as the sandbox
+// is recorded, in whatever phase it holds then, and the await reads it to
+// Running.
 func case005CreateReachesRunning(ctx context.Context, e *Env) error {
 	obj, err := e.sandbox(ctx, e.caller)
 	if err != nil {
@@ -125,6 +128,32 @@ func case005DeleteInEveryPhase(ctx context.Context, e *Env) error {
 		if obj.Status.Phase != "Deleting" {
 			return x.disagree("the object in Deleting", "phase "+obj.Status.Phase)
 		}
+	}
+	return nil
+}
+
+// case008CreateWait: a create that asks for its answer held, with ?wait=1,
+// answers 201 once the sandbox has started, with the object Running and its
+// Location. Without the hold a create answers as soon as the sandbox is
+// recorded, which every other case reads through its await.
+func case008CreateWait(ctx context.Context, e *Env) error {
+	x, err := e.caller.post(ctx, "/v1/sandboxes?wait=1", e.manifest(e.name()))
+	if err != nil {
+		return err
+	}
+	if err := x.status(http.StatusCreated); err != nil {
+		return err
+	}
+	obj, err := x.object()
+	if err != nil {
+		return err
+	}
+	if obj.Status.ID == "" {
+		return x.disagree("status.id on a created object", "no id")
+	}
+	e.record(e.caller, "/v1/sandboxes", obj.Status.ID)
+	if obj.Status.Phase != "Running" {
+		return x.disagree("phase Running in the answer of a held create", "phase "+obj.Status.Phase)
 	}
 	return nil
 }
