@@ -131,12 +131,16 @@ Two limits hold on this runtime:
    `CELLA_K8S_DNS_NAMESPACE`. [Configuration](configuration.md#kubernetes)
    has every variable.
 
+Name the Pods only once the gateway runs and carries those labels. A
+selector that matches no running Pod leaves every sandbox reaching DNS and
+nothing else.
+
 The cluster's network plugin has to enforce NetworkPolicy, egress
 included. A plugin that ignores it leaves the policy written and nothing
-confined, and the environment still reports the boundary enforced. A
-namespace that already denies everything by default loses nothing to the
-per-sandbox policy and gains nothing from it: the two add up to the same
-rule.
+confined, and the environment still reports the boundary enforced. In a
+namespace whose own policies already deny everything but the gateway and
+DNS, the per-sandbox policy opens one more path and no other: a mesh
+member's connections to the other members of its mesh.
 
 A sandbox created before the gateway was named takes the new policy at its
 next start.

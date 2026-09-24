@@ -24,7 +24,9 @@ data:
   # The gateway's Pods, by a label they carry. Named, every sandbox reaches
   # the network only through them, and the environment enforces the
   # boundary a manifest declares; set it to the labels of the gateway
-  # Deployment you run.
+  # Deployment you run. The base deploys no gateway, and a label no running
+  # Pod carries leaves every sandbox reaching DNS and nothing else, so run
+  # the gateway before applying this, or remove the key.
   CELLA_K8S_GATEWAY_SELECTOR: "app.kubernetes.io/name=cellad-egress"
   # The pool one replica opens on the database. A shared cluster has a
   # connection ceiling, and one replica does not hold it.
