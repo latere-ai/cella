@@ -31,6 +31,10 @@ func TestEnvironmentsAndTheirKeys(t *testing.T) {
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/environments/gpu/keys":
 			w.WriteHeader(http.StatusCreated)
 			_, _ = w.Write([]byte(`{"token":"key-once","jti":"jti_1","exp":"2026-10-24T12:00:00Z"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/environments/gpu/keys" && r.URL.Query().Get("cursor") == "":
+			_, _ = w.Write([]byte(`{"items":[{"jti":"jti_0","mintedAt":"2026-09-24T10:00:00Z","exp":"2027-09-24T10:00:00Z","revoked":true,"revokedAt":"2026-09-24T11:00:00Z","mintedBy":"admin"}],"next":"jti_0"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/environments/gpu/keys":
+			_, _ = w.Write([]byte(`{"items":[{"jti":"jti_1","mintedAt":"2026-09-24T12:00:00Z","exp":"2026-10-24T12:00:00Z","revoked":false}],"next":""}`))
 		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/v1/environments/gpu/keys/"):
 			w.WriteHeader(http.StatusNoContent)
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/environments/missing":
@@ -69,6 +73,17 @@ func TestEnvironmentsAndTheirKeys(t *testing.T) {
 	}
 	if got := f.last(); got.Method != http.MethodPost || got.Path != "/v1/environments/gpu/keys" {
 		t.Fatalf("the mint called %s %s", got.Method, got.Path)
+	}
+	keys, err := c.ListEnvironmentKeys(ctx, "gpu")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(keys) != 2 || keys[0].JTI != "jti_0" || !keys[0].Revoked || keys[0].RevokedAt == nil || keys[0].MintedBy != "admin" ||
+		keys[1].JTI != "jti_1" || keys[1].Revoked || !keys[1].Expires.Equal(key.Expires) {
+		t.Fatalf("the key list answered %+v", keys)
+	}
+	if got := f.last(); got.Path != "/v1/environments/gpu/keys" || got.Query.Get("cursor") != "jti_0" {
+		t.Fatalf("the second page was asked as %s ?%s", got.Path, got.Query.Encode())
 	}
 	if err = c.RevokeEnvironmentKey(ctx, "gpu", key.JTI); err != nil {
 		t.Fatal(err)

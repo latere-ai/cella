@@ -6,8 +6,10 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"time"
 
 	v1 "latere.ai/x/cella/manifest/v1"
@@ -63,4 +65,53 @@ func (c *Client) MintEnvironmentKey(ctx context.Context, ref string) (Environmen
 // frame and its next request.
 func (c *Client) RevokeEnvironmentKey(ctx context.Context, ref, jti string) error {
 	return c.write(ctx, http.MethodDelete, KindEnvironment.item(ref)+"/keys/"+url.PathEscape(jti), nil, nil, "")
+}
+
+// KeyRecord is one environment key as the key list answers it. The token is
+// not part of it: the control plane keeps no copy, so a list is not a way to
+// recover a key, only to see and revoke one.
+type KeyRecord struct {
+	// JTI names the key, which is what revokes it.
+	JTI string `json:"jti"`
+	// MintedAt is when the key was minted.
+	MintedAt time.Time `json:"mintedAt"`
+	// Expires is when the key stops working on its own.
+	Expires time.Time `json:"exp"`
+	// Revoked reports whether the key was ended by a revocation.
+	Revoked bool `json:"revoked"`
+	// RevokedAt is when, for a revoked key.
+	RevokedAt *time.Time `json:"revokedAt,omitempty"`
+	// MintedBy is the subject that minted it, where the server recorded one.
+	MintedBy string `json:"mintedBy,omitempty"`
+}
+
+// ListEnvironmentKeys follows the cursor to the end and returns the keys the
+// environment holds a record of, oldest first. It is an administrator's call,
+// as the mint and the revocation are. A key minted before the server kept
+// records is not listed and is still revoked by its jti.
+func (c *Client) ListEnvironmentKeys(ctx context.Context, ref string) ([]KeyRecord, error) {
+	var keys []KeyRecord
+	cursor := ""
+	for {
+		q := url.Values{"limit": {strconv.Itoa(maxPage)}}
+		if cursor != "" {
+			q.Set("cursor", cursor)
+		}
+		body, err := c.send(ctx, http.MethodGet, KindEnvironment.item(ref)+"/keys", q, nil, "")
+		if err != nil {
+			return nil, err
+		}
+		var page struct {
+			Items []KeyRecord `json:"items"`
+			Next  string      `json:"next"`
+		}
+		if err = json.Unmarshal(body, &page); err != nil {
+			return nil, fmt.Errorf("the key list answer is no page: %w", err)
+		}
+		keys = append(keys, page.Items...)
+		if page.Next == "" || len(page.Items) == 0 {
+			return keys, nil
+		}
+		cursor = page.Next
+	}
 }

@@ -6,6 +6,9 @@ refused before it is pushed.
 
 ## Unreleased
 
+- `client.ListEnvironmentKeys` reads an environment's key list: each key's
+  jti, when it was minted and by whom, when it expires, and whether it was
+  revoked. The token is never part of it.
 - The Go client is public: `latere.ai/x/cella/client`, the one the `cella`
   command is built on. A program outside this module can now create,
   apply, list, start, stop and delete sandboxes, secrets and environments,
