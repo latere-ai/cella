@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.5.0 - 2026-09-24
+
 - `CELLA_BASE_PATH` serves the control plane under a path of an API
   address it shares with other services, such as `/v1/environments`. The
   path takes the place of `/v1`: `/v1/sandboxes` is answered at
