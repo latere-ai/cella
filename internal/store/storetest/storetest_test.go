@@ -146,6 +146,7 @@ func (stubTx) Values() store.Values     { return stubValues{} }
 func (stubTx) Leases() store.Leases     { return stubLeases{} }
 
 func (stubTx) Revocations() store.Revocations { return stubRevocations{} }
+func (stubTx) Keys() store.Keys               { return stubKeys{} }
 func (stubTx) Ledger() store.Ledger           { return stubLedger{} }
 func (stubTx) Operations() store.Operations   { return stubOperations{} }
 
@@ -229,6 +230,15 @@ func (stubLeases) Acquire(context.Context, string, string, time.Duration) (bool,
 	return true, nil
 }
 func (stubLeases) Release(context.Context, string, string) error { return nil }
+
+type stubKeys struct{}
+
+func (stubKeys) Record(context.Context, store.Key) error         { return nil }
+func (stubKeys) Revoke(context.Context, string, time.Time) error { return nil }
+func (stubKeys) Forget(context.Context, time.Time) (int, error)  { return 0, nil }
+func (stubKeys) List(context.Context, string, store.Page) ([]store.Key, string, error) {
+	return nil, "", nil
+}
 
 type stubRevocations struct{}
 

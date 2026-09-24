@@ -14,6 +14,7 @@ package memory
 import (
 	"context"
 	"errors"
+	"fmt"
 	"maps"
 	"slices"
 	"sort"
@@ -126,6 +127,8 @@ type data struct {
 	// revoked is the jti of every token revoked before it expired, against
 	// the instant after which the row is no longer worth keeping.
 	revoked map[string]time.Time
+	// keys is the registry of environment keys, by jti.
+	keys map[string]store.Key
 	// used is the spawn ledger of design 022: how many children each sandbox
 	// has created in total.
 	used map[string]int
@@ -160,6 +163,7 @@ func newData() *data {
 		values:   map[string]valueRow{},
 		leases:   map[string]leaseRow{},
 		revoked:  map[string]time.Time{},
+		keys:     map[string]store.Key{},
 		used:     map[string]int{},
 
 		operations: map[string]store.Operation{},
@@ -192,6 +196,7 @@ func (d *data) clone() *data {
 	}
 	maps.Copy(n.leases, d.leases)
 	maps.Copy(n.revoked, d.revoked)
+	maps.Copy(n.keys, d.keys)
 	maps.Copy(n.used, d.used)
 	for k, v := range d.operations {
 		n.operations[k] = cloneOperation(v)
@@ -236,6 +241,7 @@ func (t *txn) Values() store.Values     { return values{t.d, t.env} }
 func (t *txn) Leases() store.Leases     { return leases{t.d} }
 
 func (t *txn) Revocations() store.Revocations { return revocations{t.d} }
+func (t *txn) Keys() store.Keys               { return keys{t.d} }
 func (t *txn) Ledger() store.Ledger           { return ledger{t.d} }
 func (t *txn) Operations() store.Operations   { return operations{t.d} }
 
@@ -784,6 +790,66 @@ func (x revocations) Forget(ctx context.Context, before time.Time) (int, error) 
 	for jti, exp := range x.d.revoked {
 		if exp.Before(before) {
 			delete(x.d.revoked, jti)
+			n++
+		}
+	}
+	return n, nil
+}
+
+// keys is the registry of environment keys: one row per minted key, by jti.
+type keys struct{ d *data }
+
+func (x keys) Record(ctx context.Context, k store.Key) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if k.JTI == "" || k.Environment == "" {
+		return errors.New("store: a key record names its jti and its environment")
+	}
+	if _, held := x.d.keys[k.JTI]; held {
+		return fmt.Errorf("store: the key %s is already recorded", k.JTI)
+	}
+	k.MintedAt, k.ExpiresAt, k.RevokedAt = k.MintedAt.UTC(), k.ExpiresAt.UTC(), k.RevokedAt.UTC()
+	x.d.keys[k.JTI] = k
+	return nil
+}
+
+func (x keys) Revoke(ctx context.Context, jti string, at time.Time) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	k, held := x.d.keys[jti]
+	if !held || (!k.RevokedAt.IsZero() && !k.RevokedAt.After(at)) {
+		return nil
+	}
+	k.RevokedAt = at.UTC()
+	x.d.keys[jti] = k
+	return nil
+}
+
+func (x keys) List(ctx context.Context, environment string, p store.Page) ([]store.Key, string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, "", err
+	}
+	var rows []store.Key
+	for _, k := range x.d.keys {
+		if k.Environment == environment && k.JTI > p.Cursor {
+			rows = append(rows, k)
+		}
+	}
+	slices.SortFunc(rows, func(a, b store.Key) int { return strings.Compare(a.JTI, b.JTI) })
+	page, next := store.PageOf(rows, p, func(k store.Key) string { return k.JTI })
+	return page, next, nil
+}
+
+func (x keys) Forget(ctx context.Context, before time.Time) (int, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	n := 0
+	for jti, k := range x.d.keys {
+		if k.ExpiresAt.Before(before) {
+			delete(x.d.keys, jti)
 			n++
 		}
 	}
