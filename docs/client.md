@@ -91,8 +91,8 @@ typed, err := client.Encode(v1.Sandbox{...}) // a typed object, sent as JSON
 
 | Call | What it does |
 |---|---|
-| `CreateSandbox(ctx, m)` | Creates a sandbox. The manifest may leave the name out. |
-| `ApplySandbox(ctx, name, m)` | Creates the sandbox under that name, or updates the one you hold, so applying the same manifest again makes no second sandbox. |
+| `CreateSandbox(ctx, m, opts...)` | Creates a sandbox. The manifest may leave the name out. The answer is the sandbox as soon as it is recorded, `Pending`; pass `client.Wait(timeout)` to have the server hold it until the sandbox runs or fails, for at most `timeout` (zero takes the server's ten minutes). |
+| `ApplySandbox(ctx, name, m, opts...)` | Creates the sandbox under that name, or updates the one you hold, so applying the same manifest again makes no second sandbox. `client.Wait` holds the answer the same way. |
 | `CreateSecret`, `ApplySecret` | The same for a Secret. No answer ever carries its value. |
 | `CreateEnvironment`, `ApplyEnvironment` | The same for an Environment. |
 

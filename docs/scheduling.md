@@ -49,11 +49,13 @@ create that does not fit:
 
 | Mode | The create fits | It does not fit |
 |---|---|---|
-| `direct` (the default) | the sandbox starts | the sandbox is `Failed` with the reason `NoCapacity` |
-| `queued` | the sandbox starts, unless others already wait in its queue | the sandbox is `Queued`, and starts when there is room |
+| `direct` (the default) | the sandbox is `Pending` and starts | the sandbox is `Failed` with the reason `NoCapacity` |
+| `queued` | the sandbox is `Pending` and starts, unless others already wait in its queue | the sandbox is `Queued`, and starts when there is room |
 
-Either way the create answers `201` with the sandbox, and its `phase`
-says what happened. A `Failed` sandbox keeps its name and counts toward
+Either way the create answers `201` with the sandbox as soon as it is
+recorded, and its `phase` says what happened: `Pending` is a sandbox that
+fit and is being started, which holds its share of the capacity from that
+moment. A `Failed` sandbox keeps its name and counts toward
 your own sandbox limit until you delete it, the same as one that failed
 at the driver.
 
