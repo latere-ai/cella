@@ -20,6 +20,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"latere.ai/x/pkg/authz"
@@ -79,6 +80,17 @@ type Options struct {
 	// Metrics is design 017's recorder. It is optional: with none the API
 	// counts nothing and answers the same.
 	Metrics Metrics
+	// Draining closes when the server stops taking requests. Every
+	// following feed of design 009 ends when it does, so a shutdown does not
+	// wait out its grace period for streams that would never end on their
+	// own. Nil ends them only when their callers leave.
+	Draining <-chan struct{}
+	// FollowLimit is how many following feeds this process holds open at
+	// once, and FollowHeartbeat how long one stays silent before it writes
+	// an empty line. Zero takes DefaultFollowLimit and
+	// DefaultFollowHeartbeat; a test sets them.
+	FollowLimit     int
+	FollowHeartbeat time.Duration
 	// Log takes the one line per request of design 017. Nil is the default
 	// logger, which is the redacting one cellad installs before it builds
 	// anything.
@@ -89,6 +101,11 @@ type handler struct {
 	mux     *http.ServeMux
 	metrics Metrics
 	log     *slog.Logger
+	// following counts the following feeds open now, which followLimit
+	// bounds, and heartbeat is how long one stays silent.
+	following   atomic.Int64
+	followLimit int
+	heartbeat   time.Duration
 	// patterns is every route this handler registered, in registration
 	// order. It is the half of design 008's document that the server knows;
 	// TestTheDocumentAndTheMuxAgree reads it against api/openapi.yaml, so a
@@ -108,8 +125,10 @@ func New(o Options) (http.Handler, error) {
 	}
 	h := &handler{
 		Options: o, mux: http.NewServeMux(),
-		metrics: cmp.Or(o.Metrics, Metrics(nopMetrics{})),
-		log:     cmp.Or(o.Log, slog.Default()),
+		metrics:     cmp.Or(o.Metrics, Metrics(nopMetrics{})),
+		log:         cmp.Or(o.Log, slog.Default()),
+		followLimit: cmp.Or(o.FollowLimit, DefaultFollowLimit),
+		heartbeat:   cmp.Or(o.FollowHeartbeat, DefaultFollowHeartbeat),
 	}
 	// The routes whose answer is one object or one page, in the syntax the
 	// request negotiated.
@@ -128,7 +147,6 @@ func New(o Options) (http.Handler, error) {
 	h.handle("GET /v1/sandboxes/{id}/display", h.display)
 	h.handle("POST /v1/sandboxes/{id}/input", h.input)
 	h.handle("GET /v1/sandboxes/{id}/ports", h.ports)
-	h.handle("GET /v1/events", h.eventFeed)
 	h.handle("POST /v1/secrets", h.createSecret)
 	h.handle("GET /v1/secrets", h.listSecrets)
 	h.handle("PUT /v1/secrets/{key}", h.applySecret)
@@ -158,6 +176,9 @@ func New(o Options) (http.Handler, error) {
 	h.stream(portProxyPattern, h.portProxy)
 	h.stream("GET /v1/sandboxes/{id}/screenshot", h.screenshot)
 	h.stream("GET /v1/sandboxes/{id}/screen", h.screen)
+	// A page of the feed negotiates its syntax in the handler; a following
+	// feed is newline-delimited JSON whatever Accept names.
+	h.stream("GET /v1/events", h.eventFeed)
 	// The three routes an environment key reaches are answered before the
 	// mux, because the key names an environment and no route that decides on
 	// a subject may be reached with one. They are recorded here all the same:
@@ -795,6 +816,10 @@ func errorEnvelope(err error, requestID string) (int, httpjson.Error) {
 		code = "invalid_field"
 	case errors.Is(err, driver.ErrTooLarge):
 		code = "body_too_large"
+	case errors.Is(err, events.ErrExpired), errors.Is(err, events.ErrBehind):
+		code = "cursor_expired"
+	case errors.Is(err, events.ErrNoJournal):
+		code = "capability_unsupported"
 	}
 	switch code {
 	case "unauthenticated":
@@ -893,6 +918,12 @@ func errorEnvelope(err error, requestID string) (int, httpjson.Error) {
 	case "upstream_unavailable":
 		status = 502
 		message = "Nothing is listening on that port."
+	case "cursor_expired":
+		status = 410
+		message = "The feed no longer holds the records after that position; read it again from the newest."
+	case "rate_limited":
+		status = 429
+		message = "Too many requests; wait and retry."
 	}
 	details := map[string]any{"request_id": requestID, "detail": fmt.Sprint(err)}
 	// Design 008 carries paths as a list for every code that names fields.

@@ -861,8 +861,13 @@ func (f *fake) changeFiles(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// objectFeed is the journal of one object, newest first.
+// objectFeed is the journal of one object, newest first, or with follow=1 the
+// records after the cursor and then as they are filed.
 func (f *fake) objectFeed(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Get("follow") == "1" {
+		f.followFeed(w, r)
+		return
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	records := slices.Clone(f.events[r.URL.Query().Get("object")])
@@ -874,6 +879,48 @@ func (f *fake) objectFeed(w http.ResponseWriter, r *http.Request) {
 		items = append(items, item)
 	}
 	f.write(w, http.StatusOK, map[string]any{"items": items, "next": ""})
+}
+
+// followFeed writes one object's records above the cursor as newline-delimited
+// JSON, oldest first, and keeps writing what is filed until the caller leaves.
+// The wrong-values mode sends every record twice.
+func (f *fake) followFeed(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	cursor, err := strconv.ParseInt(q.Get("cursor"), 10, 64)
+	if err != nil {
+		f.refuse(w, "invalid_field", "cursor")
+		return
+	}
+	w.Header().Set("Content-Type", "application/x-ndjson")
+	w.WriteHeader(http.StatusOK)
+	flusher, _ := w.(http.Flusher)
+	for {
+		f.mu.Lock()
+		var batch []map[string]any
+		for _, record := range f.events[q.Get("object")] {
+			if seq, _ := record["seq"].(int64); seq > cursor {
+				batch = append(batch, record)
+				if f.wrongValues {
+					batch = append(batch, record)
+				}
+				cursor = seq
+			}
+		}
+		f.mu.Unlock()
+		for _, record := range batch {
+			if err := json.NewEncoder(w).Encode(record); err != nil {
+				return
+			}
+		}
+		if flusher != nil {
+			flusher.Flush()
+		}
+		select {
+		case <-r.Context().Done():
+			return
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
 }
 
 // sinkRecords is what an operator's sink holds, in sequence order.

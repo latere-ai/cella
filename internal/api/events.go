@@ -48,26 +48,32 @@ func (h *handler) emit(r *http.Request, obj v1.Sandbox, kind events.Type, data a
 	h.Events.Write(r.Context(), record)
 }
 
-// eventFeed serves GET /v1/events?object=: design 009's records for one
-// object, newest first and paged by the sequence the journal assigned. The
-// handler reads the object, derives its kind from the id, and authorizes that
-// kind's read, so a feed tells a caller nothing a read of the object would
-// not.
+// eventFeed serves GET /v1/events: design 009's records for one object,
+// newest first and paged by the sequence the journal assigned, or with
+// follow=1 the following feed of follow.go. The handler reads the object,
+// derives its kind from the id, and authorizes that kind's read, so a feed
+// tells a caller nothing a read of the object would not.
+//
+// The route is mounted as a stream: a page negotiates its syntax here, and a
+// following feed answers newline-delimited JSON whatever Accept names.
 func (h *handler) eventFeed(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
+	switch q.Get("follow") {
+	case "", "0":
+	case "1":
+		h.followFeed(w, r)
+		return
+	default:
+		respondError(w, &manifest.Error{Code: "invalid_field", Path: "follow", Detail: "follow must be 0 or 1"})
+		return
+	}
+	if !acceptable(w, r) {
+		return
+	}
 	object := q.Get("object")
 	if object == "" {
 		respondError(w, &manifest.Error{Code: "invalid_field", Path: "object",
-			Detail: "the feed is per object; name one with ?object="})
-		return
-	}
-	// Design 009 serves a following feed as newline-delimited JSON. This
-	// server serves the pages only, and a caller that asked to follow and was
-	// handed one page would read the absence of later records as their
-	// absence.
-	if q.Get("follow") != "" {
-		respondError(w, &manifest.Error{Code: "capability_unsupported",
-			Detail: "this server serves no following feed; read the pages with ?cursor="})
+			Detail: "a page is one object's; name one with ?object=, or follow every object with ?follow=1"})
 		return
 	}
 	limit := 50

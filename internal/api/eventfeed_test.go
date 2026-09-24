@@ -105,9 +105,9 @@ func TestObjectFeed(t *testing.T) {
 	}
 }
 
-// TestObjectFeedRefusals proves what the route refuses: a query naming no
-// object, a limit outside the ceiling, a following read this server does not
-// serve, and an object that is not there.
+// TestObjectFeedRefusals proves what the route refuses: a page naming no
+// object, a limit outside the ceiling, and an object that is not there,
+// whether the read is a page or a follow.
 func TestObjectFeedRefusals(t *testing.T) {
 	f := setupRecorded(t)
 	for _, tc := range []struct {
@@ -118,7 +118,7 @@ func TestObjectFeedRefusals(t *testing.T) {
 		{"", 400, "invalid_field"},
 		{"object=sbx_01j0000000000000000000000&limit=300", 400, "invalid_field"},
 		{"object=sbx_01j0000000000000000000000&limit=zero", 400, "invalid_field"},
-		{"object=sbx_01j0000000000000000000000&follow=1", 422, "capability_unsupported"},
+		{"object=sbx_01j0000000000000000000000&follow=1", 404, "not_found"},
 		{"object=sbx_01j0000000000000000000000", 404, "not_found"},
 		{"object=sec_01j0000000000000000000000", 404, "not_found"},
 		{"object=env_nothing", 404, "not_found"},

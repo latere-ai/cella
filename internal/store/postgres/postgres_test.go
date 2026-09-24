@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/rand"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"os"
 	"os/exec"
@@ -21,6 +22,7 @@ import (
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 
+	"latere.ai/x/cella/internal/events"
 	"latere.ai/x/cella/internal/store"
 	"latere.ai/x/cella/internal/store/postgres"
 	"latere.ai/x/cella/internal/store/storetest"
@@ -48,6 +50,44 @@ func TestPostgresStore(t *testing.T) {
 	storetest.Run(t, func(t storetest.TB, key []byte) store.Store {
 		return open(t, database(t, admin), key, time.Hour)
 	})
+}
+
+// TestAFollowerReadsAnotherReplicasAppend: two replicas over one database. A
+// follower of one object on the first reads a record the second committed,
+// which never reaches the first's own subscriptions and arrives through the
+// read the follower makes on its interval, and then a record the first
+// committed itself, in sequence.
+func TestAFollowerReadsAnotherReplicasAppend(t *testing.T) {
+	dsn := database(t, server(t))
+	here, there := open(t, dsn, storetest.Key, time.Hour), open(t, dsn, storetest.Key, time.Hour)
+	e := events.NewEmitter(store.EventJournal(here, store.Journaled), slog.New(slog.DiscardHandler))
+	f, err := e.Follow(t.Context(), "sbx_a", events.FromNow)
+	if err != nil {
+		t.Fatalf("following: %v", err)
+	}
+	defer f.Close()
+	// The deadline turns a follower that never reads the journal into a
+	// failure rather than a hung test; the wait ends on the record.
+	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	defer cancel()
+	for i, replica := range []store.Store{there, here} {
+		record, err := events.Mutation(events.TypeExec, "", events.Object{
+			Kind: events.KindSandbox, ID: "sbx_a", Name: "work", Owner: "alice",
+		}, events.Phase{Phase: "Running"}, events.Actor{Subject: "alice"}, time.Now().UTC())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := store.EventJournal(replica, store.Journaled).Append(ctx, record); err != nil {
+			t.Fatalf("appending on replica %d: %v", i, err)
+		}
+		got, err := f.Next(ctx)
+		if err != nil {
+			t.Fatalf("waiting for replica %d's record: %v", i, err)
+		}
+		if len(got) != 1 || got[0].ID != record.ID || got[0].Seq != int64(i+1) {
+			t.Fatalf("the follower sent %+v for replica %d's record %s", got, i, record.ID)
+		}
+	}
 }
 
 // TestTheQueueTableIsGone: the scheduler's queue is the Queued rows of desired

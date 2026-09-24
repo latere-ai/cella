@@ -5,6 +5,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -77,6 +78,69 @@ func (j eventJournal) ByObject(ctx context.Context, objectID, cursor string, lim
 	})
 	return out, next, err
 }
+
+// After reads the records of one object above a sequence, oldest first,
+// rebuilt as ByObject rebuilds them.
+func (j eventJournal) After(ctx context.Context, objectID string, seq int64, limit int) ([]events.Record, error) {
+	var out []events.Record
+	err := j.store.Tx(ctx, func(tx Tx) error {
+		rows, err := tx.Journal().After(ctx, objectID, seq, limit)
+		if err != nil {
+			return err
+		}
+		out = make([]events.Record, 0, len(rows))
+		for _, row := range rows {
+			record, err := events.Rebuild(row.Payload, row.ID, row.Seq, row.Type, row.At)
+			if err != nil {
+				return fmt.Errorf("store: rebuilding the event %s: %w", row.ID, err)
+			}
+			out = append(out, record)
+		}
+		return nil
+	})
+	return out, err
+}
+
+// Watch subscribes to the records this process commits to the store.
+func (j eventJournal) Watch(objectID string) events.Subscription {
+	return subscription{j.store.Watch(objectID)}
+}
+
+// Shared is whether the store outlives the process, which is the store a
+// second replica can append to.
+func (j eventJournal) Shared() bool { return j.store.Durable() }
+
+// errUnsubscribed is a read of a subscription its reader already closed.
+var errUnsubscribed = errors.New("store: the subscription was closed")
+
+// subscription rebuilds each committed row into the record it was written
+// from, as a read of the journal does.
+type subscription struct{ sub *Subscription }
+
+func (s subscription) Next(ctx context.Context) (events.Record, error) {
+	select {
+	case row, open := <-s.sub.Rows():
+		if !open {
+			err := s.sub.Err()
+			switch {
+			case errors.Is(err, ErrBehind):
+				return events.Record{}, events.ErrBehind
+			case err == nil:
+				return events.Record{}, errUnsubscribed
+			}
+			return events.Record{}, err
+		}
+		record, err := events.Rebuild(row.Payload, row.ID, row.Seq, row.Type, row.At)
+		if err != nil {
+			return events.Record{}, fmt.Errorf("store: rebuilding the event %s: %w", row.ID, err)
+		}
+		return record, nil
+	case <-ctx.Done():
+		return events.Record{}, ctx.Err()
+	}
+}
+
+func (s subscription) Close() { s.sub.Close() }
 
 func (j eventJournal) Pending(ctx context.Context, limit int, now time.Time) ([]events.Pending, error) {
 	var out []events.Pending

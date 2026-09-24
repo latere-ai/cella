@@ -87,6 +87,7 @@ later.
 | [063](.archive/063-k8s-attach.md) | Kubernetes attach: a terminal and exec with stdin over the pods/exec subresource | medium | complete | 004, 008, 012, 014, 015, 031, 034, 036 |
 | [064](.archive/064-k8s-display.md) | The desktop on k8s: CELLA_K8S_DISPLAY_IMAGE, the published cella-display image, and the kind tier's computer-use run | small | complete | 004, 014, 015, 023, 031, 036, 041 |
 | [065](.archive/065-k8s-dial.md) | Dial on the k8s driver: the port forwarding subresource, the declared-port rule, the Role, and the kind tier | medium | complete | 004, 008, 012, 013, 015, 023, 031, 036, 060 |
+| [066](.archive/066-events-follow.md) | Following the events feed: one object's records from a cursor and then live, and every readable record from now | medium | complete | 008, 009, 010, 031, 055, 062 |
 
 ## Dependency graph
 
@@ -310,3 +311,4 @@ The map, the order, and the rule for a slice are in 031.
 | [063-k8s-attach.md](.archive/063-k8s-attach.md) | complete | `Attach` on the k8s driver over `pods/exec` with a terminal and stdin, resize through the terminal size queue, exec with stdin and a terminal, and `get` on `pods/exec` in the Role and the preflight |
 | [064-k8s-display.md](.archive/064-k8s-display.md) | complete | `CELLA_K8S_DISPLAY_IMAGE` and the desktop's limits read at start with every k8s quantity, the display image published by digest beside `cellad` and verified by tag, and the kind stack running the computer-use case |
 | [065-k8s-dial.md](.archive/065-k8s-dial.md) | complete | `Dial` on the k8s driver through the `pods/portforward` subresource to a declared port, `get` and `create` on `pods/portforward` in the Role and the preflight, and the dial and port cases on the kind cluster |
+| [066-events-follow.md](.archive/066-events-follow.md) | complete | `follow=1` on `GET /v1/events`: one object's records after a cursor and then live, every record the caller may read from now, the journal's subscription and the retention that keeps each object's newest record |

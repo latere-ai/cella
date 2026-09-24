@@ -24,10 +24,11 @@ import (
 )
 
 // recorded is a fixture whose API journals records, with the journal the test
-// reads them back from.
+// reads them back from and the issuer that minted its tokens.
 type recorded struct {
 	*fixture
-	store store.Store
+	store  store.Store
+	issuer *issuertest.Server
 }
 
 // setupRecorded is setup with design 009's emitter wired in. It repeats the
@@ -39,6 +40,21 @@ func setupRecorded(t *testing.T) *recorded { return setupRecordedDriver(t, nil) 
 // whose records depend on a capability the native driver does not have.
 func setupRecordedDriver(t *testing.T, wrap func(runtime.Driver) runtime.Driver) *recorded {
 	t.Helper()
+	return setupRecordedWith(t, recordedOptions{wrap: wrap})
+}
+
+// recordedOptions are what a case changes about the recorded fixture: the
+// driver, the memory journal's ring per object, and the API's own options.
+type recordedOptions struct {
+	wrap       func(runtime.Driver) runtime.Driver
+	journalCap int
+	configure  func(*Options)
+}
+
+// setupRecordedWith is setupRecorded with the changes a case names.
+func setupRecordedWith(t *testing.T, o recordedOptions) *recorded {
+	t.Helper()
+	wrap := o.wrap
 	issuer := issuertest.New(t, issuertest.WithDefaultAudience("cella"))
 	verifier, err := auth.NewVerifier(t.Context(), auth.VerifierOptions{
 		Issuers: []string{issuer.URL()}, Audience: "cella",
@@ -55,7 +71,7 @@ func setupRecordedDriver(t *testing.T, wrap func(runtime.Driver) runtime.Driver)
 	if wrap != nil {
 		runtimeDriver = wrap(d)
 	}
-	s, err := memory.Open(memory.Options{})
+	s, err := memory.Open(memory.Options{JournalCap: o.journalCap})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,11 +96,15 @@ func setupRecordedDriver(t *testing.T, wrap func(runtime.Driver) runtime.Driver)
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = c.Close() })
-	h, err := New(Options{
+	options := Options{
 		Controller: c, Verifier: verifier,
 		Authorizer: auth.NewAuthorizer(&auth.OwnerPolicy{DefaultEnvironment: "default"}),
 		Events:     emitter, Log: slog.New(slog.DiscardHandler),
-	})
+	}
+	if o.configure != nil {
+		o.configure(&options)
+	}
+	h, err := New(options)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +114,7 @@ func setupRecordedDriver(t *testing.T, wrap func(runtime.Driver) runtime.Driver)
 		t: t, url: server.URL, issuerURL: issuer.URL(),
 		alice: issuer.Mint(issuertest.Claims{Sub: "alice"}),
 		bob:   issuer.Mint(issuertest.Claims{Sub: "bob"}), h: h, c: c,
-	}, store: s}
+	}, store: s, issuer: issuer}
 }
 
 // records reads one sandbox's journal, oldest first.

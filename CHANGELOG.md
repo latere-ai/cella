@@ -44,6 +44,23 @@ refused before it is pushed.
   Kubernetes runtime, and `cellad check` name the rule when it is missing,
   and `cellad serve` does not start without it, so add it before moving to
   this release. The Role in `deploy/base` carries it.
+- `GET /v1/events` follows. With `follow=1&object=<id>&cursor=<seq>` the
+  feed sends the object's records after `cursor`, the newest `seq` you
+  hold, and then each new one as it happens, as newline-delimited JSON,
+  with nothing sent twice and nothing skipped; without `cursor` it starts
+  from now, and it ends after the object's delete. With `follow=1` and no
+  `object` it sends every record you may read from now, filtered the way
+  listing your sandboxes is. An idle feed writes an empty line every 15
+  seconds, a feed that ends on a failure writes the error envelope as its
+  last line, and a shutdown ends every feed at once rather than waiting
+  out the grace period. A cursor whose records are no longer kept is 410
+  `cursor_expired`, and a server holding 256 feeds refuses the next with
+  429 `rate_limited`. A proxy in front of the server must not buffer the
+  feed and must allow an idle read of more than 15 seconds.
+- The journal's retention now keeps each object's newest record whatever
+  its age. With a database, a prune that removed every record of an object
+  used to start that object's `seq` again at 1, so a number a reader held
+  could name a different record.
 - The release pipeline reads a release's files from the release's assets
   endpoint, by id, rather than from the list the release object carries,
   which GitHub has answered empty for a release whose every file was

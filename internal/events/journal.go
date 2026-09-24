@@ -25,6 +25,16 @@ type Journal interface {
 	// the per-object feed, and a row's columns are authoritative over its
 	// payload, so a record comes back with the sequence the journal assigned.
 	ByObject(ctx context.Context, objectID, cursor string, limit int) ([]Record, string, error)
+	// After reads one object's records with a sequence above seq, oldest
+	// first, at most limit of them. It is what a follower resumes from.
+	After(ctx context.Context, objectID string, seq int64, limit int) ([]Record, error)
+	// Watch subscribes to the records this process commits from now on:
+	// one object's, or every object's where objectID is empty.
+	Watch(objectID string) Subscription
+	// Shared reports whether another process may append to this journal,
+	// which is a store that outlives the process. A follower of one object
+	// reads such a journal on an interval as well as waiting on Watch.
+	Shared() bool
 	// Pending returns at most limit records, at most one per object, each
 	// the lowest unacknowledged sequence of its object and due at now. A
 	// deferred record holds the records behind it for that object and no
@@ -43,6 +53,17 @@ type Journal interface {
 	Drop(ctx context.Context, id string, at time.Time) error
 }
 
+// Subscription is one reader's view of the records its process commits to
+// the journal from the moment Watch opened it.
+type Subscription interface {
+	// Next blocks for the next committed record, in the order the process
+	// published them, and returns ErrBehind once a record was dropped
+	// because the reader did not keep up.
+	Next(ctx context.Context) (Record, error)
+	// Close ends the subscription.
+	Close()
+}
+
 // Pending is one record waiting for the sink and the delivery state the
 // backoff reads.
 type Pending struct {
@@ -57,6 +78,9 @@ type Pending struct {
 type Emitter struct {
 	journal Journal
 	log     *slog.Logger
+	// poll is how often a follower of one object reads a shared journal.
+	// Zero is FollowPoll; a test shortens it.
+	poll time.Duration
 }
 
 // NewEmitter builds the emitter over one journal.

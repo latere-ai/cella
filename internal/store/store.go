@@ -62,8 +62,16 @@ type Store interface {
 	// Ready is the readiness check of design 002: the store answers a
 	// trivial statement inside the probe's budget.
 	Ready(ctx context.Context) error
-	// Close releases the pool and every lease this process holds.
+	// Close releases the pool and every lease this process holds, and ends
+	// every subscription Watch opened.
 	Close() error
+	// Watch subscribes to the journal rows this process commits from now
+	// on: one object's, or every object's where objectID is empty. Each
+	// row arrives once its transaction committed, with the sequence it
+	// took, and never from a transaction that rolled back. Another
+	// process's commits do not arrive here; a reader that must see them
+	// reads the journal as well (design 009).
+	Watch(objectID string) *Subscription
 }
 
 // Tx is every method set of the store, inside one transaction.
@@ -257,7 +265,16 @@ type Journal interface {
 	Append(ctx context.Context, e Event) (int64, error)
 	// ByObject reads one object's events, newest first, one page at a time.
 	ByObject(ctx context.Context, objectID string, p Page) ([]Event, string, error)
-	// Prune drops events older than before and reports how many went.
+	// After reads one object's events whose sequence is above seq, oldest
+	// first, at most limit of them. It is the read a following reader
+	// resumes from: the sequence is dense and assigned in commit order
+	// within an object, so what it answers is every event after seq the
+	// journal still holds.
+	After(ctx context.Context, objectID string, seq int64, limit int) ([]Event, error)
+	// Prune drops the finished events older than before and reports how
+	// many went. It keeps each object's newest event whatever its age:
+	// the next sequence an object takes counts on from it, so a number is
+	// never handed out twice.
 	Prune(ctx context.Context, before time.Time) (int, error)
 	// Pending returns at most limit unfinished events, at most one per
 	// object: each object's lowest sequence, and only where its next attempt

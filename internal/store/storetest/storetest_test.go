@@ -129,6 +129,14 @@ func (s *stubStore) Durable() bool               { return false }
 func (s *stubStore) Ready(context.Context) error { return s.err }
 func (s *stubStore) Close() error                { return s.err }
 
+// Watch answers a subscription that has already ended, which is what a store
+// that publishes nothing looks like to a reader.
+func (s *stubStore) Watch(objectID string) *store.Subscription {
+	var b store.Broadcast
+	b.Close(s.err)
+	return b.Subscribe(objectID)
+}
+
 type stubTx struct{}
 
 func (stubTx) Desired() store.Desired   { return stubDesired{} }
@@ -191,6 +199,9 @@ type stubJournal struct{}
 func (stubJournal) Append(context.Context, store.Event) (int64, error) { return 1, nil }
 func (stubJournal) ByObject(context.Context, string, store.Page) ([]store.Event, string, error) {
 	return nil, "", nil
+}
+func (stubJournal) After(context.Context, string, int64, int) ([]store.Event, error) {
+	return nil, nil
 }
 func (stubJournal) Prune(context.Context, time.Time) (int, error) { return 0, nil }
 func (stubJournal) Undelivered(context.Context) (int, error)      { return 0, nil }

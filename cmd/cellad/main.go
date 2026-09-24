@@ -444,7 +444,12 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	if err := os.MkdirAll(spool, 0o750); err != nil {
 		return fail(stderr, fmt.Errorf("creating the upload spool directory: %w", err))
 	}
+	// feedsEnd closes when the public server's shutdown begins, which ends
+	// every following feed of design 009: a stream that never ends on its
+	// own would otherwise hold the shutdown for the whole grace period.
+	feedsEnd := make(chan struct{})
 	handler, err := api.New(api.Options{
+		Draining:   feedsEnd,
 		Controller: control, Verifier: identity.Verifier, Authorizer: identity.Authorizer,
 		MaxBodyBytes: cfg.MaxBodyBytes, MaxUploadBytes: cfg.MaxUploadBytes, SpoolDir: spool,
 		Egress: hub, Events: emitter, Keys: keys, Workers: workers,
@@ -540,6 +545,9 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		{Handler: public, ReadHeaderTimeout: 10 * time.Second},
 		{Handler: internal, ReadHeaderTimeout: 10 * time.Second},
 	}
+	// Shutdown runs this once it has closed the listeners, so no feed opens
+	// after the ones open now were told to end.
+	servers[0].RegisterOnShutdown(sync.OnceFunc(func() { close(feedsEnd) }))
 	errc := make(chan error, len(servers))
 	for i, ln := range []net.Listener{publicLn, internalLn} {
 		go func(s *http.Server, ln net.Listener) {

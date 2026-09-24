@@ -249,9 +249,22 @@ func (r *refusing) Pending(context.Context, int, time.Time) ([]events.Pending, e
 func (r *refusing) ByObject(context.Context, string, string, int) ([]events.Record, string, error) {
 	return nil, "", r.err
 }
+func (r *refusing) After(context.Context, string, int64, int) ([]events.Record, error) {
+	return nil, r.err
+}
+func (r *refusing) Watch(string) events.Subscription                     { return closedSubscription{r.err} }
+func (r *refusing) Shared() bool                                         { return false }
 func (r *refusing) Acknowledge(context.Context, string, time.Time) error { return r.err }
 func (r *refusing) Defer(context.Context, string, time.Time) error       { return r.err }
 func (r *refusing) Drop(context.Context, string, time.Time) error        { return r.err }
+
+// closedSubscription is a subscription that has already ended with err.
+type closedSubscription struct{ err error }
+
+func (c closedSubscription) Next(context.Context) (events.Record, error) {
+	return events.Record{}, c.err
+}
+func (closedSubscription) Close() {}
 
 // failingLease reports an error rather than a verdict.
 type failingLease struct{}
@@ -348,6 +361,11 @@ func (h *halfRefusing) Pending(context.Context, int, time.Time) ([]events.Pendin
 func (h *halfRefusing) ByObject(context.Context, string, string, int) ([]events.Record, string, error) {
 	return nil, "", nil
 }
+func (h *halfRefusing) After(context.Context, string, int64, int) ([]events.Record, error) {
+	return nil, nil
+}
+func (h *halfRefusing) Watch(string) events.Subscription { return closedSubscription{} }
+func (h *halfRefusing) Shared() bool                     { return false }
 func (h *halfRefusing) Acknowledge(context.Context, string, time.Time) error {
 	return errors.New("the row is gone")
 }

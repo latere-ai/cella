@@ -4,7 +4,9 @@
 package store_test
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -355,5 +357,105 @@ func TestByObjectRebuildsTheRecord(t *testing.T) {
 	// A cursor the journal cannot read is the journal's refusal.
 	if _, _, err := j.ByObject(t.Context(), "sbx_a", "not a sequence", 50); err == nil {
 		t.Error("a cursor that is not a sequence was read as one")
+	}
+}
+
+// durable is a memory store that reports it outlives the process, which is
+// the one fact Shared reads.
+type durable struct{ *memory.Store }
+
+func (durable) Durable() bool { return true }
+
+// TestTheJournalFollowsWhatCommits: the follow half of the event journal. A
+// read after a sequence and a subscription each hand back the record as it
+// was written, with the sequence the journal assigned; a row whose payload
+// cannot be read is an error on both; and a subscription that ended says why:
+// its reader's cancellation, its reader's close, a record it dropped, or the
+// store's close.
+func TestTheJournalFollowsWhatCommits(t *testing.T) {
+	s, err := memory.Open(memory.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	j := store.EventJournal(s, store.Journaled)
+	if j.Shared() || !store.EventJournal(durable{s}, store.Journaled).Shared() {
+		t.Error("Shared does not follow whether the store outlives the process")
+	}
+	sub := j.Watch("sbx_a")
+	record, err := events.Mutation(events.TypeCreated, "", events.Object{
+		Kind: events.KindSandbox, ID: "sbx_a", Name: "work", Owner: "alice",
+	}, events.Phase{Phase: "Running"}, events.Actor{Subject: "alice"}, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := j.Append(t.Context(), record); err != nil {
+		t.Fatal(err)
+	}
+	live, err := sub.Next(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := j.After(t.Context(), "sbx_a", 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) != 1 {
+		t.Fatalf("After read %d records", len(after))
+	}
+	for name, got := range map[string]events.Record{"subscription": live, "read": after[0]} {
+		if got.Seq != 1 || got.ID != record.ID || got.Type != events.TypeCreated || got.Object.Owner != "alice" {
+			t.Errorf("the %s handed back %+v", name, got)
+		}
+	}
+
+	// A row whose payload is not a record is an error on both halves.
+	if err := s.Tx(t.Context(), func(tx store.Tx) error {
+		_, err := tx.Journal().Append(t.Context(), store.Event{ObjectID: "sbx_a", Type: "sandbox.exec", Payload: []byte("not a record")})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sub.Next(t.Context()); err == nil {
+		t.Error("the subscription handed over a row it could not rebuild")
+	}
+	if _, err := j.After(t.Context(), "sbx_a", 1, 10); err == nil {
+		t.Error("After read a row it could not rebuild")
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := sub.Next(ctx); !errors.Is(err, context.Canceled) {
+		t.Errorf("a cancelled wait answered %v", err)
+	}
+	sub.Close()
+	if _, err := sub.Next(t.Context()); err == nil {
+		t.Error("a subscription its reader closed handed over a record")
+	}
+
+	behind, open := j.Watch(""), j.Watch("sbx_c")
+	if err := s.Tx(t.Context(), func(tx store.Tx) error {
+		for range store.SubscriptionBuffer + 1 {
+			if _, err := tx.Journal().Append(t.Context(), store.Event{ObjectID: "sbx_b", Type: "sandbox.exec", Payload: []byte(`{}`)}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		if _, err = behind.Next(t.Context()); err != nil {
+			break
+		}
+	}
+	if !errors.Is(err, events.ErrBehind) {
+		t.Errorf("a subscription that dropped a record ended with %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := open.Next(t.Context()); !errors.Is(err, memory.ErrClosed) {
+		t.Errorf("a subscription on a closed store ended with %v", err)
 	}
 }

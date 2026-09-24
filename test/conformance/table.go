@@ -46,6 +46,7 @@ var errorTable = map[string]row{
 	"quota_exceeded":         {422, "You have reached your sandbox limit."},
 	"boundary_exceeded":      {422, "A child sandbox cannot exceed its parent's boundary."},
 	"spawn_budget_exhausted": {422, "The sandbox has no spawn budget left."},
+	"cursor_expired":         {410, "The feed no longer holds the records after that position; read it again from the newest."},
 	"rate_limited":           {429, "Too many requests; wait and retry."},
 	"admission_unavailable":  {503, "The policy service is unavailable; retry shortly."},
 	"authorizer_unavailable": {503, "The permission service is unavailable; retry shortly."},
