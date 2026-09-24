@@ -42,7 +42,10 @@ order and `startDeadline`, the scheduling fields of a manifest, and the
 two gauges. [[058-preemption]] built preemption with
 `status.preemptions` and `CELLA_MAX_PREEMPTIONS`, a pass that reads an
 environment's queues as one line, `cella_preemptions_total`, and the
-proof that a pool is behind the authorizer. `capacity: auto` with its
+proof that a pool is behind the authorizer. [[072-create-answers-at-once]]
+made the loop the one that asks the driver for every placed sandbox: a
+direct create is written `Pending` and answered, and the loop's pass
+realizes it before it reads any queue. `capacity: auto` with its
 headroom, a recovery that queues on a full environment,
 `Options.Scheduler` as a seam a platform replaces, the `SandboxSet`
 kind and results collection are not built.
@@ -56,7 +59,7 @@ An `Environment` declares `spec.scheduling.mode`
 
 | Mode | On create | On no capacity | Suits |
 |---|---|---|---|
-| `direct` | the controller calls `Create` at once | `Failed` with reason `NoCapacity` | a laptop, a small team, a platform that fronts its own queue |
+| `direct` | the sandbox is placed at once and the loop calls `Create` on its next pass, which the create wakes | `Failed` with reason `NoCapacity` | a laptop, a small team, a platform that fronts its own queue |
 | `queued` | the sandbox enters one of the environment's queues and starts when capacity allows | waits until `startDeadline`, then `Failed` with `StartDeadline` | rollouts, evaluations, batch work, any shared cluster |
 
 A manifest never chooses the mode. On a `queued` environment it may

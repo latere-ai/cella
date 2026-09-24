@@ -32,7 +32,7 @@ since it imports nothing under `internal/` ([[001-architecture]]).
 
 ## Current state
 
-[[026-direct-control-plane]] implements synchronous native create, inspect, list, start, stop, and delete with durable intent. [[037-lifecycle-enforcement]] implements the reaper's deadline rules, the `Lease` and `Clock` seams, and `Touch`. [[043-postgres-store]] implements the `lost` rule, `Recovering`, the recreation from desired state and the grace without a durable store, over the store and the observed index of [[010-state]]; recovery reattaches no volume. [[045-workload-tokens]] implements the `token` rule over the `Tokens` seam, the mint at step 5 of the create order with its undo, the re-mint at recovery with the previous `jti` revoked, and the revocation a delete writes. [[058-preemption]] implements the preemption edges: the scheduler stops a victim through its driver and writes `Running` to `Queued` with `Scheduled Preempted` in one write, since the driver's stop is synchronous and a crash between a `Stopped` and a `Queued` write would leave the victim outside every queue; a preempted sandbox leaves `Queued` by a `Start` of the object its driver kept rather than through `Pending` and a create, and while it waits the `autoDelete` rule is not asked of it. Reconciliation of an update and the cascade remain to build.
+[[026-direct-control-plane]] implements synchronous native create, inspect, list, start, stop, and delete with durable intent. [[037-lifecycle-enforcement]] implements the reaper's deadline rules, the `Lease` and `Clock` seams, and `Touch`. [[043-postgres-store]] implements the `lost` rule, `Recovering`, the recreation from desired state and the grace without a durable store, over the store and the observed index of [[010-state]]; recovery reattaches no volume. [[045-workload-tokens]] implements the `token` rule over the `Tokens` seam, the mint at step 5 of the create order with its undo, the re-mint at recovery with the previous `jti` revoked, and the revocation a delete writes. [[058-preemption]] implements the preemption edges: the scheduler stops a victim through its driver and writes `Running` to `Queued` with `Scheduled Preempted` in one write, since the driver's stop is synchronous and a crash between a `Stopped` and a `Queued` write would leave the victim outside every queue; a preempted sandbox leaves `Queued` by a `Start` of the object its driver kept rather than through `Pending` and a create, and while it waits the `autoDelete` rule is not asked of it. [[072-create-answers-at-once]] answers a create once step 2 has written it, `Pending`, and finishes steps 3 onward in the scheduler loop of [[020-scheduling-and-sets]], with the driver's create and the first read outside the controller's lock, a status write carrying the boundary and the identity before the driver call, `ErrAlreadyExists` taken as this sandbox's own object, and a placed sandbox a restart left realized by the loop's first pass; a pool adoption stays on the request. Reconciliation of an update and the cascade remain to build.
 
 Design provenance: The reaper's rules come from the hosted platform, where
 they have run for months; the phase machine, the ordered create with
@@ -155,6 +155,21 @@ object rather than making a second one, so a crash between step 7 and
 the observed write is repaired by the next reconcile. `Pending` is
 written at step 1 and `Failed` with `CreateFailed` when the undo runs.
 
+The create answers once steps 1 and 2 are written, with the sandbox
+`Pending`, and the scheduler loop runs steps 3 onward for every sandbox
+that is `Pending` with no `Scheduled` condition `True`: one a create
+placed at once, one the loop placed from its queue, and one a process
+that stopped left placed. The boundary push and the mint run under the
+controller's lock and are written, as `sandbox.status`, before the
+driver's create; the driver's create and the first read run with the
+lock released, and the result is written onto the row as it stands after
+them, so a delete, an apply or a spawn made meanwhile is kept. A create
+that adopts a pool entry runs steps 3 onward on the request, because the
+fallback of a lost adoption takes a new id, which is possible only before
+the caller has read one. A refusal that needs no step past 2, a gateway
+none is connected to hold the boundary among them, is refused on the
+request with nothing written. See [[072-create-answers-at-once]].
+
 ### Update
 
 On a `desired` that differs from the last applied desired state, the
@@ -271,7 +286,7 @@ store behind `Store` ([[010-state]]); the token's shape
 | Every edge of the diagram is exercised by its named trigger and owner; every phase of [[003-manifest-contract]] is reachable; every non-terminal phase has a `Delete` edge | `TestPhaseMachine`, table-driven from the diagram, and `TestEveryPhaseHasADeleteEdge` | not built |
 | Every field of the manifest maps to the `CreateSpec` field the derivation table names, placeholders included | `TestCreateSpecDerivation`, table-driven | not built |
 | Each of the seven create steps failing in turn leaves no map, no attachment, no unrevoked `jti`, and no object, and the sandbox `Failed` with `CreateFailed` | `TestCreateOrderFailsClosed`, one case per step, asserting the purge, the detach, and the revocation | not built |
-| A `Create` that crashes before the observed write is adopted, not duplicated, on the next reconcile | `TestReconcileAdoptsAStampedObject` | not built |
+| A `Create` that crashes before the observed write is adopted, not duplicated, on the next reconcile | `TestTheLoopRealizesWhatARestartLeft` | built ([[072-create-answers-at-once]]): the loop's first pass over a placed sandbox a stopped process left takes the driver's object on `ErrAlreadyExists`, projects a new identity into it and revokes the one the first process minted, and creates one where there is none |
 | A spawn debits the budget in the same transaction as the desired write; two concurrent spawns against a budget of one yield one child and one `spawn_budget_exhausted` | `TestSpawnDebitIsAtomic` | built ([[040-mesh-and-spawn]]): the debit, the child's row and its record commit together, a refused spawn leaves no object and takes no name, and `status.spawn.used` tracks the ledger |
 | A narrowing update and an owner's widening update each keep the effective boundary within both manifests at every instant, observed through fake gateway and driver | `TestUpdateNeverWidensMidChange` | not built |
 | `Change.Volumes` is sent only while `Stopped`; a secret update re-pushes; a secret delete re-pushes and writes `notInjectable` | `TestUpdatePaths` | not built |

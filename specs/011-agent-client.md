@@ -65,7 +65,7 @@ the alias rule of [[008-api]]. `<kind>` is `sandbox`, `secret`,
 
 | Command | Route | Notes |
 |---|---|---|
-| `cella apply -f <file> [-w] [--if-match <etag>]` | `PUT /v1/<kinds>/{name}`; `POST /v1/sandboxes` for a `Sandbox` with no name | reads `apiVersion` and `kind` from the file; `-w` waits for `Running`, `Available`, `Ready`, or the set's `Succeeded`; a `version_conflict` is exit 5 |
+| `cella apply -f <file> [-w] [--timeout <d>] [--if-match <etag>]` | `PUT /v1/<kinds>/{name}`; `POST /v1/sandboxes` for a `Sandbox` with no name | reads `apiVersion` and `kind` from the file; `-w`, whose long form is `--wait`, sends the create with `?wait=1` and `timeout` ([[072-create-answers-at-once]]) and then reads until `Running`, `Available`, `Ready`, or the set's `Succeeded`, within `--timeout`, two minutes by default; a `version_conflict` is exit 5 |
 | `cella get <kind> [<ref>] [-o json|yaml|wide|name] [-l k=v]... [--phase] [--owner] [--environment] [--root <id>] [--limit n]` | `GET /v1/<kinds>[/{id}]` | one object or a list; a list follows `next` to the end unless `--limit` stops it |
 | `cella delete <kind> <ref>` | `DELETE` | 202 or 200 is exit 0 |
 | `cella start <ref>`, `cella stop <ref>` | `POST .../start`, `.../stop` | a sandbox; `cella stop set <ref>` is `POST /v1/sandboxsets/{id}/stop` |
