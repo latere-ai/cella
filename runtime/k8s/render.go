@@ -322,6 +322,9 @@ func (d *Driver) pod(s driver.CreateSpec, now time.Time, token bool) (*corev1.Po
 	for _, key := range []string{annSpec, annActivityAt, annExpiresAt, annAutoStop, annAutoDelete} {
 		delete(annotations, key)
 	}
+	// The rule of spec 018 selects the Pod by this label, which the helper
+	// of a transfer carries as well.
+	labels[labelSandbox] = s.ID
 	environment := s.Env
 	if token {
 		annotations[annToken] = "true"
@@ -331,6 +334,10 @@ func (d *Driver) pod(s driver.CreateSpec, now time.Time, token bool) (*corev1.Po
 		}
 		environment[driver.TokenFileEnv] = driver.TokenPath
 	}
+	// The gateway's doors, the sandbox's credential and the trust variables,
+	// so every client that honors them leaves through the gateway the rule
+	// leaves open (spec 018).
+	environment = egressEnv(environment, s.Egress)
 	uid, gid, err := runAs(s.User)
 	if err != nil {
 		return nil, err
@@ -400,7 +407,7 @@ func (d *Driver) pod(s driver.CreateSpec, now time.Time, token bool) (*corev1.Po
 			},
 		},
 	}
-	if token {
+	if token || s.Egress.CAPEM != "" {
 		volume, mount := tokenProjection(s.ID)
 		pod.Spec.Volumes = append(pod.Spec.Volumes, volume)
 		container := &pod.Spec.Containers[0]

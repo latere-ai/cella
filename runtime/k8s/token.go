@@ -5,18 +5,21 @@ package k8s
 
 import (
 	"context"
+	"maps"
 	"path"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"latere.ai/x/cella/egress"
 	driver "latere.ai/x/cella/runtime"
 )
 
-// The projection of spec 006's identity on a cluster: one Secret per sandbox,
-// mounted read-only on the directory the control plane reserves, with the
-// token as one key in it.
+// The projection of spec 006's identity and spec 018's authority on a
+// cluster: one Secret per sandbox, mounted read-only on the directory the
+// control plane reserves, with the token as one key and the gateway's
+// certificate authority as another.
 const (
 	// tokenVolume is the name of the projected volume inside the Pod.
 	tokenVolume = "cella-token"
@@ -28,6 +31,13 @@ const (
 	// to the sandbox's own group, so the sandbox reads its identity and
 	// nothing outside the Pod can.
 	tokenMode int32 = 0o400
+	// authorityKey is the gateway's authority, and the file name that lands
+	// it at egress.CAPath beside the token.
+	authorityKey = "egress-ca.pem"
+	// authorityMode is readable by every user of the sandbox: it is a
+	// certificate and no secret, and a tool the workload runs as another
+	// user trusts the gateway's door through it as well.
+	authorityMode int32 = 0o444
 )
 
 // tokenMount is the directory the Secret is projected on, which is the parent
@@ -41,8 +51,11 @@ var tokenMount = path.Dir(driver.TokenPath)
 func tokenSecretName(id string) string { return "cella-token-" + objectName(id) }
 
 // tokenProjection is the volume and the mount every Pod of a sandbox with an
-// identity carries. The source is optional, so a Pod whose Secret was removed
-// starts with an empty directory rather than staying Pending forever.
+// identity or a gateway's authority carries. Both keys are listed whichever
+// the Secret holds, so a prewarmed entry that is adopted later receives both
+// through the kubelet's sync. The source is optional, which covers a missing
+// key as well as a missing Secret, so a Pod whose Secret was removed starts
+// with an empty directory rather than staying Pending forever.
 func tokenProjection(id string) (corev1.Volume, corev1.VolumeMount) {
 	mode := tokenMode
 	optional := true
@@ -52,8 +65,11 @@ func tokenProjection(id string) (corev1.Volume, corev1.VolumeMount) {
 			DefaultMode: &mode,
 			Sources: []corev1.VolumeProjection{{
 				Secret: &corev1.SecretProjection{
-					Name:     tokenSecretName(id),
-					Items:    []corev1.KeyToPath{{Key: tokenKey, Path: path.Base(driver.TokenPath)}},
+					Name: tokenSecretName(id),
+					Items: []corev1.KeyToPath{
+						{Key: tokenKey, Path: path.Base(driver.TokenPath)},
+						{Key: authorityKey, Path: path.Base(egress.CAPath), Mode: ptr(authorityMode)},
+					},
 					Optional: &optional,
 				},
 			}},
@@ -62,16 +78,18 @@ func tokenProjection(id string) (corev1.Volume, corev1.VolumeMount) {
 	return volume, corev1.VolumeMount{Name: tokenVolume, MountPath: tokenMount, ReadOnly: true}
 }
 
-// putToken creates or replaces the sandbox's Secret. A replace is what a
-// rotation is: the kubelet re-syncs the projected file within its sync window
-// and the workload keeps running.
-func (d *Driver) putToken(ctx context.Context, id string, token []byte) error {
+// putSecret creates the sandbox's Secret, or writes the keys given into the
+// one there and leaves every other key as it is. A token rotation is such a
+// write: the kubelet re-syncs the projected file within its sync window and
+// the workload keeps running, and a rotation of the identity is not a
+// withdrawal of the gateway's authority.
+func (d *Driver) putSecret(ctx context.Context, id string, data map[string][]byte) error {
 	secrets := d.cs.CoreV1().Secrets(d.opts.Namespace)
 	secret := &corev1.Secret{
 		Name: tokenSecretName(id), Namespace: d.opts.Namespace,
 		Labels: map[string]string{labelManagedBy: managedValue, labelID: id},
 		Type:   corev1.SecretTypeOpaque,
-		Data:   map[string][]byte{tokenKey: token},
+		Data:   maps.Clone(data),
 	}
 	_, err := secrets.Create(ctx, secret, metav1.CreateOptions{})
 	if !apierrors.IsAlreadyExists(err) {
@@ -81,15 +99,25 @@ func (d *Driver) putToken(ctx context.Context, id string, token []byte) error {
 	if err != nil {
 		return mapErr(err, "token secret get")
 	}
-	// Only this key is replaced: spec 018 projects the gateway's authority
-	// through the same mount, and a rotation of the identity is not a
-	// withdrawal of the boundary.
 	if current.Data == nil {
 		current.Data = map[string][]byte{}
 	}
-	current.Data[tokenKey] = token
+	maps.Copy(current.Data, data)
 	_, err = secrets.Update(ctx, current, metav1.UpdateOptions{})
 	return mapErr(err, "token secret update")
+}
+
+// secretData is what a create or an adoption writes into the sandbox's
+// Secret: the token and the gateway's authority, each where it was given.
+func secretData(token []byte, boundary driver.Egress) map[string][]byte {
+	data := map[string][]byte{}
+	if len(token) > 0 {
+		data[tokenKey] = token
+	}
+	if boundary.CAPEM != "" {
+		data[authorityKey] = []byte(boundary.CAPEM)
+	}
+	return data
 }
 
 // deleteToken removes the sandbox's Secret. A Secret that is already gone is
