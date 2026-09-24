@@ -58,6 +58,12 @@ type fake struct {
 	// noSecretKey answers a secret's apply the way an installation that
 	// holds no key to seal a value under answers it.
 	noSecretKey bool
+	// egressProbe replaces what the enforcement case's probe prints inside
+	// a sandbox, and noEgressRecord keeps the refused connection out of the
+	// records, so a test reads every assertion that case makes. The empty
+	// string answers what a sandbox behind a gateway prints.
+	egressProbe    string
+	noEgressRecord bool
 	// declared, when set, is the capability set the fake honors: a gated
 	// route of any other capability answers capability_unsupported before
 	// it is routed, as the server's own gate does. desktopOnly answers the
@@ -377,9 +383,16 @@ func (f *fake) store(body map[string]any, name string) map[string]any {
 	}
 	metadata["name"] = name
 	resolveDefaults(body, f.driftedDefault)
+	// The boundary is enforced, as it is on an environment that declares
+	// egress, and a server that answers the wrong value says it is not.
+	enforced := "True"
+	if f.wrongValues {
+		enforced = "False"
+	}
 	body["status"] = map[string]any{
 		"id": id, "owner": "fake", "environment": "default",
 		"driver": "fake", "isolation": "none", "phase": "Running",
+		"conditions": []any{map[string]any{"type": "EgressEnforced", "status": enforced, "reason": "Enforced"}},
 	}
 	if f.wrongValues {
 		// A status that leaves out what every answer carries, and a
@@ -531,7 +544,17 @@ func (f *fake) exec(w http.ResponseWriter, r *http.Request) {
 	}
 	command := strings.Join(req.Command, " ")
 	stdout, stderr, code := "", "", 0
+	f.mu.Lock()
+	probe := f.egressProbe
+	f.mu.Unlock()
 	switch {
+	case strings.Contains(command, "HTTPS_PROXY"):
+		// The enforcement case's probe, answered as from behind a gateway
+		// that admits the upstream and refuses the rest.
+		stdout = "allowed HTTP/1.1 200 Connection Established\ndenied HTTP/1.1 403 Forbidden\ndirect 0\n"
+		if probe != "" {
+			stdout = probe
+		}
 	case strings.Contains(command, "CELLA_TOKEN_FILE"):
 		stdout = workloadToken
 	case req.Timeout != "":
@@ -636,8 +659,22 @@ func (f *fake) logs(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.WriteString(w, "conformance-line\n")
 }
 
-func (f *fake) egress(w http.ResponseWriter, _ *http.Request) {
-	f.write(w, http.StatusOK, map[string]any{"items": []any{}, "next": ""})
+// egress answers a sandbox's records: the refused connection the
+// enforcement case asked for, for a sandbox with an allow list, and nothing
+// for any other.
+func (f *fake) egress(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
+	obj, _ := f.lookup(r.PathValue("id"))
+	suppressed := f.noEgressRecord
+	f.mu.Unlock()
+	items := []any{}
+	spec, _ := obj["spec"].(map[string]any)
+	network, _ := spec["network"].(map[string]any)
+	boundary, _ := network["egress"].(map[string]any)
+	if boundary["allowedHosts"] != nil && !suppressed {
+		items = append(items, map[string]any{"host": deniedHost, "port": 443, "door": "proxy", "decision": "denied"})
+	}
+	f.write(w, http.StatusOK, map[string]any{"items": items, "next": ""})
 }
 
 func (f *fake) display(w http.ResponseWriter, r *http.Request) {

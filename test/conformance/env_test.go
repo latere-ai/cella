@@ -22,7 +22,8 @@ import (
 // TestSuiteCatchesAFalseCapability.
 func (f *fake) full() Config {
 	cfg := f.config()
-	cfg.Capabilities = []string{"attach", "files", "display", "input", "dial", "volumes", "mesh"}
+	cfg.Capabilities = []string{"attach", "files", "display", "input", "dial", "volumes", "mesh", "egress"}
+	cfg.Upstream = "upstream.example.com:80"
 	cfg.Admin = "fake-token"
 	cfg.Token = func(context.Context, string) (string, error) { return "fake-token", nil }
 	cfg.AuthorizerControl = f.server.URL
@@ -188,7 +189,7 @@ func TestAServerThatAnswersTheWrongValueIsReportedFailed(t *testing.T) {
 		"case008FilesTar", "case008FileRoutes", "case008Logs", "case008ListSelectors",
 		"case018SecretWriteOnly", "case018CanarySecret", "case009ObjectFeed",
 		"case009DeliveredInOrder", "case023BrowserReady", "case008PublicDocuments",
-		"case022SpawnBoundary",
+		"case022SpawnBoundary", "case018EgressEnforced",
 	} {
 		if !slices.Contains(report.Failed, name) {
 			t.Errorf("%s did not fail against a server that answers the wrong value", name)
@@ -390,6 +391,57 @@ func TestTheGatesReadADesktopRouteOnADesktop(t *testing.T) {
 			err = case004CapabilityGates(t.Context(), e)
 			if tc.fails != (err != nil) {
 				t.Fatalf("case004CapabilityGates = %v, want a failure %v", err, tc.fails)
+			}
+		})
+	}
+}
+
+// TestTheEgressCaseReadsEveryAnswer: the enforcement case holds each of the
+// probe's three answers and the record, skips where the environment declares
+// no egress, where no upstream is given, and where the image cannot run the
+// probe, and reads an upstream with no port as one on 443.
+func TestTheEgressCaseReadsEveryAnswer(t *testing.T) {
+	const direct = "allowed HTTP/1.1 200 Connection Established\ndenied HTTP/1.1 403 Forbidden\ndirect 18\n"
+	for _, tc := range []struct {
+		name     string
+		caps     []string
+		upstream string
+		probe    string
+		noRecord bool
+		want     string
+		skip     bool
+	}{
+		{"holds", []string{"egress"}, "upstream.example.com:80", "", false, "", false},
+		{"no port", []string{"egress"}, "upstream.example.com", "", false, "", false},
+		{"undeclared", []string{"files"}, "upstream.example.com:80", "", false, "does not declare egress", true},
+		{"no upstream", []string{"egress"}, "", "", false, "no upstream", true},
+		{"no tools", []string{"egress"}, "upstream.example.com:80", "missing nc\n", false, "missing nc", true},
+		{"refused upstream", []string{"egress"}, "upstream.example.com:80", "allowed HTTP/1.1 403 Forbidden\ndenied HTTP/1.1 403 Forbidden\ndirect 0\n", false, "200 from the gateway", false},
+		{"admitted denied host", []string{"egress"}, "upstream.example.com:80", "allowed HTTP/1.1 200 Connection Established\ndenied HTTP/1.1 200 Connection Established\ndirect 0\n", false, "403 from the gateway", false},
+		{"reached around the gateway", []string{"egress"}, "upstream.example.com:80", direct, false, "around the gateway", false},
+		{"no record", []string{"egress"}, "upstream.example.com:80", "", true, "a record of the connection", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFake(t)
+			f.egressProbe, f.noEgressRecord = tc.probe, tc.noRecord
+			cfg := f.config()
+			cfg.Capabilities, cfg.Upstream = tc.caps, tc.upstream
+			e, err := newEnv(t.Context(), cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer e.cleanup(context.WithoutCancel(t.Context()))
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+			err = case018EgressEnforced(ctx, e)
+			var skip *Skip
+			switch {
+			case tc.want == "" && err != nil:
+				t.Fatalf("the case failed against a server that holds it: %v", err)
+			case tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)):
+				t.Fatalf("the case answered %v, want %q", err, tc.want)
+			case tc.skip != errors.As(err, &skip):
+				t.Fatalf("the case answered %v, want a skip %v", err, tc.skip)
 			}
 		})
 	}
