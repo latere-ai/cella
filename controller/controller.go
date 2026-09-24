@@ -219,6 +219,12 @@ type Controller struct {
 	// in flight with the controller's lock released. An act that would reach
 	// the driver for one of them waits for the settle instead of crossing it.
 	realizing map[string]struct{}
+	// origins is the context of the request whose create placed a sandbox,
+	// kept until the loop realizes it. Its values are the caller's: the
+	// records of the start name the caller and the request, as they did when
+	// the request ran the create itself. A process that restarts has none,
+	// and the start is the control plane's own act.
+	origins map[string]context.Context
 	// changed is closed and replaced at every write of a sandbox, so a caller
 	// that holds a create's answer waits on the write that moves it rather
 	// than reading it on a timer.
@@ -279,7 +285,7 @@ func Open(ctx context.Context, o Options) (*Controller, error) {
 		scheduleInterval: cmp.Or(o.ScheduleInterval, DefaultScheduleInterval), wake: make(chan struct{}, 1), maxPreemptions: cmp.Or(o.MaxPreemptions, DefaultMaxPreemptions),
 		newDriver: o.NewDriver, releaseDriver: o.ReleaseDriver, registrations: o.Registrations,
 		offline: o.EnvironmentOffline, answered: map[string]time.Time{},
-		realizing: map[string]struct{}{}, changed: make(chan struct{}),
+		realizing: map[string]struct{}{}, changed: make(chan struct{}), origins: map[string]context.Context{},
 	}
 	// A store of design 010 takes one conditional write per object and
 	// carries the journal; one that is also durable is what lets the lost
@@ -429,6 +435,7 @@ func (c *Controller) forget(ctx context.Context, id, mutation string) error {
 		}
 		return err
 	}
+	delete(c.origins, id)
 	if c.durable == nil {
 		c.emit(ctx, mutation, previous)
 	}
@@ -658,6 +665,7 @@ func (c *Controller) createLocked(ctx context.Context, obj v1.Sandbox, owner str
 		// Steps 3 onward are the scheduler loop's. It is woken rather than
 		// left to its tick, so the driver is asked as soon as this answer is
 		// written.
+		c.origins[id] = context.WithoutCancel(ctx)
 		c.wakeScheduler()
 		return export(obj), nil
 	}
@@ -753,6 +761,13 @@ func (c *Controller) realize(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
+	loop := ctx
+	if origin, held := c.origins[id]; held {
+		delete(c.origins, id)
+		var cancel context.CancelFunc
+		ctx, cancel = carried(loop, origin)
+		defer cancel()
+	}
 	started, now, environment := c.clock.Now(), time.Now().UTC(), obj.Status.Environment
 	parent := c.parentOf(obj)
 	// The records of what became of the sandbox are written whether or not
@@ -796,14 +811,26 @@ func (c *Controller) realize(ctx context.Context, id string) error {
 	out := drive(ctx, d, spec, token)
 	c.mu.Lock()
 	delete(c.realizing, id)
-	if ctx.Err() != nil {
+	if loop.Err() != nil {
 		// The loop is stopping. The row is left as the status write left
 		// it, placed and unrealized, and the next process takes it from
 		// there: its driver create finds the object this one made, and its
 		// settle ends the token this one minted.
-		return errors.Join(ctx.Err(), out.created)
+		return errors.Join(loop.Err(), out.created)
 	}
 	return c.settleCreate(settle, id, d, out, tokenState, previous, parent, started)
+}
+
+// carried is a context with the values of the request that placed a
+// sandbox and the cancellation of the loop that realizes it: the records name
+// the caller, and a loop that stops still stops the driver's call.
+func carried(loop, origin context.Context) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(context.WithoutCancel(origin))
+	stop := context.AfterFunc(loop, cancel)
+	return ctx, func() {
+		stop()
+		cancel()
+	}
 }
 
 // driven is what the driver's half of a realize ended with: the create's

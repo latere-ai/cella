@@ -598,3 +598,41 @@ func TestAnAdoptionThatFailsUndoes(t *testing.T) {
 		})
 	}
 }
+
+// originKey is a value a request carries, which the records of its create's
+// start read.
+type originKey struct{}
+
+// originRecorder notes the value each act's context carried.
+type originRecorder struct {
+	actRecorder
+	seen map[string]any
+}
+
+func (r *originRecorder) Emit(ctx context.Context, a Act) {
+	r.mu.Lock()
+	r.seen[a.Type] = ctx.Value(originKey{})
+	r.mu.Unlock()
+	r.actRecorder.Emit(ctx, a)
+}
+
+// TestTheStartCarriesTheCreatesRequest: the loop writes a direct create's
+// start under the values of the request that made it, so its records name
+// the caller and the request as they did when the request ran the create;
+// the loop's own cancellation still reaches the driver.
+func TestTheStartCarriesTheCreatesRequest(t *testing.T) {
+	events := &originRecorder{seen: map[string]any{}}
+	c, _, _ := newFake(t, Options{Events: events})
+	request := context.WithValue(t.Context(), originKey{}, "req_1")
+	if _, err := c.Create(request, workspace(), "alice", 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Schedule(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	events.mu.Lock()
+	defer events.mu.Unlock()
+	if got := events.seen[MutationStarted]; got != "req_1" {
+		t.Fatalf("the start was written under %v, want the create's request", got)
+	}
+}
