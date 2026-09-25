@@ -95,21 +95,22 @@ func TestTheSandboxTrustsThePublicRootsAndTheGateway(t *testing.T) {
 
 	t.Run("aTerminatedHostVerifiesAgainstTheGatewaysAuthority", func(t *testing.T) {
 		plane.applySecret(t, "vendor", `{"apiVersion":"cella.latere.ai/v1beta1","kind":"Secret",`+
-			`"metadata":{"name":"vendor"},"spec":{"scope":{"hosts":["upstream.example.com"]},"value":"`+theCanary+`"}}`)
+			`"metadata":{"name":"vendor"},"spec":{"scope":{"hosts":["vendor.invalid"]},"value":"`+theCanary+`"}}`)
 		sandbox := plane.createMounting(t, "vendor", "VENDOR_TOKEN")
 		// curl exits 60 when the certificate it is shown does not verify
 		// against the file, before any status line. An exit of 0 with a
 		// status is a TLS session with the gateway's own leaf that
 		// verified. The status is the gateway's: its terminating engine
-		// dials the upstream by name and refuses loopback, so this tier,
-		// which reaches no resolver, cannot place the upstream behind it
-		// and the gateway answers 502 inside the session.
+		// dials the upstream by name with a transport of its own, which the
+		// tier's dial seam does not reach, and the name is under .invalid,
+		// which never resolves, so the gateway answers 502 inside the
+		// session and nothing leaves this host.
 		status := strings.TrimSpace(plane.exec(t, sandbox,
-			`curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $VENDOR_TOKEN" https://upstream.example.com/terminated`))
+			`curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $VENDOR_TOKEN" https://vendor.invalid/terminated`))
 		if len(status) != 3 || status == "000" {
 			t.Fatalf("curl printed the status %q, want one the gateway answered inside the session", status)
 		}
-		if decision := decisionFor(t, plane, sandbox, "upstream.example.com"); decision != egress.DecisionAllowed {
+		if decision := decisionFor(t, plane, sandbox, "vendor.invalid"); decision != egress.DecisionAllowed {
 			t.Fatalf("the connection was recorded %q, want %q", decision, egress.DecisionAllowed)
 		}
 	})
