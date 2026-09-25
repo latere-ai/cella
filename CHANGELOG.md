@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.6.3 - 2026-09-25
+
 - Fixed: a request its caller closed while `cellad` was still answering,
   such as a browser tab closed during a log read, was counted and logged
   as a `5xx` `driver_unavailable` or `authorizer_unavailable`, and an
