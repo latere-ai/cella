@@ -32,6 +32,7 @@
 package podman
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -114,6 +115,12 @@ type Options struct {
 	Socket string
 	// PullTimeout bounds one image pull. Zero is DefaultPullTimeout.
 	PullTimeout time.Duration
+	// TrustRoots are the public roots written into a sandbox's trust file
+	// ahead of the gateway's authority, as egress.LoadRoots read them. The
+	// gateway tunnels every host no secret is bound to, and the workload
+	// verifies such a host against these roots; none writes the authority
+	// alone.
+	TrustRoots []byte
 }
 
 // DefaultPullTimeout bounds an image pull when Options does not.
@@ -123,6 +130,7 @@ const DefaultPullTimeout = 5 * time.Minute
 type Driver struct {
 	candidates  []string
 	pullTimeout time.Duration
+	trustRoots  []byte
 	conn        atomic.Pointer[client]
 
 	mu    sync.Mutex
@@ -144,7 +152,7 @@ func New(o Options) (*Driver, error) {
 	if len(candidates) == 0 {
 		return nil, fmt.Errorf("%w: no podman socket to try", driver.ErrInvalid)
 	}
-	d := &Driver{candidates: candidates, pullTimeout: o.PullTimeout, locks: map[string]*sync.Mutex{}}
+	d := &Driver{candidates: candidates, pullTimeout: o.PullTimeout, trustRoots: bytes.Clone(o.TrustRoots), locks: map[string]*sync.Mutex{}}
 	if d.pullTimeout <= 0 {
 		d.pullTimeout = DefaultPullTimeout
 	}
@@ -759,9 +767,9 @@ func (d *Driver) Create(ctx context.Context, s driver.CreateSpec) (driver.Ref, e
 		undo()
 		return driver.Ref{}, err
 	}
-	// The authority the gateway signs with is projected between the create
-	// and the start, so the workload's first request already trusts the
-	// door its environment points at (spec 018).
+	// The trust file is projected between the create and the start, so the
+	// workload's first request already verifies the gateway's leaf and every
+	// host the gateway tunnels (spec 018).
 	if s.Egress.CAPEM != "" {
 		if err := d.putEgressCA(ctx, s.ID, s.Egress.CAPEM); err != nil {
 			undo()

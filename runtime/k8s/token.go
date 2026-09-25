@@ -16,10 +16,10 @@ import (
 	driver "latere.ai/x/cella/runtime"
 )
 
-// The projection of spec 006's identity and spec 018's authority on a
+// The projection of spec 006's identity and spec 018's trust file on a
 // cluster: one Secret per sandbox, mounted read-only on the directory the
-// control plane reserves, with the token as one key and the gateway's
-// certificate authority as another.
+// control plane reserves, with the token as one key and the trust file, the
+// public roots and the gateway's certificate authority, as another.
 const (
 	// tokenVolume is the name of the projected volume inside the Pod.
 	tokenVolume = "cella-token"
@@ -31,12 +31,13 @@ const (
 	// to the sandbox's own group, so the sandbox reads its identity and
 	// nothing outside the Pod can.
 	tokenMode int32 = 0o400
-	// authorityKey is the gateway's authority, and the file name that lands
-	// it at egress.CAPath beside the token.
+	// authorityKey is the trust file, the public roots and the gateway's
+	// authority, and the file name that lands it at egress.CAPath beside the
+	// token.
 	authorityKey = "egress-ca.pem"
-	// authorityMode is readable by every user of the sandbox: it is a
-	// certificate and no secret, and a tool the workload runs as another
-	// user trusts the gateway's door through it as well.
+	// authorityMode is readable by every user of the sandbox: it holds
+	// certificates and no secret, and a tool the workload runs as another
+	// user verifies through it as well.
 	authorityMode int32 = 0o444
 )
 
@@ -51,9 +52,9 @@ var tokenMount = path.Dir(driver.TokenPath)
 func tokenSecretName(id string) string { return "cella-token-" + objectName(id) }
 
 // tokenProjection is the volume and the mount every Pod of a sandbox with an
-// identity or a gateway's authority carries. Both keys are listed whichever
-// the Secret holds, so a prewarmed entry that is adopted later receives both
-// through the kubelet's sync. The source is optional, which covers a missing
+// identity or a trust file carries. Both keys are listed whichever the Secret
+// holds, so a prewarmed entry that is adopted later receives both through the
+// kubelet's sync. The source is optional, which covers a missing
 // key as well as a missing Secret, so a Pod whose Secret was removed starts
 // with an empty directory rather than staying Pending forever.
 func tokenProjection(id string) (corev1.Volume, corev1.VolumeMount) {
@@ -78,11 +79,19 @@ func tokenProjection(id string) (corev1.Volume, corev1.VolumeMount) {
 	return volume, corev1.VolumeMount{Name: tokenVolume, MountPath: tokenMount, ReadOnly: true}
 }
 
+// putTrust adds the trust file to the Secret data a write carries: the
+// driver's public roots, then the gateway's authority the sandbox was created
+// with. A sandbox created with no authority carries no trust file.
+func (d *Driver) putTrust(data map[string][]byte, authority string) {
+	if bundle := egress.TrustBundle(d.opts.TrustRoots, authority); bundle != nil {
+		data[authorityKey] = bundle
+	}
+}
+
 // putSecret creates the sandbox's Secret, or writes the keys given into the
 // one there and leaves every other key as it is. A token rotation is such a
-// write: the kubelet re-syncs the projected file within its sync window and
-// the workload keeps running, and a rotation of the identity is not a
-// withdrawal of the gateway's authority.
+// write, of the token and the trust file: the kubelet re-syncs the projected
+// files within its sync window and the workload keeps running.
 func (d *Driver) putSecret(ctx context.Context, id string, data map[string][]byte) error {
 	secrets := d.cs.CoreV1().Secrets(d.opts.Namespace)
 	secret := &corev1.Secret{

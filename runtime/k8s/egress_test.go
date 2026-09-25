@@ -518,8 +518,9 @@ func TestThePodCarriesTheGatewayProjection(t *testing.T) {
 	}
 }
 
-// TestTheAuthoritySurvivesARotation: a token rotation writes the token's key
-// alone, so the gateway's authority stays where the workload trusts it.
+// TestTheAuthoritySurvivesARotation: a token rotation writes the new token
+// and keeps the trust file, so the gateway's authority stays where the
+// workload verifies against it.
 func TestTheAuthoritySurvivesARotation(t *testing.T) {
 	h := newHarnessWith(t, withGateway)
 	const id = "sbx_rotated"
@@ -531,6 +532,86 @@ func TestTheAuthoritySurvivesARotation(t *testing.T) {
 	secret := h.secretOf(t, id)
 	if string(secret.Data[tokenKey]) != "second" || string(secret.Data[authorityKey]) != s.Egress.CAPEM {
 		t.Fatalf("after a rotation the Secret holds %v", secret.Data)
+	}
+}
+
+// TestK8sTrustBundleInTheSecret: the Secret's trust file is the driver's
+// public roots and then the gateway's authority, written at create and at
+// adoption, and written again at a rotation and at a start, so a sandbox
+// created while the file held the authority alone receives the roots without
+// being created again. The roots are in the Secret and never in the claim's
+// record, whose annotations the cluster caps at 256 KiB.
+func TestK8sTrustBundleInTheSecret(t *testing.T) {
+	const roots = "-----BEGIN CERTIFICATE-----\nroots\n-----END CERTIFICATE-----\n"
+	h := newHarnessWith(t, func(o *Options) {
+		withGateway(o)
+		o.TrustRoots = []byte(roots)
+	})
+	const id = "sbx_trust"
+	s := gatewaySpec(id)
+	want := roots + s.Egress.CAPEM
+	h.created(t, s)
+	if got := string(h.secretOf(t, id).Data[authorityKey]); got != want {
+		t.Fatalf("after the create the trust file is %q, want the roots and then the authority", got)
+	}
+	if strings.Contains(h.claimOf(t, id).Annotations[annSpec], "roots") {
+		t.Fatal("the claim's record carries the roots")
+	}
+
+	// A sandbox as an earlier release left it: the file holds the authority
+	// alone.
+	authorityAlone := func() {
+		t.Helper()
+		secret := h.secretOf(t, id)
+		secret.Data[authorityKey] = []byte(s.Egress.CAPEM)
+		if _, err := h.cs.CoreV1().Secrets(namespace).Update(t.Context(), secret, metav1.UpdateOptions{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	authorityAlone()
+	if err := h.Update(t.Context(), id, driver.Change{Token: []byte("second")}); err != nil {
+		t.Fatal(err)
+	}
+	secret := h.secretOf(t, id)
+	if string(secret.Data[authorityKey]) != want || string(secret.Data[tokenKey]) != "second" {
+		t.Fatalf("after a rotation the Secret holds %v, want the new token and the whole trust file", secret.Data)
+	}
+
+	authorityAlone()
+	if err := h.Stop(t.Context(), id); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Start(t.Context(), id); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(h.secretOf(t, id).Data[authorityKey]); got != want {
+		t.Fatalf("after a start the trust file is %q, want the roots and then the authority", got)
+	}
+
+	prewarm(t, h, "sbx_pool")
+	if err := h.Update(t.Context(), "sbx_pool", driver.Change{Adopt: &driver.Adoption{
+		Owner: "alice", Name: "adopted", Token: []byte("workload"), Egress: s.Egress,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(h.secretOf(t, "sbx_pool").Data[authorityKey]); got != want {
+		t.Fatalf("after an adoption the trust file is %q, want the roots and then the authority", got)
+	}
+
+	// A sandbox with no gateway gets no trust file at a start or a rotation,
+	// whatever roots the driver holds.
+	h.created(t, tokenSpec("sbx_open", "first"))
+	if err := h.Update(t.Context(), "sbx_open", driver.Change{Token: []byte("second")}); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Stop(t.Context(), "sbx_open"); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Start(t.Context(), "sbx_open"); err != nil {
+		t.Fatal(err)
+	}
+	if data := h.secretOf(t, "sbx_open").Data; len(data[authorityKey]) != 0 {
+		t.Fatalf("a sandbox with no gateway holds a trust file: %v", data)
 	}
 }
 

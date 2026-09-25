@@ -35,8 +35,9 @@ type Egress interface {
 	// gateway that is not connected learns it from the next snapshot.
 	Purge(ctx context.Context, principal string)
 	// CA is the certificate authority the environment's gateways terminate
-	// TLS with, in PEM, or empty when none has connected. The driver
-	// projects it into the sandbox so the workload trusts that door.
+	// TLS with, in PEM, or empty when none has connected. The driver writes
+	// it into the sandbox's trust file after the public roots, so the
+	// workload verifies that door and every host the door tunnels.
 	CA() string
 	// Connected is how many gateways of the environment hold a stream open,
 	// which the phase loop writes into status.gateways (spec 021).

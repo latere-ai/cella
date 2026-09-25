@@ -166,7 +166,7 @@ func labelPath(key string) string { return "/metadata/labels/" + jsonPointer(key
 
 // projectAdopted writes what the adopted sandbox holds inside itself and
 // stamps the Pod. The Secret is mounted by a projection the entry was rendered
-// with, listing the token and the gateway's authority, so the kubelet syncs
+// with, listing the token and the trust file, so the kubelet syncs
 // both files into the running container; the Pod's labels follow the claim's
 // so a cluster selecting on them sees one sandbox and not an entry beside it.
 // The proxy variables are not projected: a running container's environment
@@ -178,9 +178,7 @@ func (d *Driver) projectAdopted(ctx context.Context, id string, adopted driver.C
 	if len(a.Token) > 0 {
 		data[tokenKey] = a.Token
 	}
-	if a.Egress.CAPEM != "" {
-		data[authorityKey] = []byte(a.Egress.CAPEM)
-	}
+	d.putTrust(data, a.Egress.CAPEM)
 	if len(data) > 0 {
 		if err := d.putSecret(ctx, id, data); err != nil {
 			return fmt.Errorf("adopting %s: %w", id, err)

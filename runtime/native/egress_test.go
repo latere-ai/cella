@@ -104,3 +104,35 @@ func TestNativeWithoutAGatewaySetsNothing(t *testing.T) {
 		t.Error("an authority was projected with no gateway")
 	}
 }
+
+// TestNativeProjectsTheTrustBundle: the file the trust variables name holds
+// the driver's public roots and then the gateway's authority, so a host the
+// gateway tunnels verifies against the roots and one it terminates against
+// the authority.
+func TestNativeProjectsTheTrustBundle(t *testing.T) {
+	root := t.TempDir()
+	d, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = d.Close() }()
+	const roots = "-----BEGIN CERTIFICATE-----\nroots\n-----END CERTIFICATE-----\n"
+	d.SetTrustRoots([]byte(roots))
+	if _, err = d.Create(t.Context(), driver.CreateSpec{
+		ID: "sbx_a", Name: "one", Owner: "alice@example.com",
+		Egress: driver.Egress{ProxyAddr: "127.0.0.1:3128", Credential: "abc", CAPEM: testCAPEM},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rec, err := d.load("sbx_a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(rec.Env["SSL_CERT_FILE"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != roots+testCAPEM {
+		t.Fatalf("the trust file = %q, want the roots and then the authority", body)
+	}
+}

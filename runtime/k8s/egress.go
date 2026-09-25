@@ -233,8 +233,8 @@ func wrap(err error, what string) error {
 
 // egressEnv is the sandbox's own environment with the gateway's projection
 // added: the two doors, the credential both authenticate, and the trust
-// variables naming the gateway's authority where the create handed one
-// over. A boundary with no door adds nothing, so a sandbox on an
+// variables naming the trust file where the create handed over the
+// gateway's authority. A boundary with no door adds nothing, so a sandbox on an
 // installation that runs no gateway is unchanged.
 func egressEnv(own map[string]string, boundary driver.Egress) map[string]string {
 	projection := egress.Projection{

@@ -5,6 +5,7 @@ package podman
 
 import (
 	"testing"
+	"time"
 
 	"latere.ai/x/cella/egress"
 	driver "latere.ai/x/cella/runtime"
@@ -89,5 +90,33 @@ func TestPodmanRefusesACreateThatCannotBeProjected(t *testing.T) {
 	}
 	if f.containerCount() != 0 {
 		t.Fatal("the refused create left a container behind")
+	}
+}
+
+// TestPodmanProjectsTheTrustBundle: the file the trust variables name holds
+// the driver's public roots and then the gateway's authority, so a host the
+// gateway tunnels verifies against the roots and one it terminates against
+// the authority.
+func TestPodmanProjectsTheTrustBundle(t *testing.T) {
+	f := newFake(t)
+	const roots = "-----BEGIN CERTIFICATE-----\nroots\n-----END CERTIFICATE-----\n"
+	d, err := New(Options{Socket: f.socket, PullTimeout: 5 * time.Second, TrustRoots: []byte(roots)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Preflight(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = d.Close() })
+	create(t, d, driver.CreateSpec{
+		ID: "sbx_a", Name: "one", Owner: "alice@example.com", Image: "img",
+		Egress: driver.Egress{ProxyAddr: "gateway.example.internal:3128", Credential: "abc", CAPEM: testCAPEM},
+	})
+	file, ok := f.container(t, "sbx_a").files[egress.CAPath]
+	if !ok {
+		t.Fatalf("no trust file at %s", egress.CAPath)
+	}
+	if string(file.body) != roots+testCAPEM {
+		t.Fatalf("the trust file = %q, want the roots and then the authority", file.body)
 	}
 }

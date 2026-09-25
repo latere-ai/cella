@@ -95,8 +95,13 @@ type Egress struct {
 	// lives as long as the sandbox.
 	Credential string `json:"credential,omitempty"`
 	// CAPEM is the authority the gateway signs its leaves with. The driver
-	// projects it read-only inside the sandbox and names it in the trust
-	// variables, so the workload trusts that door and nothing else.
+	// writes it read-only inside the sandbox after its own public roots
+	// (egress.TrustBundle) and names that file in the trust variables: the
+	// gateway terminates TLS toward a host a secret is bound to and tunnels
+	// every other, so the workload verifies the gateway's leaf against the
+	// authority and an upstream's own certificate against the roots. It is
+	// the authority alone, because a driver keeps the create spec beside the
+	// sandbox and the roots do not belong in that record.
 	CAPEM string `json:"caPem,omitempty"`
 }
 

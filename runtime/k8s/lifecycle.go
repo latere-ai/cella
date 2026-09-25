@@ -78,19 +78,17 @@ func (d *Driver) Create(ctx context.Context, s driver.CreateSpec) (driver.Ref, e
 		rollback()
 		return driver.Ref{}, err
 	}
-	// The identity and the gateway's authority are in the cluster before
-	// the Pod that mounts them, so the workload's first read finds the
-	// token and its first request trusts the door it is pointed at, rather
-	// than an empty directory the kubelet fills a moment later (specs 006
-	// and 018). A prewarmed entry's Secret carries an empty token, which an
-	// adoption replaces.
+	// The identity and the trust file are in the cluster before the Pod
+	// that mounts them, so the workload's first read finds the token and its
+	// first request verifies the door it is pointed at and every host that
+	// door tunnels, rather than an empty directory the kubelet fills a moment
+	// later (specs 006 and 018). A prewarmed entry's Secret carries an empty
+	// token, which an adoption replaces.
 	data := map[string][]byte{}
 	if token {
 		data[tokenKey] = s.Token
 	}
-	if s.Egress.CAPEM != "" {
-		data[authorityKey] = []byte(s.Egress.CAPEM)
-	}
+	d.putTrust(data, s.Egress.CAPEM)
 	if len(data) > 0 {
 		if err := d.putSecret(ctx, s.ID, data); err != nil {
 			rollback()
@@ -138,6 +136,16 @@ func (d *Driver) Start(ctx context.Context, id string) error {
 	// starts under the rule they describe now.
 	if err := d.putSandboxRule(ctx, id, spec.Mesh.ID); err != nil {
 		return err
+	}
+	// The trust file is written again for the same reason: a sandbox
+	// created while it carried the gateway's authority alone starts with
+	// the public roots beside it.
+	trust := map[string][]byte{}
+	d.putTrust(trust, spec.Egress.CAPEM)
+	if len(trust) > 0 {
+		if err := d.putSecret(ctx, id, trust); err != nil {
+			return err
+		}
 	}
 	started := d.opts.Now().UTC()
 	fresh, err := d.pod(spec, started, pvc.Annotations[annToken] == "true")
@@ -256,12 +264,21 @@ func (d *Driver) Update(ctx context.Context, id string, c driver.Change) error {
 	// The token is written into the Secret the Pod already projects, not
 	// into the claim's record: the kubelet re-syncs the file and the
 	// workload keeps running. A sandbox that carried none takes one here
-	// and mounts it at its next start.
+	// and mounts it at its next start. The trust file is written beside it,
+	// so a running sandbox created while the file held the gateway's
+	// authority alone receives the public roots at its next rotation.
 	if len(c.Token) > 0 {
-		if _, err := d.getClaim(ctx, id); err != nil {
+		pvc, err := d.getClaim(ctx, id)
+		if err != nil {
 			return err
 		}
-		if err := d.putSecret(ctx, id, map[string][]byte{tokenKey: c.Token}); err != nil {
+		spec, err := specOf(pvc)
+		if err != nil {
+			return err
+		}
+		data := map[string][]byte{tokenKey: c.Token}
+		d.putTrust(data, spec.Egress.CAPEM)
+		if err := d.putSecret(ctx, id, data); err != nil {
 			return err
 		}
 	}

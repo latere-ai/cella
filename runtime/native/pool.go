@@ -60,7 +60,7 @@ func (d *Driver) adopt(ctx context.Context, id string, a driver.Adoption) error 
 	if err := d.save(id, r); err != nil {
 		return err
 	}
-	env, err := projectEgress(d.dir(id), a.Env, a.Egress)
+	env, err := projectEgress(d.dir(id), a.Env, a.Egress, d.trustRoots)
 	if err == nil {
 		env, err = projectToken(d.dir(id), a.Token, env)
 	}

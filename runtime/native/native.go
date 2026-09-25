@@ -39,6 +39,10 @@ type Driver struct {
 	mu     sync.Mutex
 	active map[string]map[*execution]struct{}
 	mains  map[string]*mainProcess
+	// trustRoots are the public roots written beside the gateway's
+	// authority in a sandbox's trust file, set once before the driver
+	// serves.
+	trustRoots []byte
 }
 
 var _ driver.Driver = (*Driver)(nil)
@@ -178,7 +182,7 @@ func (d *Driver) Create(ctx context.Context, s driver.CreateSpec) (driver.Ref, e
 	if err := os.Mkdir(filepath.Join(d.dir(s.ID), "workspace"), 0700); err != nil {
 		return driver.Ref{}, err
 	}
-	env, err := projectEgress(d.dir(s.ID), s.Env, s.Egress)
+	env, err := projectEgress(d.dir(s.ID), s.Env, s.Egress, d.trustRoots)
 	if err != nil {
 		return driver.Ref{}, err
 	}

@@ -123,6 +123,13 @@ type Options struct {
 	// namespace defaults to Namespace and its ports to the two doors'
 	// listen defaults; DNS defaults to kube-system, k8s-app=kube-dns, 53.
 	Gateway, DNS Peer
+	// TrustRoots are the public roots written into a sandbox's trust file
+	// ahead of the gateway's authority, as egress.LoadRoots read them from
+	// the process's own system bundle or SSL_CERT_FILE. No CELLA_ variable
+	// sets them. The gateway tunnels every host no secret is bound to, and
+	// the workload verifies such a host against these roots; none writes the
+	// authority alone.
+	TrustRoots []byte
 
 	// The three fields below are seams, not configuration: no variable sets
 	// them, internal/config leaves them zero, and a deployment is described
