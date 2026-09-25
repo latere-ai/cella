@@ -61,25 +61,26 @@ const objectColumns = `id, kind, owner, name, environment, phase, labels, data, 
 type desired struct{ q querier }
 
 func (x desired) Put(ctx context.Context, obj store.Object, ifVersion int64) (int64, error) {
-	labels := obj.Labels
-	if labels == nil {
-		labels = map[string]string{}
+	labels, err := labelsText(obj.Labels)
+	if err != nil {
+		return 0, err
 	}
+	data, status := jsonText(obj.Data), jsonText(obj.Status)
 	if ifVersion == 0 {
 		var version int64
 		err := x.q.QueryRow(ctx, `insert into objects (id, kind, owner, name, environment, phase, labels, data, status)
 			values ($1, $2, $3, $4, $5, $6, $7, $8, $9) returning version`,
-			obj.ID, obj.Kind, obj.Owner, obj.Name, obj.Environment, obj.Phase, labels, obj.Data, obj.Status).Scan(&version)
+			obj.ID, obj.Kind, obj.Owner, obj.Name, obj.Environment, obj.Phase, labels, data, status).Scan(&version)
 		if err != nil {
 			return 0, writeError(err, "creating the object")
 		}
 		return version, nil
 	}
 	var version int64
-	err := x.q.QueryRow(ctx, `update objects set owner = $3, name = $4, environment = $5, phase = $6,
+	err = x.q.QueryRow(ctx, `update objects set owner = $3, name = $4, environment = $5, phase = $6,
 			labels = $7, data = $8, status = $9, version = version + 1, updated_at = now(), deleted_at = null
 		where id = $1 and kind = $2 and version = $10 returning version`,
-		obj.ID, obj.Kind, obj.Owner, obj.Name, obj.Environment, obj.Phase, labels, obj.Data, obj.Status, ifVersion).Scan(&version)
+		obj.ID, obj.Kind, obj.Owner, obj.Name, obj.Environment, obj.Phase, labels, data, status, ifVersion).Scan(&version)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, x.whyNoRow(ctx, obj.Kind, obj.ID)
 	}
@@ -117,7 +118,10 @@ func (x desired) ByName(ctx context.Context, kind, owner, name string) (store.Ob
 func (x desired) List(ctx context.Context, kind string, f store.Filter, p store.Page) ([]store.Object, string, error) {
 	where := []string{`kind = $1`, `deleted_at is null`}
 	args := []any{kind}
-	where, args = narrow(where, args, f, p.Cursor)
+	where, args, err := narrow(where, args, f, p.Cursor)
+	if err != nil {
+		return nil, "", err
+	}
 	args = append(args, p.Size()+1)
 	query := `select ` + objectColumns + ` from objects where ` + strings.Join(where, " and ") +
 		` order by id limit $` + strconv.Itoa(len(args))
@@ -165,7 +169,7 @@ func (x desired) Count(ctx context.Context, kind, owner string) (int, error) {
 
 func (x desired) PutStatus(ctx context.Context, kind, id string, status []byte) error {
 	tag, err := x.q.Exec(ctx, `update objects set status = $3, updated_at = now()
-		where id = $1 and kind = $2 and deleted_at is null`, id, kind, status)
+		where id = $1 and kind = $2 and deleted_at is null`, id, kind, jsonText(status))
 	if err != nil {
 		return fmt.Errorf("store: writing the status: %w", err)
 	}
@@ -188,7 +192,7 @@ func (x desired) LastApplied(ctx context.Context, id string) ([]byte, error) {
 }
 
 func (x desired) SetLastApplied(ctx context.Context, id string, data []byte) error {
-	tag, err := x.q.Exec(ctx, `update objects set last_applied = $2, updated_at = now() where id = $1`, id, data)
+	tag, err := x.q.Exec(ctx, `update objects set last_applied = $2, updated_at = now() where id = $1`, id, jsonText(data))
 	if err != nil {
 		return fmt.Errorf("store: writing the last applied state: %w", err)
 	}
@@ -210,11 +214,11 @@ func (x observed) Put(ctx context.Context, environment string, s driver.State) e
 	if err != nil {
 		return fmt.Errorf("store: encoding the observed state: %w", err)
 	}
-	labels := s.Labels
-	if labels == nil {
-		labels = map[string]string{}
+	labels, err := labelsText(s.Labels)
+	if err != nil {
+		return err
 	}
-	if _, err := x.q.Exec(ctx, upsertObserved, s.ID, environment, s.Owner, s.Phase, labels, body); err != nil {
+	if _, err := x.q.Exec(ctx, upsertObserved, s.ID, environment, s.Owner, s.Phase, labels, string(body)); err != nil {
 		return fmt.Errorf("store: writing the observed state: %w", err)
 	}
 	return nil
@@ -241,8 +245,10 @@ func (x observed) Get(ctx context.Context, id string) (driver.State, string, err
 
 func (x observed) List(ctx context.Context, f store.Filter, p store.Page) ([]driver.State, string, error) {
 	where := []string{`true`}
-	var args []any
-	where, args = narrow(where, args, f, p.Cursor)
+	where, args, err := narrow(where, nil, f, p.Cursor)
+	if err != nil {
+		return nil, "", err
+	}
 	args = append(args, p.Size()+1)
 	query := `select state from observed where ` + strings.Join(where, " and ") +
 		` order by id limit $` + strconv.Itoa(len(args))
@@ -300,7 +306,7 @@ func (x journal) Append(ctx context.Context, e store.Event) (int64, error) {
 	var seq int64
 	err := x.q.QueryRow(ctx, `insert into events (id, object_id, seq, type, at, payload, acked_at)
 		select $1, $2, coalesce(max(seq), 0) + 1, $3, $4, $5, $6 from events where object_id = $2
-		returning seq`, e.ID, e.ObjectID, e.Type, e.At, e.Payload, nullTime(e.AckedAt)).Scan(&seq)
+		returning seq`, e.ID, e.ObjectID, e.Type, e.At, jsonText(e.Payload), nullTime(e.AckedAt)).Scan(&seq)
 	if err != nil {
 		return 0, fmt.Errorf("store: appending to the journal: %w", err)
 	}
@@ -600,7 +606,7 @@ func (x leases) Release(ctx context.Context, name, holder string) error {
 
 // narrow turns a filter and a page cursor into conditions over the columns
 // both objects and observed carry under the same names.
-func narrow(where []string, args []any, f store.Filter, cursor string) ([]string, []any) {
+func narrow(where []string, args []any, f store.Filter, cursor string) ([]string, []any, error) {
 	add := func(condition string, value any) {
 		args = append(args, value)
 		where = append(where, fmt.Sprintf(condition, len(args)))
@@ -615,7 +621,11 @@ func narrow(where []string, args []any, f store.Filter, cursor string) ([]string
 		add("environment = $%d", f.Environment)
 	}
 	if len(f.Labels) > 0 {
-		add("labels @> $%d", f.Labels)
+		labels, err := labelsText(f.Labels)
+		if err != nil {
+			return nil, nil, err
+		}
+		add("labels @> $%d", labels)
 	}
 	if len(f.IDs) > 0 {
 		add("id = any($%d)", f.IDs)
@@ -623,7 +633,7 @@ func narrow(where []string, args []any, f store.Filter, cursor string) ([]string
 	if cursor != "" {
 		add("id > $%d", cursor)
 	}
-	return where, args
+	return where, args, nil
 }
 
 // scanObject reads one objects row.
@@ -837,7 +847,7 @@ func (x operations) Enqueue(ctx context.Context, op store.Operation) error {
 	_, err := x.q.Exec(ctx, `insert into operations
 		(id, environment, sandbox_id, type, payload, state, attempts, created_at)
 		values ($1, $2, $3, $4, $5, $6, $7, $8)`,
-		op.ID, op.Environment, op.SandboxID, op.Type, jsonOrNull(op.Payload), op.State, op.Attempts, op.CreatedAt.UTC())
+		op.ID, op.Environment, op.SandboxID, op.Type, jsonText(op.Payload), op.State, op.Attempts, op.CreatedAt.UTC())
 	if err != nil {
 		var pg *pgconn.PgError
 		if errors.As(err, &pg) && pg.Code == uniqueViolation {
@@ -899,7 +909,7 @@ func (x operations) Claim(ctx context.Context, environment, worker string, n int
 
 func (x operations) Acknowledge(ctx context.Context, opID string, result []byte) error {
 	tag, err := x.q.Exec(ctx, `update operations set state = 'done', result = $2
-		where id = $1 and state <> 'done'`, opID, jsonOrNull(result))
+		where id = $1 and state <> 'done'`, opID, jsonText(result))
 	if err != nil {
 		return fmt.Errorf("store: acknowledging operation %s: %w", opID, err)
 	}
@@ -1017,11 +1027,33 @@ func scanOperation(row pgx.Row) (store.Operation, error) {
 	return op, nil
 }
 
-// jsonOrNull writes a nil payload as SQL null rather than as the JSON literal
-// null, so a row with no payload reads back as no payload.
-func jsonOrNull(raw []byte) any {
+// The json and jsonb columns take their values as text. A pooled endpoint
+// runs in exec mode, where the server describes no parameter and the driver
+// encodes each value from its Go type alone and sends it as text: a byte slice
+// goes as bytea and reaches the column as a hex literal it refuses, and a Go
+// map has no encoding at all. A string is sent as it is in every mode, and the
+// server reads it as the column's type.
+
+// jsonText is a JSON document as the text a jsonb parameter takes, and nil,
+// SQL null, for an empty one, so a row with no document reads back as none
+// rather than as the JSON literal null.
+func jsonText(raw []byte) *string {
 	if len(raw) == 0 {
 		return nil
 	}
-	return raw
+	text := string(raw)
+	return &text
+}
+
+// labelsText is a label set as the text of a jsonb object: the empty object
+// for none, which is what a labels column holds for a row without labels.
+func labelsText(labels map[string]string) (string, error) {
+	if labels == nil {
+		return "{}", nil
+	}
+	b, err := json.Marshal(labels)
+	if err != nil {
+		return "", fmt.Errorf("store: encoding the labels: %w", err)
+	}
+	return string(b), nil
 }

@@ -6,6 +6,18 @@ refused before it is pushed.
 
 ## Unreleased
 
+- Fixed: with `CELLA_DB_POOL_URL` naming a pooled endpoint whose URL
+  carries `default_query_exec_mode=exec`, the mode a transaction pooler
+  needs, every write of an object or an observed state failed with `cannot
+  find encode plan` for its labels, and every journal append and operation
+  enqueue failed with SQLSTATE 22P02, as did a list filtered by labels. In
+  that mode the server describes no parameter, so the driver encoded the
+  label maps from their Go type, which it cannot, and sent each JSON
+  document as `bytea`, which a `jsonb` column refuses. The store now binds
+  every JSON value as text, which each connection mode sends as it is. A
+  direct endpoint, or a pooled one in a mode that describes each statement,
+  was not affected.
+
 ## v0.6.3 - 2026-09-25
 
 - Fixed: a request its caller closed while `cellad` was still answering,

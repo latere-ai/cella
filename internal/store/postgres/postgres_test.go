@@ -52,6 +52,21 @@ func TestPostgresStore(t *testing.T) {
 	})
 }
 
+// TestPostgresStoreInExecMode runs the same contract with the serving pool in
+// the exec query mode a transaction pooler's DSN selects. In that mode the
+// server describes no parameter, so the driver encodes each value from its Go
+// type alone and sends it as text: a Go map has no encoding at all, and a byte
+// slice reaches a jsonb column as a bytea hex literal the column refuses. A
+// connection that describes each statement first accepts both, which is why
+// TestPostgresStore alone never sees either.
+func TestPostgresStoreInExecMode(t *testing.T) {
+	admin := server(t)
+	storetest.Run(t, func(t storetest.TB, key []byte) store.Store {
+		dsn := database(t, admin)
+		return openPooled(t, dsn, execMode(t, dsn), key, time.Hour)
+	})
+}
+
 // TestAFollowerReadsAnotherReplicasAppend: two replicas over one database. A
 // follower of one object on the first reads a record the second committed,
 // which never reaches the first's own subscriptions and arrives through the
@@ -303,12 +318,35 @@ func TestDurable(t *testing.T) {
 // it closes it itself.
 func open(t storetest.TB, dsn string, key []byte, renew time.Duration) *postgres.Store {
 	t.Helper()
-	s, err := postgres.Open(context.Background(), postgres.Options{URL: dsn, Key: key, RenewEvery: renew})
+	return openPooled(t, dsn, "", key, renew)
+}
+
+// openPooled is open with a serving endpoint of its own: migrations run over
+// dsn and every statement after them over pooled, or over dsn where pooled is
+// empty.
+func openPooled(t storetest.TB, dsn, pooled string, key []byte, renew time.Duration) *postgres.Store {
+	t.Helper()
+	s, err := postgres.Open(context.Background(), postgres.Options{URL: dsn, PoolURL: pooled, Key: key, RenewEvery: renew})
 	if err != nil {
 		t.Fatalf("opening the store: %v", err)
 	}
 	t.Cleanup(func() { _ = s.Close() })
 	return s
+}
+
+// execMode is dsn with the query mode a transaction pooler's DSN carries,
+// default_query_exec_mode=exec: no statement is prepared or described, and
+// every parameter is encoded from its Go type and sent as text.
+func execMode(t storetest.TB, dsn string) string {
+	t.Helper()
+	u, err := url.Parse(dsn)
+	if err != nil {
+		t.Fatalf("the database URL: %v", err)
+	}
+	q := u.Query()
+	q.Set("default_query_exec_mode", "exec")
+	u.RawQuery = q.Encode()
+	return u.String()
 }
 
 // acquire takes one lease and fails the test on an error.
