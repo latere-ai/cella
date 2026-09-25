@@ -6,6 +6,46 @@ refused before it is pushed.
 
 ## Unreleased
 
+- Fixed: inside a sandbox behind an egress gateway, HTTPS to any host no
+  secret is bound to failed certificate verification. `pip install`, `curl
+  https://github.com`, `git clone` and `go get` all failed. The trust
+  variables (`SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`,
+  `GIT_SSL_CAINFO`, `NODE_EXTRA_CA_CERTS`) named a file that held only the
+  gateway's own authority. The gateway passes such a host through untouched,
+  so the workload is shown the host's real certificate, and OpenSSL, curl,
+  git, Python and Go read that file as their whole trust store. On
+  Kubernetes this broke every sandbox with a gateway in v0.6.0 and v0.6.1.
+  On Podman and the native runtime it has been broken since v0.2.0, the
+  first release that pointed a sandbox at a gateway. Node was unaffected,
+  because `NODE_EXTRA_CA_CERTS` adds to its own roots. The file now holds
+  the public roots and then the gateway's authority, so a host the gateway
+  passes through verifies against the first and a host it substitutes a
+  secret for verifies against the second.
+- The public roots are the system's, read once at start: the file
+  `SSL_CERT_FILE` names in the environment of `cellad serve` or `cellad
+  worker`, or else the first of Go's Linux bundle files that holds a
+  certificate. The released image ships
+  `/etc/ssl/certs/ca-certificates.crt`. To add roots of your own, for hosts
+  whose certificates come from a private authority, point `SSL_CERT_FILE`
+  at a bundle that holds them and the public ones. `cellad serve` with
+  `CELLA_GATEWAY` set, and every `cellad worker`, now refuse to start when
+  they find no roots, or more than 512 KiB of them, and the message names
+  `SSL_CERT_FILE` and the files they tried. Without `CELLA_GATEWAY`, `cellad
+  serve` reads no roots, since no sandbox is pointed at a gateway.
+- Sandboxes created before this release keep the old file until it is
+  written again. On Kubernetes that happens at the sandbox's next token
+  rotation, at two thirds of the token's life, without a restart, and at
+  its next start. A sandbox whose token lasts as long as the sandbox itself
+  is never rotated, so stop it and start it, or wait for the rotation. On
+  Podman and the native runtime nothing rewrites the file, so delete the
+  sandbox and create it again.
+- For a program that builds a driver itself: `k8s.Options.TrustRoots`,
+  `podman.Options.TrustRoots` and `(*native.Driver).SetTrustRoots` take the
+  public roots, `egress.LoadRoots` reads them the way `cellad` does, and
+  `egress.TrustBundle` composes the file. A driver given no roots writes
+  the gateway's authority alone, as before. `runtime.Egress.CAPEM` is still
+  the authority alone.
+
 ## v0.6.1 - 2026-09-25
 
 - v0.6.0 was tagged but not published: two of its own tests read a sandbox
