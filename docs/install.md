@@ -224,6 +224,7 @@ Each line is a requirement:
 | `backend` | the cluster did not answer, or the ServiceAccount lacks one of the accesses the driver uses, which the line names |
 | `data directory` | `CELLA_DATA_DIR` is not writable, so readiness fails from the first request |
 | `admission`, `sink`, `store`, `gateway` | each is reported as not configured when its variable is unset, and answered for when it is set |
+| `gateway`, set | the gateway's name does not resolve, or `cellad` found no public roots to give the sandboxes behind it, in which case `cellad serve` refuses to start as well; the line names `SSL_CERT_FILE` and the files it read |
 
 ## Serving behind a shared origin
 

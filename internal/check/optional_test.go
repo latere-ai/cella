@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -35,7 +36,7 @@ func TestEveryOptionalLineNamesItsVariableWhenUnset(t *testing.T) {
 		{admission(empty), "CELLA_ADMISSION_URL"},
 		{sink(t.Context(), config.Config{}, http.DefaultClient, time.Now), "CELLA_EVENTS_URL"},
 		{store(t.Context(), config.Config{}), "CELLA_DB_URL"},
-		{gateway(t.Context(), config.Config{}), "CELLA_GATEWAY"},
+		{gateway(t.Context(), config.Config{}, empty), "CELLA_GATEWAY"},
 	} {
 		t.Run(tc.line.Name, func(t *testing.T) {
 			if tc.line.State != Skipped {
@@ -192,18 +193,31 @@ func TestStoreThatDoesNotAnswer(t *testing.T) {
 func TestGatewayResolvesAndDoesNotDial(t *testing.T) {
 	// Nothing listens on this port, and the line passes: it resolves.
 	cfg := config.Config{Gateway: config.EgressGateway{ProxyAddr: "127.0.0.1:1"}}
-	got := gateway(t.Context(), cfg)
-	if got.State != Ok || !strings.Contains(got.Detail, "127.0.0.1") {
+	system := getenv(nil)
+	got := gateway(t.Context(), cfg, system)
+	if got.State != Ok || !strings.Contains(got.Detail, "127.0.0.1") || !strings.Contains(got.Detail, "public roots") {
 		t.Fatalf("gateway = %s (%s)", got.State, got.Detail)
 	}
 	cfg.Gateway = config.EgressGateway{ProxyAddr: "gateway.invalid:3128"}
-	if got := gateway(t.Context(), cfg); got.State != Failed || !strings.Contains(got.Detail, "CELLA_GATEWAY") {
+	if got := gateway(t.Context(), cfg, system); got.State != Failed || !strings.Contains(got.Detail, "CELLA_GATEWAY") {
 		t.Fatalf("gateway = %s (%s), want a failure naming the variable", got.State, got.Detail)
 	}
 	// A door named without a port is a host, which is what spec 002's
 	// table admits.
 	cfg.Gateway = config.EgressGateway{ProxyAddr: "localhost"}
-	if got := gateway(t.Context(), cfg); got.State != Ok {
+	if got := gateway(t.Context(), cfg, system); got.State != Ok {
 		t.Fatalf("gateway = %s (%s)", got.State, got.Detail)
+	}
+}
+
+// TestGatewayFailsWithoutPublicRoots: serve with a gateway refuses to start
+// without the public roots, so the line that answers for the gateway fails
+// on the same file, naming it.
+func TestGatewayFailsWithoutPublicRoots(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing.pem")
+	cfg := config.Config{Gateway: config.EgressGateway{ProxyAddr: "127.0.0.1:1"}}
+	got := gateway(t.Context(), cfg, getenv(map[string]string{"SSL_CERT_FILE": missing}))
+	if got.State != Failed || !strings.Contains(got.Detail, "public roots") || !strings.Contains(got.Detail, missing) {
+		t.Fatalf("gateway = %s (%s), want a failure naming the roots and the file", got.State, got.Detail)
 	}
 }

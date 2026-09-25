@@ -103,7 +103,7 @@ func Run(ctx context.Context, o Options) []Line {
 	lines = append(lines, admission(o.Getenv))
 	lines = append(lines, sink(ctx, cfg, client, now))
 	lines = append(lines, store(ctx, cfg))
-	lines = append(lines, gateway(ctx, cfg))
+	lines = append(lines, gateway(ctx, cfg, o.Getenv))
 	return lines
 }
 

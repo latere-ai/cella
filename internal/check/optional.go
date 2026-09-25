@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"latere.ai/x/cella/egress"
 	"latere.ai/x/cella/internal/config"
 	"latere.ai/x/cella/internal/events"
 	"latere.ai/x/cella/internal/store/postgres/migrations"
@@ -163,7 +164,11 @@ func isUndefinedTable(err error) bool {
 // control plane, so a refused connection from cellad is the policy working
 // and would fail a check on a correct deployment. A name that does not
 // resolve is a sandbox that cannot reach its door.
-func gateway(ctx context.Context, cfg config.Config) Line {
+//
+// The line also reads the public roots the way serve does, since serve with a
+// gateway refuses to start without them: a sandbox given the gateway's
+// authority alone verifies no host the gateway passes through.
+func gateway(ctx context.Context, cfg config.Config, getenv config.Getenv) Line {
 	addr := strings.TrimSpace(cfg.Gateway.ProxyAddr)
 	if addr == "" {
 		return Line{Name: "gateway", State: Skipped,
@@ -179,6 +184,11 @@ func gateway(ctx context.Context, cfg config.Config) Line {
 	if err != nil {
 		return Line{Name: "gateway", State: Failed, Detail: "CELLA_GATEWAY: " + err.Error()}
 	}
+	roots, err := egress.LoadRoots(getenv)
+	if err != nil {
+		return Line{Name: "gateway", State: Failed, Detail: "the public roots a sandbox behind the gateway verifies against: " + err.Error()}
+	}
 	return Line{Name: "gateway", State: Ok,
-		Detail: fmt.Sprintf("%s resolves to %s; the door is dialed by the sandboxes and not from here", addr, strings.Join(addrs, ", "))}
+		Detail: fmt.Sprintf("%s resolves to %s; the door is dialed by the sandboxes and not from here; %d public roots from %s",
+			addr, strings.Join(addrs, ", "), roots.Count, roots.Source)}
 }
