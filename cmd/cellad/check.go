@@ -12,6 +12,7 @@ import (
 	"latere.ai/x/cella/internal/check"
 	"latere.ai/x/cella/internal/config"
 	"latere.ai/x/cella/internal/version"
+	"latere.ai/x/cella/runtime"
 )
 
 // checkRole is the check subcommand of spec 014: one line per requirement of
@@ -30,7 +31,10 @@ func checkRole(ctx context.Context, args []string, getenv config.Getenv, stdout,
 		_, _ = fmt.Fprintln(stdout, version.String())
 		return 0
 	}
-	lines := check.Run(ctx, check.Options{Getenv: getenv, Open: openRuntime})
+	// The runtime line asks the driver's preflight alone, which reads no
+	// trust file, so the driver is opened without the public roots.
+	open := func(cfg config.Config) (runtime.Driver, func() error, error) { return openRuntime(cfg, nil) }
+	lines := check.Run(ctx, check.Options{Getenv: getenv, Open: open})
 	if check.Report(stdout, lines) {
 		return 1
 	}

@@ -158,9 +158,12 @@ func TestEgressEndToEnd(t *testing.T) {
 		if path == "" {
 			t.Fatal("the trust variables were not set")
 		}
+		// The file is the host's public roots and then the gateway's
+		// authority; TestTheSandboxTrustsThePublicRootsAndTheGateway names
+		// the roots and proves both halves with a client in the sandbox.
 		projected := strings.TrimSpace(plane.exec(t, sandbox, "cat "+path))
-		if !strings.Contains(projected, "BEGIN CERTIFICATE") || strings.TrimSpace(gateway.CAPEM()) != projected {
-			t.Fatalf("the sandbox holds %q, want the gateway's own authority", projected)
+		if !strings.HasSuffix(projected, strings.TrimSpace(gateway.CAPEM())) {
+			t.Fatalf("the sandbox's trust file does not end with the gateway's own authority: %.200q", projected)
 		}
 	})
 

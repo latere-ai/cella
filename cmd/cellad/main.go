@@ -30,6 +30,7 @@ import (
 
 	apidoc "latere.ai/x/cella/api"
 	"latere.ai/x/cella/controller"
+	"latere.ai/x/cella/egress"
 	"latere.ai/x/cella/internal/admission"
 	"latere.ai/x/cella/internal/api"
 	"latere.ai/x/cella/internal/auth"
@@ -164,7 +165,15 @@ func workerRole(ctx context.Context, args []string, getenv config.Getenv, stdout
 	if err = os.MkdirAll(cfg.DataDir, 0o750); err != nil {
 		return fail(stderr, fmt.Errorf("CELLA_DATA_DIR: %w", err))
 	}
-	runtimeDriver, closeRuntime, err := openWorkerRuntime(cfg)
+	// The control plane decides whether this worker's sandboxes are pointed
+	// at a gateway, so the worker reads the public roots whatever it serves
+	// and refuses to start without them (spec 018). Its own stream to an
+	// https control plane verifies against the same files.
+	roots, err := egress.LoadRoots(getenv)
+	if err != nil {
+		return fail(stderr, fmt.Errorf("the public roots a sandbox behind a gateway verifies against: %w", err))
+	}
+	runtimeDriver, closeRuntime, err := openWorkerRuntime(cfg, roots.PEM)
 	if err != nil {
 		return fail(stderr, err)
 	}
@@ -187,18 +196,20 @@ func workerRole(ctx context.Context, args []string, getenv config.Getenv, stdout
 
 // openWorkerRuntime opens the driver the worker runs. It is openRuntime over
 // the worker's own configuration, which carries the driver's variables and
-// none of the control plane's.
-func openWorkerRuntime(cfg config.WorkerConfig) (runtime.Driver, func() error, error) {
+// none of the control plane's, and over the public roots this host holds.
+func openWorkerRuntime(cfg config.WorkerConfig, roots []byte) (runtime.Driver, func() error, error) {
 	noop := func() error { return nil }
 	switch cfg.Runtime {
 	case config.RuntimeK8s:
-		d, err := k8s.New(cfg.K8s)
+		o := cfg.K8s
+		o.TrustRoots = roots
+		d, err := k8s.New(o)
 		if err != nil {
 			return nil, noop, fmt.Errorf("runtime: %w", err)
 		}
 		return d, noop, nil
 	case config.RuntimePodman:
-		d, err := podman.New(podman.Options{Socket: cfg.PodmanSocket})
+		d, err := podman.New(podman.Options{Socket: cfg.PodmanSocket, TrustRoots: roots})
 		if err != nil {
 			return nil, noop, fmt.Errorf("runtime: %w", err)
 		}
@@ -208,6 +219,7 @@ func openWorkerRuntime(cfg config.WorkerConfig) (runtime.Driver, func() error, e
 		if err != nil {
 			return nil, noop, fmt.Errorf("runtime: %w", err)
 		}
+		d.SetTrustRoots(roots)
 		return d, d.Close, nil
 	}
 }
@@ -237,6 +249,22 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	defer tel.shutdown()
 	if err := os.MkdirAll(cfg.DataDir, 0o750); err != nil {
 		return fail(stderr, fmt.Errorf("CELLA_DATA_DIR: %w", err))
+	}
+	// A sandbox pointed at the gateway verifies every host the gateway
+	// tunnels against the public roots in its trust file, and one given the
+	// gateway's authority alone verifies none of them. So a control plane
+	// that points sandboxes at a gateway reads the roots now and refuses to
+	// start without them; one with no gateway sets no trust variable and
+	// reads nothing (spec 018).
+	var roots []byte
+	if cfg.Gateway.ProxyAddr != "" {
+		loaded, err := egress.LoadRoots(getenv)
+		if err != nil {
+			return fail(stderr, fmt.Errorf("the public roots a sandbox behind the gateway verifies against: %w", err))
+		}
+		tel.log.InfoContext(ctx, "the public roots every sandbox's trust file carries",
+			"certificates", loaded.Count, "source", loaded.Source)
+		roots = loaded.PEM
 	}
 
 	// Recovery may change runtime records. Own the state before opening the
@@ -366,7 +394,7 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	// A driver that owns local processes or an engine session is closed at
 	// shutdown; one that drives a cluster owns nothing this process has to
 	// release.
-	runtimeDriver, closeRuntime, err := openRuntime(cfg)
+	runtimeDriver, closeRuntime, err := openRuntime(cfg, roots)
 	if err != nil {
 		return fail(stderr, err)
 	}
@@ -591,17 +619,19 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 // engine session is closed at shutdown, and one that drives a cluster owns
 // nothing this process has to release. The serve role and the check role
 // open the same way, so the check drives the driver the node would.
-func openRuntime(cfg config.Config) (runtime.Driver, func() error, error) {
+func openRuntime(cfg config.Config, roots []byte) (runtime.Driver, func() error, error) {
 	noop := func() error { return nil }
 	switch cfg.Runtime {
 	case config.RuntimeK8s:
-		driver, err := k8s.New(cfg.K8s)
+		o := cfg.K8s
+		o.TrustRoots = roots
+		driver, err := k8s.New(o)
 		if err != nil {
 			return nil, noop, fmt.Errorf("runtime: %w", err)
 		}
 		return driver, noop, nil
 	case config.RuntimePodman:
-		driver, err := podman.New(podman.Options{Socket: cfg.PodmanSocket})
+		driver, err := podman.New(podman.Options{Socket: cfg.PodmanSocket, TrustRoots: roots})
 		if err != nil {
 			return nil, noop, fmt.Errorf("runtime: %w", err)
 		}
@@ -611,6 +641,7 @@ func openRuntime(cfg config.Config) (runtime.Driver, func() error, error) {
 		if err != nil {
 			return nil, noop, fmt.Errorf("runtime: %w", err)
 		}
+		driver.SetTrustRoots(roots)
 		return driver, driver.Close, nil
 	}
 }
