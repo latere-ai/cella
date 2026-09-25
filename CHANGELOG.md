@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.6.2 - 2026-09-25
+
 - Fixed: inside a sandbox behind an egress gateway, HTTPS to any host no
   secret is bound to failed certificate verification. `pip install`, `curl
   https://github.com`, `git clone` and `go get` all failed. The trust
