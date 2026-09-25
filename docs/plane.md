@@ -127,6 +127,14 @@ core's scheduler loop asks the driver for it, so a server of your own runs
 `core.RunScheduler(ctx)` beside its handler, as it runs `core.RunReaper(ctx)`.
 Without the loop a created sandbox stays `Pending`.
 
+A server that builds its own driver and points sandboxes at a gateway gives
+the driver the public roots, which the sandbox's trust file carries ahead of
+the gateway's authority: `egress.LoadRoots(os.Getenv)` reads them the way
+`cellad` does, and `k8s.Options.TrustRoots`, `podman.Options.TrustRoots` or
+`(*native.Driver).SetTrustRoots` takes them. A driver given none writes the
+gateway's authority alone, and a workload behind it then fails to verify
+every host the gateway passes through untouched.
+
 `manifest.Options` is where your platform goes: `Actor` is who is applying,
 as your own identity rendered it; `Defaults` is what an absent field takes;
 `Ceilings` is what the subject's plan may not exceed; `Admit` is the

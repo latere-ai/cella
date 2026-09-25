@@ -98,8 +98,10 @@ The sandbox is pointed at the gateway through its environment:
 address and the sandbox's own credential, `CELLA_GATEWAY_URL` and
 `CELLA_GATEWAY_CREDENTIAL` name the gateway's second door for tools that
 ignore proxy variables, and the trust variables name
-`/run/cella/egress-ca.pem`, the authority the gateway presents when it
-substitutes a secret. A program that honors none of them reaches nothing.
+`/run/cella/egress-ca.pem`. That file holds the public roots, which a host
+the gateway passes through untouched is verified against, and then the
+gateway's own authority, which the gateway presents when it substitutes a
+secret. A program that honors none of them reaches nothing.
 `status.conditions` reports `EgressEnforced` true once the gateway holds
 the sandbox's boundary.
 

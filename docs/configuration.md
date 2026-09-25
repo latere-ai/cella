@@ -149,6 +149,7 @@ does.
 | `CELLA_POOL_CPU`, `CELLA_POOL_MEMORY`, `CELLA_POOL_DISK` | unset | the resources of a prewarmed sandbox. A create is served from the pool only when it matches what a prewarmed sandbox already is |
 | `CELLA_GATEWAY` | unset | the egress gateway's proxy door as a sandbox dials it, `host` or `host:port` (port 3128 when none is given). A manifest that declares a boundary or mounts a secret needs a gateway |
 | `CELLA_GATEWAY_REVERSE` | unset | the gateway's reverse door as a sandbox dials it, for tools that ignore proxy variables. Only with `CELLA_GATEWAY` |
+| `SSL_CERT_FILE` | the system's bundle | with `CELLA_GATEWAY` set, the file of public root certificates every sandbox behind the gateway trusts, beside the gateway's own authority. Unset, `cellad` reads the first of `/etc/ssl/certs/ca-certificates.crt`, `/etc/pki/tls/certs/ca-bundle.crt`, `/etc/ssl/ca-bundle.pem`, `/etc/pki/tls/cacert.pem`, `/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem` and `/etc/ssl/cert.pem` that holds a certificate; the released image ships the first. A control plane with a gateway that finds none, or finds more than 512 KiB of certificates, refuses to start. Set it to a bundle that adds your own roots when sandboxes reach hosts with certificates from a private authority. It is also what `cellad`'s own connections trust |
 
 These are read on every start, whether or not the environment exists yet:
 
@@ -199,6 +200,7 @@ outbound to a control plane somebody else operates.
 | `CELLA_DATA_DIR` | `/var/lib/cella` | local state, as for the control plane |
 | `CELLA_CAPACITY_CPU`, `CELLA_CAPACITY_MEMORY`, `CELLA_CAPACITY_DISK`, `CELLA_CAPACITY_SANDBOXES` | unset | what this one worker declares it can hold. Placement admits against it beside the environment's own capacity |
 | `CELLA_WORKER_LABELS` | unset | `key=value` pairs that describe this worker to an operator reading the fleet |
+| `SSL_CERT_FILE` | the system's bundle | the public roots the worker writes into the trust file of a sandbox behind a gateway, read as for the control plane. A worker that finds none refuses to start, since the control plane decides whether its sandboxes are pointed at a gateway |
 | `CELLA_INSECURE_CONTROL_PLANE` | unset | `true` admits an `http://` control plane on a host that is not loopback. For a test stack only |
 
 ## The egress gateway
@@ -235,7 +237,7 @@ variables below, because the runtime would overwrite them.
 |---|---|
 | `CELLA_TOKEN_FILE` | the path of the sandbox's own workload token, `/run/cella/token` on Podman and Kubernetes. `cella` reads it with no flag |
 | `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, and their lowercase forms | the gateway's proxy door with the sandbox's credential, when the sandbox runs behind a gateway |
-| `SSL_CERT_FILE`, `NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`, `GIT_SSL_CAINFO`, `CURL_CA_BUNDLE` | the gateway's certificate authority, `/run/cella/egress-ca.pem` on Podman and Kubernetes, where the runtime projected it |
+| `SSL_CERT_FILE`, `NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`, `GIT_SSL_CAINFO`, `CURL_CA_BUNDLE` | the sandbox's trust file, `/run/cella/egress-ca.pem` on Podman and Kubernetes, when the sandbox runs behind a gateway. It holds the public roots the control plane or the worker read and then the gateway's own authority, so a host the gateway passes through verifies against the first and a host it substitutes a secret for verifies against the second |
 | `CELLA_GATEWAY_URL`, `CELLA_GATEWAY_CREDENTIAL` | the reverse door and the credential it takes, when the environment has one |
 
 A sandbox taken from a warm pool on Kubernetes is the exception: its
