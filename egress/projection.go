@@ -11,8 +11,9 @@ import (
 	"strings"
 )
 
-// CAPath is where a driver projects the gateway's certificate authority
-// inside a sandbox, read-only, under the control plane's own prefix.
+// CAPath is where a driver projects the sandbox's trust file, read-only,
+// under the control plane's own prefix: the public roots and the gateway's
+// certificate authority, which TrustBundle composes.
 const CAPath = "/run/cella/egress-ca.pem"
 
 // ProxyUser is the user half of the proxy credential. A stock client sends
@@ -71,9 +72,9 @@ type Projection struct {
 	ReverseAddr string
 	// Credential is what both doors authenticate.
 	Credential string
-	// CAPath is where the driver projected the authority inside the sandbox.
-	// It is empty when the driver could not project a file, and the trust
-	// variables are then not set.
+	// CAPath is where the driver projected the trust file inside the
+	// sandbox. It is empty when the driver could not project a file, and the
+	// trust variables are then not set.
 	CAPath string
 }
 
