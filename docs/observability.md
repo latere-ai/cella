@@ -54,6 +54,14 @@ and `driver` are what the installation configured.
 A stream is counted and not timed. Its life is not a request's latency,
 and mixing the two makes the histogram unreadable.
 
+A request whose caller closed it while `cellad` was still answering, and
+which then failed because the cancellation reached the driver, the
+authorizer or the store, is counted as `status="4xx"` and
+`code="client_closed"`: the `499` a proxy logs for the same event. It is
+not a dependency failure, so it does not raise the 5xx rate, and nobody
+receives its answer. The request log line carries the same status and
+code.
+
 ### Sandboxes
 
 | Metric | Labels |
@@ -83,6 +91,9 @@ and mixing the two makes the histogram unreadable.
 
 `cella_decisions_total{endpoint="authorizer"}` counts every authorization
 question, whether your endpoint or the built-in owner policy answered it.
+A question left without an answer because its caller closed the request
+is not counted: it says nothing about the endpoint, and `unavailable` is
+the outcome an alert reads.
 
 ### The boundary
 

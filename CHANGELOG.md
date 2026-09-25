@@ -6,6 +6,14 @@ refused before it is pushed.
 
 ## Unreleased
 
+- Fixed: a request its caller closed while `cellad` was still answering,
+  such as a browser tab closed during a log read, was counted and logged
+  as a `5xx` `driver_unavailable` or `authorizer_unavailable`, and an
+  authorization question it left unanswered counted as the authorizer
+  being `unavailable`, which the alert on that outcome reads. Such a
+  request is now `4xx` `client_closed` in `cella_requests_total` and the
+  request log, and the unanswered question is not counted.
+
 ## v0.6.2 - 2026-09-25
 
 - Fixed: inside a sandbox behind an egress gateway, HTTPS to any host no
