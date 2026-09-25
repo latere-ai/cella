@@ -132,6 +132,13 @@ func (a *Authorizer) Lookup(ctx context.Context, c Caller, info authz.Caller, ac
 func (a *Authorizer) decide(ctx context.Context, c Caller, info authz.Caller, action string, res authz.Resource, deny Code) (_ Decision, outcome error) {
 	started := time.Now()
 	defer func() {
+		// A call whose caller went away ends on the caller's cancellation and
+		// produced no decision the endpoint can be judged by. Counting it as
+		// unavailable would raise the alert that reads that outcome for a
+		// browser that closed a tab, so it is not counted at all.
+		if ctx.Err() != nil && CodeOf(outcome) == CodeAuthorizerUnavailable {
+			return
+		}
 		a.metrics.Decision(MetricEndpointAuthorizer, outcomeOf(outcome), time.Since(started))
 	}()
 	d, err := a.inner.Authorize(ctx, Envelope(c, info, action, res))

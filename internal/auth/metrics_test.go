@@ -95,3 +95,32 @@ func TestNoRecorderDecidesTheSame(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// waiting is an authorizer that answers only when its caller gives up, with
+// the cancellation, the way an HTTP call to an endpoint ends when the request
+// that asked it is aborted.
+type waiting struct{}
+
+func (waiting) Authorize(ctx context.Context, _ authz.Request) (authz.Decision, error) {
+	<-ctx.Done()
+	return authz.Decision{}, ctx.Err()
+}
+
+// TestADecisionItsCallerAbandonedIsNotCounted: a question whose request was
+// aborted by its caller is still refused, since no decision is never an
+// allow, but it says nothing about the endpoint and is not counted as
+// unavailable, which is the outcome the endpoint's alert reads.
+func TestADecisionItsCallerAbandonedIsNotCounted(t *testing.T) {
+	rec := &decisionRecorder{}
+	a := auth.NewAuthorizer(waiting{}).Measure(rec)
+	res := (auth.Sandbox{ID: "sbx_1", Owner: alice}).Resource()
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err := a.Decide(ctx, caller(alice, "alice", nil), info, "sandboxes.read", res)
+	if auth.CodeOf(err) != auth.CodeAuthorizerUnavailable {
+		t.Fatalf("an abandoned question answered %v, want no decision", err)
+	}
+	if got := rec.read(); len(got) != 0 {
+		t.Errorf("counted %v, want nothing", got)
+	}
+}
