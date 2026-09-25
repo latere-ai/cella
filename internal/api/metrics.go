@@ -161,20 +161,45 @@ func (o *observed) class() string {
 // container's output joins the trace it belongs to.
 func (h *handler) observe(ctx context.Context, slot *routeSlot, o *observed, started time.Time) {
 	elapsed := time.Since(started)
-	code := envelopeCode(slot, o)
-	h.metrics.Request(slot.route, o.class(), code)
+	status, code := o.class(), envelopeCode(slot, o)
+	if callerGone(ctx, o) {
+		status, code = metrics.StatusClass(statusClientClosed), ClientClosed
+	}
+	h.metrics.Request(slot.route, status, code)
 	if !o.hijacked {
 		h.metrics.RequestDuration(slot.route, elapsed)
 	}
 	h.log.LogAttrs(ctx, slog.LevelInfo, "request",
 		slog.String("route", slot.route),
-		slog.String("status", o.class()),
+		slog.String("status", status),
 		slog.String("code", code),
 		slog.Duration("duration", elapsed),
 		slog.String("subject", slot.subject),
 		slog.String("sandbox", slot.sandbox),
 		slog.String("request_id", slot.requestID),
 	)
+}
+
+// ClientClosed is the code a request is counted and logged under when its
+// caller went away while the handler ran and the handler then answered with a
+// server failure. The cancellation reached a driver, authorizer or store call
+// through the request's context, and the failure it produced says nothing
+// about that dependency, so it is not counted as the dependency's. The code is
+// recorded and never written: nobody is left to read an envelope.
+const ClientClosed = "client_closed"
+
+// statusClientClosed is the status such a request is counted under: the 499
+// that proxies log for a client that closed its request. Its class is 4xx, so
+// the status label keeps its five values.
+const statusClientClosed = 499
+
+// callerGone reports whether the request's caller went away before a server
+// failure was answered. net/http cancels a request's context while its
+// handler runs only when the client's connection closed, and a hijacked
+// connection is the handler's own and never cancels it, so a done context at
+// the deferred count of a 5xx is the caller's leaving.
+func callerGone(ctx context.Context, o *observed) bool {
+	return !o.hijacked && o.written && o.status >= http.StatusInternalServerError && ctx.Err() != nil
 }
 
 // envelopeCode prefers the code the handler recorded on the writer and falls
