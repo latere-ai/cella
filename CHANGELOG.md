@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.6.1 - 2026-09-25
+
 - v0.6.0 was tagged but not published: two of its own tests read a sandbox
   straight after a create and failed under the race detector on the release
   runner. This release carries the same binaries, packages and API as the
