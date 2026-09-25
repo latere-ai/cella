@@ -1,6 +1,6 @@
 ---
 title: "Sandbox trust bundle: the file the trust variables name holds the public roots and the gateway's authority, so a tunneled host verifies as well as a terminated one"
-status: in-progress
+status: complete
 track: core
 depends_on:
   - specs/004-runtime-contract.md
@@ -10,7 +10,7 @@ depends_on:
   - specs/031-hosted-sandbox-consolidation.md
   - specs/.archive/039-egress-gateway.md
   - specs/.archive/070-k8s-egress.md
-affects: [egress/, runtime/native/, runtime/podman/, runtime/k8s/, runtime/, cmd/cellad/, docs/, CHANGELOG.md]
+affects: [egress/, runtime/, runtime/native/, runtime/podman/, runtime/k8s/, controller/, cmd/cellad/, docs/, CHANGELOG.md]
 effort: small
 created: 2026-09-25
 updated: 2026-09-25
@@ -167,16 +167,55 @@ mounts the directory and not a `subPath` of the key.
 | An HTTPS upstream in the conformance case `case018EgressEnforced` or the kind tier | feasible without a public CA: the stack's `cellad` would read a test root through `SSL_CERT_FILE` mounted from a ConfigMap, and the upstream would serve a certificate from it. It needs a TLS upstream in place of the netcat echo, a verifying client that honors `SSL_CERT_FILE` in the sandbox's image (the probe is written for busybox, whose `wget` does not read the variable), and that file becomes `cellad`'s own trust for every call it makes to the stubs. The `cmd/cellad` egress tier proves the same path over the native driver with a stock client, and the k8s driver's composition is proved over the fake clientset |
 | Rewriting the file on podman and native at rotation or start | neither keeps the authority beside the sandbox; the fix for them is a create |
 | Reading `SSL_CERT_DIR` | see the roots above |
+| A `cellad check` line for the roots | `cellad serve` refuses at start with the sentence that line would print; the check opens the driver for its preflight alone, which reads no trust file |
 
 ## Acceptance criteria
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| The bundle is the roots, then the authority, each block on its own lines; empty roots give the authority alone; no authority gives nothing | `TestTrustBundle` | not built |
-| `SSL_CERT_FILE` wins over the list; the list is read in Go's order and a file with no certificate is passed over; a named file that is missing or empty is refused; nothing found is refused; non-certificate blocks are dropped; roots over the bound are refused | `TestLoadRoots` | not built |
-| The native driver writes the bundle at create | `TestNativeProjectsTheTrustBundle` | not built |
-| The podman driver writes the bundle at create | `TestPodmanProjectsTheTrustBundle` | not built |
-| The k8s driver writes the bundle into the Secret at create and adoption, and rewrites it at a rotation and a start | `TestK8sTrustBundleInTheSecret` | not built |
-| `cellad serve` with `CELLA_GATEWAY` and `cellad worker` refuse to start without roots | `TestServeRefusesAGatewayWithoutPublicRoots`, `TestTheWorkerRefusesWithoutPublicRoots` | not built |
-| A workload reaches an HTTPS host tunneled through the proxy door, verifying against the projected file alone, where the host's certificate chains to a root the control plane read as the system's | `TestTheSandboxTrustsThePublicRootsAndTheGateway` | not built |
-| The same workload reaches a host a mounted secret is bound to, terminated by the gateway, verifying the gateway's leaf against the same file | `TestTheSandboxTrustsThePublicRootsAndTheGateway` | not built |
+| The bundle is the roots, then the authority, each block on its own lines; empty roots give the authority alone; no authority gives nothing | `TestTrustBundle` | passing |
+| `SSL_CERT_FILE` wins over the list; the list is read in Go's order and a file with no certificate is passed over; a named file that is missing or empty is refused; nothing found is refused; non-certificate blocks are dropped; roots over the bound are refused | `TestLoadRoots` | passing |
+| The native driver writes the bundle at create | `TestNativeProjectsTheTrustBundle` | passing |
+| The podman driver writes the bundle at create | `TestPodmanProjectsTheTrustBundle` | passing |
+| The k8s driver writes the bundle into the Secret at create and adoption, and rewrites it at a rotation and a start; the claim's record never carries the roots | `TestK8sTrustBundleInTheSecret` | passing |
+| `cellad serve` with `CELLA_GATEWAY` and `cellad worker` refuse to start without roots; `cellad serve` without `CELLA_GATEWAY` reads none | `TestServeRefusesAGatewayWithoutPublicRoots`, `TestTheWorkerRefusesWithoutPublicRoots` | passing |
+| The file the trust variables name holds the root the control plane read and then the gateway's authority, and all five variables name it | `TestTheSandboxTrustsThePublicRootsAndTheGateway` | passing; failed on the tree before the fix with one certificate in the file |
+| curl in the sandbox reaches an HTTPS host the gateway tunnels, verifying against the projected file alone, where the host's certificate chains to a root the control plane read as the system's | `TestTheSandboxTrustsThePublicRootsAndTheGateway` | passing; failed on the tree before the fix with curl's exit 60, `SSL certificate problem: self signed certificate` |
+| curl in the sandbox completes a TLS session with the gateway's own leaf for a host a mounted secret is bound to, verifying against the same file | `TestTheSandboxTrustsThePublicRootsAndTheGateway` | passing before and after the fix, as the guard on the gateway's authority |
+
+## Outcome
+
+The trust file is the public roots and then the gateway's authority on
+every driver. `cellad serve` with a gateway, and `cellad worker`, read the
+roots once at start from `SSL_CERT_FILE` or Go's Linux bundle list and
+refuse to start without them. `runtime.Egress.CAPEM` stays the authority
+alone, so the claim's annotation, the native and podman records and the
+worker stream are the size they were.
+
+| Piece | Where |
+|---|---|
+| `TrustBundle`, `LoadRoots`, `Roots`, `MaxRootsBytes` | `egress/trust.go` |
+| The native driver's `SetTrustRoots` and the composed file | `runtime/native/egress.go`, `runtime/native/native.go`, `runtime/native/pool.go` |
+| `podman.Options.TrustRoots` and the composed file | `runtime/podman/podman.go`, `runtime/podman/egress.go` |
+| `k8s.Options.TrustRoots`, `putTrust`, the file at create, adoption, rotation and start | `runtime/k8s/k8s.go`, `runtime/k8s/token.go`, `runtime/k8s/lifecycle.go`, `runtime/k8s/pool.go` |
+| The roots read at start, the refusal, the drivers opened with them | `cmd/cellad/main.go`, `cmd/cellad/check.go` |
+| The end-to-end case with curl in the sandbox, and the two refusals | `cmd/cellad/trust_test.go`, `cmd/cellad/egress_test.go` |
+| The operator's and the plane builder's pages | `docs/configuration.md`, `docs/kubernetes.md`, `docs/plane.md`, `CHANGELOG.md` |
+
+Running sandboxes: on k8s the next token rotation writes the file beside
+the new token and the kubelet syncs it into the running container, and a
+start writes it before the new Pod. On podman and native a sandbox created
+before the fix is deleted and created again, which the changelog says.
+
+### What diverges from the design above
+
+| Item | What shipped | Why |
+|---|---|---|
+| The terminated case | curl completes the TLS session with the gateway's leaf and prints the gateway's status; the upstream leg is not reached | the gateway's terminating engine, `pkg/egress.Gateway`, dials the upstream by name with a transport of its own and refuses loopback, so the in-process tier, which reaches no resolver, cannot place an upstream behind it. What the criterion is about, the workload verifying the gateway's leaf against the file, is what curl's exit proves: a failed verification is exit 60 before any status |
+
+### What this leaves open
+
+| Open | Why |
+|---|---|
+| An HTTPS upstream in `case018EgressEnforced` and the kind tier | as above under Not in this spec |
+| A dial seam on `pkg/egress.Gateway` | would let the in-process tier carry a terminated request to its upstream; a change to the shared library, out of this fix's scope |
