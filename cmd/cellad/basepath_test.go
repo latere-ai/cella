@@ -243,7 +243,9 @@ func TestServingUnderABasePathEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	created := fetch(t, http.MethodPost, under+"/sandboxes", m.alice,
+	// The hold keeps the answer until the sandbox runs, since the cases
+	// below run a command in it.
+	created := fetch(t, http.MethodPost, under+"/sandboxes?wait=1", m.alice,
 		`{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox","metadata":{"name":"web"},`+
 			`"spec":{"command":`+string(command)+`,"network":{"ports":[{"name":"web","port":`+strconv.Itoa(port)+`}]}}}`)
 	if created.status != http.StatusCreated {

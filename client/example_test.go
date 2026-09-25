@@ -9,13 +9,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"latere.ai/x/cella/client"
 )
 
-// A sandbox provider applies a manifest under a name, runs a command in the
-// sandbox and waits for it, and deletes the sandbox. The address and the
-// token are the caller's own.
+// A sandbox provider applies a manifest under a name, holding the answer
+// until the sandbox runs, runs a command in it and waits for it, and deletes
+// the sandbox. The address and the token are the caller's own.
 func ExampleNew() {
 	ctx := context.Background()
 	c, err := client.New(client.Config{
@@ -32,7 +33,10 @@ kind: Sandbox
 spec:
   image: ghcr.io/example/agent:1
 `))
-	sandbox, _, err := c.ApplySandbox(ctx, "agent-7", manifest)
+	// A create answers once the sandbox is recorded, before it runs; the
+	// hold makes the answer the running sandbox, so the command below has a
+	// workload to run in.
+	sandbox, _, err := c.ApplySandbox(ctx, "agent-7", manifest, client.Wait(2*time.Minute))
 	if err != nil {
 		var refusal *client.Error
 		if errors.As(err, &refusal) {
