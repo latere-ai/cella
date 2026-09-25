@@ -264,6 +264,11 @@ func TestTheEgressSubcommandConnects(t *testing.T) {
 	if !strings.Contains(out.String(), "environment=default") {
 		t.Fatalf("the role did not read its environment out of the key: %q", out.String())
 	}
+	// The role binds its doors before its stream reaches the control plane,
+	// so the report above says nothing about the stream. A create sent on it
+	// alone can reach a control plane with no gateway yet, which refuses a
+	// boundary that needs one.
+	plane.awaitGateway(t)
 	// A boundary that needs a gateway is the assertion: the create waits
 	// for an acknowledgment and fails without one.
 	sandbox := plane.create(t, `{"mode":"allowlist","allowedHosts":["upstream.example.com"]}`)
@@ -502,6 +507,31 @@ func (p *plane) records(t *testing.T, sandbox string, n int) []egress.Record {
 			t.Fatalf("%d records after the deadline, want %d", len(page.Items), n)
 		}
 		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// awaitGateway waits until the control plane counts a gateway connected to
+// its environment, which the environment phase loop writes into
+// status.gateways on its next pass.
+func (p *plane) awaitGateway(t *testing.T) {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		var env struct {
+			Status struct {
+				Gateways int `json:"gateways"`
+			} `json:"status"`
+		}
+		if err := json.Unmarshal([]byte(p.get(t, "/v1/environments/default")), &env); err != nil {
+			t.Fatal(err)
+		}
+		if env.Status.Gateways > 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the control plane never counted a connected gateway")
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 
