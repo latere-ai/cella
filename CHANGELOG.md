@@ -6,6 +6,15 @@ refused before it is pushed.
 
 ## Unreleased
 
+- v0.6.0 was tagged but not published: two of its own tests read a sandbox
+  straight after a create and failed under the race detector on the release
+  runner. This release carries the same binaries, packages and API as the
+  v0.6.0 notes below describe. The base path test and the client's example
+  now hold the create with `?wait=1` and `client.Wait` before they run a
+  command in the sandbox, as every caller that acts on a new sandbox has to
+  since v0.6.0, and the egress subcommand test creates once the control
+  plane counts its gateway rather than when the gateway's doors are bound.
+
 ## v0.6.0 - 2026-09-25
 
 - A create answers at once, which changes what every caller of `POST
