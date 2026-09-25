@@ -31,7 +31,9 @@ refused before it is pushed.
   `CELLA_GATEWAY` set, and every `cellad worker`, now refuse to start when
   they find no roots, or more than 512 KiB of them, and the message names
   `SSL_CERT_FILE` and the files they tried. Without `CELLA_GATEWAY`, `cellad
-  serve` reads no roots, since no sandbox is pointed at a gateway.
+  serve` reads no roots, since no sandbox is pointed at a gateway. `cellad
+  check` reads them on its `gateway` line and fails that line where `cellad
+  serve` would refuse.
 - Sandboxes created before this release keep the old file until it is
   written again. On Kubernetes that happens at the sandbox's next token
   rotation, at two thirds of the token's life, without a restart, and at

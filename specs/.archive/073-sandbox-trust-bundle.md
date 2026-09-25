@@ -108,6 +108,7 @@ naming `SSL_CERT_FILE` and the files it tried.
 | `cellad serve` without `CELLA_GATEWAY` | no: no sandbox is pointed at a gateway, so no trust variable is ever set | nothing to refuse |
 | `cellad worker` | yes: the control plane decides whether the worker's sandboxes are pointed at a gateway, and the worker cannot know | refuses to start; its own stream to an `https` control plane verifies against the same files, so such a host could not run a worker anyway |
 | `cellad egress` | no: the gateway projects nothing into a sandbox | unchanged |
+| `cellad check` with `CELLA_GATEWAY` set | yes, on its `gateway` line | the line fails with the sentence `cellad serve` would refuse with |
 
 `SSL_CERT_FILE` set to a file that is missing, unreadable or holds no
 certificate is refused whatever the role, since the operator named it. The
@@ -167,7 +168,6 @@ mounts the directory and not a `subPath` of the key.
 | An HTTPS upstream in the conformance case `case018EgressEnforced` or the kind tier | feasible without a public CA: the stack's `cellad` would read a test root through `SSL_CERT_FILE` mounted from a ConfigMap, and the upstream would serve a certificate from it. It needs a TLS upstream in place of the netcat echo, a verifying client that honors `SSL_CERT_FILE` in the sandbox's image (the probe is written for busybox, whose `wget` does not read the variable), and that file becomes `cellad`'s own trust for every call it makes to the stubs. The `cmd/cellad` egress tier proves the same path over the native driver with a stock client, and the k8s driver's composition is proved over the fake clientset |
 | Rewriting the file on podman and native at rotation or start | neither keeps the authority beside the sandbox; the fix for them is a create |
 | Reading `SSL_CERT_DIR` | see the roots above |
-| A `cellad check` line for the roots | `cellad serve` refuses at start with the sentence that line would print; the check opens the driver for its preflight alone, which reads no trust file |
 
 ## Acceptance criteria
 
@@ -179,9 +179,10 @@ mounts the directory and not a `subPath` of the key.
 | The podman driver writes the bundle at create | `TestPodmanProjectsTheTrustBundle` | passing |
 | The k8s driver writes the bundle into the Secret at create and adoption, and rewrites it at a rotation and a start; the claim's record never carries the roots | `TestK8sTrustBundleInTheSecret` | passing |
 | `cellad serve` with `CELLA_GATEWAY` and `cellad worker` refuse to start without roots; `cellad serve` without `CELLA_GATEWAY` reads none | `TestServeRefusesAGatewayWithoutPublicRoots`, `TestTheWorkerRefusesWithoutPublicRoots` | passing |
+| `cellad check`'s `gateway` line fails without roots and names the file | `TestGatewayFailsWithoutPublicRoots`, `TestGatewayResolvesAndDoesNotDial` | passing |
 | The file the trust variables name holds the root the control plane read and then the gateway's authority, and all five variables name it | `TestTheSandboxTrustsThePublicRootsAndTheGateway` | passing; failed on the tree before the fix with one certificate in the file |
 | curl in the sandbox reaches an HTTPS host the gateway tunnels, verifying against the projected file alone, where the host's certificate chains to a root the control plane read as the system's | `TestTheSandboxTrustsThePublicRootsAndTheGateway` | passing; failed on the tree before the fix with curl's exit 60, `SSL certificate problem: self signed certificate` |
-| curl in the sandbox completes a TLS session with the gateway's own leaf for a host a mounted secret is bound to, verifying against the same file | `TestTheSandboxTrustsThePublicRootsAndTheGateway` | passing before and after the fix, as the guard on the gateway's authority |
+| curl in the sandbox completes a TLS session with the gateway's own leaf for a host a mounted secret is bound to, verifying against the same file | `TestTheSandboxTrustsThePublicRootsAndTheGateway` | passing before and after the fix, as the guard on the gateway's authority; fails with curl's exit 60 when the driver writes the roots without the authority |
 
 ## Outcome
 
@@ -199,8 +200,14 @@ worker stream are the size they were.
 | `podman.Options.TrustRoots` and the composed file | `runtime/podman/podman.go`, `runtime/podman/egress.go` |
 | `k8s.Options.TrustRoots`, `putTrust`, the file at create, adoption, rotation and start | `runtime/k8s/k8s.go`, `runtime/k8s/token.go`, `runtime/k8s/lifecycle.go`, `runtime/k8s/pool.go` |
 | The roots read at start, the refusal, the drivers opened with them | `cmd/cellad/main.go`, `cmd/cellad/check.go` |
+| The roots on the check's `gateway` line | `internal/check/optional.go`, `internal/check/check.go` |
 | The end-to-end case with curl in the sandbox, and the two refusals | `cmd/cellad/trust_test.go`, `cmd/cellad/egress_test.go` |
-| The operator's and the plane builder's pages | `docs/configuration.md`, `docs/kubernetes.md`, `docs/plane.md`, `CHANGELOG.md` |
+| The operator's and the plane builder's pages | `docs/configuration.md`, `docs/kubernetes.md`, `docs/install.md`, `docs/plane.md`, `CHANGELOG.md` |
+
+The released image's base, `gcr.io/distroless/static-debian12:nonroot`,
+carries `/etc/ssl/certs/ca-certificates.crt` with 150 certificates in
+224,449 bytes, read on 2026-09-25, inside the 512 KiB bound, and no deploy
+manifest sets `SSL_CERT_FILE` or mounts over `/etc/ssl`.
 
 Running sandboxes: on k8s the next token rotation writes the file beside
 the new token and the kubelet syncs it into the running container, and a
@@ -211,7 +218,7 @@ before the fix is deleted and created again, which the changelog says.
 
 | Item | What shipped | Why |
 |---|---|---|
-| The terminated case | curl completes the TLS session with the gateway's leaf and prints the gateway's status; the upstream leg is not reached | the gateway's terminating engine, `pkg/egress.Gateway`, dials the upstream by name with a transport of its own and refuses loopback, so the in-process tier, which reaches no resolver, cannot place an upstream behind it. What the criterion is about, the workload verifying the gateway's leaf against the file, is what curl's exit proves: a failed verification is exit 60 before any status |
+| The terminated case | curl completes the TLS session with the gateway's leaf for `vendor.invalid` and prints the gateway's status; the upstream leg is not reached | the gateway's terminating engine, `pkg/egress.Gateway`, dials the upstream by name with a transport of its own, which the tier's dial seam does not reach, and refuses loopback, so the in-process tier cannot place an upstream behind it. The host is under `.invalid`, which never resolves, so the gateway answers 502 inside the session and nothing leaves the machine. What the criterion is about, the workload verifying the gateway's leaf against the file, is what curl's exit proves: a failed verification is exit 60 before any status |
 
 ### What this leaves open
 
