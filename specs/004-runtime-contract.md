@@ -209,12 +209,14 @@ driver's.
 ### Projections
 
 Every driver projects into the sandbox, read-only: the workload token
-at `/run/cella/token` and the gateway's CA at
-`/run/cella/egress-ca.pem` ([[006-identity]],
-[[018-egress-and-secrets]]), and sets `CELLA_URL` to the control
+at `/run/cella/token` and the trust file at `/run/cella/egress-ca.pem`,
+the public roots the driver was given at construction and then the
+gateway's CA ([[006-identity]], [[018-egress-and-secrets]],
+[[073-sandbox-trust-bundle]]), and sets `CELLA_URL` to the control
 plane's public URL, so a process inside reaches the API with the token
 beside it ([[011-agent-client]]). `Change.Token` re-projects a token before
-expiry without a restart; on k8s the projected Secret is updated, on
+expiry without a restart; on k8s the projected Secret is updated, with the
+trust file written again beside the token and again at every start, on
 podman and `local` the file is rewritten.
 
 ### The k8s driver
