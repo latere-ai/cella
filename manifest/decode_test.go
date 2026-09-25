@@ -8,7 +8,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
+
+	"go.yaml.in/yaml/v3"
 )
 
 // theExample is the manifest of design 003's Overview, reduced to the fields
@@ -201,19 +202,40 @@ func TestUnknownFieldNamesThePath(t *testing.T) {
 }
 
 // TestYAMLLimits is design 003's two bounds. Each is refused with
-// invalid_field, and each in well under a tenth of a second: a document that
-// costs more to expand than it cost to send is refused before it is expanded.
+// invalid_field, and the work of the refusal is bounded by the budget rather
+// than by what the document would expand to: a document that costs more to
+// expand than it cost to send is refused before it is expanded.
+//
+// The work is counted in the nodes the check enters, not timed. The alias
+// chain expands to 9^10 scalars, about 3.5 billion, and the check refuses it
+// after entering about twice AliasBudget nodes, so the count separates a
+// bounded check from an expanding one by three orders of magnitude on any
+// machine. A wall-clock bound on the same refusal measured the machine as
+// much as the code, and a race-detector run under load exceeded it.
 func TestYAMLLimits(t *testing.T) {
 	for _, tc := range []struct{ name, body string }{
 		{"an alias chain", billionLaughs()},
 		{"nesting", deepNesting(MaxDepth + 8)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			started := time.Now()
-			_, err := Decode([]byte(tc.body), MediaYAML)
-			if elapsed := time.Since(started); elapsed > 100*time.Millisecond {
-				t.Errorf("the refusal took %s", elapsed)
+			var root yaml.Node
+			if err := yaml.Unmarshal([]byte(tc.body), &root); err != nil {
+				t.Fatalf("the fixture does not parse: %v", err)
 			}
+			w := walk{left: AliasBudget}
+			err := w.expansion(&root, 0, false)
+			if got := codeOf(t, err); got != "invalid_field" {
+				t.Fatalf("the check's refusal is %s: %v", got, err)
+			}
+			if limit := 2*(AliasBudget+2) + len(tc.body); w.entered > limit {
+				t.Errorf("the check entered %d nodes before refusing; the budget bounds it at %d", w.entered, limit)
+			}
+			// No node costs more than the body is long, so a check that
+			// refuses on the first node past the budget overspends by less.
+			if w.left < -(len(tc.body) + 1) {
+				t.Errorf("the check spent %d bytes past the budget before refusing", -w.left)
+			}
+			_, err = Decode([]byte(tc.body), MediaYAML)
 			if got := codeOf(t, err); got != "invalid_field" {
 				t.Fatalf("the refusal is %s: %v", got, err)
 			}

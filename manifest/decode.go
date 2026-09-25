@@ -132,8 +132,8 @@ func yamlToJSON(body []byte) ([]byte, error) {
 	case !errors.Is(err, io.EOF):
 		return nil, fail("bad_request", err.Error())
 	}
-	budget := AliasBudget
-	if err := expansion(&first, 0, false, &budget); err != nil {
+	w := walk{left: AliasBudget}
+	if err := w.expansion(&first, 0, false); err != nil {
 		return nil, err
 	}
 	var value any
@@ -151,29 +151,41 @@ func yamlToJSON(body []byte) ([]byte, error) {
 	return raw, nil
 }
 
+// walk is one pass over a document's node tree before any value is built.
+// left is the alias budget not yet spent, and entered counts the nodes the
+// pass entered, which is the work checking the document costs.
+type walk struct {
+	left    int
+	entered int
+}
+
 // expansion charges one node against the alias budget and refuses when it is
 // spent or when the document nests too deep. Only a node reached through an
 // alias is charged: the budget is what expansion costs beyond what the body
 // already carried, so a large document is bounded by the body cap of design
-// 008 and a small one with a chain of aliases is bounded here.
-func expansion(node *yaml.Node, depth int, aliased bool, left *int) error {
+// 008 and a small one with a chain of aliases is bounded here. A node reached
+// through an alias costs at least one byte and an alias leads straight to one,
+// so beyond the nodes the body carries the pass enters about twice AliasBudget
+// nodes at most, whatever the aliases would expand to.
+func (w *walk) expansion(node *yaml.Node, depth int, aliased bool) error {
 	if node == nil {
 		return nil
 	}
+	w.entered++
 	if depth > MaxDepth {
 		return fail("invalid_field", "the manifest nests deeper than "+strconv.Itoa(MaxDepth)+" levels")
 	}
-	if *left < 0 {
+	if w.left < 0 {
 		return fail("invalid_field", "the manifest's aliases expand past "+strconv.Itoa(AliasBudget)+" bytes")
 	}
 	if node.Kind == yaml.AliasNode {
-		return expansion(node.Alias, depth+1, true, left)
+		return w.expansion(node.Alias, depth+1, true)
 	}
 	if aliased {
-		*left -= len(node.Value) + 1
+		w.left -= len(node.Value) + 1
 	}
 	for _, child := range node.Content {
-		if err := expansion(child, depth+1, aliased, left); err != nil {
+		if err := w.expansion(child, depth+1, aliased); err != nil {
 			return err
 		}
 	}
