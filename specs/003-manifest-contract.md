@@ -229,7 +229,7 @@ stored status into every response.
 | `parent`, `root`, `mesh`, `spawn` | the spawn tree position: the parent's id and the root's, or empty and the sandbox's own id for a root; the inherited or minted mesh; the budget and what is used ([[022-mesh-and-spawn]]) |
 | `set` | `{name, index}` for a `SandboxSet` replica ([[020-scheduling-and-sets]]); absent otherwise |
 | `preemptions` | how many times the scheduler stopped the sandbox to place one of higher priority ([[020-scheduling-and-sets]]); absent while zero |
-| `conditions` | `Ready`, `WorkspaceReady`, `EgressEnforced`, `VolumesAttached`, `Scheduled`, `DisplayReady`, each with `status`, `reason`, `message`, `since` |
+| `conditions` | `Ready`, `WorkspaceReady`, `EgressEnforced`, `VolumesAttached`, `Scheduled`, `DisplayReady`, each with `status`, `reason`, `message`, `since`; and `Observed` `False` on a list row whose driver read failed, written on that answer and never stored ([[075-list-page-resilience]]) |
 | `secrets.mounted`, `.notInjectable` | which placeholders are in `env`; and which will leave the sandbox as inert strings, so the request goes out unauthenticated, because the secret was deleted or its scope no longer has a host the sandbox may reach |
 | `volumes[]` | `{name, volume, attached}` per mount |
 | `ports[]` | `{name, port, state, url}`; `state` is `listening` or `closed` ([[023-computer-use-operations]]); `url` set for `expose: public` |

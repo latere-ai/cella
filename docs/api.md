@@ -68,6 +68,14 @@ one spawn tree. `GET /v1/secrets` pages the same way and filters by
 widens it: an `owner` whose objects you may not read answers an empty
 page, not an error.
 
+A sandbox list reads each sandbox from its environment. When one
+environment does not answer, the page still answers every sandbox: a row
+that could not be read carries the status last recorded and the condition
+`Observed` with `status` `False` and the reason `DriverUnavailable`, or
+`EnvironmentNotHeld` when the server holds no environment of that name.
+`phase` filters by the phase the row carries. Reading that one sandbox by
+id is refused with `driver_unavailable` until its environment answers.
+
 **Concurrency.** An environment read carries an `ETag`, and an apply that
 sends `If-Match` with an older version is refused with `409
 version_conflict`, so two administrators cannot silently overwrite each

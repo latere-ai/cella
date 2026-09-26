@@ -17,7 +17,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"strconv"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -663,35 +663,36 @@ func (h *handler) item(w http.ResponseWriter, r *http.Request) {
 	}
 	respond(w, http.StatusOK, obj)
 }
+
+// list is GET /v1/sandboxes: the selectors of design 008, the list rule, and
+// one read of the runtime per listed row. A row whose read fails is answered
+// with the status this control plane last wrote and the Observed condition
+// False, rather than failing the page: the page is how a caller finds the
+// objects it came for, and one environment that does not answer would
+// otherwise hide every sandbox on every other (spec 075). A request its caller
+// closed still ends the page.
 func (h *handler) list(w http.ResponseWriter, r *http.Request) {
 	d, err := h.decide(r, authorizer.ActionSandboxList, auth.List(authorizer.ActionSandboxList))
 	if err != nil {
 		respondError(w, err)
 		return
 	}
-	limit := 50
-	if q := r.URL.Query().Get("limit"); q != "" {
-		limit, err = strconv.Atoi(q)
-		if err != nil || limit < 1 || limit > 200 {
-			respondError(w, &manifest.Error{Code: "invalid_field", Detail: "limit must be between 1 and 200"})
-			return
-		}
+	limit, err := pageLimit(r)
+	if err != nil {
+		respondError(w, err)
+		return
 	}
-	labels := map[string]string{}
-	for _, q := range r.URL.Query()["label"] {
-		k, v, ok := strings.Cut(q, "=")
-		if !ok || k == "" {
-			respondError(w, &manifest.Error{Code: "invalid_field", Detail: "label selector requires key=value"})
-			return
-		}
-		if prior, ok := labels[k]; ok && prior != v {
-			respond(w, 200, map[string]any{"items": []v1.Sandbox{}, "next": ""})
-			return
-		}
-		labels[k] = v
+	labels, satisfiable, err := labelSelector(r)
+	if err != nil {
+		respondError(w, err)
+		return
 	}
 	items := []v1.Sandbox{}
 	next := ""
+	if !satisfiable {
+		respond(w, http.StatusOK, map[string]any{"items": items, "next": next})
+		return
+	}
 	q := r.URL.Query()
 	// The tree selector of design 008 narrows the page to one root's
 	// sandboxes, the root included; every other selector still applies, and
@@ -701,7 +702,7 @@ func (h *handler) list(w http.ResponseWriter, r *http.Request) {
 		objects = h.Controller.Tree(root)
 	}
 	for _, obj := range objects {
-		if obj.Status.ID <= q.Get("cursor") || (q.Get("owner") != "" && q.Get("owner") != obj.Status.Owner) || (q.Get("environment") != "" && q.Get("environment") != obj.Spec.Environment) || !matches(obj, labels) {
+		if obj.Status.ID <= q.Get("cursor") || (q.Get("owner") != "" && q.Get("owner") != obj.Status.Owner) || (q.Get("environment") != "" && q.Get("environment") != obj.Spec.Environment) || !carries(obj.Metadata.Labels, labels) {
 			continue
 		}
 		if !admits(d.Filter, obj.Status.Owner, obj.Metadata.Labels) {
@@ -714,11 +715,20 @@ func (h *handler) list(w http.ResponseWriter, r *http.Request) {
 			respondError(w, err)
 			return
 		}
-		obj, err = h.Controller.Refresh(r.Context(), obj)
-		if err != nil {
+		fresh, err := h.Controller.Refresh(r.Context(), obj)
+		switch {
+		case err == nil:
+			obj = fresh
+		case r.Context().Err() != nil:
 			respondError(w, err)
 			return
+		default:
+			h.log.WarnContext(r.Context(), "a listed sandbox's runtime did not answer its read; the row carries the status last written",
+				"sandbox", obj.Status.ID, "environment", obj.Status.Environment, "err", err)
+			obj = unobserved(obj, err, time.Now().UTC())
 		}
+		// The phase selector reads what the row answers: the runtime's phase
+		// where the read succeeded, the last written one where it did not.
 		if q.Get("phase") != "" && q.Get("phase") != obj.Status.Phase {
 			continue
 		}
@@ -728,16 +738,25 @@ func (h *handler) list(w http.ResponseWriter, r *http.Request) {
 		}
 		items = append(items, obj)
 	}
-	respond(w, 200, map[string]any{"items": items, "next": next})
+	respond(w, http.StatusOK, map[string]any{"items": items, "next": next})
 }
-func matches(obj v1.Sandbox, labels map[string]string) bool {
-	for k, v := range labels {
-		got, ok := obj.Metadata.Labels[k]
-		if !ok || got != v {
-			return false
-		}
+
+// unobserved marks one listed row whose runtime read failed: the Observed
+// condition False, with the reason the failure names and one fixed sentence.
+// The error itself goes to the log and not to the caller, since a driver's
+// error can name the substrate behind it.
+func unobserved(obj v1.Sandbox, err error, now time.Time) v1.Sandbox {
+	reason := v1.ReasonDriverUnavailable
+	if errors.Is(err, controller.ErrNoEnvironment) {
+		reason = v1.ReasonEnvironmentNotHeld
 	}
-	return true
+	obj.Status.Conditions = append(slices.DeleteFunc(slices.Clone(obj.Status.Conditions), func(c v1.Condition) bool {
+		return c.Type == v1.ConditionObserved
+	}), v1.Condition{
+		Type: v1.ConditionObserved, Status: v1.ConditionFalse, Reason: reason, Since: now,
+		Message: "The environment did not answer this read; the status is the one last recorded.",
+	})
+	return obj
 }
 
 type execRequest struct {

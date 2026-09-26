@@ -183,7 +183,7 @@ The server writes `status`; it is ignored on the way in.
 | `environment`, `driver`, `isolation` | where it runs and the boundary that runtime provides: `container`, `process`, or `none` |
 | `phase` | `Pending`, `Queued`, `Running`, `Stopped`, `Failed`, `Lost`, `Recovering`, or `Deleting` |
 | `reason` | why it is in that phase, such as `NoCapacity`, `StartDeadline`, `Preempted`, or the lifecycle rule that stopped it |
-| `conditions` | statements with a type, a status, a reason, and a time: `Scheduled`, `EgressEnforced`, `DisplayReady`, and others |
+| `conditions` | statements with a type, a status, a reason, and a time: `Scheduled`, `EgressEnforced`, `DisplayReady`, and others. A row of a list page whose environment did not answer carries `Observed` `False`: its status is the one last recorded, not a fresh read |
 | `parent`, `root`, `mesh`, `spawn` | where it sits in a spawn tree, its mesh, and its budget with how much is used |
 | `ports` | each declared port, `listening` or `closed` |
 | `secrets` | which placeholders are mounted, and which the gateway will not substitute |

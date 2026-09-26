@@ -60,7 +60,8 @@ func EgressModeRank(m EgressMode) int {
 
 // The condition types a Sandbox's status carries. The driver owns the first
 // five and the controller owns Scheduled; each says what the environment
-// actually does, never what the manifest asked for.
+// actually does, never what the manifest asked for. Observed is the list's,
+// written on one answer and never stored.
 const (
 	ConditionReady           = "Ready"
 	ConditionWorkspaceReady  = "WorkspaceReady"
@@ -68,6 +69,14 @@ const (
 	ConditionVolumesAttached = "VolumesAttached"
 	ConditionScheduled       = "Scheduled"
 	ConditionDisplayReady    = "DisplayReady"
+	// ConditionObserved False on a row of a list page says the environment's
+	// driver did not answer the read that page made of this sandbox, so the
+	// phase, the conditions and the instants are the ones the control plane
+	// last wrote and not a read of the runtime. The list answers the row
+	// rather than failing the page, and no other answer carries the
+	// condition: a read of one sandbox that cannot reach its driver is
+	// refused with driver_unavailable.
+	ConditionObserved = "Observed"
 )
 
 // The values a condition's Status takes, spelled as Kubernetes spells them so
@@ -91,4 +100,11 @@ const (
 	// ReasonNoGateway is EgressEnforced false because no gateway of the
 	// environment holds the sandbox's map.
 	ReasonNoGateway = "NoGateway"
+	// ReasonDriverUnavailable is Observed false because the driver of the
+	// sandbox's environment answered the read with an error.
+	ReasonDriverUnavailable = "DriverUnavailable"
+	// ReasonEnvironmentNotHeld is Observed false because this control plane
+	// holds no environment of the name the sandbox is placed on, so there
+	// is no driver to ask.
+	ReasonEnvironmentNotHeld = "EnvironmentNotHeld"
 )
