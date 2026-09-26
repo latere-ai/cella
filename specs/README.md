@@ -97,6 +97,7 @@ later.
 | [073](.archive/073-sandbox-trust-bundle.md) | Sandbox trust bundle: the file the trust variables name holds the public roots and then the gateway's authority, the roots read from the system at start, and a role that finds none refuses to start | small | complete | 004, 012, 018, 021, 031, 039, 070 |
 | [074](.archive/074-client-closed-requests.md) | Client-closed requests: a request its caller closed is counted as `client_closed` and not as the failure of the dependency its cancellation reached | small | complete | 006, 008, 017 |
 | [075](.archive/075-list-page-resilience.md) | List page resilience: a row whose driver read fails is answered with the status last written and `Observed` `False`, and the page is not failed | small | complete | 003, 005, 008, 074 |
+| [076](076-rolling-replicas.md) | Rolling replicas: one writer lease gates the controller, every replica answers the API by forwarding to the writer, the lease is handed off on SIGTERM, and readiness means can serve | large | drafted | 005, 008, 010, 014, 017, 018, 021, 043, 072 |
 
 ## Dependency graph
 
