@@ -32,7 +32,9 @@ func (c *Client) GetSecret(ctx context.Context, ref string) (v1.Secret, []byte, 
 }
 
 // ListSecrets follows the cursor to the end, or to Limit objects, and returns
-// the decoded objects with their own bytes, in order.
+// the decoded objects with their own bytes, in order. Owner and Labels
+// narrow the list; a secret has no phase and no environment, so the server
+// ignores those two selectors.
 func (c *Client) ListSecrets(ctx context.Context, o ListOptions) ([]v1.Secret, []json.RawMessage, error) {
 	return listAll[v1.Secret](ctx, c, KindSecret, o)
 }

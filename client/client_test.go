@@ -766,13 +766,16 @@ func TestACancelledContextIsTheCallersOwn(t *testing.T) {
 	}
 }
 
-// TestSecretsListLikeSandboxesDo: one grammar per kind, and no answer
-// carries a value.
+// TestSecretsListLikeSandboxesDo: one grammar per kind, the owner and label
+// selectors on the wire as the sandbox list sends them, and no answer carries
+// a value.
 func TestSecretsListLikeSandboxesDo(t *testing.T) {
 	f := newFixture(t, func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"items":[{"metadata":{"name":"api"},"spec":{"kind":"static"},"status":{"id":"sec_1","version":2}}],"next":""}`))
 	})
-	items, raws, err := f.client(client.Config{}).ListSecrets(t.Context(), client.ListOptions{Limit: 10})
+	items, raws, err := f.client(client.Config{}).ListSecrets(t.Context(), client.ListOptions{
+		Limit: 10, Owner: "issuer|alice", Labels: []string{"team=core"},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -783,7 +786,8 @@ func TestSecretsListLikeSandboxesDo(t *testing.T) {
 		t.Fatalf("a secret's answer carries a value: %s", raws[0])
 	}
 	seen := f.last()
-	if seen.Path != "/v1/secrets" || seen.Query.Get("limit") != "10" {
+	if seen.Path != "/v1/secrets" || seen.Query.Get("limit") != "10" ||
+		seen.Query.Get("owner") != "issuer|alice" || seen.Query.Get("label") != "team=core" {
 		t.Fatalf("the list called %s?%s", seen.Path, seen.Query.Encode())
 	}
 }

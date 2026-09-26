@@ -112,7 +112,7 @@ sandbox, raw, err := c.GetSandbox(ctx, "agent-7")
 | Call | What it does |
 |---|---|
 | `GetSandbox`, `GetSecret`, `GetEnvironment` | Read one object by name or id. |
-| `ListSandboxes`, `ListSecrets`, `ListEnvironments` | List with `ListOptions`: labels (`team=core`), phase, owner, environment, and a total `Limit`. The client follows the pages for you. |
+| `ListSandboxes`, `ListSecrets`, `ListEnvironments` | List with `ListOptions`: labels (`team=core`), phase, owner, environment, and a total `Limit`. The sandbox list honors every selector and the secret list labels and owner. The client follows the pages for you. |
 | `GetAs`, `ListAs` | The same reads in a syntax you name with an `Accept` value, such as `application/yaml`, returned as the server wrote it. |
 | `StartSandbox`, `StopSandbox` | Start a stopped sandbox or stop a running one. |
 | `Delete(ctx, kind, ref)` | Delete an object of `client.KindSandbox`, `KindSecret` or `KindEnvironment`. |

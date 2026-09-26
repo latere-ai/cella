@@ -58,14 +58,22 @@ type Page struct {
 }
 
 // ListOptions are the selectors of design 008. Limit is the total a caller
-// wants across pages, not the page size; zero means every object.
+// wants across pages, not the page size; zero means every object. The server
+// intersects every selector with what the caller may read, so a selector
+// narrows a list and never widens it. The sandbox list honors every
+// selector and the secret list Labels and Owner; a list ignores a selector
+// it does not honor rather than refusing it.
 type ListOptions struct {
 	// Labels are selectors of the form key=value; an object matches when
 	// it carries every one.
 	Labels []string
 	// Phase keeps the objects in that phase.
 	Phase string
-	// Owner keeps the objects of that rendered subject.
+	// Owner keeps the objects of that rendered subject, the value an
+	// object's status.owner carries. A server before v0.7.0 ignores it on
+	// the secret list and answers every secret the caller may read, so a
+	// caller that acts on the answer, such as one that deletes a person's
+	// secrets, compares status.owner as well.
 	Owner string
 	// Environment keeps the sandboxes placed on that environment.
 	Environment string
