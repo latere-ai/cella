@@ -6,6 +6,28 @@ refused before it is pushed.
 
 ## Unreleased
 
+- `GET /v1/secrets` takes `owner` and `label`, as `GET /v1/sandboxes`
+  does: `?owner=<status.owner>` answers that owner's secrets and
+  `?label=key=value`, repeatable, the secrets carrying every label. Both
+  narrow what the caller may already read and never widen it, so naming
+  another subject's owner answers what the caller could already read of
+  that subject's secrets, which under the owner policy is an empty page.
+  `ListSecrets` in the client package and `cella get secrets --owner` send
+  it. A server before this release ignores both on the secret list and
+  answers every secret the caller may read, so a program that acts on the
+  answer against an older server, such as one that deletes a person's
+  secrets, should still compare `status.owner`.
+- Fixed: `GET /v1/sandboxes` failed the whole page with
+  `driver_unavailable`, or with `not_found` for a sandbox on an
+  environment the server holds no driver for, when reading one sandbox
+  from its environment failed. The page now answers every sandbox: a row
+  that could not be read carries the status last recorded and the
+  condition `Observed` with `status` `False` and the reason
+  `DriverUnavailable` or `EnvironmentNotHeld`, and the failure is logged
+  at warn with the sandbox and the error. `phase` filters such a row by
+  the phase last recorded. Reading that sandbox by id is still refused
+  with `driver_unavailable`, and a request its caller closed still ends
+  the page.
 - Fixed: with `CELLA_DB_POOL_URL` naming a pooled endpoint whose URL
   carries `default_query_exec_mode=exec`, the mode a transaction pooler
   needs, every write of an object or an observed state failed with `cannot
