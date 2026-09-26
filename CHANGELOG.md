@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.7.0 - 2026-09-26
+
 - `GET /v1/secrets` takes `owner` and `label`, as `GET /v1/sandboxes`
   does: `?owner=<status.owner>` answers that owner's secrets and
   `?label=key=value`, repeatable, the secrets carrying every label. Both
