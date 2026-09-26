@@ -6,6 +6,18 @@ refused before it is pushed.
 
 ## Unreleased
 
+- Changed: `cella_requests_total`, `cella_request_duration_seconds` and the
+  request log line name a request refused before it reached an endpoint
+  `unmatched` instead of leaving `route` empty. Every Latere service uses
+  that label for such a request.
+- Changed: the server span and the OpenTelemetry request metrics take the
+  route from the shared handler in `latere.ai/x/pkg/otel`, which now decides
+  one route per request. The values are unchanged: the span is named
+  `GET /v1/sandboxes/{id}` and `http.route` is `/v1/sandboxes/{id}`.
+- Changed: with no authorization endpoint configured, a token minted from a
+  service account's key is narrowed by the grants it carries, as a personal
+  access token's is.
+
 ## v0.8.0 - 2026-09-27
 
 - Fixed: the OpenTelemetry request metrics (`http.server.request.duration`
