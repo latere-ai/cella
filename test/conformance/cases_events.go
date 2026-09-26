@@ -391,10 +391,11 @@ func case008SecretListOwner(ctx context.Context, e *Env) error {
 	if len(none) != 0 {
 		return fmt.Errorf("the list under an owner nobody is holds %d secrets", len(none))
 	}
-	other, err := e.second()
-	if err != nil {
-		// The narrowing half holds without a second subject; the
-		// intersection half needs one.
+	// The narrowing half holds without a second subject; the intersection
+	// half needs one, so a run that mints none ends here with the half it
+	// proved.
+	other := e.other
+	if other == nil {
 		return nil
 	}
 	x, err = e.applySecretAs(ctx, other, e.name(), "theirs-"+e.run)
