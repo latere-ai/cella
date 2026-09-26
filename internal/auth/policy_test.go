@@ -365,9 +365,44 @@ func TestOwnerPolicyDeniesAGrantlessPAT(t *testing.T) {
 	}
 }
 
-// TestGrantsNarrowNothingButAPAT: the claim narrows one credential class.
-// A person's session token, and a token cellad minted for a sandbox, are
-// decided by the policy alone whatever authorization_details says.
+// TestOwnerPolicyNarrowsAServiceAccountKeysToken: a token minted from a
+// service account's key carries grants as a personal access token does,
+// and the policy's allow is narrowed by them the same way; one carrying no
+// grant is a deny.
+func TestOwnerPolicyNarrowsAServiceAccountKeysToken(t *testing.T) {
+	p := policy()
+	mine := auth.Sandbox{ID: "sbx_01J9MINE", Owner: bob}.Resource()
+	other := auth.Sandbox{ID: "sbx_01J9OTHER", Owner: bob}.Resource()
+	ask := func(res authz.Resource, grants ...any) authz.Decision {
+		t.Helper()
+		claims := map[string]any{"token_use": "sak"}
+		if grants != nil {
+			claims["authorization_details"] = grants
+		}
+		d, err := p.Authorize(t.Context(), authz.Request{
+			Subject: bob, Action: authorizer.ActionSandboxRead, Resource: res, Claims: claims,
+		})
+		if err != nil {
+			t.Fatalf("the owner policy answered an error: %v", err)
+		}
+		return d
+	}
+	read := entry(authorizer.KindSandbox, "sbx_01J9MINE", "cella:sandbox.read")
+	if d := ask(mine, read); !d.Allow {
+		t.Errorf("the granted sandbox answered %+v, want an allow", d)
+	}
+	if d := ask(other, read); d.Allow || d.Reason != authz.ReasonGrant {
+		t.Errorf("another sandbox answered %+v, want a %q deny", d, authz.ReasonGrant)
+	}
+	if d := ask(mine); d.Allow || d.Reason != authz.ReasonGrant {
+		t.Errorf("a grantless service account key's token answered %+v, want a %q deny", d, authz.ReasonGrant)
+	}
+}
+
+// TestGrantsNarrowNothingButAPAT: the claim narrows the credential classes
+// minted from a key, a personal access token and a service account key's
+// token. A person's session token, and a token cellad minted for a sandbox,
+// are decided by the policy alone whatever authorization_details says.
 func TestGrantsNarrowNothingButAPAT(t *testing.T) {
 	p := policy()
 	res := auth.Sandbox{ID: "sbx_01J9", Owner: bob}.Resource()

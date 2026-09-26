@@ -56,12 +56,12 @@ type OwnerPolicy struct {
 //
 // The answer is the policy's own decision intersected with the grants the
 // caller's token carries (infrastructure/identity id-13). A personal
-// access token is narrower than the person who holds it: the policy says
-// what the person may do, and authz.Restrict removes what the credential
-// was not granted. The conjunction turns an allow into a deny and never a
-// deny into an allow, so a grant is a restriction and never authority,
-// and a token of any other credential class is decided by the policy
-// alone. An operator's endpoint on latere.ai/x/pkg/authz/server applies
+// access token, or a token minted from a service account's key, is
+// narrower than the principal who holds it: the policy says what the
+// principal may do, and authz.Restrict removes what the credential was not
+// granted. The conjunction turns an allow into a deny and never a deny into
+// an allow, so a grant is a restriction and never authority, and a token of
+// any other credential class is decided by the policy alone. An operator's endpoint on latere.ai/x/pkg/authz/server applies
 // the same function to whatever its decider returned; cellad reaches this
 // policy through no endpoint, so the intersection is here.
 //
