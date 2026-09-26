@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.8.0 - 2026-09-27
+
 - Fixed: the OpenTelemetry request metrics (`http.server.request.duration`
   and the rest) carried no `http.route`, so every request fell into one
   series whatever endpoint it reached. They now carry the route's path
