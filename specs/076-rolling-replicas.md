@@ -68,7 +68,7 @@ behind a loop:
 | create otherwise | writes desired state and wakes the scheduler loop in the same process; the loop's `realize` calls `d.Create` | `controller/controller.go:669-670`, `:812` |
 | apply of a sandbox | pushes the new boundary to the gateways this process holds | `controller/controller.go:1337` |
 | secret create, update, delete | `repushMounts` pushes every mounting sandbox's map to this process's gateways | `controller/secret.go:250` |
-| read, list | `d.Inspect` per sandbox | `controller/controller.go:1019` |
+| read, list | `d.Inspect` per sandbox, in `refresh` | `controller/controller.go:1019`, `:1033` |
 | exec, attach, files, logs, dial, ports, display, screenshot, screen, input | the driver's data plane call per request | `controller/controller.go:1231`, `controller/operations.go`, `controller/display.go` |
 
 ### Why the lease is not the blocker
@@ -216,9 +216,12 @@ requests in the pause are held and answered, not refused.
 A synchronous delete that step 4 cancels leaves its row `Deleting`, and
 today nothing finishes such a row until a caller deletes again: the lost
 rule skips it (`controller/recovery.go:77`) and so does token rotation
-(`controller/reaper.go:314`). The reaper finishes a `Deleting` row whose
-object the driver still has, at its next tick, which a crash mid-delete
-needs as much as a handoff does.
+(`controller/reaper.go:314`). The reaper finishes every `Deleting` row at
+its next tick: where the driver still has the object it deletes it again,
+and where the driver no longer has it, because the cut came after the
+driver's delete and before the row was forgotten, it ends the identity and
+the ledger row and forgets the row. A crash mid-delete needs this as much
+as a handoff does.
 
 ### Fencing
 
@@ -424,7 +427,7 @@ promotion, with an alert when no replica has held `writer` for a minute.
 | A writer that lost `writer` cannot write, and a takeover waits for a write in flight | `TestADemotedWriterCannotWrite` | not built |
 | A writer that loses the lease to another holder, or renews nothing for the term, exits non-zero; one failed renewal does not | `TestLosingTheWriterLeaseExits` | not built |
 | Readiness is the same in both roles and does not read the lease | `TestReadinessDoesNotReadTheLease` | not built |
-| The reaper finishes a `Deleting` row whose object the driver still has | `TestTheReaperFinishesAnInterruptedDelete` | not built |
+| The reaper finishes a `Deleting` row: it deletes an object the driver still has, and forgets a row whose object the driver no longer has | `TestTheReaperFinishesAnInterruptedDelete` | not built |
 | A gateway and a worker whose long-lived stream dropped dial again after the minimum backoff | `TestAGatewayRedialsAtOnceAfterALongStream`, `TestAWorkerRedialsAtOnceAfterALongStream` | not built |
 | A create that needs a gateway right after a promotion waits for one to connect | `TestACreateWaitsForAGatewayAfterPromotion` | not built |
 | Every migration is expand-only but the one allowed exception | `TestMigrationsAreExpandOnly` | not built |
