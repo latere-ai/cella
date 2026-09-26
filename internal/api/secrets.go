@@ -7,7 +7,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"strconv"
 
 	"latere.ai/x/pkg/authz"
 
@@ -167,28 +166,40 @@ func (h *handler) secretItem(w http.ResponseWriter, r *http.Request) {
 	respond(w, http.StatusOK, deleted)
 }
 
-// listSecrets is GET /v1/secrets, narrowed to what the actor may see. A row
-// the authorizer refuses is left out rather than refused, so a filter answers
-// an empty page and never a 403, and no answer carries a value.
+// listSecrets is GET /v1/secrets, narrowed to what the actor may see. The
+// owner and label selectors narrow the collection before the authorizer is
+// asked, as on the sandbox list, so a selector is intersected with the
+// decision's filter and the kind's read and never widens them: a caller that
+// names another subject's owner reads what it could already read of that
+// subject's secrets, which under the owner policy is nothing. A row the
+// authorizer refuses is left out rather than refused, so a filter answers an
+// empty page and never a 403, and no answer carries a value.
 func (h *handler) listSecrets(w http.ResponseWriter, r *http.Request) {
 	d, err := h.decide(r, authorizer.ActionSecretList, auth.List(authorizer.ActionSecretList))
 	if err != nil {
 		respondError(w, err)
 		return
 	}
-	limit := 50
-	if q := r.URL.Query().Get("limit"); q != "" {
-		limit, err = strconv.Atoi(q)
-		if err != nil || limit < 1 || limit > 200 {
-			respondError(w, &manifest.Error{Code: "invalid_field", Detail: "limit must be between 1 and 200"})
-			return
-		}
+	limit, err := pageLimit(r)
+	if err != nil {
+		respondError(w, err)
+		return
+	}
+	labels, satisfiable, err := labelSelector(r)
+	if err != nil {
+		respondError(w, err)
+		return
 	}
 	items := []v1.Secret{}
 	next := ""
-	cursor := r.URL.Query().Get("cursor")
+	if !satisfiable {
+		respond(w, http.StatusOK, map[string]any{"items": items, "next": next})
+		return
+	}
+	q := r.URL.Query()
+	cursor, owner := q.Get("cursor"), q.Get("owner")
 	for _, obj := range h.Controller.ListSecrets() {
-		if obj.Status.ID <= cursor {
+		if obj.Status.ID <= cursor || (owner != "" && owner != obj.Status.Owner) || !carries(obj.Metadata.Labels, labels) {
 			continue
 		}
 		if !admits(d.Filter, obj.Status.Owner, obj.Metadata.Labels) {

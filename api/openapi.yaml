@@ -51,7 +51,33 @@ paths:
     get:
       operationId: listSandboxes
       summary: List the caller's sandboxes.
-      description: Authorized as `sandbox.list`.
+      description: >-
+        Answers `{"items": [...], "next": "..."}`. Every selector is
+        intersected with what the caller may read, so a selector outside it
+        is an empty page and never `forbidden`. Authorized as `sandbox.list`.
+      parameters:
+        - $ref: "#/components/parameters/ListLabel"
+        - $ref: "#/components/parameters/ListOwner"
+        - name: phase
+          in: query
+          required: false
+          description: Keeps the sandboxes in this phase.
+          schema:
+            type: string
+        - name: environment
+          in: query
+          required: false
+          description: Keeps the sandboxes placed on this environment.
+          schema:
+            type: string
+        - name: root
+          in: query
+          required: false
+          description: Keeps one spawn tree, the root with every sandbox below it.
+          schema:
+            type: string
+        - $ref: "#/components/parameters/ListCursor"
+        - $ref: "#/components/parameters/ListLimit"
       responses:
         "200":
           description: The answer this route serves.
@@ -900,7 +926,17 @@ paths:
     get:
       operationId: listSecrets
       summary: List the caller's secrets; no answer carries a value.
-      description: Authorized as `secret.list`.
+      description: >-
+        Answers `{"items": [...], "next": "..."}`. `owner` and `label` are
+        intersected with what the caller may read, so naming another
+        subject's owner answers only what the caller could already read of
+        that subject's secrets, and a selector outside it is an empty page,
+        never `forbidden`. Authorized as `secret.list`.
+      parameters:
+        - $ref: "#/components/parameters/ListLabel"
+        - $ref: "#/components/parameters/ListOwner"
+        - $ref: "#/components/parameters/ListCursor"
+        - $ref: "#/components/parameters/ListLimit"
       responses:
         "200":
           description: The answer this route serves.
@@ -1188,6 +1224,46 @@ components:
         When it passes first the answer is the sandbox as it stands.
       schema:
         type: string
+    ListLabel:
+      name: label
+      in: query
+      required: false
+      description: >-
+        `key=value`, repeatable; an object is listed when it carries every
+        one. Two that name one key with two values match nothing. A selector
+        without `=` or without a key is `invalid_field`.
+      schema:
+        type: array
+        items:
+          type: string
+      style: form
+      explode: true
+    ListOwner:
+      name: owner
+      in: query
+      required: false
+      description: >-
+        Keeps the objects of this owner, the rendered subject an object's
+        `status.owner` carries.
+      schema:
+        type: string
+    ListCursor:
+      name: cursor
+      in: query
+      required: false
+      description: The `next` of the previous page; absent for the first.
+      schema:
+        type: string
+    ListLimit:
+      name: limit
+      in: query
+      required: false
+      description: The page size, 1 to 200, 50 when absent; anything else is `invalid_field`.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
   responses:
     Error:
       description: "The refusal envelope of design 008: one code, one fixed sentence."

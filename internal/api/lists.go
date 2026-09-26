@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
+	"strings"
 
 	"latere.ai/x/pkg/authz"
 
@@ -27,6 +28,38 @@ func pageLimit(r *http.Request) (int, error) {
 	return limit, nil
 }
 
+// labelSelector reads the repeated ?label=key=value selectors of a list into
+// the set a row must carry. A selector without its equals sign or its key is
+// invalid_field. The second result is false where two selectors name one key
+// with two values, which no row can carry, so the caller answers an empty
+// page without reading a row.
+func labelSelector(r *http.Request) (map[string]string, bool, error) {
+	labels := map[string]string{}
+	satisfiable := true
+	for _, q := range r.URL.Query()["label"] {
+		k, v, ok := strings.Cut(q, "=")
+		if !ok || k == "" {
+			return nil, false, &manifest.Error{Code: "invalid_field", Path: "label", Detail: "label selector requires key=value"}
+		}
+		if prior, held := labels[k]; held && prior != v {
+			satisfiable = false
+		}
+		labels[k] = v
+	}
+	return labels, satisfiable, nil
+}
+
+// carries reports whether a row's labels hold every selector with the value
+// the selector names.
+func carries(have, want map[string]string) bool {
+	for k, v := range want {
+		if got, ok := have[k]; !ok || got != v {
+			return false
+		}
+	}
+	return true
+}
+
 // admits is the filter step of design 008's list rule: a list decision's
 // filter over one row. The row's owner is one the filter names, when it names
 // any, and the row carries every label the filter names with the value it
@@ -40,12 +73,7 @@ func admits(filter *authz.Filter, owner string, labels map[string]string) bool {
 	if len(filter.Owners) > 0 && !slices.Contains(filter.Owners, owner) {
 		return false
 	}
-	for k, v := range filter.Labels {
-		if got, ok := labels[k]; !ok || got != v {
-			return false
-		}
-	}
-	return true
+	return carries(labels, filter.Labels)
 }
 
 // admitsEnvironment is the filter step for one environment. The default one,

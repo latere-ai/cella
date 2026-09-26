@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"slices"
 	"strings"
 	"sync"
@@ -251,6 +252,86 @@ func TestSecretRoutes(t *testing.T) {
 			`{"apiVersion":"`+v1.APIVersion+`","kind":"Secret","metadata":{"name":"no-value"},"spec":{"scope":{"hosts":["api.example.com"]}}}`,
 			http.StatusBadRequest)
 		f.request(http.MethodPost, "/v1/secrets", f.alice, `{`, http.StatusBadRequest)
+	})
+}
+
+// listedSecrets reads one page of the secret list as one subject and returns
+// the names it carries, in the page's order.
+func listedSecrets(t *testing.T, f *fixture, query, token string) []string {
+	t.Helper()
+	var page struct {
+		Items []v1.Secret `json:"items"`
+	}
+	body := f.request(http.MethodGet, "/v1/secrets"+query, token, "", http.StatusOK)
+	if err := json.Unmarshal(body, &page); err != nil {
+		t.Fatalf("the list is %s: %v", body, err)
+	}
+	names := make([]string, 0, len(page.Items))
+	for _, item := range page.Items {
+		names = append(names, item.Metadata.Name)
+	}
+	return names
+}
+
+// labeledSecretBody is one Secret manifest carrying labels.
+func labeledSecretBody(name, labels string) string {
+	return `{"apiVersion":"` + v1.APIVersion + `","kind":"Secret","metadata":{"name":"` + name + `","labels":` + labels + `},` +
+		`"spec":{"scope":{"hosts":["api.example.com"]},"value":"v"}}`
+}
+
+// TestSecretListSelectsByOwner: ?owner= narrows the secret list to one
+// rendered subject, as it narrows the sandbox list, and never widens what the
+// caller reads. Under the owner policy a subject that names another subject
+// reads an empty page, not that subject's secrets and not a refusal; a caller
+// the authorizer lets read every secret, which is how a plane's service
+// reads, gets exactly the named owner's. The label selectors narrow the same
+// list, and two that name one key with two values match nothing.
+func TestSecretListSelectsByOwner(t *testing.T) {
+	t.Run("underTheOwnerPolicy", func(t *testing.T) {
+		f := setupSealed(t, nil)
+		alice := decodeSecret(t, f.request(http.MethodPost, "/v1/secrets", f.alice,
+			labeledSecretBody("a-one", `{"team":"x"}`), http.StatusCreated)).Status.Owner
+		f.request(http.MethodPost, "/v1/secrets", f.alice, labeledSecretBody("a-two", `{"team":"y"}`), http.StatusCreated)
+		bob := decodeSecret(t, f.request(http.MethodPost, "/v1/secrets", f.bob,
+			labeledSecretBody("b-one", `{"team":"x"}`), http.StatusCreated)).Status.Owner
+		for _, tc := range []struct {
+			name, query, token string
+			want               []string
+		}{
+			{"one's own owner", "?owner=" + url.QueryEscape(alice), f.alice, []string{"a-one", "a-two"}},
+			{"another subject's owner", "?owner=" + url.QueryEscape(bob), f.alice, []string{}},
+			{"an owner nobody is", "?owner=nobody", f.alice, []string{}},
+			{"no owner", "", f.bob, []string{"b-one"}},
+			{"one's own owner and a label", "?owner=" + url.QueryEscape(alice) + "&label=team=x", f.alice, []string{"a-one"}},
+			{"a label that crosses owners", "?label=team=x", f.alice, []string{"a-one"}},
+			{"two values for one label", "?label=team=x&label=team=y", f.alice, []string{}},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				if got := listedSecrets(t, f, tc.query, tc.token); !slices.Equal(got, tc.want) {
+					t.Errorf("the list carries %v, want %v", got, tc.want)
+				}
+			})
+		}
+		f.request(http.MethodGet, "/v1/secrets?label=team", f.alice, "", http.StatusBadRequest)
+	})
+
+	t.Run("forACallerThatReadsEverySecret", func(t *testing.T) {
+		f := setupSealed(t, decisionFunc(func(context.Context, authz.Request) (authz.Decision, error) {
+			return authz.Decision{Allow: true}, nil
+		}))
+		alice := decodeSecret(t, f.request(http.MethodPost, "/v1/secrets", f.alice,
+			labeledSecretBody("a-one", `{}`), http.StatusCreated)).Status.Owner
+		bob := decodeSecret(t, f.request(http.MethodPost, "/v1/secrets", f.bob,
+			labeledSecretBody("b-one", `{}`), http.StatusCreated)).Status.Owner
+		if got := listedSecrets(t, f, "", f.alice); !slices.Equal(got, []string{"a-one", "b-one"}) {
+			t.Fatalf("the unselected list carries %v", got)
+		}
+		if got := listedSecrets(t, f, "?owner="+url.QueryEscape(bob), f.alice); !slices.Equal(got, []string{"b-one"}) {
+			t.Errorf("the list selected by bob's owner carries %v", got)
+		}
+		if got := listedSecrets(t, f, "?owner="+url.QueryEscape(alice)+"&limit=1", f.alice); !slices.Equal(got, []string{"a-one"}) {
+			t.Errorf("the list selected by alice's owner carries %v", got)
+		}
 	})
 }
 

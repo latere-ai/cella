@@ -63,7 +63,10 @@ path.
 Pass `next` back as `cursor` for the next page; an empty `next` is the
 end. `limit` is 1 to 200, 50 by default. It filters by `label=key=value`
 (repeatable), `phase`, `owner`, `environment`, and `root`, which returns
-one spawn tree.
+one spawn tree. `GET /v1/secrets` pages the same way and filters by
+`label` and `owner`. A filter narrows what you may already see and never
+widens it: an `owner` whose objects you may not read answers an empty
+page, not an error.
 
 **Concurrency.** An environment read carries an `ETag`, and an apply that
 sends `If-Match` with an older version is refused with `409
@@ -260,7 +263,7 @@ line carries it.
 | Route | Action | What it does |
 |---|---|---|
 | `POST /v1/secrets` | `secret.create` | create a secret from a manifest |
-| `GET /v1/secrets` | `secret.list` | list your secrets |
+| `GET /v1/secrets` | `secret.list` | list your secrets; `owner` and `label` narrow the list as they do for sandboxes |
 | `PUT /v1/secrets/{name}` | `secret.create` or `secret.update` | apply by name; a second apply rotates the value in place, and running sandboxes use the new value on their next request |
 | `GET /v1/secrets/{name}` | `secret.read` | read one secret without its value |
 | `DELETE /v1/secrets/{name}` | `secret.delete` | delete it; a sandbox that mounted it reports the placeholder as not injectable |
