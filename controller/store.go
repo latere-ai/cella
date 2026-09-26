@@ -8,8 +8,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"sync"
 	"syscall"
 
 	v1 "latere.ai/x/cella/manifest/v1"
@@ -86,9 +88,17 @@ type Sealer interface {
 }
 
 type fileStore struct {
-	dir     string
-	lock    *os.File
-	sealer  Sealer
+	dir    string
+	lock   *os.File
+	sealer Sealer
+	// mu guards every collection below and the file they are written to.
+	// The controller's callers hold different locks: a sandbox is written
+	// under the controller's, an environment's phase under none, so the
+	// store serializes its own document rather than trusting one of them.
+	mu sync.Mutex
+	// objects is this store's own copy of the sandboxes, never the map the
+	// controller mutates: a write of any other collection marshals it, and
+	// that write does not run under the controller's lock.
 	objects map[string]v1.Sandbox
 	secrets map[string]secretRow
 	// ledger is the spawn count of design 022, one entry per sandbox that
@@ -155,6 +165,8 @@ func OpenSealedFileStore(dir string, sealer Sealer) (Store, error) {
 		ledger: map[string]int{}, environments: map[string]environmentRow{}}, nil
 }
 func (s *fileStore) Load() (map[string]v1.Sandbox, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	b, err := os.ReadFile(filepath.Join(s.dir, "objects.json"))
 	if errors.Is(err, os.ErrNotExist) {
 		return map[string]v1.Sandbox{}, nil
@@ -182,12 +194,14 @@ func (s *fileStore) Load() (map[string]v1.Sandbox, error) {
 	if s.environments == nil {
 		s.environments = map[string]environmentRow{}
 	}
-	return data.Objects, nil
+	return maps.Clone(data.Objects), nil
 }
 
 // LoadSecrets is the Secret half of Load. The snapshot was read by Load,
 // which the controller calls first.
 func (s *fileStore) LoadSecrets() (map[string]v1.Secret, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	out := make(map[string]v1.Secret, len(s.secrets))
 	for id, row := range s.secrets {
 		obj := row.Object
@@ -201,6 +215,8 @@ func (s *fileStore) LoadSecrets() (map[string]v1.Secret, error) {
 // snapshot. The journal is not this store's: it keeps desired state and
 // nothing else, and the controller's emitter takes the record.
 func (s *fileStore) WriteSecret(_ context.Context, obj v1.Secret, plaintext []byte, _ string) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	row := s.secrets[obj.Status.ID]
 	row.Object = obj
 	row.Object.Spec.Value = ""
@@ -227,6 +243,8 @@ func (s *fileStore) WriteSecret(_ context.Context, obj v1.Secret, plaintext []by
 
 // RemoveSecret drops one Secret and its ciphertext from the snapshot.
 func (s *fileStore) RemoveSecret(_ context.Context, id, _ string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	previous, held := s.secrets[id]
 	delete(s.secrets, id)
 	if err := s.write(); err != nil {
@@ -239,6 +257,8 @@ func (s *fileStore) RemoveSecret(_ context.Context, id, _ string) error {
 // OpenValue unseals one value. It is the snapshot store's half of the one
 // decrypting call, and it has the same single caller the durable store's has.
 func (s *fileStore) OpenValue(_ context.Context, secretID string) ([]byte, int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	row, held := s.secrets[secretID]
 	if !held || len(row.Sealed) == 0 {
 		return nil, 0, ErrNotFound
@@ -261,13 +281,18 @@ func (s *fileStore) restoreSecret(id string, previous secretRow, held bool) {
 	delete(s.secrets, id)
 }
 
+// Save replaces the sandboxes with a copy of the controller's map, taken
+// under this store's lock, and rewrites the snapshot.
 func (s *fileStore) Save(objects map[string]v1.Sandbox) error {
-	s.objects = objects
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.objects = maps.Clone(objects)
 	return s.write()
 }
 
 // write replaces the snapshot atomically: both collections, every time,
 // because the file is one document and a half-written one is no state at all.
+// The caller holds s.mu.
 func (s *fileStore) write() error {
 	b, err := json.Marshal(snapshot{Version: 1, Objects: s.objects, Secrets: s.secrets,
 		Ledger: s.ledger, Environments: s.environments})
@@ -301,6 +326,8 @@ func (s *fileStore) write() error {
 	return d.Sync()
 }
 func (s *fileStore) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.lock == nil {
 		return nil
 	}
@@ -314,6 +341,8 @@ func (s *fileStore) Close() error {
 // this store: the file is replaced by one rename, so a reader sees both or
 // neither.
 func (s *fileStore) WriteSpawn(_ context.Context, obj v1.Sandbox, _, parentID string, budget int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if parentID == "" {
 		return errors.New("a debit names a sandbox")
 	}
@@ -337,6 +366,8 @@ func (s *fileStore) WriteSpawn(_ context.Context, obj v1.Sandbox, _, parentID st
 
 // CreditSpawn returns one unit to a parent whose child never started.
 func (s *fileStore) CreditSpawn(_ context.Context, parentID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if n := s.ledger[parentID]; n > 0 {
 		s.ledger[parentID] = n - 1
 		return s.write()
@@ -346,11 +377,15 @@ func (s *fileStore) CreditSpawn(_ context.Context, parentID string) error {
 
 // SpawnsUsed is how many children one sandbox has created in total.
 func (s *fileStore) SpawnsUsed(_ context.Context, parentID string) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.ledger[parentID], nil
 }
 
 // ForgetSpawns drops one sandbox's count at the delete that ends it.
 func (s *fileStore) ForgetSpawns(_ context.Context, parentID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if _, held := s.ledger[parentID]; !held {
 		return nil
 	}
@@ -370,6 +405,8 @@ var (
 // LoadEnvironments is the Environment half of Load. The snapshot was read by
 // Load, which the controller calls first.
 func (s *fileStore) LoadEnvironments() (map[string]v1.Environment, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	out := make(map[string]v1.Environment, len(s.environments))
 	for name, row := range s.environments {
 		obj := row.Object
@@ -383,6 +420,8 @@ func (s *fileStore) LoadEnvironments() (map[string]v1.Environment, error) {
 // the snapshot. The journal is not this store's: it keeps desired state and
 // nothing else, and the controller's emitter takes the record.
 func (s *fileStore) WriteEnvironment(_ context.Context, obj v1.Environment, ifVersion int64, _ string) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	name := obj.Metadata.Name
 	previous, held := s.environments[name]
 	if held && previous.Version != ifVersion {
@@ -404,6 +443,8 @@ func (s *fileStore) WriteEnvironment(_ context.Context, obj v1.Environment, ifVe
 // WriteEnvironmentStatus writes what the phase loop computed, which is a
 // write of the whole row on a store that keeps one document.
 func (s *fileStore) WriteEnvironmentStatus(_ context.Context, obj v1.Environment, _ string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	name := obj.Metadata.Name
 	previous, held := s.environments[name]
 	if !held {
@@ -422,6 +463,8 @@ func (s *fileStore) WriteEnvironmentStatus(_ context.Context, obj v1.Environment
 
 // RemoveEnvironment drops one Environment from the snapshot.
 func (s *fileStore) RemoveEnvironment(_ context.Context, name, _ string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	previous, held := s.environments[name]
 	delete(s.environments, name)
 	if err := s.write(); err != nil {
