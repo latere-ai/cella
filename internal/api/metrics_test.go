@@ -16,8 +16,12 @@ import (
 	"time"
 
 	"go.opentelemetry.io/otel"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+
+	pkgotel "latere.ai/x/pkg/otel"
 
 	"latere.ai/x/cella/egress"
 	"latere.ai/x/cella/internal/metrics"
@@ -266,6 +270,10 @@ func TestRequestSpans(t *testing.T) {
 			t.Errorf("the span carries no %s: %v", key, attrs)
 		}
 	}
+	// http.route is the path template alone; the method is the span's own.
+	if attrs["http.route"] != "/v1/sandboxes/{id}" {
+		t.Errorf("the span's http.route is %q, want /v1/sandboxes/{id}", attrs["http.route"])
+	}
 	// The subject is the qualified one design 006 fixes: the issuer and the
 	// claim, which is what an authorizer decides on.
 	if !strings.HasSuffix(attrs["cella.subject"], "|alice") {
@@ -273,6 +281,53 @@ func TestRequestSpans(t *testing.T) {
 	}
 	if attrs["cella.sandbox"] != obj.Status.ID {
 		t.Errorf("the span names the sandbox %q, want %q", attrs["cella.sandbox"], obj.Status.ID)
+	}
+}
+
+// TestRequestMetricsCarryTheRoute drives the API through the OpenTelemetry
+// handler cellad mounts it behind. The mux matches on a copy of the request,
+// so the handler never saw the pattern and measured every request with no
+// http.route; the route wrapper hands it over through the labeler instead.
+func TestRequestMetricsCarryTheRoute(t *testing.T) {
+	reader := sdkmetric.NewManualReader()
+	meters := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	previous := otel.GetMeterProvider()
+	otel.SetMeterProvider(meters)
+	t.Cleanup(func() {
+		otel.SetMeterProvider(previous)
+		_ = meters.Shutdown(t.Context())
+	})
+
+	f := setup(t, nil)
+	obj := f.sandbox("measured")
+	h := pkgotel.Handler(f.h, "cellad")
+	for _, path := range []string{"/v1/sandboxes/" + obj.Status.ID, "/v1/no-such-route"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Header.Set("Authorization", "Bearer "+f.alice)
+		h.ServeHTTP(httptest.NewRecorder(), req)
+	}
+
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(t.Context(), &rm); err != nil {
+		t.Fatal(err)
+	}
+	var routes []string
+	for _, scope := range rm.ScopeMetrics {
+		for _, m := range scope.Metrics {
+			if m.Name != "http.server.request.duration" {
+				continue
+			}
+			for _, p := range m.Data.(metricdata.Histogram[float64]).DataPoints {
+				route, _ := p.Attributes.Value("http.route")
+				routes = append(routes, route.AsString())
+			}
+		}
+	}
+	slices.Sort(routes)
+	// A path no route serves is measured with no route, so a client cannot
+	// grow the label.
+	if want := []string{"", "/v1/sandboxes/{id}"}; !slices.Equal(routes, want) {
+		t.Errorf("http.server.request.duration routes = %q, want %q", routes, want)
 	}
 }
 

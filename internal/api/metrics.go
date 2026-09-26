@@ -10,8 +10,10 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
@@ -243,12 +245,33 @@ func (h *handler) route(pattern string, fn http.HandlerFunc, negotiates bool) {
 }
 
 // nameSpan renames the server span after the route pattern, so a trace lists
-// one span per endpoint rather than one per path.
-func nameSpan(ctx context.Context, route string) {
-	if span := trace.SpanFromContext(ctx); span.IsRecording() && route != "" {
-		span.SetName(route)
+// one span per endpoint rather than one per path, and gives the pattern's
+// path to http.route on the span and on the request metrics. The metrics take
+// it through the labeler the OpenTelemetry handler put on the context: the
+// mux sets the pattern on the copy of the request it was handed, which the
+// handler never sees, so without the labeler every request was measured with
+// no route.
+func nameSpan(ctx context.Context, pattern string) {
+	if pattern == "" {
+		return
+	}
+	route := routePath(pattern)
+	if l, ok := otelhttp.LabelerFromContext(ctx); ok && route != "" {
+		l.Add(attribute.String("http.route", route))
+	}
+	if span := trace.SpanFromContext(ctx); span.IsRecording() {
+		span.SetName(pattern)
 		span.SetAttributes(attribute.String("http.route", route))
 	}
+}
+
+// routePath is a mux pattern without its method: http.route is the path
+// template alone, and the method is on the span and the metrics already.
+func routePath(pattern string) string {
+	if i := strings.IndexByte(pattern, '/'); i >= 0 {
+		return pattern[i:]
+	}
+	return ""
 }
 
 // stampSpan puts design 017's request attributes on the server span: who

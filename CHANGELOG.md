@@ -6,6 +6,13 @@ refused before it is pushed.
 
 ## Unreleased
 
+- Fixed: the OpenTelemetry request metrics (`http.server.request.duration`
+  and the rest) carried no `http.route`, so every request fell into one
+  series whatever endpoint it reached. They now carry the route's path
+  template, such as `/v1/sandboxes/{id}`; a path no route serves still has
+  none. The server span's `http.route` is the same template, without the
+  method it used to start with; the span's name keeps the method.
+
 ## v0.7.1 - 2026-09-26
 
 - v0.7.0 was tagged but not published: the release runner's race tier
