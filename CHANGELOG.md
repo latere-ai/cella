@@ -6,6 +6,18 @@ refused before it is pushed.
 
 ## Unreleased
 
+- v0.7.0 was tagged but not published: the release runner's race tier
+  found the environment phase loop and a sandbox delete writing the local
+  snapshot store at once. This release carries the same binaries, packages
+  and API as the v0.7.0 notes below describe, with that fixed.
+- Fixed: with no `CELLA_DB_URL`, the snapshot under `CELLA_DATA_DIR` could
+  be written from two goroutines at once, since an environment's phase is
+  written outside the lock a sandbox write holds, and the write of the
+  environment read the sandboxes while the other changed them. Under load
+  that is a crash on concurrent map access or a snapshot that misses one of
+  the two writes. The store now serializes its own writes and keeps its own
+  copy of the sandboxes. A deployment with Postgres was not affected.
+
 ## v0.7.0 - 2026-09-26
 
 - `GET /v1/secrets` takes `owner` and `label`, as `GET /v1/sandboxes`
