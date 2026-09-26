@@ -58,7 +58,10 @@ worker and gateway health is the control plane's view of them.
 Labels are bounded: no label ever carries a sandbox id, a subject, a
 name, or a path. `route` is the `http.ServeMux` pattern, taken from a
 context value a middleware behind the mux fills, since the OTel route
-template runs before the mux matches. Gauges are scrape-time callbacks
+template runs before the mux matches; a request that reached no endpoint is
+`unmatched`, the shared label of `latere.ai/x/pkg/otel`. The same middleware
+hands the pattern to the server span and the OTel request metrics with
+`otel.SetRoute`. Gauges are scrape-time callbacks
 over the store's cached indexes, never a driver `List`. Every
 histogram names its bounds; labeled histograms are initialized over
 their closed vocabularies at start so a series exists before its first

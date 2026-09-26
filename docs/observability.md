@@ -41,7 +41,9 @@ control plane's, taken as its records arrive.
 
 Labels are bounded. No series carries a sandbox id, a subject, a name or
 a path: `route` is the router's pattern, not the URL, and `environment`
-and `driver` are what the installation configured.
+and `driver` are what the installation configured. A request refused before
+it reached an endpoint, such as one with no valid bearer, is counted under
+`route="unmatched"`.
 
 ### Requests
 
@@ -109,8 +111,11 @@ a quiet installation reads zero rather than nothing.
 
 ## Traces
 
-With the endpoint set, each request draws one span named after its route,
-carrying the subject, the request id and the sandbox the route names. The
+With the endpoint set, each request draws one span named after its method
+and route (`GET /v1/sandboxes/{id}`), carrying the subject, the request id
+and the sandbox the route names. The OpenTelemetry request metrics
+(`http.server.request.duration` and the body size histograms) carry the
+same route as `http.route`; a request that reached no endpoint has none. The
 calls `cellad` makes on the request's own path, to your authorizer and
 your admission endpoint, are child spans on the same trace, so one trace
 shows what a refusal or a slow create was waiting on. Delivery to your

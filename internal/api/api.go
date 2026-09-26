@@ -24,6 +24,7 @@ import (
 
 	"latere.ai/x/pkg/authz"
 	"latere.ai/x/pkg/httpjson"
+	"latere.ai/x/pkg/otel"
 
 	"latere.ai/x/cella/authorizer"
 	cellaclient "latere.ai/x/cella/client"
@@ -231,7 +232,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			// route: design 017's label is the endpoint and never the path,
 			// which carries the environment's name.
 			slot.route = EgressStreamRoute
-			nameSpan(r.Context(), EgressStreamRoute)
+			otel.SetRoute(r.Context(), EgressStreamRoute)
 			if id != environment {
 				respondError(w, &auth.Error{Code: auth.CodeForbidden, Detail: "the key names another environment"})
 				return

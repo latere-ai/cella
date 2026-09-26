@@ -20,6 +20,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"go.opentelemetry.io/otel/trace"
 
 	pkgotel "latere.ai/x/pkg/otel"
 
@@ -114,9 +115,9 @@ func TestRequestsAreCountedByRoute(t *testing.T) {
 	want := []request{
 		{"POST /v1/sandboxes", "2xx", ""},
 		{"GET /v1/sandboxes/{id}", "4xx", "not_found"},
-		// A request refused before the mux chose an endpoint carries no
-		// route: no endpoint was reached.
-		{"", "4xx", "unauthenticated"},
+		// A request refused before the mux chose an endpoint reached none,
+		// and is counted under the label every service gives such a request.
+		{pkgotel.UnmatchedRoute, "4xx", "unauthenticated"},
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("counted %v, want %v", got, want)
@@ -239,30 +240,31 @@ func TestRequestSpans(t *testing.T) {
 
 	f := setup(t, nil)
 	obj := f.sandbox("traced")
-	ctx, span := provider.Tracer("test").Start(t.Context(), "client")
-	req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/v1/sandboxes/"+obj.Status.ID, nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/sandboxes/"+obj.Status.ID, nil)
 	req.Header.Set("Authorization", "Bearer "+f.alice)
-	// The handler is driven directly, so the span under test is the one the
-	// route wrapper named and not a transport's.
+	// Through the OpenTelemetry handler cellad mounts the API behind, which
+	// opens the server span and names it from the route the wrapper records.
 	rr := httptest.NewRecorder()
-	f.h.ServeHTTP(rr, req)
+	pkgotel.Handler(f.h, "cellad").ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("GET the sandbox = %d: %s", rr.Code, rr.Body)
 	}
-	span.End()
 
-	spans := exporter.GetSpans()
-	if len(spans) == 0 {
-		t.Fatal("the request drew no span")
+	var servers []sdktrace.ReadOnlySpan
+	for _, s := range exporter.GetSpans().Snapshots() {
+		if s.SpanKind() == trace.SpanKindServer {
+			servers = append(servers, s)
+		}
 	}
-	// The wrapper renames the span it was called under, which here is the
-	// client span the case opened.
-	named := spans[len(spans)-1]
-	if named.Name != "GET /v1/sandboxes/{id}" {
-		t.Errorf("the span is named %q, want the route pattern", named.Name)
+	if len(servers) != 1 {
+		t.Fatalf("the request drew %d server spans, want one", len(servers))
+	}
+	named := servers[0]
+	if named.Name() != "GET /v1/sandboxes/{id}" {
+		t.Errorf("the span is named %q, want the route pattern", named.Name())
 	}
 	attrs := map[string]string{}
-	for _, kv := range named.Attributes {
+	for _, kv := range named.Attributes() {
 		attrs[string(kv.Key)] = kv.Value.AsString()
 	}
 	for _, key := range []string{"http.route", "cella.subject", "cella.request_id", "cella.sandbox"} {

@@ -5,17 +5,18 @@ package api
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"errors"
 	"log/slog"
 	"net"
 	"net/http"
-	"strings"
 	"time"
 
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+
+	"latere.ai/x/pkg/otel"
 
 	"latere.ai/x/cella/internal/metrics"
 )
@@ -155,8 +156,9 @@ func (o *observed) class() string {
 }
 
 // observe is the one count and the one log line per request, deferred by
-// ServeHTTP. A request that never reached the mux carries no route, which is
-// the count of a bearer that was refused before any endpoint was chosen.
+// ServeHTTP. A request that never reached the mux is counted under
+// otel.UnmatchedRoute, the label every service gives a request no route
+// serves: a bearer refused before any endpoint was chosen.
 //
 // The line is emitted under the request's own context, so the trace id and
 // the span id reach both paths of the log tee and a line read out of the
@@ -167,12 +169,13 @@ func (h *handler) observe(ctx context.Context, slot *routeSlot, o *observed, sta
 	if callerGone(ctx, o) {
 		status, code = metrics.StatusClass(statusClientClosed), ClientClosed
 	}
-	h.metrics.Request(slot.route, status, code)
+	route := cmp.Or(slot.route, otel.UnmatchedRoute)
+	h.metrics.Request(route, status, code)
 	if !o.hijacked {
-		h.metrics.RequestDuration(slot.route, elapsed)
+		h.metrics.RequestDuration(route, elapsed)
 	}
 	h.log.LogAttrs(ctx, slog.LevelInfo, "request",
-		slog.String("route", slot.route),
+		slog.String("route", route),
 		slog.String("status", status),
 		slog.String("code", code),
 		slog.Duration("duration", elapsed),
@@ -235,43 +238,15 @@ func (h *handler) route(pattern string, fn http.HandlerFunc, negotiates bool) {
 		if slot := slotOf(r.Context()); slot != nil {
 			slot.route, slot.sandbox = r.Pattern, r.PathValue("id")
 		}
-		nameSpan(r.Context(), r.Pattern)
+		// The mux matched on a copy of the request, so the pattern reaches
+		// the server span and the request metrics only through SetRoute.
+		otel.SetRoute(r.Context(), r.Pattern)
 		stampSandbox(r.Context(), r.PathValue("id"))
 		if negotiates && !acceptable(w, r) {
 			return
 		}
 		fn(w, r)
 	})
-}
-
-// nameSpan renames the server span after the route pattern, so a trace lists
-// one span per endpoint rather than one per path, and gives the pattern's
-// path to http.route on the span and on the request metrics. The metrics take
-// it through the labeler the OpenTelemetry handler put on the context: the
-// mux sets the pattern on the copy of the request it was handed, which the
-// handler never sees, so without the labeler every request was measured with
-// no route.
-func nameSpan(ctx context.Context, pattern string) {
-	if pattern == "" {
-		return
-	}
-	route := routePath(pattern)
-	if l, ok := otelhttp.LabelerFromContext(ctx); ok && route != "" {
-		l.Add(attribute.String("http.route", route))
-	}
-	if span := trace.SpanFromContext(ctx); span.IsRecording() {
-		span.SetName(pattern)
-		span.SetAttributes(attribute.String("http.route", route))
-	}
-}
-
-// routePath is a mux pattern without its method: http.route is the path
-// template alone, and the method is on the span and the metrics already.
-func routePath(pattern string) string {
-	if i := strings.IndexByte(pattern, '/'); i >= 0 {
-		return pattern[i:]
-	}
-	return ""
 }
 
 // stampSpan puts design 017's request attributes on the server span: who
