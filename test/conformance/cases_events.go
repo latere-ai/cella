@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
+	"slices"
 	"strings"
 	"time"
 )
@@ -26,13 +28,14 @@ func eventCases() []Case {
 	}
 }
 
-// secretCases prove the Secret kind's one rule: the value goes in and never
-// comes back.
+// secretCases prove the Secret kind's one rule, that the value goes in and
+// never comes back, and the owner selector of its list.
 func secretCases() []Case {
 	return []Case{
 		{"secrets", "case018SecretWriteOnly", case018SecretWriteOnly},
 		{"secrets", "case018SecretRotates", case018SecretRotates},
 		{"secrets", "case018SecretDelete", case018SecretDelete},
+		{"secrets", "case008SecretListOwner", case008SecretListOwner},
 	}
 }
 
@@ -354,6 +357,111 @@ func case018SecretDelete(ctx context.Context, e *Env) error {
 	return read.refusal("not_found")
 }
 
+// case008SecretListOwner: ?owner= narrows the secret list to one owner and
+// never widens it. Every row a selected page carries has that owner, the
+// caller's own secret is under its own owner, an owner nobody is answers an
+// empty page and not a refusal, and with a second subject the caller's page
+// under that subject's owner holds its secret only where the caller's
+// unselected list holds it too. Which of another subject's secrets a caller
+// may read is the authorizer's, so the case asserts the intersection and not
+// an answer.
+func case008SecretListOwner(ctx context.Context, e *Env) error {
+	x, err := e.applySecret(ctx, e.name(), "owned-"+e.run)
+	if err != nil {
+		return err
+	}
+	own, err := x.object()
+	if err != nil {
+		return err
+	}
+	if own.Status.Owner == "" {
+		return x.disagree("status.owner on a created secret", "none")
+	}
+	mine, err := secretPages(ctx, e.caller, own.Status.Owner)
+	if err != nil {
+		return err
+	}
+	if !slices.ContainsFunc(mine, func(o object) bool { return o.Status.ID == own.Status.ID }) {
+		return fmt.Errorf("the list under the caller's own owner %q does not hold %s, which this run created", own.Status.Owner, own.Status.ID)
+	}
+	none, err := secretPages(ctx, e.caller, "nobody-"+e.run)
+	if err != nil {
+		return err
+	}
+	if len(none) != 0 {
+		return fmt.Errorf("the list under an owner nobody is holds %d secrets", len(none))
+	}
+	other, err := e.second()
+	if err != nil {
+		// The narrowing half holds without a second subject; the
+		// intersection half needs one.
+		return nil
+	}
+	x, err = e.applySecretAs(ctx, other, e.name(), "theirs-"+e.run)
+	if err != nil {
+		return err
+	}
+	theirs, err := x.object()
+	if err != nil {
+		return err
+	}
+	selected, err := secretPages(ctx, e.caller, theirs.Status.Owner)
+	if err != nil {
+		return err
+	}
+	unselected, err := secretPages(ctx, e.caller, "")
+	if err != nil {
+		return err
+	}
+	holds := func(page []object) bool {
+		return slices.ContainsFunc(page, func(o object) bool { return o.Status.ID == theirs.Status.ID })
+	}
+	if holds(selected) && !holds(unselected) {
+		return fmt.Errorf("the list under another subject's owner holds %s, which the caller's own list does not", theirs.Status.ID)
+	}
+	return nil
+}
+
+// secretPages follows the secret list to its end under one owner, or under
+// none when owner is empty, and fails on a row whose owner is not the one
+// named. It stops at 50 pages, past which a list that never ends is the
+// finding.
+func secretPages(ctx context.Context, c *client, owner string) ([]object, error) {
+	var out []object
+	cursor := ""
+	for range 50 {
+		q := url.Values{"limit": {"200"}}
+		if owner != "" {
+			q.Set("owner", owner)
+		}
+		if cursor != "" {
+			q.Set("cursor", cursor)
+		}
+		x, err := c.get(ctx, "/v1/secrets?"+q.Encode())
+		if err != nil {
+			return nil, err
+		}
+		if err := x.status(http.StatusOK); err != nil {
+			return nil, err
+		}
+		var page listEnvelope
+		if err := json.Unmarshal(x.Body, &page); err != nil {
+			return nil, x.disagree("a list envelope with items and next", "a body that does not decode: "+err.Error())
+		}
+		for _, item := range page.Items {
+			if owner != "" && item.Status.Owner != owner {
+				return nil, x.disagree("only rows whose status.owner is "+owner, "a row of "+item.Status.Owner)
+			}
+		}
+		out = append(out, page.Items...)
+		if page.Next == "" {
+			return out, nil
+		}
+		cursor = page.Next
+	}
+	return nil, fmt.Errorf("the secret list did not end within 50 pages")
+}
+
 // case018EgressRecords: the connections the gateway reported for a sandbox
 // are a list a caller reads, empty where nothing left.
 func case018EgressRecords(ctx context.Context, e *Env) error {
@@ -546,7 +654,12 @@ func (e *Env) secret(name, value string) []byte {
 // skipped with what the server said, and not failed. Every other refusal is
 // a disagreement.
 func (e *Env) applySecret(ctx context.Context, name, value string) (*exchange, error) {
-	x, err := e.caller.put(ctx, "/v1/secrets/"+name, e.secret(name, value), "application/json")
+	return e.applySecretAs(ctx, e.caller, name, value)
+}
+
+// applySecretAs is applySecret as one identity of the run.
+func (e *Env) applySecretAs(ctx context.Context, c *client, name, value string) (*exchange, error) {
+	x, err := c.put(ctx, "/v1/secrets/"+name, e.secret(name, value), "application/json")
 	if err != nil {
 		return nil, err
 	}
@@ -565,7 +678,7 @@ func (e *Env) applySecret(ctx context.Context, name, value string) (*exchange, e
 		return x, err
 	}
 	if obj.Status.ID != "" {
-		e.record(e.caller, "/v1/secrets", obj.Status.ID)
+		e.record(c, "/v1/secrets", obj.Status.ID)
 	}
 	return x, nil
 }

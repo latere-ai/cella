@@ -200,7 +200,7 @@ func TestAServerWithNoSecretKeySkipsTheSecrets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"case018SecretWriteOnly", "case018SecretRotates", "case018SecretDelete"} {
+	for _, name := range []string{"case018SecretWriteOnly", "case018SecretRotates", "case018SecretDelete", "case008SecretListOwner"} {
 		if !slices.Contains(report.Skipped, name) {
 			t.Errorf("%s did not skip against a server that stores no secret value", name)
 		}

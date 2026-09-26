@@ -1127,11 +1127,18 @@ func (f *fake) secretFor(ref string) (string, map[string]any, bool) {
 	return "", nil, false
 }
 
-func (f *fake) listSecrets(w http.ResponseWriter, _ *http.Request) {
+// listSecrets answers every secret, narrowed to one owner where the query
+// names one, as design 008's list does.
+func (f *fake) listSecrets(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	owner := r.URL.Query().Get("owner")
 	items := []any{}
 	for _, name := range keys(f.secrets) {
+		status, _ := f.secrets[name]["status"].(map[string]any)
+		if held, _ := status["owner"].(string); owner != "" && held != owner {
+			continue
+		}
 		items = append(items, f.secrets[name])
 	}
 	f.write(w, http.StatusOK, map[string]any{"items": items, "next": ""})
