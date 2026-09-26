@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.7.1 - 2026-09-26
+
 - v0.7.0 was tagged but not published: the release runner's race tier
   found the environment phase loop and a sandbox delete writing the local
   snapshot store at once. This release carries the same binaries, packages
