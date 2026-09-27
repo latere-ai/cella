@@ -7,49 +7,54 @@ import (
 	"cmp"
 	"context"
 	"errors"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	"latere.ai/x/pkg/otel"
 )
 
-// ErrNoWriter is a request a standby held for the whole of its hold without
-// finding a writer to forward it to, or one whose forward failed after it
-// reached a writer that then went away (spec 076). Design 008 answers it with
-// 503 control_plane_unavailable: another replica becomes the writer shortly,
-// and the caller's retry reaches it.
+// ErrNoWriter is a request that found no replica to take it within its hold,
+// or one whose forward failed after it reached a writer that then went away
+// (spec 076). Design 008 answers it with 503 control_plane_unavailable:
+// another replica becomes the writer shortly, and the caller's retry reaches
+// it.
 var ErrNoWriter = errors.New("no replica holds the writer lease")
 
-// DefaultForwardHold is how long a standby holds a request while no writer
-// can be reached, when CELLA_FORWARD_HOLD sets nothing.
+// DefaultForwardHold is how long a request is held while no replica can take
+// it, when CELLA_FORWARD_HOLD sets nothing.
 const DefaultForwardHold = 15 * time.Second
 
-// The outcomes of one forwarded request, which design 017 counts.
+// The outcomes of one request a standby forwarded, which design 017 counts.
 const (
 	ForwardForwarded = "forwarded"
 	ForwardNoWriter  = "no_writer"
 	ForwardFailed    = "failed"
 )
 
-// ForwardOutcomes is the closed vocabulary of a forward's outcome.
-var ForwardOutcomes = []string{ForwardForwarded, ForwardNoWriter, ForwardFailed}
+// holdPoll is how often a held request looks again for somewhere to go.
+const holdPoll = 100 * time.Millisecond
 
-// writerPoll is how often a held request looks again for a writer, and how
-// long the writer's address is trusted before it is read again.
-const writerPoll = 100 * time.Millisecond
-
-// ForwarderOptions configures the forwarder a standby answers the API with.
+// ForwarderOptions configures the API slot of a process that may be a writer
+// or a standby (spec 076).
 type ForwarderOptions struct {
+	// Local serves the request in this process and reports whether it did,
+	// which is true once this process is the writer. Nil never serves here.
+	Local func(w http.ResponseWriter, r *http.Request) bool
+	// Changed returns a channel closed the next time Local may answer
+	// differently, so a held request is served the moment this process
+	// promotes rather than at its next poll. Nil polls only.
+	Changed func() <-chan struct{}
 	// Writer reads where the writer's public listener is reached, a URL
-	// such as http://10.0.0.7:8080, or empty when no replica holds the
-	// writer lease.
+	// such as http://10.0.0.7:8080, or empty where no other replica holds
+	// the writer lease. Nil never forwards.
 	Writer func(ctx context.Context) (string, error)
-	// Hold is how long a request waits for a writer it can reach before it
+	// Hold is how long a request waits for a replica to take it before it
 	// is refused. Zero takes DefaultForwardHold.
 	Hold time.Duration
 	// Counted records one forward by its outcome. Nil counts nothing.
@@ -57,37 +62,43 @@ type ForwarderOptions struct {
 	Log     *slog.Logger
 }
 
-// Forwarder is a standby's half of the API: every request goes to the writer
-// as it arrived, a WebSocket and a stream included, and the writer verifies,
-// authorizes and answers it. A standby verifies nothing itself, so a forwarded
-// request is decided exactly as a direct one. While no writer can be reached
-// the request is held, its body unread, and forwarded once one can; a dial
-// that fails is tried again inside the hold, and a request that reached a
-// writer is never sent twice.
+// Forwarder is the API slot of spec 076. A request is served here where this
+// process is the writer, and otherwise goes to the writer as it arrived, a
+// WebSocket and a stream included, and the writer verifies, authorizes and
+// answers it: a standby verifies nothing itself, so a forwarded request is
+// decided exactly as a direct one. While neither is possible the request is
+// held, its body unread, and routed again each poll until the hold ends. A
+// forward that could not connect sent nothing and is routed again; one that
+// reached a writer is never sent twice.
 type Forwarder struct {
-	writer  func(ctx context.Context) (string, error)
+	local   func(http.ResponseWriter, *http.Request) bool
+	changed func() <-chan struct{}
+	writer  func(context.Context) (string, error)
 	hold    time.Duration
 	counted func(string)
 	log     *slog.Logger
 	proxy   *httputil.ReverseProxy
-
-	mu     sync.Mutex
-	cached string
-	read   time.Time
 }
 
-// holdKey carries the instant a forwarded request's hold ends to the dialer,
-// and targetKey the writer's address the request was held for to the rewrite.
+// The context values a forward carries from the forwarder to the proxy's
+// rewrite, its dialer and its error handler.
 type (
-	holdKey   struct{}
-	targetKey struct{}
+	targetKey  struct{}
+	notSentKey struct{}
 )
 
-// NewForwarder builds the forwarder.
+// notConnected is a forward that reached no writer: nothing of the request
+// was sent, so it may be routed again.
+type notConnected struct{ err error }
+
+func (e *notConnected) Error() string { return "no connection to the writer: " + e.err.Error() }
+func (e *notConnected) Unwrap() error { return e.err }
+
+// NewForwarder builds the API slot.
 func NewForwarder(o ForwarderOptions) *Forwarder {
 	f := &Forwarder{
-		writer: o.Writer, hold: cmp.Or(o.Hold, DefaultForwardHold),
-		counted: o.Counted, log: cmp.Or(o.Log, slog.Default()),
+		local: o.Local, changed: o.Changed, writer: o.Writer,
+		hold: cmp.Or(o.Hold, DefaultForwardHold), counted: o.Counted, log: cmp.Or(o.Log, slog.Default()),
 	}
 	if f.counted == nil {
 		f.counted = func(string) {}
@@ -95,9 +106,9 @@ func NewForwarder(o ForwarderOptions) *Forwarder {
 	// Every forward dials afresh: a pooled connection to a writer that has
 	// since handed off would carry the next request to a process that is
 	// going away. One in-cluster handshake per request is the price.
-	transport := &http.Transport{DialContext: f.dial, DisableKeepAlives: true}
+	transport := &http.Transport{DialContext: dialTarget, DisableKeepAlives: true}
 	f.proxy = &httputil.ReverseProxy{
-		Rewrite:   f.rewrite,
+		Rewrite:   rewrite,
 		Transport: otel.Transport(transport),
 		ModifyResponse: func(*http.Response) error {
 			f.counted(ForwardForwarded)
@@ -112,27 +123,72 @@ func NewForwarder(o ForwarderOptions) *Forwarder {
 	return f
 }
 
-// ServeHTTP holds the request until a writer can be reached or the hold ends,
-// and forwards it.
+// ServeHTTP serves, forwards or holds one request.
 func (f *Forwarder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	id := requestID(r)
 	w.Header().Set(RequestIDHeader, id)
+	r.Header.Set(RequestIDHeader, id)
+	// The body is read by whichever answer the request gets. A forward
+	// whose dial failed read none of it, and the transport's close of it
+	// must not end it for the next attempt; the server closes it when the
+	// handler returns.
+	if r.Body != nil {
+		r.Body = io.NopCloser(r.Body)
+	}
 	deadline := time.Now().Add(f.hold)
-	target, err := f.await(r.Context(), deadline)
-	if err != nil {
+	for {
+		var changed <-chan struct{}
+		if f.changed != nil {
+			changed = f.changed()
+		}
+		if f.local != nil && f.local(w, r) {
+			return
+		}
+		if f.writer != nil {
+			target, err := f.writer(r.Context())
+			if err != nil {
+				f.log.WarnContext(r.Context(), "the writer lease could not be read", "err", err)
+			}
+			if target != "" && f.forward(w, r, target) {
+				return
+			}
+		}
 		if r.Context().Err() != nil {
 			return
 		}
-		f.counted(ForwardNoWriter)
-		f.log.WarnContext(r.Context(), "a request found no writer within the hold", "hold", f.hold, "err", err)
-		respondError(w, ErrNoWriter)
-		return
+		if time.Now().After(deadline) {
+			f.counted(ForwardNoWriter)
+			f.log.WarnContext(r.Context(), "a request found no replica to take it within the hold", "hold", f.hold.String())
+			respondError(w, ErrNoWriter)
+			return
+		}
+		timer := time.NewTimer(holdPoll)
+		select {
+		case <-r.Context().Done():
+			timer.Stop()
+			return
+		case <-changed:
+			timer.Stop()
+		case <-timer.C:
+		}
 	}
-	ctx := context.WithValue(context.WithValue(r.Context(), holdKey{}, deadline), targetKey{}, target)
-	out := r.WithContext(ctx)
-	out.Header = r.Header.Clone()
-	out.Header.Set(RequestIDHeader, id)
-	f.proxy.ServeHTTP(w, out)
+}
+
+// forward sends the request to one writer and reports whether it was sent. A
+// forward that could not connect wrote nothing and returns false, so the
+// caller routes the request again.
+func (f *Forwarder) forward(w http.ResponseWriter, r *http.Request, target string) bool {
+	var notSent atomic.Bool
+	ctx := context.WithValue(context.WithValue(r.Context(), targetKey{}, target), notSentKey{}, &notSent)
+	f.proxy.ServeHTTP(w, r.WithContext(ctx))
+	return !notSent.Load()
+}
+
+// RefuseNoWriter answers a request no replica could take within its hold, with
+// the request id it carried or one minted for it: 503 control_plane_unavailable.
+func RefuseNoWriter(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set(RequestIDHeader, requestID(r))
+	respondError(w, ErrNoWriter)
 }
 
 // rewrite points the request at the writer. The path is the one the caller
@@ -140,7 +196,7 @@ func (f *Forwarder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // before the API sees a request, and the writer's listener serves the same
 // base. The Host is the caller's, so the writer composes what it writes
 // under the address the caller used.
-func (f *Forwarder) rewrite(pr *httputil.ProxyRequest) {
+func rewrite(pr *httputil.ProxyRequest) {
 	target, _ := pr.In.Context().Value(targetKey{}).(string)
 	u, err := url.Parse(target)
 	if err != nil || u.Host == "" {
@@ -155,123 +211,46 @@ func (f *Forwarder) rewrite(pr *httputil.ProxyRequest) {
 	pr.SetXForwarded()
 }
 
-// dial connects to the writer the lease names now, whatever address the
-// request was rewritten to, and tries again until the request's hold ends: a
-// writer that just handed off refuses the connection, and its successor's
-// address appears in the lease a moment later.
-func (f *Forwarder) dial(ctx context.Context, network, _ string) (net.Conn, error) {
-	deadline, _ := ctx.Value(holdKey{}).(time.Time)
-	var dialer net.Dialer
-	for {
-		target, err := f.await(ctx, deadline)
-		if err != nil {
-			return nil, err
-		}
-		u, err := url.Parse(target)
-		if err != nil {
-			return nil, err
-		}
-		host := u.Host
-		if u.Port() == "" {
-			port := "80"
-			if u.Scheme == "https" {
-				port = "443"
-			}
-			host = net.JoinHostPort(u.Hostname(), port)
-		}
-		conn, err := dialer.DialContext(ctx, network, host)
-		if err == nil {
-			return conn, nil
-		}
-		f.forget()
-		if time.Now().After(deadline) || ctx.Err() != nil {
-			return nil, errors.Join(ErrNoWriter, err)
-		}
-		if err := sleepCtx(ctx, writerPoll); err != nil {
-			return nil, err
-		}
-	}
-}
-
-// await returns the writer's address, reading the lease each poll until one
-// appears, the deadline passes or the caller leaves.
-func (f *Forwarder) await(ctx context.Context, deadline time.Time) (string, error) {
-	for {
-		target := f.address()
-		var err error
-		if target == "" {
-			target, err = f.refresh(ctx)
-		}
-		if err == nil && target != "" {
-			return target, nil
-		}
-		if err != nil {
-			f.log.WarnContext(ctx, "the writer lease could not be read", "err", err)
-		}
-		if time.Now().After(deadline) {
-			return "", errors.Join(ErrNoWriter, err)
-		}
-		if err := sleepCtx(ctx, writerPoll); err != nil {
-			return "", err
-		}
-	}
-}
-
-// address is the writer's address as last read, while it is fresh, which
-// spares a lease read to every request of a burst.
-func (f *Forwarder) address() string {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.cached != "" && time.Since(f.read) < writerPoll {
-		return f.cached
-	}
-	return ""
-}
-
-// refresh reads the writer lease again.
-func (f *Forwarder) refresh(ctx context.Context) (string, error) {
-	target, err := f.writer(ctx)
+// dialTarget connects to the writer the request was routed to. A dial that
+// fails is notConnected: nothing was sent.
+func dialTarget(ctx context.Context, network, _ string) (net.Conn, error) {
+	target, _ := ctx.Value(targetKey{}).(string)
+	u, err := url.Parse(target)
 	if err != nil {
-		return "", err
+		return nil, &notConnected{err: err}
 	}
-	f.mu.Lock()
-	f.cached, f.read = target, time.Now()
-	f.mu.Unlock()
-	return target, nil
-}
-
-// forget drops the address a dial just failed on, so the next attempt reads
-// the lease again.
-func (f *Forwarder) forget() {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.cached = ""
+	host := u.Host
+	if u.Port() == "" {
+		port := "80"
+		if u.Scheme == "https" {
+			port = "443"
+		}
+		host = net.JoinHostPort(u.Hostname(), port)
+	}
+	var dialer net.Dialer
+	conn, err := dialer.DialContext(ctx, network, host)
+	if err != nil {
+		return nil, &notConnected{err: err}
+	}
+	return conn, nil
 }
 
 // failed answers a forward that did not complete. A caller that left is
-// answered nothing; any other failure is the writer gone, before or after the
+// answered nothing; a forward that reached no writer is left for the
+// forwarder to route again; any other failure is the writer gone after the
 // request reached it, and the caller's retry finds the next one.
 func (f *Forwarder) failed(w http.ResponseWriter, r *http.Request, err error) {
 	if r.Context().Err() != nil {
 		return
 	}
-	outcome := ForwardFailed
-	if errors.Is(err, ErrNoWriter) {
-		outcome = ForwardNoWriter
+	var unreached *notConnected
+	if errors.As(err, &unreached) {
+		if notSent, ok := r.Context().Value(notSentKey{}).(*atomic.Bool); ok {
+			notSent.Store(true)
+			return
+		}
 	}
-	f.counted(outcome)
+	f.counted(ForwardFailed)
 	f.log.WarnContext(r.Context(), "a forwarded request did not complete", "err", err)
 	respondError(w, ErrNoWriter)
-}
-
-// sleepCtx waits d or until ctx ends.
-func sleepCtx(ctx context.Context, d time.Duration) error {
-	timer := time.NewTimer(d)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	}
 }

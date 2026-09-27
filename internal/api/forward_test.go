@@ -172,8 +172,8 @@ func TestAStandbyForwardsEveryRoute(t *testing.T) {
 
 // TestAStandbyHoldsUntilAWriterIsPromoted: a request that reaches a standby
 // while no replica holds the writer lease waits, and is answered by the
-// writer once one is promoted; a dial the old writer refuses is tried again
-// against the successor the lease names next.
+// writer once one is promoted; a dial the old writer refuses sent nothing, and
+// the request goes whole to the successor the lease names next.
 func TestAStandbyHoldsUntilAWriterIsPromoted(t *testing.T) {
 	writer := newWriterStub(t)
 	gone, err := net.Listen("tcp", "127.0.0.1:0")
@@ -206,6 +206,13 @@ func TestAStandbyHoldsUntilAWriterIsPromoted(t *testing.T) {
 	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("the held request was answered %d", res.StatusCode)
+	}
+	var got map[string]string
+	if err := json.NewDecoder(res.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got["body"] != "held" {
+		t.Errorf("the writer read the body %q after a refused dial, want it whole", got["body"])
 	}
 	if waited := time.Since(started); waited < 250*time.Millisecond {
 		t.Errorf("the request was answered after %v, before a writer was promoted", waited)
@@ -281,5 +288,46 @@ func TestANotWriterRefusalIsControlPlaneUnavailable(t *testing.T) {
 			envelope.Message != "The control plane is unavailable; retry shortly." {
 			t.Errorf("%v answers %d %+v", err, status, envelope)
 		}
+	}
+}
+
+// TestAHeldRequestIsServedHereOnceThisProcessPromotes: a request a standby
+// holds while no other replica is the writer is answered by this process the
+// moment it promotes, not forwarded to itself and not refused at the hold.
+func TestAHeldRequestIsServedHereOnceThisProcessPromotes(t *testing.T) {
+	var serving atomic.Bool
+	changed := make(chan struct{})
+	f := NewForwarder(ForwarderOptions{
+		Hold:   5 * time.Second,
+		Writer: fixedWriter(""),
+		Local: func(w http.ResponseWriter, _ *http.Request) bool {
+			if !serving.Load() {
+				return false
+			}
+			_, _ = io.WriteString(w, "local")
+			return true
+		},
+		Changed: func() <-chan struct{} { return changed },
+	})
+	front := fronted(t, f)
+	time.AfterFunc(200*time.Millisecond, func() {
+		serving.Store(true)
+		close(changed)
+	})
+	started := time.Now()
+	res, err := http.Get(front.URL + "/v1/environments/echo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = res.Body.Close() }()
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != http.StatusOK || string(body) != "local" {
+		t.Errorf("the held request was answered %d %q, want this process's answer", res.StatusCode, body)
+	}
+	if waited := time.Since(started); waited > 2*time.Second {
+		t.Errorf("the held request waited %v after the promotion", waited)
 	}
 }

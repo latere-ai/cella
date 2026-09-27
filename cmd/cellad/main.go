@@ -15,6 +15,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -22,6 +23,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -267,13 +269,27 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		roots = loaded.PEM
 	}
 
+	// The stop signal ends ctx, and the process keeps working for a while
+	// after it: a writer hands off and every replica drains. What must
+	// outlive the signal, the store, identity, the loops, delivery and the
+	// servers, runs on run, which keeps the values and never ends.
+	run := context.WithoutCancel(ctx)
+
 	// Recovery may change runtime records. Own the state before opening the
 	// driver so a second process cannot mutate live workloads.
-	desired, lease, storeReady, journal, err := openStore(ctx, cfg)
+	desired, lease, storeReady, journal, err := openStore(run, cfg)
 	if err != nil {
 		return fail(stderr, err)
 	}
 	defer func() { _ = desired.Close() }()
+	// A store of spec 010 names one writer through the writer lease (spec
+	// 076). This process records where it is reached on every lease it takes,
+	// and every write of its controller is fenced on holding that lease, so a
+	// writer that lost it writes nothing after its successor read the rows.
+	bound, fenced := desired.(*store.Controlled)
+	if fenced {
+		bound.Advertise(cfg.Replicas.AdvertiseURL).Fence(store.WriterLease)
+	}
 	// Design 009's journal. Where desired state is design 010's store, the
 	// record of a mutation commits inside that mutation's own transaction
 	// and this is the same store read back. Where it is the local snapshot,
@@ -301,15 +317,15 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 
 	// The one registry of design 017. The pull gauges read an index that is
 	// already current: the controller's map of desired sandboxes, the hub's
-	// connection count, and the journal's backlog. Neither the controller
-	// nor the hub exists yet, so each closure reads a variable this function
-	// assigns below and the goroutines that serve a scrape are started after
-	// both, which is what orders the write before the read.
-	var control *controller.Controller
+	// connection count, and the journal's backlog. The controller exists
+	// only once this process is the writer, so each closure reads it through
+	// active and a standby reports none.
+	var active atomic.Pointer[controller.Controller]
 	registry := metrics.New(metrics.Options{
 		Environment: cfg.DefaultEnvironment,
 		Driver:      cfg.Runtime,
 		Sandboxes: func() map[string]int {
+			control := active.Load()
 			if control == nil {
 				return nil
 			}
@@ -320,12 +336,14 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 			return phaseCounts(phases)
 		},
 		Queues: func() []metrics.Series {
+			control := active.Load()
 			if control == nil {
 				return nil
 			}
 			return queueSeries(control.QueueDepths())
 		},
 		Capacity: func() []metrics.Series {
+			control := active.Load()
 			if control == nil {
 				return nil
 			}
@@ -336,7 +354,7 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 			// outlives the drain: a store that has stopped answering must
 			// not hold a scrape open, and a shutdown must not turn every
 			// remaining scrape into a warning.
-			read, cancel := context.WithTimeout(context.WithoutCancel(ctx), scrapeTimeout)
+			read, cancel := context.WithTimeout(run, scrapeTimeout)
 			defer cancel()
 			n, err := store.EventJournal(journal, delivery).Undelivered(read)
 			if err != nil {
@@ -348,13 +366,13 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	})
 	// The store measures itself where it is design 010's, which is the one
 	// that carries a transaction worth timing.
-	if bound, ok := desired.(*store.Controlled); ok {
+	if fenced {
 		bound.Measure(registry)
 	}
 	// Identity comes up before the listeners, so a deployment whose
 	// issuer or signing key is wrong fails to start rather than binding
 	// a port and refusing every request (spec 006).
-	identity, err := auth.Start(ctx, auth.Options{
+	identity, err := auth.Start(run, auth.Options{
 		Issuers:            cfg.OIDCIssuers,
 		Audience:           cfg.OIDCAudience,
 		Audiences:          cfg.OIDCAudiences,
@@ -398,7 +416,7 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	if err != nil {
 		return fail(stderr, err)
 	}
-	if err := runtimeDriver.Preflight(ctx); err != nil {
+	if err := runtimeDriver.Preflight(run); err != nil {
 		return fail(stderr, fmt.Errorf("runtime preflight: %w", err))
 	}
 	// The gateways of the environment connect to this hub, and the
@@ -411,55 +429,9 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		Metrics:     registry,
 	})
 	registry.WithGateways(hub.Connected)
-	if _, transactional := desired.(*store.Controlled); !transactional {
+	if !fenced {
 		controllerEvents = emitter
 	}
-	control, err = controller.Open(ctx, controller.Options{
-		Store: desired, Driver: runtimeDriver, Environment: cfg.DefaultEnvironment,
-		Lease: lease, ReapInterval: cfg.ReapInterval, TouchInterval: cfg.TouchInterval,
-		LostGrace: cfg.LostGrace, Events: controllerEvents, Tokens: tokens,
-		Retention: store.NewRetention(journal, cfg.Events.Retention),
-		Egress:    hub, Gateway: controller.GatewayAddresses{Proxy: cfg.Gateway.ProxyAddr, Reverse: cfg.Gateway.ReverseAddr},
-		Pool: cfg.Scheduling.Pool, PoolInFlight: cfg.Scheduling.PoolInFlight, PoolGrace: cfg.Scheduling.PoolGrace,
-		Capacity: cfg.Scheduling.Capacity.Sandboxes, CapacityQuantities: cfg.Scheduling.Capacity,
-		SchedulingMode: cfg.Scheduling.Mode, ScheduleInterval: cfg.Scheduling.ScheduleInterval, MaxPreemptions: cfg.Scheduling.MaxPreemptions,
-		EnvironmentOffline: cfg.EnvironmentOffline,
-		// The driver of an environment a worker serves is the remote driver
-		// over the stream that worker opened. The controller holds no
-		// transport of its own, which is what keeps it from dialing one.
-		NewDriver: func(obj v1.Environment) (runtime.Driver, error) {
-			id := obj.Status.ID
-			return remote.New(remote.Options{Environment: id, Transport: workers.Transport(id)})
-		},
-		ReleaseDriver: func(obj v1.Environment) { workers.Release(obj.Status.ID) },
-		Registrations: api.WorkerRegistrations(workers),
-		Metrics:       registry,
-	})
-	if err != nil {
-		return fail(stderr, fmt.Errorf("controller: %w", err))
-	}
-	// A gateway that connects to a control plane that has just restarted
-	// receives every live sandbox's map, with the credential that sandbox
-	// already holds, rather than an empty world.
-	hub.Seed(control.EgressMaps(ctx))
-	// The reaper is this process's clock: one tick applies the lifecycle
-	// rules to the environment cellad drives (spec 005). One cellad is the
-	// only writer of its environment, so it holds its own lease. The refill
-	// loop ticks beside it under a lease of its own, keeping the
-	// environment's pool at the size an operator asked for (spec 020).
-	loopCtx, cancelLoops := context.WithCancel(ctx)
-	loopsDone := make(chan struct{})
-	go func() {
-		defer close(loopsDone)
-		var loops sync.WaitGroup
-		loops.Go(func() { control.RunReaper(loopCtx) })
-		loops.Go(func() { control.RunPool(loopCtx) })
-		loops.Go(func() { control.RunEnvironments(loopCtx) })
-		loops.Go(func() { control.RunScheduler(loopCtx) })
-		loops.Wait()
-	}()
-	stopLoops := sync.OnceFunc(func() { cancelLoops(); <-loopsDone })
-	defer stopLoops()
 	// Stage 3 of every resolve: the operator's endpoint where one is
 	// configured, and the identity step where none is (spec 007).
 	admit, err := admissionStep(cfg, registry)
@@ -475,23 +447,126 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	if err := os.MkdirAll(spool, 0o750); err != nil {
 		return fail(stderr, fmt.Errorf("creating the upload spool directory: %w", err))
 	}
-	// feedsEnd closes when the public server's shutdown begins, which ends
-	// every following feed of design 009: a stream that never ends on its
-	// own would otherwise hold the shutdown for the whole grace period.
-	feedsEnd := make(chan struct{})
-	handler, err := api.New(api.Options{
-		Draining:   feedsEnd,
-		Controller: control, Verifier: identity.Verifier, Authorizer: identity.Authorizer,
-		MaxBodyBytes: cfg.MaxBodyBytes, MaxUploadBytes: cfg.MaxUploadBytes, SpoolDir: spool,
-		Egress: hub, Events: emitter, Keys: keys, Workers: workers,
-		Admit: admit, Defaults: manifest.Defaults{Image: cfg.Admission.DefaultImage},
-		Metrics: registry, PublicPath: cfg.PublicPath,
-	})
-	if err != nil {
-		return fail(stderr, fmt.Errorf("API: %w", err))
+	// apiDrain closes when this process stops answering the API: a writer
+	// handing off, or a single process stopping. It ends every following
+	// feed of design 009, answers every held create, and closes every
+	// WebSocket with 1001, so none holds the stop for its grace period.
+	apiDrain := make(chan struct{})
+	closeAPIDrain := sync.OnceFunc(func() { close(apiDrain) })
+
+	// The API slot of the public listener. A process with the store of spec
+	// 010 is a standby until it holds the writer lease: it forwards every
+	// request to the writer the lease names, and holds a request while
+	// none can be reached. A process with the local snapshot is the only
+	// one and serves at once.
+	sw := newRoleSwitch()
+	slot := api.ForwarderOptions{
+		Local: sw.serveLocally, Changed: sw.watch, Hold: cfg.Replicas.ForwardHold,
+		Counted: registry.Forwarded, Log: tel.log,
 	}
+	if fenced {
+		slot.Writer = (&writerLookup{bound: bound}).address
+	}
+	forwarder := api.NewForwarder(slot)
+
+	// promote is today's start of a writer, run once this process may be
+	// one: the controller loads every row, the gateways are handed every
+	// map, the loops start and the API answers. On the local snapshot it
+	// runs before the listeners; with the store of spec 010 it runs when
+	// the writer lease is taken.
+	// stopLoops ends the loops a promotion started. The promotion runs on
+	// the goroutine that took the lease, so the function is read and
+	// written through an atomic pointer.
+	var (
+		writer   atomic.Bool
+		loopStop atomic.Pointer[func()]
+	)
+	stopLoops := func() {
+		if stop := loopStop.Load(); stop != nil {
+			(*stop)()
+		}
+	}
+	promote := func() error {
+		started := time.Now()
+		control, err := controller.Open(run, controller.Options{
+			Store: desired, Driver: runtimeDriver, Environment: cfg.DefaultEnvironment,
+			Lease: lease, ReapInterval: cfg.ReapInterval, TouchInterval: cfg.TouchInterval,
+			LostGrace: cfg.LostGrace, Events: controllerEvents, Tokens: tokens,
+			Retention: store.NewRetention(journal, cfg.Events.Retention),
+			Egress:    hub, Gateway: controller.GatewayAddresses{Proxy: cfg.Gateway.ProxyAddr, Reverse: cfg.Gateway.ReverseAddr},
+			// A writer just promoted holds no gateway until its
+			// predecessor's gateways reconnect, so a boundary that needs
+			// one waits up to the acknowledgment's bound (spec 076).
+			GatewayGrace: cfg.Gateway.AckTimeout,
+			Pool:         cfg.Scheduling.Pool, PoolInFlight: cfg.Scheduling.PoolInFlight, PoolGrace: cfg.Scheduling.PoolGrace,
+			Capacity: cfg.Scheduling.Capacity.Sandboxes, CapacityQuantities: cfg.Scheduling.Capacity,
+			SchedulingMode: cfg.Scheduling.Mode, ScheduleInterval: cfg.Scheduling.ScheduleInterval, MaxPreemptions: cfg.Scheduling.MaxPreemptions,
+			EnvironmentOffline: cfg.EnvironmentOffline,
+			// The driver of an environment a worker serves is the remote
+			// driver over the stream that worker opened. The controller
+			// holds no transport of its own, which is what keeps it from
+			// dialing one.
+			NewDriver: func(obj v1.Environment) (runtime.Driver, error) {
+				id := obj.Status.ID
+				return remote.New(remote.Options{Environment: id, Transport: workers.Transport(id)})
+			},
+			ReleaseDriver: func(obj v1.Environment) { workers.Release(obj.Status.ID) },
+			Registrations: api.WorkerRegistrations(workers),
+			Metrics:       registry,
+		})
+		if err != nil {
+			return fmt.Errorf("controller: %w", err)
+		}
+		// A gateway that connects to a control plane that has just
+		// restarted, or just been promoted, receives every live sandbox's
+		// map, with the credential that sandbox already holds, rather than
+		// an empty world.
+		hub.Seed(control.EgressMaps(run))
+		handler, err := api.New(api.Options{
+			Draining:   apiDrain,
+			Controller: control, Verifier: identity.Verifier, Authorizer: identity.Authorizer,
+			MaxBodyBytes: cfg.MaxBodyBytes, MaxUploadBytes: cfg.MaxUploadBytes, SpoolDir: spool,
+			Egress: hub, Events: emitter, Keys: keys, Workers: workers,
+			Admit: admit, Defaults: manifest.Defaults{Image: cfg.Admission.DefaultImage},
+			Metrics: registry, PublicPath: cfg.PublicPath,
+		})
+		if err != nil {
+			return fmt.Errorf("API: %w", err)
+		}
+		// The reaper is this process's clock: one tick applies the
+		// lifecycle rules to the environments this control plane drives
+		// (spec 005). Each loop still takes the lease of its own name,
+		// which only the writer asks for. The refill loop ticks beside it,
+		// keeping each environment's pool at the size an operator asked
+		// for (spec 020).
+		loopCtx, cancelLoops := context.WithCancel(run)
+		loopsDone := make(chan struct{})
+		go func() {
+			defer close(loopsDone)
+			var loops sync.WaitGroup
+			loops.Go(func() { control.RunReaper(loopCtx) })
+			loops.Go(func() { control.RunPool(loopCtx) })
+			loops.Go(func() { control.RunEnvironments(loopCtx) })
+			loops.Go(func() { control.RunScheduler(loopCtx) })
+			loops.Wait()
+		}()
+		stop := sync.OnceFunc(func() { cancelLoops(); <-loopsDone })
+		loopStop.Store(&stop)
+		active.Store(control)
+		writer.Store(true)
+		sw.promoted(handler)
+		if fenced {
+			registry.LeaseHeld(metrics.LeaseWriter, true)
+		}
+		tel.log.InfoContext(run, "this process is the writer", "took", time.Since(started).String(),
+			"store", recovery(cfg, control), "advertise", cfg.Replicas.AdvertiseURL)
+		return nil
+	}
+	defer stopLoops()
+
 	// Delivery runs on the replica holding the journal lease, so a replica
-	// set posts each record once (spec 009).
+	// set posts each record once (spec 009). It holds no controller state,
+	// so a standby may deliver as well as the writer.
 	stopDelivery := func() {}
 	if cfg.Events.Enabled() {
 		deliverer, err := events.NewDeliverer(events.DelivererOptions{
@@ -503,14 +578,27 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		if err != nil {
 			return fail(stderr, err)
 		}
-		deliveryCtx, cancelDelivery := context.WithCancel(ctx)
+		deliveryCtx, cancelDelivery := context.WithCancel(run)
 		deliveryDone := make(chan struct{})
 		go func() { defer close(deliveryDone); deliverer.Run(deliveryCtx) }()
 		stopDelivery = sync.OnceFunc(func() { cancelDelivery(); <-deliveryDone })
 		defer stopDelivery()
 	}
 
+	// The local snapshot has one process and no lease to wait for: it
+	// promotes now, and a controller that cannot open fails the start as it
+	// always did.
+	if !fenced {
+		if err := promote(); err != nil {
+			return fail(stderr, err)
+		}
+	}
+
 	draining := make(chan struct{})
+	// Readiness is whether this process can serve, never whether it holds
+	// the writer lease: a rolling update starts a new process and waits for
+	// it to be ready before it stops an old one, and the old writer holds
+	// the lease until it stops (spec 076).
 	checks := []health.Check{
 		{Name: "draining", Run: notDraining(draining)},
 		{Name: "disk", Run: diskWritable(cfg.DataDir)},
@@ -543,7 +631,7 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		// inbound traceparent joins the caller's trace at this one seam.
 		// The route wrapper behind the mux renames the span once the
 		// pattern is known.
-		api: otel.Handler(handler, "cellad"),
+		api: otel.Handler(forwarder, "cellad"),
 		// The key set every workload token and environment key verifies
 		// against, so a platform or a third service trusts a sandbox
 		// without asking cellad (spec 006).
@@ -569,17 +657,18 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		_ = publicLn.Close()
 		return fail(stderr, fmt.Errorf("CELLA_INTERNAL_ADDR: %w", err))
 	}
+	state := "store=postgres role=standby"
+	if control := active.Load(); control != nil {
+		state = recovery(cfg, control)
+	}
 	_, _ = fmt.Fprintf(stdout, "cellad: %s listening public=%s internal=%s runtime=%s issuers=%d authorizer=%s admission=%s %s telemetry=%s base=%s\n",
 		version.Version, publicLn.Addr(), internalLn.Addr(), cfg.Runtime, len(cfg.OIDCIssuers), identity.Mode,
-		cfg.Admission.Mode(), recovery(cfg, control), tel.mode, cmp.Or(cfg.BasePath, "/"))
+		cfg.Admission.Mode(), state, tel.mode, cmp.Or(cfg.BasePath, "/"))
 
 	servers := []*http.Server{
 		{Handler: public, ReadHeaderTimeout: 10 * time.Second},
 		{Handler: internal, ReadHeaderTimeout: 10 * time.Second},
 	}
-	// Shutdown runs this once it has closed the listeners, so no feed opens
-	// after the ones open now were told to end.
-	servers[0].RegisterOnShutdown(sync.OnceFunc(func() { close(feedsEnd) }))
 	errc := make(chan error, len(servers))
 	for i, ln := range []net.Listener{publicLn, internalLn} {
 		go func(s *http.Server, ln net.Listener) {
@@ -589,17 +678,107 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		}(servers[i], ln)
 	}
 
+	// With the store of spec 010 this process waits for the writer lease and
+	// promotes once it holds it, then renews it for as long as it is the
+	// writer. Losing it is an exit: the process comes back as a standby, and
+	// the fence refuses whatever its controller tries to write until then.
+	demoted := make(chan error, 1)
+	stopAcquire := make(chan struct{})
+	acquireDone := make(chan struct{})
+	stopWatch := make(chan struct{})
+	watchDone := make(chan struct{})
+	// The renewal is stopped after the wait for the lease has ended, which
+	// is what closes watchDone where no renewal ever started; the defers
+	// run in the reverse of this order.
+	endWatch := sync.OnceFunc(func() {
+		close(stopWatch)
+		<-watchDone
+	})
+	defer endWatch()
+	// However serve returns, the goroutine that waits for the lease is
+	// stopped and waited for, so no promotion outlives the process's serve.
+	endAcquire := sync.OnceFunc(func() {
+		close(stopAcquire)
+		<-acquireDone
+	})
+	defer endAcquire()
+	if fenced {
+		go func() {
+			defer close(acquireDone)
+			if !awaitWriterLease(run, bound, stopAcquire, tel.log) {
+				close(watchDone)
+				return
+			}
+			select {
+			case <-stopAcquire:
+				// The stop came while the lease was being taken: this
+				// process does not promote, and hands the lease back.
+				if err := bound.ReleaseAll(run); err != nil {
+					tel.log.WarnContext(run, "the writer lease taken during the stop was not released", "err", err)
+				}
+				close(watchDone)
+				return
+			default:
+			}
+			if err := promote(); err != nil {
+				close(watchDone)
+				demoted <- err
+				return
+			}
+			go func() {
+				defer close(watchDone)
+				if err := watchWriterLease(run, bound, controller.LeaseTTL, stopWatch, tel.log); err != nil {
+					registry.LeaseHeld(metrics.LeaseWriter, false)
+					demoted <- err
+				}
+			}()
+		}()
+	} else {
+		close(acquireDone)
+		close(watchDone)
+	}
+
 	select {
 	case <-ctx.Done():
 	case err := <-errc:
 		return fail(stderr, err)
+	case err := <-demoted:
+		// A writer that lost its lease stops acting at once and exits, and
+		// a process whose promotion failed exits the same way.
+		sw.stopServing()
+		closeAPIDrain()
+		stopLoops()
+		stopDelivery()
+		for _, s := range servers {
+			_ = s.Close()
+		}
+		return fail(stderr, err)
 	}
-	// The stop signal has fired, so the shutdown runs on a context that
-	// keeps the request's values and outlives its cancellation.
+	// The stop signal has fired. A standby stops looking for the lease
+	// first, so a process on its way out never becomes the writer.
 	close(draining)
-	stopping := context.WithoutCancel(ctx)
-	sleepCtx(stopping, drainDelay)
-	shutdownCtx, cancel := context.WithTimeout(stopping, gracePeriod)
+	endAcquire()
+	if writer.Load() && fenced {
+		// The writer keeps serving through the drain delay, while the load
+		// balancer takes it out of rotation and the standbys forward to it,
+		// and then hands off before it drains (spec 076).
+		sleepCtx(run, drainDelay)
+		handoff(run, handoffSteps{
+			stopServing: sw.stopServing, drainAPI: closeAPIDrain, drainGateways: hub.Drain,
+			waitRequests: func() int { return sw.drain(cfg.Replicas.HandoffTimeout) },
+			stopWatch:    endWatch,
+			stopLoops:    stopLoops, stopDelivery: stopDelivery,
+			release: func(ctx context.Context) error {
+				err := bound.ReleaseAll(ctx)
+				registry.LeasesReleased()
+				return err
+			},
+		}, tel.log)
+	} else {
+		sleepCtx(run, drainDelay)
+		closeAPIDrain()
+	}
+	shutdownCtx, cancel := context.WithTimeout(run, gracePeriod)
 	defer cancel()
 	for _, s := range servers {
 		_ = s.Shutdown(shutdownCtx)
@@ -612,6 +791,42 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		return fail(stderr, fmt.Errorf("runtime shutdown: %w", err))
 	}
 	return 0
+}
+
+// handoffSteps are the acts of one handoff, in the order handoff runs them.
+type handoffSteps struct {
+	stopServing   func()
+	drainAPI      func()
+	drainGateways func()
+	waitRequests  func() int
+	stopWatch     func()
+	stopLoops     func()
+	stopDelivery  func()
+	release       func(context.Context) error
+}
+
+// handoff is a writer giving its place to a standby (spec 076): it stops
+// answering requests itself, so new ones are held for the successor; it ends
+// what would outlast the handoff, the held creates, the following feeds and
+// every socket, and closes its gateways' streams so they dial the next
+// writer; it waits for the requests in flight up to the handoff timeout and
+// cuts the rest; it stops renewing the writer lease, stops its loops and its
+// delivery; and it releases every lease it holds, the writer's last. A
+// standby promotes within its poll of the lease, and the requests this
+// process holds are forwarded to it.
+func handoff(ctx context.Context, s handoffSteps, log *slog.Logger) {
+	started := time.Now()
+	s.stopServing()
+	s.drainAPI()
+	s.drainGateways()
+	cut := s.waitRequests()
+	s.stopWatch()
+	s.stopLoops()
+	s.stopDelivery()
+	if err := s.release(ctx); err != nil {
+		log.WarnContext(ctx, "a lease was not released at the handoff; its term lapses instead", "err", err)
+	}
+	log.InfoContext(ctx, "this process handed off the writer lease", "took", time.Since(started).String(), "cut", cut)
 }
 
 // openRuntime opens the backend CELLA_RUNTIME selects and returns it with
