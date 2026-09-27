@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.9.1 - 2026-09-27
+
 ### Security
 
 - The egress gateway refuses a request inside a terminated tunnel whose
