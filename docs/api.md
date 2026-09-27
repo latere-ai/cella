@@ -142,6 +142,7 @@ code in the `X-Cella-Error` trailer.
 | `authorizer_unavailable` | 503 | the authorization endpoint gave no decision; nothing was allowed |
 | `admission_unavailable` | 503 | the admission endpoint gave no answer; nothing was created |
 | `egress_gateway_unavailable` | 503 | the manifest's egress boundary needs a gateway and none is connected; connect one, or set `spec.network.egress.mode` to `open` with no denied host and no mounted secret |
+| `control_plane_unavailable` | 503 | no replica of the control plane could take the request, which happens for a moment while one replica hands off to another; retry |
 | `driver_unavailable` | 503 | the environment's runtime did not answer |
 
 ## Routes

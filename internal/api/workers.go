@@ -153,6 +153,7 @@ func (h *handler) workerStream(w http.ResponseWriter, r *http.Request, environme
 		_ = conn.Close()
 		return
 	}
+	defer h.goingAway(conn)()
 	_ = h.Workers.Serve(r.Context(), environment, newWorkerSocket(conn))
 }
 

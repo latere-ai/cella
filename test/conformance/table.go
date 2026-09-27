@@ -52,5 +52,6 @@ var errorTable = map[string]row{
 	"authorizer_unavailable":     {503, "The permission service is unavailable; retry shortly."},
 	"driver_unavailable":         {503, "The environment is unavailable; retry shortly."},
 	"egress_gateway_unavailable": {503, "No gateway is connected to enforce this sandbox's egress boundary; connect one, or open the boundary."},
+	"control_plane_unavailable":  {503, "The control plane is unavailable; retry shortly."},
 	"upstream_unavailable":       {502, "Nothing is listening on that port."},
 }

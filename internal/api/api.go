@@ -88,10 +88,13 @@ type Options struct {
 	// place of /v1, so a caller that reached the control plane under a
 	// prefix is sent to a path under the same prefix.
 	PublicPath string
-	// Draining closes when the server stops taking requests. Every
-	// following feed of design 009 ends when it does, so a shutdown does not
-	// wait out its grace period for streams that would never end on their
-	// own. Nil ends them only when their callers leave.
+	// Draining closes when the server stops taking requests, which is a
+	// shutdown or a writer handing off to another replica (spec 076). Every
+	// following feed of design 009 ends when it does, a held create answers
+	// the sandbox as it stands, and every WebSocket this handler holds is
+	// closed with 1001, going away, so neither waits out a grace period for
+	// streams that would never end on their own. Nil ends them only when
+	// their callers leave.
 	Draining <-chan struct{}
 	// FollowLimit is how many following feeds this process holds open at
 	// once, and FollowHeartbeat how long one stays silent before it writes
@@ -578,6 +581,8 @@ func (h *handler) awaitStart(ctx context.Context, obj v1.Sandbox, timeout time.D
 		select {
 		case <-ctx.Done():
 			return obj, nil
+		case <-h.Draining:
+			return obj, nil
 		case <-changed:
 		case <-tick.C:
 		}
@@ -959,6 +964,8 @@ func errorEnvelope(err error, requestID string) (int, httpjson.Error) {
 		code = "capability_unsupported"
 	case errors.Is(err, controller.ErrNoGateway):
 		code = "egress_gateway_unavailable"
+	case errors.Is(err, controller.ErrNotWriter), errors.Is(err, ErrNoWriter):
+		code = "control_plane_unavailable"
 	}
 	switch code {
 	case "unauthenticated":
@@ -1039,6 +1046,9 @@ func errorEnvelope(err error, requestID string) (int, httpjson.Error) {
 	case "egress_gateway_unavailable":
 		status = 503
 		message = "No gateway is connected to enforce this sandbox's egress boundary; connect one, or open the boundary."
+	case "control_plane_unavailable":
+		status = 503
+		message = "The control plane is unavailable; retry shortly."
 	case "missing_field":
 		status = 400
 		message = "A required field is missing."

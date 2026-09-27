@@ -299,6 +299,7 @@ func (h *handler) screen(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { _ = conn.Close() }()
+	defer h.goingAway(conn)()
 	h.touch(r, obj)
 	h.pump(r, conn, obj, frames)
 }

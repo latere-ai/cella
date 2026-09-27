@@ -57,6 +57,10 @@ type EgressHub struct {
 	records map[string][]egress.Record
 	metrics Metrics
 	ca      string
+	// drain closes when a writer hands off (spec 076): every gateway
+	// stream is closed with 1001 so the gateway dials the next writer.
+	drain     chan struct{}
+	drainOnce sync.Once
 }
 
 // EgressHubOptions configures the hub.
@@ -88,6 +92,7 @@ func NewEgressHub(o EgressHubOptions) *EgressHub {
 		waiters:     map[*ackWaiter]struct{}{},
 		records:     map[string][]egress.Record{},
 		metrics:     cmp.Or(o.Metrics, Metrics(nopMetrics{})),
+		drain:       make(chan struct{}),
 	}
 	if h.ackTimeout <= 0 {
 		h.ackTimeout = DefaultAckTimeout
@@ -100,6 +105,11 @@ func NewEgressHub(o EgressHubOptions) *EgressHub {
 	}
 	return h
 }
+
+// Drain closes every gateway stream with 1001, going away, and every one that
+// opens after, which a writer handing off to another replica does so its
+// gateways dial the next writer at once (spec 076).
+func (h *EgressHub) Drain() { h.drainOnce.Do(func() { close(h.drain) }) }
 
 // Seed replaces the hub's set of maps with what desired state says. It runs
 // once at start-up, before the listeners, so the first gateway to connect
@@ -456,6 +466,9 @@ func (h *EgressHub) writePump(ctx context.Context, conn *websocket.Conn, c *gate
 		case <-ctx.Done():
 			return
 		case <-c.done:
+			return
+		case <-h.drain:
+			closeGoingAway(conn)
 			return
 		case f := <-c.out:
 			if !writeFrame(conn, f) {

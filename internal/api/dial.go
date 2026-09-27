@@ -106,6 +106,7 @@ func (h *handler) dial(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { _ = conn.Close() }()
+	defer h.goingAway(conn)()
 	writer := &frameWriter{conn: conn}
 	ctx, cancel := context.WithTimeout(r.Context(), dialTimeout)
 	inside, err := dialer.Dial(ctx, obj.Status.ID, int(port))

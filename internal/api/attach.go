@@ -118,6 +118,7 @@ func (h *handler) socket(w http.ResponseWriter, r *http.Request, terminal bool) 
 		return
 	}
 	defer func() { _ = conn.Close() }()
+	defer h.goingAway(conn)()
 	h.touch(r, obj)
 	h.session(r, conn, obj, terminal, requestID)
 }
@@ -413,4 +414,32 @@ func (h *handler) applyFrame(r *http.Request, w *frameWriter, stream runtime.Ses
 		h.touch(r, obj)
 	}
 	return true
+}
+
+// goingAway closes one socket with 1001, going away, when the handler drains,
+// and returns the function that stops watching it. A socket that ends on its
+// own first is left to its own close.
+func (h *handler) goingAway(conn *websocket.Conn) (stop func()) {
+	if h.Draining == nil {
+		return func() {}
+	}
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-h.Draining:
+			closeGoingAway(conn)
+		case <-done:
+		}
+	}()
+	return sync.OnceFunc(func() { close(done) })
+}
+
+// closeGoingAway tells the peer the server is leaving and closes the socket.
+// The close frame is a control frame, which gorilla lets a second goroutine
+// write beside the one that writes the stream.
+func closeGoingAway(conn *websocket.Conn) {
+	_ = conn.WriteControl(websocket.CloseMessage,
+		websocket.FormatCloseMessage(websocket.CloseGoingAway, "the control plane is handing off; reconnect"),
+		time.Now().Add(time.Second))
+	_ = conn.Close()
 }
