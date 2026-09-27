@@ -1,12 +1,11 @@
 # SPDX-FileCopyrightText: 2026 Latere AI
 # SPDX-License-Identifier: Apache-2.0
 #
-# The control plane. One replica, because the store of spec 010 elects one
-# writer through its leases table: a second replica takes no lease, runs no
-# reaper, and spends connections against the ceiling the database shares.
-# Recreate rather than RollingUpdate for the same reason, and because an
-# installation with no database keeps its desired state on this Pod's own
-# disk, where two processes must never meet.
+# The control plane. One replica with Recreate, because an installation with
+# no database keeps its desired state on this Pod's own disk, where two
+# processes must never meet. With CELLA_DB_URL an overlay may run more: one
+# replica is the writer, the others forward the API to it, and a writer that
+# is stopped hands off to a standby (docs/kubernetes.md).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -30,7 +29,8 @@ spec:
       serviceAccountName: cellad
       automountServiceAccountToken: true
       # Spec 002's shutdown: readiness answers 503 at once, a 3 second
-      # drain delay, then 60 seconds of grace for the open streams.
+      # drain delay, a writer's handoff of at most CELLA_HANDOFF_TIMEOUT (10
+      # seconds), then 60 seconds of grace for the open streams.
       terminationGracePeriodSeconds: 90
       securityContext:
         runAsNonRoot: true

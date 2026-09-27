@@ -1,6 +1,6 @@
 ---
 title: "Rolling replicas: one writer lease gates the controller, every replica answers the API by forwarding to the writer, the lease is handed off on SIGTERM, and readiness means can serve"
-status: drafted
+status: complete
 track: core
 depends_on:
   - specs/005-lifecycle-controller.md
@@ -15,7 +15,7 @@ depends_on:
 affects: [cmd/cellad/, controller/, internal/store/, internal/api/, internal/egressd/, internal/worker/, internal/config/, deploy/, docs/kubernetes.md, docs/configuration.md]
 effort: large
 created: 2026-09-26
-updated: 2026-09-26
+updated: 2026-09-27
 author: changkun
 ---
 
@@ -154,18 +154,22 @@ goes through a reverse proxy to the writer's `address`:
   already a proxy's for a request that came through an ingress, so the
   standby's address in its place loses nothing.
 - WebSocket upgrades are proxied as a byte stream after the upgrade.
-- The writer's address is read from the `writer` row and cached until the
-  row's expiry, and read again when a forward fails to connect.
+- The writer's address is read from the `writer` row, trusted for 100
+  milliseconds so a burst of held requests costs one read each poll. A row
+  whose term lapsed, one this process holds itself, and one whose holder
+  advertises no address name no writer to forward to.
 - When no process holds `writer`, or the forward cannot connect, the
-  request is held, not failed: its body is not read, and it is forwarded
-  once a writer's row appears, for at most `CELLA_FORWARD_HOLD` (default
-  15s). A forward that failed to connect is retried; one that reached the
-  writer is never retried, since the writer may have acted on it. At the
-  bound the answer is 503. Whether that is `driver_unavailable` or a new
-  code, `control_plane_unavailable` with the sentence "The control plane is
-  unavailable; retry shortly.", is a decision for review: a new code is
-  one more row in design 008's table and the conformance error table, and
-  says what happened.
+  request is held, not failed: its body is not read, and it is routed again
+  each 100 milliseconds, for at most `CELLA_FORWARD_HOLD` (default 15s). A
+  forward that failed to connect sent nothing and is routed again; one that
+  reached the writer is never retried, since the writer may have acted on
+  it. At the bound the answer is 503 `control_plane_unavailable`, with the
+  sentence "The control plane is unavailable; retry shortly.", a row of
+  design 008's table and of the conformance error table.
+- One handler, the API slot, does all of it: it asks this process first,
+  which answers once it promoted and until it hands off, then forwards to
+  the writer the lease names, then holds. A standby that promotes while it
+  holds requests serves them itself.
 - A standby tries to take `writer` every second. It reads the row first
   and attempts the conditional upsert only when the row is absent or its
   term lapsed, so a standby's poll takes no row lock while a writer holds
@@ -381,17 +385,20 @@ this design is therefore a Recreate, and every rollout after it is rolling.
   it the ReplicaSet may remove the writer first and then the standby it
   handed off to, which is two handoffs in one rollout. Writing it needs
   the Pod's name from the downward API and `patch` on Pods in the
-  control plane's namespace.
+  control plane's namespace; it is not built.
 
 ### Configuration and observation
 
-New variables, entered in spec 002's table when built:
-`CELLA_ADVERTISE_URL`, `CELLA_FORWARD_HOLD` and `CELLA_HANDOFF_TIMEOUT`.
-Design 017 gains `writer` as a value of the `cella_lease_held` gauge's
-lease label, a count of forwarded requests by outcome (forwarded, held
-past the bound, failed after connecting) and the duration of each
-promotion, with an alert when no replica has held `writer` for a minute.
-`cellad check` reports the role and, for a standby, the writer's address.
+New variables, in spec 002's table: `CELLA_ADVERTISE_URL`, an http or
+https URL with a host and no path, which needs `CELLA_DB_URL`;
+`CELLA_FORWARD_HOLD` and `CELLA_HANDOFF_TIMEOUT`, each positive and at most
+five minutes. Design 017 gains `writer` as a value of the
+`cella_lease_held` gauge's name label and
+`cella_forwarded_requests_total` by outcome (`forwarded`, `no_writer`,
+`failed`). The lease alert reads the replica set as one,
+`max by (name) (cella_lease_held) == 0`: a standby holds no lease, so one
+replica not holding it is the ordinary case and none holding it is the
+alert. A promotion logs how long it took.
 
 ## Open risks
 
@@ -405,7 +412,7 @@ promotion, with an alert when no replica has held `writer` for a minute.
 | A standby cannot reach the writer's address while the writer holds the lease, for a network policy that omits replica-to-replica traffic | requests are held and then refused at the bound, and the forwarded-request count shows it; the plane requirement above |
 | A migration that is not expand-only reaches a rolling window | the migration test |
 | The first rollout onto this design is rolling instead of Recreate | the release note and the plane's own procedure say Recreate |
-| The hold is a window in which a request waits instead of failing fast | `CELLA_FORWARD_HOLD` is configurable, and zero refuses at once |
+| The hold is a window in which a request waits instead of failing fast | `CELLA_FORWARD_HOLD` is configurable down to one second |
 
 ## Not in this spec
 
@@ -420,15 +427,45 @@ promotion, with an alert when no replica has held `writer` for a minute.
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| A standby forwards every API route to the writer, the environment key routes and every WebSocket included, and serves the probes, `/metrics`, `/version`, the document and the key set itself | `TestAStandbyForwardsEveryRoute` | not built |
-| A request that reaches a standby with no writer is held and answered once one is promoted; one held past `CELLA_FORWARD_HOLD` is refused with 503; a forward that reached the writer is not retried | `TestAStandbyHoldsUntilAWriterIsPromoted`, `TestAHoldPastTheBoundIsRefused` | not built |
-| Promotion loads what the previous writer wrote and serves it | `TestPromotionReadsThePreviousWritersRows` | not built |
-| On SIGTERM the writer stops executing, ends holds and streams, waits the bound, stops the loops and releases `writer` before its server shutdown ends; a standby promotes within its poll | `TestSIGTERMHandsOffBeforeTheDrain` | not built |
-| A writer that lost `writer` cannot write, and a takeover waits for a write in flight | `TestADemotedWriterCannotWrite` | not built |
-| A writer that loses the lease to another holder, or renews nothing for the term, exits non-zero; one failed renewal does not | `TestLosingTheWriterLeaseExits` | not built |
-| Readiness is the same in both roles and does not read the lease | `TestReadinessDoesNotReadTheLease` | not built |
-| The reaper finishes a `Deleting` row: it deletes an object the driver still has, and forgets a row whose object the driver no longer has | `TestTheReaperFinishesAnInterruptedDelete` | not built |
-| A gateway and a worker whose long-lived stream dropped dial again after the minimum backoff | `TestAGatewayRedialsAtOnceAfterALongStream`, `TestAWorkerRedialsAtOnceAfterALongStream` | not built |
-| A create that needs a gateway right after a promotion waits for one to connect | `TestACreateWaitsForAGatewayAfterPromotion` | not built |
-| Every migration is expand-only but the one allowed exception | `TestMigrationsAreExpandOnly` | not built |
-| Two `cellad` processes over one database, one SIGTERMed while a probe loop reads and writes through both, answer every unary request with a success | `TestARollingHandoffAnswersEveryRequest` | not built |
+| A standby forwards every API route to the writer, the environment key routes and every WebSocket included, with the path under the base, the body, the bearer, the caller's Host, a request id and `X-Forwarded-For`, a stream write by write | `TestAStandbyForwardsEveryRoute` | passing |
+| A request that reaches a standby with no writer is held and answered once one is promoted, served by this process where it is the one that promoted; one held past `CELLA_FORWARD_HOLD` is refused with 503 `control_plane_unavailable`; a forward that failed to connect goes whole to the next writer, and one that reached the writer is not sent twice | `TestAStandbyHoldsUntilAWriterIsPromoted`, `TestAHoldPastTheBoundIsRefused`, `TestAHeldRequestIsServedHereOnceThisProcessPromotes`, `TestTheRoleSwitchServesForwardsOrHolds` | passing |
+| A write the fence refused and a request no replica took are both `control_plane_unavailable` | `TestANotWriterRefusalIsControlPlaneUnavailable` | passing |
+| The writer lease carries its holder's address; a reader learns the holder, the address and whether the term lapsed; `Holds` names the live holder alone | `TestSuiteHoldsTheMemoryAdapter`, `TestPostgresStore` | passing, the suite's leases case |
+| A writer that lost `writer` cannot write, and a takeover waits for a write in flight | `TestTheFenceRefusesAWriterThatLostItsLease`, `TestATakeoverWaitsForAFencedWrite` | passing; the second failed without `for share` on the tree before the fence, the successor taking the lease 250 milliseconds before the fenced transaction committed |
+| The store's name and version refusals reach the controller as its own errors | `TestTheStoresRefusalsAreTheControllers` | passing |
+| A handoff frees every lease, the writer's last, and its series stop claiming them | `TestReleaseAllFreesEveryLeaseTheWriterLast`, `TestAHandoffReleasesEveryLeaseSeries` | passing |
+| A standby takes the writer lease only once no live holder has it | `TestAStandbyTakesTheWriterLeaseOnlyOnceItIsFree` | passing |
+| On SIGTERM the writer stops serving, ends holds, feeds and sockets with 1001, closes its gateways' streams, waits the handoff timeout, cuts the rest, and releases `writer`; the requests it holds go to the successor | `TestAHandoffHoldsNewRequestsAndCutsTheSlowOnes`, `TestDrainingEndsWhatWouldOutlastAHandoff`, `TestAHubThatDrainsClosesItsGatewayStreams`, `TestARollingHandoffAnswersEveryRequest` | passing |
+| A writer that renews into another holder, or renews nothing for the term, is demoted; one failed renewal is not a loss | `TestLosingTheWriterLeaseExits` | passing, over the renewal loop; the exit it triggers is `serve`'s |
+| Promotion loads what the previous writer wrote and serves it, and a standby stays ready throughout without holding the lease | `TestARollingHandoffAnswersEveryRequest` | passing |
+| The reaper finishes a `Deleting` row: it deletes an object the driver still has, and forgets a row whose object the driver no longer has | `TestTheReaperFinishesAnInterruptedDelete`, `TestLostSuppressedForEndedSandbox` | passing; the first failed with the rule disabled |
+| A gateway and a worker whose accepted stream ended dial again after the minimum backoff, and refused attempts still wait longer each time | `TestAnAcceptedStreamResetsTheBackoff`, `TestAnAcceptedStreamResetsTheWorkersBackoff` | passing; both failed on the tree before the change with the waits doubling |
+| A create that needs a gateway right after a promotion waits for one to connect, and a sandbox placed before the promotion stays placed inside the grace | `TestACreateWaitsForAGatewayAfterPromotion`, `TestAPlacedSandboxWaitsOutTheGatewayGrace` | passing; both failed with the grace disabled |
+| Every migration is expand-only but the one allowed exception, and the rule names what contracts | `TestMigrationsAreExpandOnly`, `TestTheExpandRuleNamesWhatContracts` | passing |
+| The three variables take their defaults and refuse what a forward cannot use | `TestReplicasReadsItsVariables` | passing |
+| Two `cellad` processes over one database, the writer stopped as SIGTERM stops it while a probe writes and reads through the standby, answer every request with a success or `control_plane_unavailable`, and none on the wire fails | `TestARollingHandoffAnswersEveryRequest` | passing: about 500 requests a run, about 250 of them between the stop and the old writer's exit, every one a success |
+
+## Outcome
+
+Built as designed, with these differences:
+
+| Design | Built |
+|---|---|
+| a standby holds, then forwards, in the forwarder | one handler, the API slot, asks this process, forwards, or holds; a standby that promotes while it holds requests serves them itself |
+| `CELLA_FORWARD_HOLD` zero refuses at once | both waits are positive and at most five minutes |
+| a histogram of promotion durations | a log line with how long the promotion took |
+| `cellad check` reports the role and the writer's address | not built |
+| pod deletion cost on the writer's Pod | not built; a rollout may hand off twice |
+| the fence covers the controller's writes | it covers every write transaction of the controller's store adapter, the key rotation included |
+| delivery runs on any replica | it does, and a writer stops it before it releases its leases so it does not take the journal lease back |
+
+| Piece | Where |
+|---|---|
+| `Lease`, `Get`, `Holds`, the address on every acquisition and renewal, migration 6 | `internal/store/store.go`, `internal/store/memory/`, `internal/store/postgres/` |
+| `WriterLease`, `Advertise`, `Fence`, `Lease`, `ReleaseAll`, the error mapping | `internal/store/writer.go` |
+| `ErrNotWriter`, the reaper's rule for `Deleting` rows, the gateway grace | `controller/` |
+| the API slot, `control_plane_unavailable`, the drain of holds, feeds, sockets and gateway streams | `internal/api/forward.go`, `internal/api/api.go`, `internal/api/attach.go`, `internal/api/egress.go` |
+| the role, the promotion, the renewal, the handoff | `cmd/cellad/role.go`, `cmd/cellad/main.go` |
+| the backoff reset | `internal/egressd/sync.go`, `internal/worker/worker.go` |
+| the variables, the metrics, the alert | `internal/config/replicas.go`, `internal/metrics/`, `deploy/base/prometheusrule.yaml` |
+| the operator's page | `docs/kubernetes.md`, `docs/configuration.md`, `deploy/README.md` |

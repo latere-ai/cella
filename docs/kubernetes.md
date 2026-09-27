@@ -172,3 +172,56 @@ answers the same question at any time. An installation whose Role was
 written for an earlier release adds `get` on `pods/exec` and the
 `pods/portforward` rule before it moves to this one. A worker that runs this runtime checks the same list
 when it starts.
+
+## Running more than one replica
+
+With `CELLA_DB_URL` set, `cellad serve` runs as one writer and any number of
+standbys. The writer holds a lease in the database and does all the work: it
+runs the background loops, holds the gateways' and the workers' streams, and
+answers the API. A standby answers every API request by forwarding it to the
+writer, WebSockets and streams included. When the writer is stopped it
+finishes the requests it is answering, for at most `CELLA_HANDOFF_TIMEOUT`,
+and hands the lease to a standby, which takes over within about a second.
+Requests that arrive during that second are held, for at most
+`CELLA_FORWARD_HOLD`, and answered by the new writer; one that cannot be
+placed in time is refused with `503 control_plane_unavailable`, which a
+client retries.
+
+An overlay changes these for a rolling set:
+
+| Where | Value | Why |
+|---|---|---|
+| `replicas` | `2` or more | a standby to hand off to |
+| `strategy` | `RollingUpdate`, `maxSurge: 1`, `maxUnavailable: 0` | a new replica is ready before an old one stops |
+| PodDisruptionBudget | `minAvailable: 1` | a node drain leaves one replica |
+| `CELLA_ADVERTISE_URL` | `http://$(POD_IP):8080`, with `POD_IP` from `status.podIP` | where the other replicas forward to; a scheme and a host, no path |
+| NetworkPolicy | each replica reaches the others' public port | a standby dials the writer directly |
+| `terminationGracePeriodSeconds` | above the drain delay (3s), `CELLA_HANDOFF_TIMEOUT` and the 60 second grace | the base's `90` fits the defaults |
+| `CELLA_DB_MAX_CONNS` | sized against the database's ceiling | see below |
+
+Readiness is unchanged and never depends on the lease: a standby is ready
+when it can serve, and a rolling update waits for the new replica to be
+ready while the old writer still holds the lease.
+
+**Database connections.** During a rollout at most
+`(replicas + maxSurge) × CELLA_DB_MAX_CONNS` connections are open, plus one
+per starting replica while its migrations run. A standby holds about one.
+Two replicas with a surge of one and `CELLA_DB_MAX_CONNS=3` is at most nine,
+and about four in steady state.
+
+**The first rollout.** A release before this one runs no standby, and a new
+replica beside it would become a second writer. The first rollout onto this
+release is a `Recreate`; every rollout after it can be rolling.
+
+**Streams.** A WebSocket or a following stream ends when the replica it runs
+through stops, and one a standby forwards ends when either the standby or
+the writer stops. A rollout therefore ends every terminal, screen, dial and
+following feed at least once, closed with `1001` where the writer closes it.
+A client reconnects: a terminal starts a new session, a following feed
+resumes from the newest `seq` it holds, and a gateway or a worker dials
+again at once and is made whole by the writer's snapshot.
+
+**One replica with a database.** Without `CELLA_ADVERTISE_URL` the process
+never forwards: it waits for the writer lease and then serves. After a crash
+that left the lease held, the next process waits up to the lease's 15 second
+term before it serves.

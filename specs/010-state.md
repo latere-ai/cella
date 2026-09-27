@@ -146,8 +146,10 @@ type Records interface { // egress connection records (018); never the journal
 }
 
 type Leases interface {
-	Acquire(ctx context.Context, name, holder string, ttl time.Duration) (held bool, err error)
+	Acquire(ctx context.Context, name, holder, address string, ttl time.Duration) (held bool, err error)
 	Release(ctx context.Context, name, holder string) error
+	Get(ctx context.Context, name string) (Lease, error)             // holder, address, and whether the term lapsed
+	Holds(ctx context.Context, name, holder string) (bool, error)    // the write fence: the row for share
 }
 ```
 
@@ -293,10 +295,13 @@ is null`; `revocations (exp)`; `environment_keys (environment, jti)` and `enviro
 
 ### Leases
 
-`leases` rows are `name`, `holder`, `expires_at`; `Acquire` is a
-conditional upsert. Names: `reaper`, `journal`, `scheduler`,
-`environments`, and `pool:<environment>`; every TTL is 15 seconds and
-the holder renews at a third of it.
+`leases` rows are `name`, `holder`, `expires_at` and `address`; `Acquire`
+is a conditional upsert that records the address the holder is reached at.
+Names: `writer`, `reaper`, `journal`, `scheduler`, `environments`, and
+`pool:<environment>`; every TTL is 15 seconds and the holder renews at a
+third of it. `writer` decides which replica opens the controller at all,
+and a fenced write reads its row `for share` inside the write's own
+transaction ([[076-rolling-replicas]]).
 
 ### Why two states
 

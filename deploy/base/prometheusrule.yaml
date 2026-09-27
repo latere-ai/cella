@@ -27,8 +27,9 @@ spec:
   groups:
     - name: cellad.availability
       rules:
-        # The control plane is one replica by design, so its absence is an
-        # outage rather than reduced capacity.
+        # One replica of the control plane not answering is an outage where
+        # it is the only one, and a writer or a standby gone where there are
+        # more; the lease alert below says whether any replica is the writer.
         - alert: CelladDown
           expr: up{job="cellad"} == 0
           for: 5m

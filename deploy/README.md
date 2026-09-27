@@ -115,14 +115,19 @@ covers. An installation that wants its workloads in a namespace of their
 own sets the variable to that namespace in the ConfigMap and applies the
 Role and the RoleBinding there instead.
 
-## One replica
+## One replica, or a rolling set
 
-`replicas: 1`, `strategy: Recreate`. The store elects one writer through
-its leases table, so a second replica takes no lease, runs no reaper, and
-spends database connections; an installation with no database keeps its
-desired state on the Pod's own disk, where two processes must never meet.
-The disruption budget is written as `maxUnavailable: 1` for the same
-reason: `minAvailable: 1` over one replica refuses every node drain.
+The base runs `replicas: 1` with `strategy: Recreate`, which is the only
+shape an installation with no database can take: its desired state is on
+the Pod's own disk, where two processes must never meet. The disruption
+budget is written as `maxUnavailable: 1` for the same reason:
+`minAvailable: 1` over one replica refuses every node drain.
+
+With `CELLA_DB_URL` set, an installation can run two or more replicas and
+roll them with no gap: one replica is the writer and the others forward to
+it, and a writer that is stopped hands off to a standby within about a
+second. [Running more than one replica](../docs/kubernetes.md#running-more-than-one-replica)
+lists what an overlay changes for it.
 
 ## Checking an installation
 
