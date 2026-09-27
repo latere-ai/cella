@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.9.0 - 2026-09-27
+
 - Changed: `cella_requests_total`, `cella_request_duration_seconds` and the
   request log line name a request refused before it reached an endpoint
   `unmatched` instead of leaving `route` empty. Every Latere service uses
