@@ -142,6 +142,9 @@ type Config struct {
 	// a test proves the conformance suite notices (spec 015). It is empty in
 	// every deployment and accepted only with the native runtime.
 	DriftDefault string
+	// Replicas is spec 076's half: the address other replicas forward to,
+	// and the two waits of a handoff.
+	Replicas Replicas
 	// Identity is spec 006's half: the issuers, the audience, the signing
 	// keys, the authorizer, and the owner policy's admins.
 	Identity
@@ -170,6 +173,7 @@ func Load(getenv Getenv) (Config, error) {
 		problems = append(problems, "CELLA_DB_POOL_URL needs CELLA_DB_URL: migrations run over the direct endpoint")
 	}
 	c.DBMaxConns = connections(getenv, &problems)
+	c.Replicas = loadReplicas(getenv, c.DBURL != "", &problems)
 	c.SecretKey = secretKey(getenv, &problems)
 	c.loadEvents(getenv, &problems)
 	c.Admission = loadAdmission(getenv, &problems)

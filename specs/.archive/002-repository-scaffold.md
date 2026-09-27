@@ -216,6 +216,7 @@ operator's own second check over whatever the endpoint returned.
 | `CELLA_EVENTS_RETRY_WINDOW` | 009 | `24h` | how long a record the sink has not taken is retried before it is dropped and counted; at least `1m` |
 | `CELLA_DB_URL`, `CELLA_DB_POOL_URL`, `CELLA_DB_MAX_CONNS` | 010 | unset, unset, `4` | the direct Postgres URL migrations run over, the pooled endpoint the serving path opens where one is named (falling back to the direct one), and the pool size; the direct URL unset keeps desired state in the single-process snapshot of 026 and turns recovery off; the pooled one without the direct one is a start-up failure |
 | `CELLA_JOURNAL_CAP` | 010 | `1000` | events kept per object in the in-memory journal |
+| `CELLA_ADVERTISE_URL`, `CELLA_FORWARD_HOLD`, `CELLA_HANDOFF_TIMEOUT` | 076 | unset, `15s`, `10s` | where the other replicas reach this one's public listener, an http or https URL with no path, which needs `CELLA_DB_URL`; how long a standby holds a request while no writer can be reached; how long a writer handing off waits for the requests in flight; both waits positive and at most `5m` |
 | `CELLA_JOURNAL_RETENTION` | 010 | `720h` | how long acknowledged or dropped events stay in the Postgres journal |
 | `CELLA_REQUESTS_PER_MINUTE` | 008 | `600` | requests one subject may send in a minute; `0` turns the limit off |
 | `CELLA_MAX_BODY_BYTES` | 008 | `65536` | the largest manifest or JSON body accepted |

@@ -128,8 +128,21 @@ for each capability, and what the network rule of each sandbox admits.
 | `CELLA_DB_MAX_CONNS` | `4` | the connections one replica opens, between 1 and 32 |
 | `CELLA_SECRET_KEY` | unset | 32 bytes, base64, that every secret value's data key is wrapped under. Without it, a `Secret` is refused with `capability_unsupported`. `openssl rand -base64 32` makes one |
 
-Several replicas on one database share the work: each background loop is
-held by one replica at a time under a lease.
+## Replicas
+
+Several replicas on one database run as one writer and standbys. The writer
+holds a lease in the database and does all the work: it runs the background
+loops, holds the gateway and worker streams, and answers the API. A standby
+answers every API request by forwarding it to the writer. When the writer
+stops, it hands the lease to a standby within about a second, so a rolling
+update takes the control plane away from nobody. See
+[Running on Kubernetes](kubernetes.md) for the rollout it supports.
+
+| Variable | Default | What it is |
+|---|---|---|
+| `CELLA_ADVERTISE_URL` | unset | where the other replicas reach this one's public listener, such as `http://10.0.0.7:8080`: a scheme and a host with no path. Needs `CELLA_DB_URL`. Unset, the process never forwards: it waits for the writer lease and then serves, which is one replica. A process that crashed without handing off holds the lease until its 15 second term lapses, so the next process waits up to that long before it serves |
+| `CELLA_FORWARD_HOLD` | `15s` | how long a standby holds a request while no writer can be reached, before it answers `503 control_plane_unavailable`. At most `5m` |
+| `CELLA_HANDOFF_TIMEOUT` | `10s` | how long a writer that was told to stop waits for the requests it is still answering before it cancels them and hands off. At most `5m` |
 
 ## The default environment
 
