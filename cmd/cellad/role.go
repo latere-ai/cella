@@ -47,15 +47,14 @@ type roleSwitch struct {
 	// active counts the requests the API is answering now, which a handoff
 	// waits for.
 	active int
-	// handoff ends the context of every request the API still answers when
-	// a handoff's wait runs out.
-	handoff context.Context
-	cancel  context.CancelFunc
+	// cut closes when a handoff's wait runs out, which ends the context of
+	// every request the API still answers.
+	cut     chan struct{}
+	cutOnce sync.Once
 }
 
 func newRoleSwitch() *roleSwitch {
-	handoff, cancel := context.WithCancel(context.Background())
-	return &roleSwitch{changed: make(chan struct{}), handoff: handoff, cancel: cancel}
+	return &roleSwitch{changed: make(chan struct{}), cut: make(chan struct{})}
 }
 
 // watch returns the channel closed at the next change of whether this process
@@ -85,8 +84,15 @@ func (s *roleSwitch) serveLocally(w http.ResponseWriter, r *http.Request) bool {
 	}()
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
-	stop := context.AfterFunc(s.handoff, cancel)
-	defer stop()
+	answered := make(chan struct{})
+	defer close(answered)
+	go func() {
+		select {
+		case <-s.cut:
+			cancel()
+		case <-answered:
+		}
+	}()
 	local.ServeHTTP(w, r.WithContext(ctx))
 	return true
 }
@@ -124,7 +130,7 @@ func (s *roleSwitch) drain(timeout time.Duration) int {
 	s.mu.Lock()
 	cut := s.active
 	s.mu.Unlock()
-	s.cancel()
+	s.cutOnce.Do(func() { close(s.cut) })
 	s.waitIdle(timeout)
 	return cut
 }
