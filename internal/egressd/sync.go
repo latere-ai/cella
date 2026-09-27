@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -52,6 +53,9 @@ type syncClient struct {
 	// once per connection: a reconnect makes the gateway whole again and is
 	// not a second start.
 	connected sync.Once
+	// after is the reconnect's timer, time.After unless a test replaces it
+	// to read the waits the loop chose.
+	after func(time.Duration) <-chan time.Time
 }
 
 // Record queues one connection record. It never blocks the connection that
@@ -74,32 +78,47 @@ func (c *syncClient) Record(r egress.Record) {
 // Run holds one stream open until the context ends, reconnecting with
 // backoff. Each connection opens with a hello, takes a snapshot that replaces
 // everything the gateway held, and then applies what arrives.
+//
+// The backoff grows over attempts the control plane did not accept and starts
+// over after one it did: a stream that was made whole and then ended is a
+// control plane that went away, such as a writer handing off to another
+// replica, and the gateway dials again at the shortest wait rather than at
+// whatever its earlier failures had grown the wait to.
 func (c *syncClient) Run(ctx context.Context) error {
+	after := c.after
+	if after == nil {
+		after = time.After
+	}
 	backoff := minBackoff
 	for {
-		if err := c.connect(ctx); err != nil && ctx.Err() == nil {
+		accepted, err := c.connect(ctx)
+		if accepted {
+			backoff = minBackoff
+		}
+		if err != nil && ctx.Err() == nil {
 			c.log.WarnContext(ctx, "the gateway's stream to the control plane ended", "err", err, "retryIn", backoff)
 		}
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-time.After(backoff):
+		case <-after(backoff):
 		}
 		backoff = min(backoff*2, maxBackoff)
 	}
 }
 
-// connect runs one connection to completion.
-func (c *syncClient) connect(ctx context.Context) error {
+// connect runs one connection to completion and reports whether the control
+// plane accepted it, which is its snapshot arriving.
+func (c *syncClient) connect(ctx context.Context) (bool, error) {
 	header := http.Header{}
 	header.Set("Authorization", "Bearer "+c.key)
 	conn, resp, err := c.dialer.DialContext(ctx, c.url, header)
 	if err != nil {
 		if resp != nil {
 			_ = resp.Body.Close()
-			return errors.New("the control plane refused the stream: " + resp.Status)
+			return false, errors.New("the control plane refused the stream: " + resp.Status)
 		}
-		return err
+		return false, err
 	}
 	defer func() { _ = conn.Close() }()
 	if resp != nil {
@@ -113,18 +132,20 @@ func (c *syncClient) connect(ctx context.Context) error {
 		CAPEM:     c.caPEM,
 	}}
 	if err = writeMessage(conn, hello); err != nil {
-		return err
+		return false, err
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	up := make(chan egress.Frame, 64)
-	go c.readLoop(ctx, cancel, conn, up)
-	return c.writeLoop(ctx, conn, up)
+	var accepted atomic.Bool
+	go c.readLoop(ctx, cancel, conn, up, &accepted)
+	err = c.writeLoop(ctx, conn, up)
+	return accepted.Load(), err
 }
 
 // readLoop applies what the control plane sends and queues the answer.
-func (c *syncClient) readLoop(ctx context.Context, cancel context.CancelFunc, conn *websocket.Conn, up chan<- egress.Frame) {
+func (c *syncClient) readLoop(ctx context.Context, cancel context.CancelFunc, conn *websocket.Conn, up chan<- egress.Frame, accepted *atomic.Bool) {
 	defer cancel()
 	for {
 		if err := conn.SetReadDeadline(time.Now().Add(egress.HeartbeatTimeout)); err != nil {
@@ -145,6 +166,7 @@ func (c *syncClient) readLoop(ctx context.Context, cancel context.CancelFunc, co
 			// exactly what the control plane says and nothing it held
 			// before, so a purge missed while disconnected still lands.
 			c.store.Replace(f.Snapshot.Maps)
+			accepted.Store(true)
 			for _, m := range f.Snapshot.Maps {
 				queue(ctx, up, ack(m.Principal, m.Version))
 			}

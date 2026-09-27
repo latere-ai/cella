@@ -41,6 +41,9 @@ type plane struct {
 	keys       []string
 	refuse     bool
 	registered int
+	// drop ends every stream right after the upgrade, which is a control
+	// plane that accepted the worker and then went away.
+	drop atomic.Bool
 }
 
 func newPlane(t *testing.T) *plane {
@@ -84,6 +87,10 @@ func newPlaneUnder(t *testing.T, base string) *plane {
 	mux.HandleFunc("GET /v1/environments/{id}/operations", func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
+			return
+		}
+		if p.drop.Load() {
+			_ = conn.Close()
 			return
 		}
 		_ = p.hub.Serve(r.Context(), "env_test", worker.NewSocket(conn))
@@ -321,6 +328,78 @@ func TestWorkerReconnects(t *testing.T) {
 	p.mu.Unlock()
 	if registrations < 2 {
 		t.Errorf("the worker registered %d times, want one per connection", registrations)
+	}
+}
+
+// waitRecorder stands in for the reconnect's timer: it keeps every wait the
+// loop chose and fires at once.
+type waitRecorder struct {
+	mu    sync.Mutex
+	waits []time.Duration
+}
+
+func (r *waitRecorder) after(d time.Duration) <-chan time.Time {
+	r.mu.Lock()
+	r.waits = append(r.waits, d)
+	r.mu.Unlock()
+	fired := make(chan time.Time, 1)
+	fired <- time.Now()
+	return fired
+}
+
+func (r *waitRecorder) taken() []time.Duration {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]time.Duration(nil), r.waits...)
+}
+
+// TestAnAcceptedStreamResetsTheWorkersBackoff: a stream the control plane
+// accepted and then ended, which is what a writer handing off to another
+// replica leaves, is dialed again at the shortest wait however often it has
+// happened, and registrations the control plane refuses still wait longer
+// each time.
+func TestAnAcceptedStreamResetsTheWorkersBackoff(t *testing.T) {
+	p := newPlane(t)
+	p.drop.Store(true)
+	w, err := worker.New(worker.Options{URL: p.url, Key: "an-environment-key", Driver: nativeDriver(t), Version: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder := &waitRecorder{}
+	w.SetAfter(recorder.after)
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() { defer close(done); _ = w.Run(ctx) }()
+	t.Cleanup(func() { cancel(); <-done })
+
+	waitUntil(t, func() bool { return len(recorder.taken()) >= 4 }, "four accepted streams to end")
+	for i, wait := range recorder.taken()[:4] {
+		if wait != worker.MinBackoff {
+			t.Fatalf("wait %d after an accepted stream was %v, want %v: %v", i, wait, worker.MinBackoff, recorder.taken())
+		}
+	}
+	p.mu.Lock()
+	p.refuse = true
+	p.mu.Unlock()
+	accepted := len(recorder.taken())
+	waitUntil(t, func() bool { return len(recorder.taken()) >= accepted+3 }, "three refused registrations")
+	refused := recorder.taken()[accepted:]
+	for i := 1; i < len(refused); i++ {
+		if refused[i] <= refused[i-1] && refused[i] != worker.MaxBackoff {
+			t.Fatalf("the waits after refused registrations did not grow: %v", refused)
+		}
+	}
+}
+
+// waitUntil polls until the condition holds or ten seconds pass.
+func waitUntil(t *testing.T, done func() bool, what string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for !done() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 

@@ -242,6 +242,69 @@ func TestTheGatewayReconnects(t *testing.T) {
 	}, "the second connection's snapshot to land")
 }
 
+// waitRecorder stands in for the reconnect's timer: it keeps every wait the
+// loop chose and fires at once, so a test reads the backoff sequence without
+// sleeping through it.
+type waitRecorder struct {
+	mu    sync.Mutex
+	waits []time.Duration
+}
+
+func (r *waitRecorder) after(d time.Duration) <-chan time.Time {
+	r.mu.Lock()
+	r.waits = append(r.waits, d)
+	r.mu.Unlock()
+	fired := make(chan time.Time, 1)
+	fired <- time.Now()
+	return fired
+}
+
+func (r *waitRecorder) taken() []time.Duration {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]time.Duration(nil), r.waits...)
+}
+
+// TestAnAcceptedStreamResetsTheBackoff: a stream the control plane accepted
+// with its snapshot and then ended, which is what a writer handing off to
+// another replica leaves, is dialed again at the shortest wait however often
+// it has happened, and attempts the control plane does not accept still wait
+// longer each time.
+func TestAnAcceptedStreamResetsTheBackoff(t *testing.T) {
+	p := newStubPlane(t)
+	p.down = func(conn *websocket.Conn) {
+		send(conn, egress.Frame{Type: egress.FrameSnapshot, Snapshot: &egress.Snapshot{}})
+		_ = conn.Close()
+	}
+	recorder := &waitRecorder{}
+	c := &syncClient{
+		url: p.url(t, "default"), key: "key", gatewayID: "gw-test", store: newStore(nil),
+		records: make(chan egress.Record, recordBuffer), log: slog.Default(),
+		dialer: &websocket.Dialer{Subprotocols: []string{egress.Protocol}, HandshakeTimeout: 5 * time.Second},
+		after:  recorder.after,
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() { defer close(done); _ = c.Run(ctx) }()
+	t.Cleanup(func() { cancel(); <-done })
+
+	waitFor(t, func() bool { return len(recorder.taken()) >= 5 }, "five accepted streams to end")
+	for i, wait := range recorder.taken()[:5] {
+		if wait != minBackoff {
+			t.Fatalf("wait %d after an accepted stream was %v, want %v: %v", i, wait, minBackoff, recorder.taken())
+		}
+	}
+	accepted := len(recorder.taken())
+	p.server.Close()
+	waitFor(t, func() bool { return len(recorder.taken()) >= accepted+3 }, "three refused dials")
+	refused := recorder.taken()[accepted:]
+	for i := 1; i < len(refused); i++ {
+		if refused[i] <= refused[i-1] && refused[i] != maxBackoff {
+			t.Fatalf("the waits after refused dials did not grow: %v", refused)
+		}
+	}
+}
+
 // TestRecordsGoUpTheSameStream is the telemetry half of the protocol: the
 // gateway reports every connection on the stream it already holds, so the
 // control plane needs no inbound route.

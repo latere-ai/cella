@@ -77,6 +77,9 @@ type Worker struct {
 	// and worker the id the control plane minted for this process.
 	environment string
 	worker      string
+	// after is the reconnect's timer, time.After unless a test replaces it
+	// to read the waits the loop chose.
+	after func(time.Duration) <-chan time.Time
 }
 
 // New builds the worker. It fails where the URL is not one a credential may
@@ -120,9 +123,20 @@ func (w *Worker) Run(ctx context.Context) error {
 	if err := w.options.Driver.Preflight(ctx); err != nil {
 		return fmt.Errorf("worker: the driver this worker runs is not usable: %w", err)
 	}
+	after := w.after
+	if after == nil {
+		after = time.After
+	}
 	backoff := minBackoff
 	for {
-		err := w.connect(ctx)
+		accepted, err := w.connect(ctx)
+		// A stream the control plane opened and then ended is a control
+		// plane that went away, such as a writer handing off to another
+		// replica, so the next dial waits the shortest wait rather than what
+		// earlier refusals grew the wait to.
+		if accepted {
+			backoff = minBackoff
+		}
 		if ctx.Err() != nil {
 			// The worker was asked to stop. Whatever ended the connection is
 			// that request, not a failure of the worker's own act.
@@ -134,7 +148,7 @@ func (w *Worker) Run(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-time.After(backoff):
+		case <-after(backoff):
 		}
 		backoff = min(backoff*2, maxBackoff)
 	}
@@ -143,19 +157,21 @@ func (w *Worker) Run(ctx context.Context) error {
 // connect registers and holds one stream. Registration comes first every
 // time: the control plane mints a worker id per registration, so a worker
 // that reconnects is a new claimer and the operations its predecessor held
-// are redelivered rather than waiting on a connection that is gone.
-func (w *Worker) connect(ctx context.Context) error {
+// are redelivered rather than waiting on a connection that is gone. It
+// reports whether the control plane accepted the stream, which is the
+// registration taken and the stream opened.
+func (w *Worker) connect(ctx context.Context) (bool, error) {
 	if err := w.register(ctx); err != nil {
-		return err
+		return false, err
 	}
 	conn, err := w.dial(ctx)
 	if err != nil {
-		return err
+		return false, err
 	}
 	server := remote.NewServer(conn, remote.ServerOptions{
 		Worker: w.worker, Driver: w.options.Driver, Log: w.log,
 	})
-	return server.Run(ctx)
+	return true, server.Run(ctx)
 }
 
 // register declares this worker and its driver and takes the id it claims

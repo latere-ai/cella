@@ -11,3 +11,14 @@ func ShortenWriteDeadline(d time.Duration) (restore func()) {
 	writeDeadlineOverride.Store(int64(d))
 	return func() { writeDeadlineOverride.Store(0) }
 }
+
+// SetAfter replaces the reconnect's timer, so a test reads the waits the loop
+// chose without sleeping through them.
+func (w *Worker) SetAfter(after func(time.Duration) <-chan time.Time) { w.after = after }
+
+// MinBackoff and MaxBackoff are the shortest and the longest wait between
+// two dials.
+const (
+	MinBackoff = minBackoff
+	MaxBackoff = maxBackoff
+)
