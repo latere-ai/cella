@@ -41,6 +41,17 @@ type Controlled struct {
 
 	// metrics is design 017's recorder, never nil.
 	metrics Metrics
+
+	// address is where this process's public listener is reached by other
+	// replicas, recorded on every lease it takes (spec 076).
+	address string
+	// fence is the lease every write transaction must find this process
+	// holding, or the write is controller.ErrNotWriter. Empty fences
+	// nothing, which is a deployment that runs one process.
+	fence string
+	// acquired is every lease name this process has taken, which a handoff
+	// releases.
+	acquired map[string]struct{}
 }
 
 // ForController wraps a store for one environment's controller. d says
@@ -49,6 +60,7 @@ func ForController(s Store, environment string, d Delivery) *Controlled {
 	return &Controlled{
 		store: s, environment: environment, holder: Holder(),
 		versions: map[string]int64{}, delivery: d, metrics: nopMetrics{},
+		acquired: map[string]struct{}{},
 	}
 }
 
@@ -169,7 +181,7 @@ func (c *Controlled) Write(ctx context.Context, obj v1.Sandbox, mutation string)
 		return err
 	}
 	var written int64
-	err = c.store.Tx(ctx, func(tx Tx) error {
+	err = c.write(ctx, func(tx Tx) error {
 		next, err := tx.Desired().Put(ctx, row, version)
 		if err != nil {
 			return err
@@ -212,7 +224,7 @@ func (c *Controlled) WriteSpawn(ctx context.Context, obj v1.Sandbox, mutation, p
 		return err
 	}
 	var written int64
-	err = c.store.Tx(ctx, func(tx Tx) error {
+	err = c.write(ctx, func(tx Tx) error {
 		if err := tx.Ledger().Debit(ctx, parentID, budget); err != nil {
 			return err
 		}
@@ -241,7 +253,7 @@ func (c *Controlled) WriteSpawn(ctx context.Context, obj v1.Sandbox, mutation, p
 // CreditSpawn returns one unit to a parent whose child never started, which
 // is the undo of design 005's create order.
 func (c *Controlled) CreditSpawn(ctx context.Context, parentID string) error {
-	return c.store.Tx(ctx, func(tx Tx) error { return tx.Ledger().Credit(ctx, parentID) })
+	return c.write(ctx, func(tx Tx) error { return tx.Ledger().Credit(ctx, parentID) })
 }
 
 // SpawnsUsed is how many children one sandbox has created in total, which is
@@ -258,7 +270,7 @@ func (c *Controlled) SpawnsUsed(ctx context.Context, parentID string) (int, erro
 
 // ForgetSpawns drops one sandbox's ledger row at the delete that ends it.
 func (c *Controlled) ForgetSpawns(ctx context.Context, parentID string) error {
-	return c.store.Tx(ctx, func(tx Tx) error { return tx.Ledger().Forget(ctx, parentID) })
+	return c.write(ctx, func(tx Tx) error { return tx.Ledger().Forget(ctx, parentID) })
 }
 
 // WriteRecord appends one journal row for an act whose payload no field of
@@ -275,7 +287,7 @@ func (c *Controlled) WriteRecord(ctx context.Context, obj v1.Sandbox, mutation s
 	if err != nil {
 		return err
 	}
-	return c.store.Tx(ctx, func(tx Tx) error {
+	return c.write(ctx, func(tx Tx) error {
 		_, err := tx.Journal().Append(ctx, event)
 		return err
 	})
@@ -286,7 +298,7 @@ func (c *Controlled) WriteRecord(ctx context.Context, obj v1.Sandbox, mutation s
 // either way, and the journal still records that this replica ended it.
 func (c *Controlled) Remove(ctx context.Context, id, mutation string) error {
 	defer c.observe(OpRemove, time.Now())
-	err := c.store.Tx(ctx, func(tx Tx) error {
+	err := c.write(ctx, func(tx Tx) error {
 		// The row is read before it goes, so the record carries the labels,
 		// name, owner and reason of an object that no longer exists once the
 		// transaction ends. A row another replica already removed leaves the
@@ -337,7 +349,7 @@ func (c *Controlled) record(ctx context.Context, mutation string, obj v1.Sandbox
 // last listed.
 func (c *Controlled) Rebuild(ctx context.Context, environment string, states []driver.State) error {
 	defer c.observe(OpRebuild, time.Now())
-	return c.store.Tx(ctx, func(tx Tx) error {
+	return c.write(ctx, func(tx Tx) error {
 		return tx.Observed().Rebuild(ctx, environment, states)
 	})
 }
@@ -362,9 +374,14 @@ func (c *Controlled) Acquire(ctx context.Context, name string, ttl time.Duration
 	var held bool
 	err := c.store.Tx(ctx, func(tx Tx) error {
 		var err error
-		held, err = tx.Leases().Acquire(ctx, name, c.holder, ttl)
+		held, err = tx.Leases().Acquire(ctx, name, c.holder, c.address, ttl)
 		return err
 	})
+	if err == nil && held {
+		c.mu.Lock()
+		c.acquired[name] = struct{}{}
+		c.mu.Unlock()
+	}
 	return held, err
 }
 

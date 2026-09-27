@@ -315,15 +315,36 @@ type Values interface {
 // Leases are the single-writer seam of design 005: the loops that act on an
 // environment run on the replica that holds the named lease.
 //
-// The names are reaper, journal, scheduler, environments and pool:<environment>,
-// each with a 15 second term the holder renews at a third of it.
+// The names are writer, reaper, journal, scheduler, environments and
+// pool:<environment>, each with a 15 second term the holder renews at a third
+// of it. writer is the process that opens the controller at all (spec 076);
+// the others are taken by that process's loops.
 type Leases interface {
-	// Acquire takes or renews the lease for holder and reports whether it is
-	// held. A live lease of another holder is not held and not an error.
-	Acquire(ctx context.Context, name, holder string, ttl time.Duration) (bool, error)
+	// Acquire takes or renews the lease for holder, recording the address
+	// the holder is reached at, and reports whether it is held. A live lease
+	// of another holder is not held and not an error.
+	Acquire(ctx context.Context, name, holder, address string, ttl time.Duration) (bool, error)
 	// Release frees a lease this holder holds. Releasing a lease another
 	// holder took is not an error and frees nothing.
 	Release(ctx context.Context, name, holder string) error
+	// Get reads one lease. A name no row holds is the zero Lease and no
+	// error; a row whose term lapsed is returned with Live false.
+	Get(ctx context.Context, name string) (Lease, error)
+	// Holds reports whether holder holds the named lease with its term not
+	// lapsed. A store with row locks holds the row for share until the
+	// transaction ends, so a takeover waits for the transaction that asked
+	// and a transaction that asks after a takeover is refused: this is the
+	// write fence of spec 076.
+	Holds(ctx context.Context, name, holder string) (bool, error)
+}
+
+// Lease is one lease row as a reader sees it.
+type Lease struct {
+	Name    string
+	Holder  string
+	Address string
+	// Live reports whether the term has not lapsed, by the store's clock.
+	Live bool
 }
 
 // Revocations is the jti of every token cellad minted and then replaced or

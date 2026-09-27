@@ -836,7 +836,56 @@ func leases(t TB, open Opener) {
 	// a replica that died without releasing leaves behind.
 	held(t, s, "pool:env_one", "replica-one", 150*time.Millisecond, true, "a short term")
 	time.Sleep(300 * time.Millisecond)
+	if got := lease(t, s, "pool:env_one"); got.Holder != "replica-one" || got.Live {
+		t.Errorf("a lapsed term reads %+v, want replica-one and not live", got)
+	}
+	if holds(t, s, "pool:env_one", "replica-one") {
+		t.Errorf("a holder whose term lapsed still holds the lease")
+	}
 	held(t, s, "pool:env_one", "replica-two", term, true, "after the term lapsed")
+
+	// A reader learns who holds a lease and where that holder is reached,
+	// which is how a standby finds the writer (spec 076).
+	held(t, s, "writer", "replica-one", term, true, "the writer")
+	if got := lease(t, s, "writer"); got != (store.Lease{Name: "writer", Holder: "replica-one", Address: "http://replica-one:8080", Live: true}) {
+		t.Errorf("the writer's row reads %+v", got)
+	}
+	if !holds(t, s, "writer", "replica-one") || holds(t, s, "writer", "replica-two") {
+		t.Errorf("Holds does not name the writer alone")
+	}
+	if got := lease(t, s, "nobody-holds-this"); got != (store.Lease{}) {
+		t.Errorf("a lease no row holds reads %+v, want the zero lease", got)
+	}
+	with(t, s, func(tx store.Tx) error {
+		return tx.Leases().Release(ctx, "writer", "replica-one")
+	})
+	if holds(t, s, "writer", "replica-one") {
+		t.Errorf("a released lease is still held")
+	}
+}
+
+// lease reads one lease row.
+func lease(t TB, s store.Store, name string) store.Lease {
+	t.Helper()
+	var got store.Lease
+	with(t, s, func(tx store.Tx) error {
+		var err error
+		got, err = tx.Leases().Get(context.Background(), name)
+		return err
+	})
+	return got
+}
+
+// holds asks whether one holder holds one lease.
+func holds(t TB, s store.Store, name, holder string) bool {
+	t.Helper()
+	var got bool
+	with(t, s, func(tx store.Tx) error {
+		var err error
+		got, err = tx.Leases().Holds(context.Background(), name, holder)
+		return err
+	})
+	return got
 }
 
 // values: the envelope, and a store with no key.
@@ -1051,7 +1100,7 @@ func held(t TB, s store.Store, name, holder string, ttl time.Duration, want bool
 	var got bool
 	with(t, s, func(tx store.Tx) error {
 		var err error
-		got, err = tx.Leases().Acquire(context.Background(), name, holder, ttl)
+		got, err = tx.Leases().Acquire(context.Background(), name, holder, "http://"+holder+":8080", ttl)
 		return err
 	})
 	if got != want {

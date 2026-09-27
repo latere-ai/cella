@@ -572,11 +572,13 @@ func (x values) Rewrap(ctx context.Context, oldKEK, newKEK []byte) (int, error) 
 // The lease statements, which the renewal loop runs as well as this method
 // set, so the conditional upsert has one statement in one place.
 const (
-	acquireLease = `insert into leases (name, holder, expires_at)
-		values ($1, $2, now() + make_interval(secs => $3))
-		on conflict (name) do update set holder = excluded.holder, expires_at = excluded.expires_at
+	acquireLease = `insert into leases (name, holder, expires_at, address)
+		values ($1, $2, now() + make_interval(secs => $3), nullif($4, ''))
+		on conflict (name) do update set holder = excluded.holder, expires_at = excluded.expires_at, address = excluded.address
 		where leases.holder = excluded.holder or leases.expires_at < now()`
 	releaseLease = `delete from leases where name = $1 and holder = $2`
+	getLease     = `select holder, coalesce(address, ''), expires_at > now() from leases where name = $1`
+	holdsLease   = `select 1 from leases where name = $1 and holder = $2 and expires_at > now() for share`
 )
 
 type leases struct {
@@ -584,15 +586,39 @@ type leases struct {
 	store *Store
 }
 
-func (x leases) Acquire(ctx context.Context, name, holder string, ttl time.Duration) (bool, error) {
-	tag, err := x.q.Exec(ctx, acquireLease, name, holder, ttl.Seconds())
+func (x leases) Acquire(ctx context.Context, name, holder, address string, ttl time.Duration) (bool, error) {
+	tag, err := x.q.Exec(ctx, acquireLease, name, holder, ttl.Seconds(), address)
 	if err != nil {
 		return false, fmt.Errorf("store: acquiring the lease %s: %w", name, err)
 	}
 	if tag.RowsAffected() == 0 {
 		return false, nil
 	}
-	x.store.remember(name, holder, ttl)
+	x.store.remember(name, holder, address, ttl)
+	return true, nil
+}
+
+func (x leases) Get(ctx context.Context, name string) (store.Lease, error) {
+	out := store.Lease{Name: name}
+	err := x.q.QueryRow(ctx, getLease, name).Scan(&out.Holder, &out.Address, &out.Live)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return store.Lease{}, nil
+	}
+	if err != nil {
+		return store.Lease{}, fmt.Errorf("store: reading the lease %s: %w", name, err)
+	}
+	return out, nil
+}
+
+func (x leases) Holds(ctx context.Context, name, holder string) (bool, error) {
+	var one int
+	err := x.q.QueryRow(ctx, holdsLease, name, holder).Scan(&one)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("store: reading the lease %s: %w", name, err)
+	}
 	return true, nil
 }
 

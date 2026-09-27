@@ -203,6 +203,60 @@ func TestRenewalStopsWhenTheLeaseMoves(t *testing.T) {
 	}
 }
 
+// TestATakeoverWaitsForAFencedWrite is the write fence of spec 076 on the
+// database's row lock: a transaction that found its process holding the
+// writer lease holds that row for share, so a successor whose upsert comes
+// after the term lapsed waits until the transaction ends, and once the
+// successor holds the lease the old holder's next check is refused.
+func TestATakeoverWaitsForAFencedWrite(t *testing.T) {
+	admin := server(t)
+	dsn := database(t, admin)
+	const term = 300 * time.Millisecond
+	old := open(t, dsn, storetest.Key, time.Hour)
+	successor := open(t, dsn, storetest.Key, time.Hour)
+	if !acquire(t, old, "writer", "replica-one", term) {
+		t.Fatal("the first holder did not take the writer lease")
+	}
+	checked := make(chan struct{})
+	committed := make(chan time.Time, 1)
+	go func() {
+		err := old.Tx(t.Context(), func(tx store.Tx) error {
+			held, err := tx.Leases().Holds(t.Context(), "writer", "replica-one")
+			if err != nil || !held {
+				return fmt.Errorf("the holder's check inside its term: %v, %w", held, err)
+			}
+			close(checked)
+			// The term lapses while this transaction still holds the row.
+			time.Sleep(2 * term)
+			return nil
+		})
+		if err != nil {
+			t.Error(err)
+		}
+		committed <- time.Now()
+	}()
+	<-checked
+	time.Sleep(term + 50*time.Millisecond)
+	if !acquire(t, successor, "writer", "replica-two", time.Minute) {
+		t.Fatal("the successor did not take the lapsed lease")
+	}
+	acquired := time.Now()
+	if at := <-committed; acquired.Before(at) {
+		t.Fatalf("the successor took the lease at %v, before the fenced transaction committed at %v", acquired, at)
+	}
+	var held bool
+	if err := old.Tx(t.Context(), func(tx store.Tx) error {
+		var err error
+		held, err = tx.Leases().Holds(t.Context(), "writer", "replica-one")
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if held {
+		t.Error("the old holder still holds the lease its successor took")
+	}
+}
+
 // TestOpenRefusesAURLThatIsNotPostgres keeps a misconfigured deployment from
 // starting: CELLA_DB_URL selects the store, and a URL no driver registers
 // would otherwise fail on the first statement.
@@ -355,7 +409,7 @@ func acquire(t *testing.T, s *postgres.Store, name, holder string, ttl time.Dura
 	var got bool
 	if err := s.Tx(t.Context(), func(tx store.Tx) error {
 		var err error
-		got, err = tx.Leases().Acquire(t.Context(), name, holder, ttl)
+		got, err = tx.Leases().Acquire(t.Context(), name, holder, "", ttl)
 		return err
 	}); err != nil {
 		t.Fatalf("acquiring %s: %v", name, err)

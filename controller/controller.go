@@ -45,6 +45,11 @@ var (
 	// ErrVersionConflict is a conditional write whose row moved since it was
 	// read. Design 008 answers it with 409 version_conflict.
 	ErrVersionConflict = errors.New("the object changed since it was read")
+	// ErrNotWriter is a write refused because this process no longer holds
+	// the writer lease (spec 076): another replica is the writer now, and the
+	// caller's retry reaches it. Design 008 answers it with 503
+	// control_plane_unavailable.
+	ErrNotWriter = errors.New("this process is not the writer; another replica holds the writer lease")
 )
 
 type Options struct {

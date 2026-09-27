@@ -72,7 +72,7 @@ func (c *Controlled) WriteSecret(ctx context.Context, obj v1.Secret, plaintext [
 		written int64
 		value   = obj.Status.Version
 	)
-	err := c.store.Tx(ctx, func(tx Tx) error {
+	err := c.write(ctx, func(tx Tx) error {
 		if len(plaintext) > 0 {
 			next, err := tx.Values().Put(ctx, obj.Status.ID, plaintext)
 			if err != nil {
@@ -116,7 +116,7 @@ func (c *Controlled) WriteSecret(ctx context.Context, obj v1.Secret, plaintext [
 // an error: the object is gone either way, and the journal still records that
 // this replica ended it.
 func (c *Controlled) RemoveSecret(ctx context.Context, id, mutation string) error {
-	err := c.store.Tx(ctx, func(tx Tx) error {
+	err := c.write(ctx, func(tx Tx) error {
 		obj := v1.Secret{Status: v1.SecretStatus{ID: id}}
 		if row, err := tx.Desired().Get(ctx, KindSecret, id); err == nil {
 			if decoded, err := decodeSecret(row); err == nil {
@@ -169,7 +169,7 @@ func (c *Controlled) OpenValue(ctx context.Context, secretID string) ([]byte, in
 // ciphertext is read, and the store reads under the new key when it returns.
 func (c *Controlled) Rewrap(ctx context.Context, oldKEK, newKEK []byte) (int, error) {
 	var n int
-	err := c.store.Tx(ctx, func(tx Tx) error {
+	err := c.write(ctx, func(tx Tx) error {
 		var err error
 		n, err = tx.Values().Rewrap(ctx, oldKEK, newKEK)
 		return err

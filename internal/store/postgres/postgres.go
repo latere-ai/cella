@@ -80,10 +80,13 @@ type Store struct {
 	pool *pgxpool.Pool
 	env  store.Envelope
 
-	mu     sync.Mutex
-	held   map[string]string // lease name to the holder this process registered
-	terms  map[string]time.Duration
-	closed bool
+	mu    sync.Mutex
+	held  map[string]string // lease name to the holder this process registered
+	terms map[string]time.Duration
+	// addresses is the address each held lease was acquired with, which its
+	// renewal writes again.
+	addresses map[string]string
+	closed    bool
 
 	stop context.CancelFunc
 	done chan struct{}
@@ -127,7 +130,7 @@ func Open(ctx context.Context, o Options) (*Store, error) {
 	loopCtx, stop := context.WithCancel(context.WithoutCancel(ctx))
 	s := &Store{
 		pool: pool, env: env,
-		held: map[string]string{}, terms: map[string]time.Duration{},
+		held: map[string]string{}, terms: map[string]time.Duration{}, addresses: map[string]string{},
 		stop: stop, done: make(chan struct{}),
 	}
 	go s.renewLoop(loopCtx, renewEvery(o.RenewEvery))
@@ -328,13 +331,15 @@ func (s *Store) renewHeld(ctx context.Context) {
 	s.mu.Lock()
 	held := make(map[string]string, len(s.held))
 	terms := make(map[string]time.Duration, len(s.terms))
+	addresses := make(map[string]string, len(s.addresses))
 	for name, holder := range s.held {
 		held[name] = holder
 		terms[name] = s.terms[name]
+		addresses[name] = s.addresses[name]
 	}
 	s.mu.Unlock()
 	for name, holder := range held {
-		tag, err := s.pool.Exec(ctx, acquireLease, name, holder, terms[name].Seconds())
+		tag, err := s.pool.Exec(ctx, acquireLease, name, holder, terms[name].Seconds(), addresses[name])
 		if err != nil || tag.RowsAffected() == 0 {
 			s.forget(name)
 		}
@@ -342,11 +347,12 @@ func (s *Store) renewHeld(ctx context.Context) {
 }
 
 // remember registers a lease for renewal, and forget drops one.
-func (s *Store) remember(name, holder string, ttl time.Duration) {
+func (s *Store) remember(name, holder, address string, ttl time.Duration) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.held[name] = holder
 	s.terms[name] = ttl
+	s.addresses[name] = address
 }
 
 func (s *Store) forget(name string) {
@@ -354,4 +360,5 @@ func (s *Store) forget(name string) {
 	defer s.mu.Unlock()
 	delete(s.held, name)
 	delete(s.terms, name)
+	delete(s.addresses, name)
 }

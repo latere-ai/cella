@@ -65,7 +65,7 @@ func (c *Controlled) WriteEnvironment(ctx context.Context, obj v1.Environment, i
 		return 0, err
 	}
 	var written int64
-	err = c.store.Tx(ctx, func(tx Tx) error {
+	err = c.write(ctx, func(tx Tx) error {
 		next, err := tx.Desired().Put(ctx, row, ifVersion)
 		if err != nil {
 			return err
@@ -96,7 +96,7 @@ func (c *Controlled) WriteEnvironmentStatus(ctx context.Context, obj v1.Environm
 			return err
 		}
 	}
-	return c.store.Tx(ctx, func(tx Tx) error {
+	return c.write(ctx, func(tx Tx) error {
 		if err := tx.Desired().PutStatus(ctx, KindEnvironment, obj.Metadata.Name, status); err != nil {
 			return err
 		}
@@ -111,7 +111,7 @@ func (c *Controlled) WriteEnvironmentStatus(ctx context.Context, obj v1.Environm
 // RemoveEnvironment deletes one Environment and appends the mutation, in one
 // transaction.
 func (c *Controlled) RemoveEnvironment(ctx context.Context, name, mutation string) error {
-	return c.store.Tx(ctx, func(tx Tx) error {
+	return c.write(ctx, func(tx Tx) error {
 		obj := v1.Environment{Metadata: v1.Metadata{Name: name}, Status: v1.EnvironmentStatus{ID: name}}
 		if row, err := tx.Desired().Get(ctx, KindEnvironment, name); err == nil {
 			if decoded, err := decodeEnvironment(row); err == nil {

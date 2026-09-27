@@ -226,10 +226,14 @@ func (stubValues) Rewrap(context.Context, []byte, []byte) (int, error) {
 
 type stubLeases struct{}
 
-func (stubLeases) Acquire(context.Context, string, string, time.Duration) (bool, error) {
+func (stubLeases) Acquire(context.Context, string, string, string, time.Duration) (bool, error) {
 	return true, nil
 }
 func (stubLeases) Release(context.Context, string, string) error { return nil }
+func (stubLeases) Get(context.Context, string) (store.Lease, error) {
+	return store.Lease{}, nil
+}
+func (stubLeases) Holds(context.Context, string, string) (bool, error) { return true, nil }
 
 type stubKeys struct{}
 

@@ -151,6 +151,7 @@ type valueRow struct {
 
 type leaseRow struct {
 	holder  string
+	address string
 	expires time.Time
 }
 
@@ -709,7 +710,7 @@ func (x values) Rewrap(ctx context.Context, oldKEK, newKEK []byte) (int, error) 
 
 type leases struct{ d *data }
 
-func (x leases) Acquire(ctx context.Context, name, holder string, ttl time.Duration) (bool, error) {
+func (x leases) Acquire(ctx context.Context, name, holder, address string, ttl time.Duration) (bool, error) {
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
@@ -718,8 +719,30 @@ func (x leases) Acquire(ctx context.Context, name, holder string, ttl time.Durat
 	if held && current.holder != holder && current.expires.After(now) {
 		return false, nil
 	}
-	x.d.leases[name] = leaseRow{holder: holder, expires: now.Add(ttl)}
+	x.d.leases[name] = leaseRow{holder: holder, address: address, expires: now.Add(ttl)}
 	return true, nil
+}
+
+func (x leases) Get(ctx context.Context, name string) (store.Lease, error) {
+	if err := ctx.Err(); err != nil {
+		return store.Lease{}, err
+	}
+	current, held := x.d.leases[name]
+	if !held {
+		return store.Lease{}, nil
+	}
+	return store.Lease{Name: name, Holder: current.holder, Address: current.address,
+		Live: current.expires.After(time.Now().UTC())}, nil
+}
+
+// Holds needs no lock of its own: a transaction of this store holds the one
+// mutex every other transaction waits on.
+func (x leases) Holds(ctx context.Context, name, holder string) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	current, held := x.d.leases[name]
+	return held && current.holder == holder && current.expires.After(time.Now().UTC()), nil
 }
 
 func (x leases) Release(ctx context.Context, name, holder string) error {

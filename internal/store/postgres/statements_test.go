@@ -59,7 +59,12 @@ func TestStatementsReportFailures(t *testing.T) {
 			{"a value write", func() error { _, err := tx.Values().Put(gone, "sec_a", []byte("value")); return err }},
 			{"a value read", func() error { _, _, err := tx.Values().Open(gone, "sec_a"); return err }},
 			{"a value delete", func() error { return tx.Values().Delete(gone, "sec_a") }},
-			{"a lease", func() error { _, err := tx.Leases().Acquire(gone, "reaper", "replica-one", time.Second); return err }},
+			{"a lease", func() error {
+				_, err := tx.Leases().Acquire(gone, "reaper", "replica-one", "", time.Second)
+				return err
+			}},
+			{"a lease read", func() error { _, err := tx.Leases().Get(gone, "reaper"); return err }},
+			{"a lease check", func() error { _, err := tx.Leases().Holds(gone, "reaper", "replica-one"); return err }},
 			{"a lease release", func() error { return tx.Leases().Release(gone, "reaper", "replica-one") }},
 			{"a ledger debit", func() error { return tx.Ledger().Debit(gone, "sbx_a", 1) }},
 			{"a ledger credit", func() error { return tx.Ledger().Credit(gone, "sbx_a") }},
