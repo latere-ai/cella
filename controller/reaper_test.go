@@ -762,3 +762,52 @@ func TestReaperEndToEndOverNative(t *testing.T) {
 		t.Fatalf("the workspace outlived its record: %v", err)
 	}
 }
+
+// TestTheReaperFinishesAnInterruptedDelete: a delete cut short leaves its row
+// Deleting, and nothing else would end it until a caller deleted again. The
+// next tick finishes it: an object the driver still has is deleted and the
+// row forgotten, and a row whose object the driver already removed is
+// forgotten, each recorded as deleted (spec 076).
+func TestTheReaperFinishesAnInterruptedDelete(t *testing.T) {
+	t.Run("the driver still has the object", func(t *testing.T) {
+		c, d, _ := newFake(t, Options{})
+		obj := created(t, c, "interrupted")
+		d.set(func(d *fakeDriver) { d.deleteErr = errors.New("the runtime went away mid-delete") })
+		if _, err := c.Act(t.Context(), obj.Status.ID, "delete"); err == nil {
+			t.Fatal("the delete succeeded with the driver failing")
+		}
+		if got, err := c.Get(t.Context(), obj.Status.ID, "alice"); err != nil || got.Status.Phase != PhaseDeleting {
+			t.Fatalf("the cut-short delete left %q: %v", got.Status.Phase, err)
+		}
+		d.set(func(d *fakeDriver) { d.deleteErr = nil })
+		acted, err := c.Reap(t.Context())
+		if err != nil || acted != 1 {
+			t.Fatalf("the tick acted on %d and answered %v, want the one delete finished", acted, err)
+		}
+		if _, err := c.Get(t.Context(), obj.Status.ID, "alice"); !errors.Is(err, ErrNotFound) {
+			t.Errorf("the finished delete kept the row: %v", err)
+		}
+		if _, deletes, _ := d.acted(); !slices.Contains(deletes, obj.Status.ID) {
+			t.Errorf("the driver was not asked to delete %s: %v", obj.Status.ID, deletes)
+		}
+	})
+	t.Run("the driver already removed the object", func(t *testing.T) {
+		c, d, _ := newFake(t, Options{})
+		obj := created(t, c, "half-done")
+		d.set(func(d *fakeDriver) { delete(d.states, obj.Status.ID) })
+		c.mu.Lock()
+		cut := clone(c.objects[obj.Status.ID])
+		cut.Status.Phase = PhaseDeleting
+		if err := c.persist(t.Context(), cut, MutationDeleting); err != nil {
+			c.mu.Unlock()
+			t.Fatal(err)
+		}
+		c.mu.Unlock()
+		if acted, err := c.Reap(t.Context()); err != nil || acted != 1 {
+			t.Fatalf("the tick acted on %d and answered %v, want the one delete finished", acted, err)
+		}
+		if _, err := c.Get(t.Context(), obj.Status.ID, "alice"); !errors.Is(err, ErrNotFound) {
+			t.Errorf("a Deleting row whose object is gone was kept: %v", err)
+		}
+	})
+}

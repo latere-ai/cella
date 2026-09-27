@@ -212,6 +212,11 @@ func (c *Controller) reapEnvironment(ctx context.Context, environment string) (i
 	now := c.clock.Now()
 	acted := 0
 	var failed error
+	// The deletes this pass finishes are the ones a previous act left
+	// Deleting, read before this pass's own rules write any: a delete the
+	// rules below start and cannot finish is retried at the next tick, not
+	// twice in this one.
+	cutShort := c.deleting(environment)
 	// The observed index is what the lost rule reads, and it is rebuilt from
 	// the same list the deadline rules run over, so one tick has one view of
 	// the environment. A rebuild that fails holds the lost rule for that
@@ -263,6 +268,9 @@ func (c *Controller) reapEnvironment(ctx context.Context, environment string) (i
 			acted++
 		}
 	}
+	finished, err := c.finishDeletes(ctx, cutShort)
+	acted += finished
+	failed = errors.Join(failed, err)
 	if !rebuilt {
 		return acted, failed
 	}
@@ -277,6 +285,64 @@ func (c *Controller) reapEnvironment(ctx context.Context, environment string) (i
 		}
 	}
 	return acted, failed
+}
+
+// finishDeletes ends the sandboxes whose rows said Deleting when the pass
+// began.
+// A delete writes Deleting and then calls the driver, all under the
+// controller's lock, so a Deleting row read under that lock is no delete in
+// flight: it is one a driver failure, a restart or a writer handing off to
+// another replica cut short (spec 076). The delete is run again, which deletes
+// an object the driver still has and takes an absent one as already deleted,
+// and then ends the identity, the ledger row and the row itself, each with the
+// reason the row was written with. A row whose create the scheduler has in
+// flight is the settle's to finish and is left alone.
+func (c *Controller) finishDeletes(ctx context.Context, ids []string) (int, error) {
+	finished := 0
+	var failed error
+	for _, id := range ids {
+		done, err := c.finishDelete(ctx, id)
+		if err != nil {
+			failed = errors.Join(failed, fmt.Errorf("reaper: finishing the delete of %s: %w", id, err))
+			continue
+		}
+		if done {
+			c.log.InfoContext(ctx, "reaper finished a delete that was cut short", "sandbox", id)
+			finished++
+		}
+	}
+	return finished, failed
+}
+
+// deleting is every sandbox of one environment whose row says Deleting and
+// whose create the scheduler does not have in flight, in id order.
+func (c *Controller) deleting(environment string) []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var ids []string
+	for id, obj := range c.objects {
+		if _, busy := c.realizing[id]; !busy && obj.Status.Phase == PhaseDeleting && obj.Status.Environment == environment {
+			ids = append(ids, id)
+		}
+	}
+	slices.Sort(ids)
+	return ids
+}
+
+// finishDelete re-reads one Deleting row under the controller's lock and ends
+// it, descendants first, as the delete that wrote it would have.
+func (c *Controller) finishDelete(ctx context.Context, id string) (bool, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	obj, held := c.objects[id]
+	if _, busy := c.realizing[id]; !held || busy || obj.Status.Phase != PhaseDeleting {
+		return false, nil
+	}
+	if err := c.cascade(ctx, id); err != nil {
+		return false, err
+	}
+	obj = clone(obj)
+	return true, c.deleteOne(ctx, &obj)
 }
 
 // enforceToken is design 005's token rule: a live sandbox whose token has

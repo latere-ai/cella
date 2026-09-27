@@ -61,6 +61,7 @@ const MutationSpawned = "sandbox.spawned"
 // two callers that both passed the check race for the last unit here, and one
 // of them loses.
 func (c *Controller) Spawn(ctx context.Context, obj v1.Sandbox, parent v1.Sandbox, max int) (v1.Sandbox, error) {
+	c.awaitGateway(ctx, obj.Spec)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if parent.Status.ID == "" {

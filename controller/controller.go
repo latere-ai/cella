@@ -86,6 +86,14 @@ type Options struct {
 	// Gateway is where sandboxes of this environment reach the gateway's
 	// two doors, from CELLA_GATEWAY and CELLA_GATEWAY_REVERSE.
 	Gateway GatewayAddresses
+	// GatewayGrace is how long after Open a create, a spawn or an apply
+	// whose boundary needs a gateway waits for one to connect while none
+	// is, rather than being refused at once, and how long the scheduler
+	// keeps a placed sandbox placed rather than failing it for the same
+	// reason. A writer that has just been promoted holds no gateway until
+	// the previous writer's gateways reconnect to it (spec 076). Zero waits
+	// for none; cellad sets CELLA_EGRESS_ACK_TIMEOUT.
+	GatewayGrace time.Duration
 	// Events is design 009's emission seam, set only where the store keeps
 	// no journal of its own. See the Events interface.
 	Events Events
@@ -180,10 +188,14 @@ type Controller struct {
 	retry            map[string]time.Time
 	egress           Egress
 	gateway          GatewayAddresses
-	events           Events
-	tokens           Tokens
-	retention        Retention
-	metrics          Metrics
+	// gatewayGrace is Options.GatewayGrace and opened the instant Open
+	// returned, which the grace counts from.
+	gatewayGrace time.Duration
+	opened       time.Time
+	events       Events
+	tokens       Tokens
+	retention    Retention
+	metrics      Metrics
 	// secrets is the Secret kind's store, and secretObjects this process's
 	// copy of the collection. Neither holds a value: what is here is what a
 	// read returns, and a plaintext is read per compile through the seam.
@@ -283,7 +295,7 @@ func Open(ctx context.Context, o Options) (*Controller, error) {
 		lifecycle: o.Lifecycle, touched: map[string]time.Time{},
 		lostGrace: o.LostGrace, recoveryAttempts: o.RecoveryAttempts,
 		lost: map[string]time.Time{}, attempts: map[string]int{}, retry: map[string]time.Time{},
-		egress: o.Egress, gateway: o.Gateway,
+		egress: o.Egress, gateway: o.Gateway, gatewayGrace: o.GatewayGrace,
 		events: o.Events, tokens: o.Tokens, retention: o.Retention, metrics: cmp.Or(o.Metrics, Metrics(nopMetrics{})),
 		secretObjects: map[string]v1.Secret{},
 		pool:          o.Pool, capacity: o.Capacity,
@@ -364,6 +376,7 @@ func Open(ctx context.Context, o Options) (*Controller, error) {
 		_ = store.Close()
 		return nil, fmt.Errorf("the %s driver declares no Pool capability, so this environment keeps no prewarmed entries", o.Driver.Name())
 	}
+	c.opened = time.Now()
 	return c, nil
 }
 
@@ -469,6 +482,7 @@ func (c *Controller) forget(ctx context.Context, id, mutation string) error {
 // nothing behind, and the create takes the slow path under an id of its own,
 // which it can only do before the caller has read one.
 func (c *Controller) Create(ctx context.Context, obj v1.Sandbox, owner string, max int) (v1.Sandbox, error) {
+	c.awaitGateway(ctx, obj.Spec)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.create(ctx, obj, owner, max, nil)
@@ -784,6 +798,14 @@ func (c *Controller) realize(ctx context.Context, id string) error {
 	// is replaced below and ended once this run has settled.
 	previous := obj.Status.TokenState
 	boundary, err := c.pushEgress(ctx, &obj)
+	if err != nil && c.gatewayGraceHolds(err) {
+		// No gateway is connected yet to a writer that was just promoted.
+		// The row stays placed and the loop takes it again shortly, once
+		// the previous writer's gateways have reconnected.
+		c.purgeEgress(settle, id)
+		time.AfterFunc(gatewayRetry, c.wakeScheduler)
+		return nil
+	}
 	if err != nil {
 		// A gateway that went away between the create's admission and this
 		// pass, or one that took the put and never answered. The map may sit
@@ -1340,6 +1362,7 @@ func crockfordULID(b [16]byte) string {
 // driver is not called, because design 003 marks every field a running
 // sandbox would have to be recreated for immutable.
 func (c *Controller) Update(ctx context.Context, obj v1.Sandbox) (v1.Sandbox, error) {
+	c.awaitGateway(ctx, obj.Spec)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	held, ok := c.objects[obj.Status.ID]

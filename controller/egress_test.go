@@ -9,7 +9,9 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"latere.ai/x/cella/egress"
 	v1 "latere.ai/x/cella/manifest/v1"
@@ -441,4 +443,98 @@ func mustGet(t *testing.T, c *Controller, id string) v1.Sandbox {
 		t.Fatal(err)
 	}
 	return obj
+}
+
+// reconnectingGateway is a gateway of a writer that has just been promoted:
+// none is connected until the previous writer's gateways dial again, at the
+// instant the test sets, and a map sent before then reaches no gateway.
+type reconnectingGateway struct {
+	gateway
+	back atomic.Int64 // unix nanoseconds from which one is connected; zero is never
+}
+
+func (g *reconnectingGateway) connected() bool {
+	back := g.back.Load()
+	return back != 0 && time.Now().UnixNano() >= back
+}
+
+func (g *reconnectingGateway) Connected() int {
+	if g.connected() {
+		return 1
+	}
+	return 0
+}
+
+func (g *reconnectingGateway) Send(ctx context.Context, m egress.Map) error {
+	if !g.connected() {
+		return ErrNoGateway
+	}
+	return g.gateway.Send(ctx, m)
+}
+
+// TestACreateWaitsForAGatewayAfterPromotion: right after a controller opens,
+// which is a writer just promoted, a create whose boundary needs a gateway
+// waits for the previous writer's gateways to reconnect rather than being
+// refused at once; past the grace it is refused as before, and a controller
+// with no grace refuses at once (spec 076).
+func TestACreateWaitsForAGatewayAfterPromotion(t *testing.T) {
+	t.Run("a gateway reconnects inside the grace", func(t *testing.T) {
+		gw := &reconnectingGateway{}
+		gw.back.Store(time.Now().Add(300 * time.Millisecond).UnixNano())
+		d := &gatewayDriver{modes: []v1.EgressMode{v1.EgressAllowlist}}
+		c := openController(t, Options{Driver: d, Egress: gw, GatewayGrace: 5 * time.Second})
+		answered, err := c.Create(t.Context(), bounded(), "alice", 0)
+		if err != nil || answered.Status.Phase != driver.Pending {
+			t.Fatalf("the create answered %s and %v, want Pending once the gateway reconnected", answered.Status.Phase, err)
+		}
+	})
+	t.Run("none reconnects inside the grace", func(t *testing.T) {
+		gw := &reconnectingGateway{}
+		d := &gatewayDriver{modes: []v1.EgressMode{v1.EgressAllowlist}}
+		c := openController(t, Options{Driver: d, Egress: gw, GatewayGrace: 200 * time.Millisecond})
+		started := time.Now()
+		if _, err := c.Create(t.Context(), bounded(), "alice", 0); !errors.Is(err, ErrNoGateway) {
+			t.Fatalf("the create answered %v, want ErrNoGateway past the grace", err)
+		}
+		if waited := time.Since(started); waited < 150*time.Millisecond {
+			t.Errorf("the create was refused after %v, before the grace ended", waited)
+		}
+	})
+	t.Run("no grace", func(t *testing.T) {
+		gw := &reconnectingGateway{}
+		d := &gatewayDriver{modes: []v1.EgressMode{v1.EgressAllowlist}}
+		c := openController(t, Options{Driver: d, Egress: gw})
+		started := time.Now()
+		if _, err := c.Create(t.Context(), bounded(), "alice", 0); !errors.Is(err, ErrNoGateway) {
+			t.Fatalf("the create answered %v, want ErrNoGateway", err)
+		}
+		if waited := time.Since(started); waited > time.Second {
+			t.Errorf("a controller with no grace waited %v", waited)
+		}
+	})
+}
+
+// TestAPlacedSandboxWaitsOutTheGatewayGrace: a sandbox the previous writer
+// placed and did not realize reaches a newly promoted writer's scheduler
+// before any gateway has reconnected to it. Inside the grace the sandbox
+// stays placed and is realized once a gateway is back, rather than failed.
+func TestAPlacedSandboxWaitsOutTheGatewayGrace(t *testing.T) {
+	gw := &reconnectingGateway{}
+	gw.back.Store(time.Now().UnixNano())
+	d := &gatewayDriver{modes: []v1.EgressMode{v1.EgressAllowlist}}
+	c := openController(t, Options{Driver: d, Egress: gw, GatewayGrace: 5 * time.Second})
+	answered, err := c.Create(t.Context(), bounded(), "alice", 0)
+	if err != nil || !placed(answered) {
+		t.Fatalf("the create answered %s and %v, want placed", answered.Status.Phase, err)
+	}
+	gw.back.Store(0)
+	kept, err := finished(t.Context(), c, answered, nil)
+	if err != nil || !placed(kept) || kept.Status.Phase == PhaseFailed {
+		t.Fatalf("with no gateway inside the grace the sandbox is %s/%s and %v, want still placed", kept.Status.Phase, kept.Status.Reason, err)
+	}
+	gw.back.Store(time.Now().UnixNano())
+	got, err := finished(t.Context(), c, kept, nil)
+	if err != nil || got.Status.Phase != driver.Running {
+		t.Fatalf("once a gateway is back the sandbox is %s and %v, want Running", got.Status.Phase, err)
+	}
 }

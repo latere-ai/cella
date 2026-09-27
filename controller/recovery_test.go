@@ -163,7 +163,9 @@ func TestLostForVanishedSandbox(t *testing.T) {
 // TestLostSuppressedForEndedSandbox is the hosted reaper's
 // TestReaperSuppressesLostWhenProbeMatches restated: there, a sandbox with a
 // recent terminal audit was not reported lost; here a phase the control plane
-// itself wrote is what says the sandbox was ended rather than lost.
+// itself wrote is what says the sandbox was ended rather than lost. A Deleting
+// one whose object is already gone is a delete cut short between the driver
+// and the row, and the reaper finishes it rather than keeping it (spec 076).
 func TestLostSuppressedForEndedSandbox(t *testing.T) {
 	for _, phase := range []string{driver.Pending, PhaseFailed, PhaseDeleting} {
 		t.Run(phase, func(t *testing.T) {
@@ -180,15 +182,24 @@ func TestLostSuppressedForEndedSandbox(t *testing.T) {
 			if _, err := c.Reap(t.Context()); err != nil {
 				t.Fatalf("the tick failed: %v", err)
 			}
+			if slices.Contains(st.mutations(id), MutationLost) {
+				t.Errorf("a %s sandbox was reported lost", phase)
+			}
 			got, err := c.Get(t.Context(), id, "alice")
+			if phase == PhaseDeleting {
+				if !errors.Is(err, ErrNotFound) {
+					t.Fatalf("a Deleting sandbox whose object is gone was kept: %v", err)
+				}
+				if last := st.mutations(id); len(last) == 0 || last[len(last)-1] != MutationDeleted {
+					t.Errorf("the finished delete's journal is %v", last)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("the record went: %v", err)
 			}
 			if got.Status.Phase != phase {
 				t.Fatalf("a %s sandbox was moved to %s", phase, got.Status.Phase)
-			}
-			if slices.Contains(st.mutations(id), MutationLost) {
-				t.Errorf("a %s sandbox was reported lost", phase)
 			}
 		})
 	}

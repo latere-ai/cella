@@ -221,6 +221,45 @@ func needsGatewayFor(spec v1.SandboxSpec) bool {
 	return e.Mode != v1.EgressOpen || len(e.DeniedHosts) > 0 || len(spec.Secrets) > 0
 }
 
+// gatewayRetry is how often a request inside the gateway grace looks again for
+// a connected gateway, and how soon the scheduler takes again a sandbox it
+// kept placed for want of one.
+const gatewayRetry = 100 * time.Millisecond
+
+// awaitGateway holds a create, a spawn or an apply whose boundary needs a
+// gateway while none is connected, for what is left of the grace since this
+// controller opened, or until the caller leaves. It runs before the
+// controller's lock is taken, so a wait holds no other request. What follows
+// decides as it always did: a gateway that connected is used, and none at the
+// end of the grace is ErrNoGateway.
+func (c *Controller) awaitGateway(ctx context.Context, spec v1.SandboxSpec) {
+	if c.egress == nil || c.gatewayGrace <= 0 || !needsGatewayFor(spec) {
+		return
+	}
+	until := c.opened.Add(c.gatewayGrace)
+	for c.egress.Connected() == 0 {
+		left := time.Until(until)
+		if left <= 0 {
+			return
+		}
+		timer := time.NewTimer(min(left, gatewayRetry))
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+	}
+}
+
+// gatewayGraceHolds reports whether a push that found no gateway is inside the
+// grace after Open with none connected, which the scheduler waits out rather
+// than failing the create.
+func (c *Controller) gatewayGraceHolds(err error) bool {
+	return errors.Is(err, ErrNoGateway) && c.egress != nil && c.egress.Connected() == 0 &&
+		c.gatewayGrace > 0 && time.Since(c.opened) < c.gatewayGrace
+}
+
 // pushEgress compiles the sandbox's map and puts it in a gateway before the
 // driver is called, which is the order spec 018 fixes: a sandbox never starts
 // before a gateway knows it. It reports whether a gateway holds the map, so
