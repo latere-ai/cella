@@ -6,6 +6,15 @@ refused before it is pushed.
 
 ## Unreleased
 
+### Security
+
+- The egress gateway refuses a request inside a terminated tunnel whose
+  `Host`, or `:authority` over HTTP/2, names another authority than the
+  tunnel's, answering `421 Misdirected Request`. Before, such a request was
+  sent to the tunnel's host with that host's credentials swapped in, and a
+  front that routes by `Host` could deliver them to another service. From
+  `latere.ai/x/pkg` v0.89.1.
+
 ## v0.9.0 - 2026-09-27
 
 - Changed: `cella_requests_total`, `cella_request_duration_seconds` and the
