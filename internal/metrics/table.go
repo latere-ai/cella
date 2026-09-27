@@ -63,7 +63,10 @@ var (
 	// Leases are the loops that run under one, by kind. The refill loop's
 	// lease is keyed by environment and its kind is "pool", because an
 	// environment per series would make the label unbounded.
-	Leases = []string{LeaseReaper, LeaseJournal, LeasePool, LeaseEnvironments, LeaseScheduler}
+	Leases = []string{LeaseWriter, LeaseReaper, LeaseJournal, LeasePool, LeaseEnvironments, LeaseScheduler}
+	// ForwardOutcomes are what one request a standby forwarded to the
+	// writer ended with (spec 076).
+	ForwardOutcomes = []string{ForwardForwarded, ForwardNoWriter, ForwardFailed}
 	// Doors are where a connection reached the gateway (design 018).
 	Doors = []string{DoorProxy, DoorReverse}
 	// Decisions are what the boundary did with it.
@@ -108,6 +111,7 @@ const (
 	OpEvents  = "events"
 	OpAcquire = "acquire"
 
+	LeaseWriter       = "writer"
 	LeaseReaper       = "reaper"
 	LeaseJournal      = "journal"
 	LeasePool         = "pool"
@@ -124,6 +128,10 @@ const (
 
 	DirectionIn  = "in"
 	DirectionOut = "out"
+
+	ForwardForwarded = "forwarded"
+	ForwardNoWriter  = "no_writer"
+	ForwardFailed    = "failed"
 
 	ExitZero    = "0"
 	ExitNonzero = "nonzero"
@@ -158,6 +166,7 @@ var Table = []Row{
 	{Name: "cella_event_delivery_duration_seconds", Kind: KindHistogram, Buckets: LatencyBuckets, Owners: []string{"009"}},
 	{Name: "cella_store_query_duration_seconds", Kind: KindHistogram, Labels: []string{"op"}, Buckets: StoreBuckets, Owners: []string{"010"}},
 	{Name: "cella_lease_held", Kind: KindGauge, Labels: []string{"name"}, Owners: []string{"010"}},
+	{Name: "cella_forwarded_requests_total", Kind: KindCounter, Labels: []string{"outcome"}, Owners: []string{"076"}},
 	{Name: "cella_exec_total", Kind: KindCounter, Labels: []string{"exit"}, Owners: []string{"008"}},
 	{Name: "cella_egress_connections_total", Kind: KindCounter, Labels: []string{"decision", "door"}, Owners: []string{"018"}},
 	{Name: "cella_egress_bytes_total", Kind: KindCounter, Labels: []string{"direction", "door"}, Owners: []string{"018"}},
@@ -223,6 +232,7 @@ var help = map[string]string{
 	"cella_event_delivery_duration_seconds": "how long one delivery attempt took",
 	"cella_store_query_duration_seconds":    "store operation latency by operation",
 	"cella_lease_held":                      "whether this replica holds the named lease",
+	"cella_forwarded_requests_total":        "requests a standby forwarded to the writer, by outcome",
 	"cella_exec_total":                      "exec sessions by how they ended",
 	"cella_egress_connections_total":        "connections the boundary decided on, by decision and door",
 	"cella_egress_bytes_total":              "bytes across the boundary, by direction and door",

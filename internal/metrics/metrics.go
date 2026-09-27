@@ -79,6 +79,7 @@ type Registry struct {
 	snapshots   *pkgmetrics.Counter
 	adoptions   *pkgmetrics.Counter
 	preemptions *pkgmetrics.Counter
+	forwarded   *pkgmetrics.Counter
 
 	requestDuration *pkgmetrics.Histogram
 	createDuration  *pkgmetrics.Histogram
@@ -127,6 +128,7 @@ func New(o Options) *Registry {
 	r.snapshots = counter("cella_gateway_snapshots_total")
 	r.adoptions = counter("cella_pool_adoptions_total")
 	r.preemptions = counter("cella_preemptions_total")
+	r.forwarded = counter("cella_forwarded_requests_total")
 
 	r.requestDuration = histogram("cella_request_duration_seconds", LatencyBuckets)
 	r.createDuration = histogram("cella_sandbox_create_duration_seconds", CreateBuckets)
@@ -384,6 +386,23 @@ func (r *Registry) LeaseHeld(name string, held bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.leases[name] = held
+}
+
+// LeasesReleased reports every lease this replica held as no longer held,
+// which a writer handing off to another replica does once it released them,
+// so its series stop claiming leases its successor holds (spec 076).
+func (r *Registry) LeasesReleased() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for name := range r.leases {
+		r.leases[name] = false
+	}
+}
+
+// Forwarded counts one request a standby forwarded to the writer, by what
+// it ended with (spec 076).
+func (r *Registry) Forwarded(outcome string) {
+	r.forwarded.Inc(map[string]string{"outcome": outcome})
 }
 
 // ---------------------------------------------------------------------------

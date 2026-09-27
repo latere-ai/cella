@@ -393,3 +393,25 @@ func TestPendingPublishesNoSeriesWhenTheStoreCannotAnswer(t *testing.T) {
 		t.Errorf("a store that did not answer published a series:\n%s", out)
 	}
 }
+
+// TestAHandoffReleasesEveryLeaseSeries: a writer that handed its leases to
+// another replica reports each as no longer held, so no two replicas claim
+// one lease while the old one drains, and every request it forwarded is
+// counted by outcome (spec 076).
+func TestAHandoffReleasesEveryLeaseSeries(t *testing.T) {
+	r := full()
+	r.LeaseHeld(metrics.LeaseWriter, true)
+	r.LeaseHeld(metrics.LeaseReaper, true)
+	r.LeasesReleased()
+	for _, name := range []string{metrics.LeaseWriter, metrics.LeaseReaper} {
+		if !series(t, r, `cella_lease_held{name="`+name+`"} 0`) {
+			t.Errorf("the %s lease still reads as held after the handoff", name)
+		}
+	}
+	r.Forwarded(metrics.ForwardForwarded)
+	r.Forwarded(metrics.ForwardNoWriter)
+	if !series(t, r, `cella_forwarded_requests_total{outcome="forwarded"} 1`) ||
+		!series(t, r, `cella_forwarded_requests_total{outcome="no_writer"} 1`) {
+		t.Errorf("the forwards were not counted by outcome")
+	}
+}

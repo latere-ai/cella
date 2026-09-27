@@ -82,11 +82,12 @@ spec:
           annotations:
             summary: "records are being dropped undelivered"
             description: "The sink refused them, or the retry window closed. The dropped record is gone; the object's own status is not."
-        # A lease nobody holds is a loop that is not running: no reaper
-        # means no deadline is enforced, and no journal lease means no
-        # record is delivered.
+        # A lease no replica holds is a loop that is not running: no writer
+        # means no replica answers the API, no reaper means no deadline is
+        # enforced, and no journal lease means no record is delivered. A
+        # standby holds none, so the alert reads the replica set as one.
         - alert: CelladLeaseNotHeld
-          expr: cella_lease_held == 0
+          expr: max by (name) (cella_lease_held) == 0
           for: 2m
           labels:
             severity: warning

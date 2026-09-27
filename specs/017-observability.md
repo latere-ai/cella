@@ -83,7 +83,8 @@ observation.
 | `cella_events_delivered_total` | counter | `outcome` (`acknowledged`, `deferred`, `dropped`) | | 009 |
 | `cella_event_delivery_duration_seconds` | histogram | none | 5ms to 10s, 12 bounds | 009 |
 | `cella_store_query_duration_seconds` | histogram | `op` | 1ms to 5s, 12 bounds | 010 |
-| `cella_lease_held` | gauge | `name` (`reaper`, `journal`, `scheduler`, `environments`, `pool`) | | 010 |
+| `cella_lease_held` | gauge | `name` (`writer`, `reaper`, `journal`, `scheduler`, `environments`, `pool`) | | 010 |
+| `cella_forwarded_requests_total` | counter | `outcome` (`forwarded`, `no_writer`, `failed`) | | 076 |
 | `cella_exec_total` | counter | `exit` (`0`, `nonzero`, `failed`) | | 008 |
 | `cella_egress_connections_total` | counter | `decision`, `door` | | 018 |
 | `cella_egress_bytes_total` | counter | `direction`, `door` | | 018 |
@@ -160,7 +161,7 @@ publishes does not carry the prefix and is not checked.
 | events backing up | `cella_events_pending` above 1000 for 10 minutes, or `cella_events_delivered_total{outcome="dropped"}` increasing |
 | an environment offline | `cella_environments{phase="Offline"}` above zero for 5 minutes |
 | sandboxes lost on a ready environment | `cella_sandboxes{phase="Lost"}` above zero for 15 minutes where the environment's `cella_environments{phase="Ready"}` is one |
-| a lease not held | `cella_lease_held` zero for a name for 2 minutes |
+| a lease not held | `cella_lease_held` zero for a name on every replica for 2 minutes: a standby holds no lease, so one replica not holding a lease is the ordinary case and none holding it is the alert |
 | operations redelivered | `cella_operations_redelivered_total` increasing for 10 minutes |
 
 ## Not in this spec
