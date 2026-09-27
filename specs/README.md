@@ -98,6 +98,7 @@ later.
 | [074](.archive/074-client-closed-requests.md) | Client-closed requests: a request its caller closed is counted as `client_closed` and not as the failure of the dependency its cancellation reached | small | complete | 006, 008, 017 |
 | [075](.archive/075-list-page-resilience.md) | List page resilience: a row whose driver read fails is answered with the status last written and `Observed` `False`, and the page is not failed | small | complete | 003, 005, 008, 074 |
 | [076](.archive/076-rolling-replicas.md) | Rolling replicas: one writer lease gates the controller, every replica answers the API by forwarding to the writer, the lease is handed off on SIGTERM, and readiness means can serve | large | complete | 005, 008, 010, 014, 017, 018, 021, 043, 072 |
+| [077](077-egress-scope-and-confirmation.md) | Egress scope by path and confirmation refusals: a Secret scoped by host, port and path prefix with the longest prefix winning, one header, confirmation patterns refused 403 and recorded for the owner, one-shot allowances, upstream refusals in the same record | large | drafted | 003, 005, 006, 008, 009, 010, 018, 022, 039, 046 |
 
 ## Dependency graph
 
