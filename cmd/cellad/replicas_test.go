@@ -24,6 +24,8 @@ import (
 
 	"latere.ai/x/pkg/authkit/issuertest"
 
+	"latere.ai/x/cella/internal/store"
+	"latere.ai/x/cella/internal/store/postgres"
 	v1 "latere.ai/x/cella/manifest/v1"
 )
 
@@ -339,4 +341,47 @@ func TestARollingHandoffAnswersEveryRequest(t *testing.T) {
 		}
 	}
 	t.Logf("%d probe requests, %d during the handoff, %d answered control_plane_unavailable", len(results), during, refused)
+}
+
+// TestAWriterThatLosesItsLeaseExits: a writer whose lease another holder took,
+// which is what a partition longer than the term leaves behind, stops at its
+// next renewal and exits non-zero, to come back as a standby (spec 076).
+func TestAWriterThatLosesItsLeaseExits(t *testing.T) {
+	db := replicaDatabase(t)
+	key := []byte("0123456789abcdef0123456789abcdef")
+	shared := map[string]string{
+		"CELLA_DB_URL":     db,
+		"CELLA_SECRET_KEY": base64.StdEncoding.EncodeToString(key),
+	}
+	writer := startReplica(t, shared)
+	awaitCondition(t, "the replica to become the writer", 30*time.Second, func() bool { return writer.writerLeaseHeld(t) })
+
+	intruder, err := postgres.Open(t.Context(), postgres.Options{URL: db, Key: key})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = intruder.Close() })
+	if err := intruder.Tx(t.Context(), func(tx store.Tx) error {
+		held, err := tx.Leases().Get(t.Context(), store.WriterLease)
+		if err != nil {
+			return err
+		}
+		if err := tx.Leases().Release(t.Context(), store.WriterLease, held.Holder); err != nil {
+			return err
+		}
+		taken, err := tx.Leases().Acquire(t.Context(), store.WriterLease, "an-intruder", "", time.Minute)
+		if err != nil || !taken {
+			return fmt.Errorf("taking the writer lease: %v, %w", taken, err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	code, ok := writer.exited(30 * time.Second)
+	if !ok {
+		t.Fatal("the writer kept running after another holder took its lease")
+	}
+	if code != 1 || !strings.Contains(writer.errOut.String(), "writer lease") {
+		t.Errorf("the demoted writer exited %d: %s", code, writer.errOut.String())
+	}
 }

@@ -33,8 +33,10 @@ refused before it is pushed.
   `maxUnavailable: 0`, a disruption budget, a network policy between the
   replicas, the grace period, and the database pool.
 - The first rollout onto this release is a `Recreate`: an older process runs
-  no standby, and a new replica beside it would become a second writer.
-  Rollouts after it can be rolling.
+  no standby, and a new replica beside it would become a second writer. Set
+  `CELLA_ADVERTISE_URL` in that rollout already, so the writer it starts
+  advertises where the next rollout's standbys forward to. Rollouts after
+  it can be rolling.
 - Added: `503 control_plane_unavailable`, "The control plane is unavailable;
   retry shortly.", for a request no replica could take within its hold,
   which happens only while one replica hands off to another. Retry it.

@@ -369,6 +369,9 @@ A binary before this design runs no standby, publishes no address, has no
 fence and takes the loop leases, not `writer`. A new process started beside
 it would take `writer` and open a second controller. The first rollout onto
 this design is therefore a Recreate, and every rollout after it is rolling.
+The Recreate already sets `CELLA_ADVERTISE_URL` and the policy between the
+replicas, so the writer it starts advertises the address the standbys of
+the next rollout forward to.
 
 ### What a plane sets
 
@@ -436,7 +439,7 @@ alert. A promotion logs how long it took.
 | A handoff frees every lease, the writer's last, and its series stop claiming them | `TestReleaseAllFreesEveryLeaseTheWriterLast`, `TestAHandoffReleasesEveryLeaseSeries` | passing |
 | A standby takes the writer lease only once no live holder has it | `TestAStandbyTakesTheWriterLeaseOnlyOnceItIsFree` | passing |
 | On SIGTERM the writer stops serving, ends holds, feeds and sockets with 1001, closes its gateways' streams, waits the handoff timeout, cuts the rest, and releases `writer`; the requests it holds go to the successor | `TestAHandoffHoldsNewRequestsAndCutsTheSlowOnes`, `TestDrainingEndsWhatWouldOutlastAHandoff`, `TestAHubThatDrainsClosesItsGatewayStreams`, `TestARollingHandoffAnswersEveryRequest` | passing |
-| A writer that renews into another holder, or renews nothing for the term, is demoted; one failed renewal is not a loss | `TestLosingTheWriterLeaseExits` | passing, over the renewal loop; the exit it triggers is `serve`'s |
+| A writer that renews into another holder, or renews nothing for the term, is demoted and its process exits non-zero; one failed renewal is not a loss | `TestLosingTheWriterLeaseExits`, `TestAWriterThatLosesItsLeaseExits` | passing: the renewal loop's cases, and a running writer whose lease another holder took exiting 1 within two seconds |
 | Promotion loads what the previous writer wrote and serves it, and a standby stays ready throughout without holding the lease | `TestARollingHandoffAnswersEveryRequest` | passing |
 | The reaper finishes a `Deleting` row: it deletes an object the driver still has, and forgets a row whose object the driver no longer has | `TestTheReaperFinishesAnInterruptedDelete`, `TestLostSuppressedForEndedSandbox` | passing; the first failed with the rule disabled |
 | A gateway and a worker whose accepted stream ended dial again after the minimum backoff, and refused attempts still wait longer each time | `TestAnAcceptedStreamResetsTheBackoff`, `TestAnAcceptedStreamResetsTheWorkersBackoff` | passing; both failed on the tree before the change with the waits doubling |

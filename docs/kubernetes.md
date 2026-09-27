@@ -211,7 +211,10 @@ and about four in steady state.
 
 **The first rollout.** A release before this one runs no standby, and a new
 replica beside it would become a second writer. The first rollout onto this
-release is a `Recreate`; every rollout after it can be rolling.
+release is a `Recreate`; every rollout after it can be rolling. Set
+`CELLA_ADVERTISE_URL` and the policy between the replicas in that `Recreate`
+already, so the writer it starts advertises where the next rollout's
+standbys forward to.
 
 **Streams.** A WebSocket or a following stream ends when the replica it runs
 through stops, and one a standby forwards ends when either the standby or
