@@ -17,6 +17,51 @@ refused before it is pushed.
 - Changed: with no authorization endpoint configured, a token minted from a
   service account's key is narrowed by the grants it carries, as a personal
   access token's is.
+- Added: with `CELLA_DB_URL`, `cellad serve` runs as several replicas that
+  roll with no gap. One replica is the writer: it holds a lease in the
+  database, runs the background loops, holds the gateways' and the workers'
+  streams, and answers the API. The others are standbys that forward every
+  API request to the writer, WebSockets and streams included. A writer that
+  is stopped finishes its requests for at most `CELLA_HANDOFF_TIMEOUT`
+  (default `10s`) and hands the lease to a standby, which takes over within
+  about a second; a request that arrives meanwhile is held for at most
+  `CELLA_FORWARD_HOLD` (default `15s`) and then answered. Each replica sets
+  `CELLA_ADVERTISE_URL`, the address the others reach its public listener
+  at, such as `http://$(POD_IP):8080`. Readiness does not depend on the
+  lease. [Running more than one replica](docs/kubernetes.md#running-more-than-one-replica)
+  lists what a Deployment changes: `RollingUpdate` with `maxSurge: 1` and
+  `maxUnavailable: 0`, a disruption budget, a network policy between the
+  replicas, the grace period, and the database pool.
+- The first rollout onto this release is a `Recreate`: an older process runs
+  no standby, and a new replica beside it would become a second writer.
+  Rollouts after it can be rolling.
+- Added: `503 control_plane_unavailable`, "The control plane is unavailable;
+  retry shortly.", for a request no replica could take within its hold,
+  which happens only while one replica hands off to another. Retry it.
+- Changed: with `CELLA_DB_URL`, a process waits for the writer lease before
+  it opens its controller. A process that crashed without handing off holds
+  the lease until its 15 second term lapses, so the next one waits up to
+  that long before it serves.
+- Changed: `cella_lease_held` carries the name `writer`, and the
+  `CelladLeaseNotHeld` alert fires when no replica holds a lease rather than
+  when one replica does not, since a standby holds none. New:
+  `cella_forwarded_requests_total{outcome}` counts what a standby forwarded.
+- Changed: when a writer hands off, or a single process stops, every
+  terminal, screen and dial WebSocket is closed with `1001` and a create
+  held under `?wait=1` answers the sandbox as it stands, rather than
+  waiting out the shutdown's grace period.
+- Fixed: a gateway or a worker whose stream to the control plane had
+  dropped a few times over its life waited up to 30 seconds before dialing
+  again, because its backoff never reset after a stream that worked. It now
+  dials again at once after a stream the control plane accepted.
+- Fixed: a delete whose runtime call failed, or that a restart cut short,
+  left the sandbox `Deleting` until someone deleted it again. The reaper now
+  finishes such a delete at its next tick.
+- Fixed: a create or a spawn whose name another replica had just taken, or
+  a write over a row another replica had changed, answered
+  `driver_unavailable`. They answer `name_taken` and `version_conflict`.
+- The database gains one nullable column, `leases.address` (migration 6),
+  which an older release ignores.
 
 ## v0.8.0 - 2026-09-27
 
