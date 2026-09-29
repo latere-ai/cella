@@ -22,6 +22,16 @@ func secretResource(obj v1.Secret) authz.Resource {
 	return (auth.Secret{ID: obj.Status.ID, Name: obj.Metadata.Name, Owner: obj.Status.Owner, Labels: obj.Metadata.Labels}).Resource()
 }
 
+// secretUpdateResource is the resource of secret.update: the stored Secret,
+// and the Secret the request would write as its proposal. The proposal's
+// owner is the stored one, since an update never moves a Secret to another
+// owner, and its spec is stripped of the value, which no authorization
+// request carries.
+func secretUpdateResource(existing, proposed v1.Secret) authz.Resource {
+	return withProposal(secretResource(existing), existing.Status.Owner, proposed.Metadata,
+		manifest.StripSecretValue(proposed).Spec)
+}
+
 // createSecret is POST /v1/secrets: a create whose name must be free.
 func (h *handler) createSecret(w http.ResponseWriter, r *http.Request) {
 	obj, ok := h.readSecret(w, r, nil)
@@ -44,7 +54,9 @@ func (h *handler) createSecret(w http.ResponseWriter, r *http.Request) {
 
 // applySecret is PUT /v1/secrets/{key}: a create when the name is free and an
 // update when the caller already holds it, which is the grammar every kind of
-// this API shares.
+// this API shares. An update reads and resolves its body before it asks the
+// authorizer, so secret.update is asked about the stored Secret together with
+// the one the body would write, as sandbox.update is.
 func (h *handler) applySecret(w http.ResponseWriter, r *http.Request) {
 	key := r.PathValue("key")
 	existing, err := h.Controller.GetSecret(r.Context(), key, caller(r).Subject)
@@ -56,16 +68,13 @@ func (h *handler) applySecret(w http.ResponseWriter, r *http.Request) {
 		respondError(w, err)
 		return
 	}
-	if _, err = h.decide(r, authorizer.ActionSecretUpdate, secretResource(existing)); err != nil {
-		respondError(w, err)
-		return
-	}
 	obj, ok := h.readSecret(w, r, &existing)
 	if !ok {
 		return
 	}
-	if obj.Metadata.Name == "" {
-		obj.Metadata.Name = existing.Metadata.Name
+	if _, err = h.decide(r, authorizer.ActionSecretUpdate, secretUpdateResource(existing, obj)); err != nil {
+		respondError(w, err)
+		return
 	}
 	stored, err := h.Controller.UpdateSecret(r.Context(), obj, existing.Status.ID)
 	if err != nil {

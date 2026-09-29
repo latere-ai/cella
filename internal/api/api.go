@@ -284,6 +284,21 @@ func resource(obj v1.Sandbox) authz.Resource {
 		Environment: obj.Spec.Environment, Parent: obj.Status.Parent, Root: obj.Status.Root,
 		Labels: obj.Metadata.Labels}).Resource()
 }
+
+// withProposal adds to an update's resource the object the request would
+// write, as the member "proposed": its owner, its metadata and its spec. An
+// authorizer then reads the change and not only the object it is made to, and
+// can refuse one it does not allow, such as a label its tenancy is read from.
+// The spec is sent as given: a kind whose spec carries a value no authorizer
+// may see strips it before it calls this.
+func withProposal(res authz.Resource, owner string, metadata v1.Metadata, spec any) authz.Resource {
+	if res.Fields == nil {
+		res.Fields = map[string]any{}
+	}
+	res.Fields["proposed"] = map[string]any{"owner": owner, "metadata": metadata, "spec": spec}
+	return res
+}
+
 func (h *handler) decide(r *http.Request, action string, res authz.Resource) (auth.Decision, error) {
 	return h.decideAs(r, caller(r), action, res)
 }
@@ -400,8 +415,7 @@ func (h *handler) update(w http.ResponseWriter, r *http.Request, existing v1.San
 		return
 	}
 	obj.Status = existing.Status
-	res := resource(obj)
-	res.Fields["proposed"] = map[string]any{"owner": obj.Status.Owner, "metadata": obj.Metadata, "spec": obj.Spec}
+	res := withProposal(resource(obj), obj.Status.Owner, obj.Metadata, obj.Spec)
 	if _, err = h.decide(r, authorizer.ActionSandboxUpdate, res); err != nil {
 		respondError(w, err)
 		return
@@ -647,7 +661,7 @@ func (h *handler) item(w http.ResponseWriter, r *http.Request) {
 	}
 	res := resource(obj)
 	if action == authorizer.ActionSandboxUpdate {
-		res.Fields["proposed"] = map[string]any{"owner": obj.Status.Owner, "metadata": obj.Metadata, "spec": obj.Spec}
+		res = withProposal(res, obj.Status.Owner, obj.Metadata, obj.Spec)
 	}
 	if _, err = h.decide(r, action, res); err != nil {
 		respondError(w, err)

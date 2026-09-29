@@ -589,3 +589,157 @@ func (p *failingPolicy) Authorize(ctx context.Context, req authz.Request) (authz
 	}
 	return p.inner.Authorize(ctx, req)
 }
+
+// wireSecret is the resource of a secret.update as an authorizer decodes it
+// off the wire: the stored Secret's fields, and the proposal beside them.
+type wireSecret struct {
+	Kind     string            `json:"kind"`
+	ID       string            `json:"id"`
+	Name     string            `json:"name"`
+	Owner    string            `json:"owner"`
+	Labels   map[string]string `json:"labels"`
+	Proposed *struct {
+		Owner    string         `json:"owner"`
+		Metadata v1.Metadata    `json:"metadata"`
+		Spec     map[string]any `json:"spec"`
+	} `json:"proposed"`
+}
+
+// resourceOf reads a request's resource through JSON, the way an endpoint
+// behind the wire reads it.
+func resourceOf(t *testing.T, r authz.Request) wireSecret {
+	t.Helper()
+	b, err := json.Marshal(r.Resource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var res wireSecret
+	if err := json.Unmarshal(b, &res); err != nil {
+		t.Fatalf("the resource is %s: %v", b, err)
+	}
+	return res
+}
+
+// TestASecretUpdateCarriesItsProposal: secret.update is asked about the
+// stored Secret with the Secret the body would write beside it as
+// "proposed", so an authorizer sees a change of labels or scope before it is
+// made. The proposal carries the metadata and the resolved spec, and the
+// value appears nowhere in the request.
+func TestASecretUpdateCarriesItsProposal(t *testing.T) {
+	var mu sync.Mutex
+	var asked []authz.Request
+	f := setupSealed(t, decisionFunc(func(_ context.Context, r authz.Request) (authz.Decision, error) {
+		if r.Action == authorizer.ActionSecretUpdate {
+			mu.Lock()
+			asked = append(asked, r)
+			mu.Unlock()
+		}
+		return authz.Decision{Allow: true}, nil
+	}))
+	created := decodeSecret(t, f.request(http.MethodPost, "/v1/secrets", f.alice,
+		labeledSecretBody("github", `{"team":"a"}`), http.StatusCreated))
+	const canary = "ghp_rotated_canary"
+	f.request(http.MethodPut, "/v1/secrets/github", f.alice,
+		`{"apiVersion":"`+v1.APIVersion+`","kind":"Secret","metadata":{"labels":{"team":"b"}},`+
+			`"spec":{"scope":{"hosts":["api.github.com","uploads.github.com"]},"value":"`+canary+`"}}`,
+		http.StatusOK)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(asked) != 1 {
+		t.Fatalf("secret.update was asked %d times, want once", len(asked))
+	}
+	req := asked[0]
+	wire, err := json.Marshal(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(wire), canary) {
+		t.Fatalf("the authorization request carries the value: %s", wire)
+	}
+	// The resource's own fields are the stored Secret's.
+	res := resourceOf(t, req)
+	if res.Kind != v1.KindSecret || res.ID != created.Status.ID || res.Name != "github" || res.Owner != created.Status.Owner || res.Labels["team"] != "a" {
+		t.Errorf("the resource is %+v, want the stored secret %s with team=a", res, created.Status.ID)
+	}
+	if res.Proposed == nil {
+		t.Fatalf("secret.update carried no proposal: %s", wire)
+	}
+	proposed := *res.Proposed
+	if proposed.Owner != created.Status.Owner || proposed.Metadata.Name != "github" || proposed.Metadata.Labels["team"] != "b" {
+		t.Errorf("the proposal is %+v, want the stored owner, the name github and team=b", proposed)
+	}
+	var spec v1.SecretSpec
+	b, err := json.Marshal(proposed.Spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(b, &spec); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(spec.Scope.Hosts, []string{"api.github.com", "uploads.github.com"}) || spec.Kind != v1.SecretStatic || spec.Inject.Header != v1.DefaultInjectHeader {
+		t.Errorf("the proposed spec is %s, want the body's scope with the defaults resolved", b)
+	}
+	if _, carried := proposed.Spec["value"]; carried {
+		t.Errorf("the proposed spec names a value: %s", b)
+	}
+}
+
+// TestASecretUpdateTheAuthorizerRefusesChangesNothing: an authorizer that
+// holds a Secret's labels fixed, as a plane that reads its tenancy from
+// them does, refuses an update that changes one on the proposal alone, and
+// the stored Secret keeps its labels, its scope and its value. A body that
+// does not resolve is refused before the authorizer is asked at all.
+func TestASecretUpdateTheAuthorizerRefusesChangesNothing(t *testing.T) {
+	var asked atomic.Int32
+	f := setupSealed(t, decisionFunc(func(_ context.Context, r authz.Request) (authz.Decision, error) {
+		if r.Action != authorizer.ActionSecretUpdate {
+			return authz.Decision{Allow: true}, nil
+		}
+		asked.Add(1)
+		res := resourceOf(t, r)
+		if res.Proposed == nil || res.Proposed.Metadata.Labels["team"] != res.Labels["team"] {
+			return authz.Decision{Reason: "a secret's team is fixed"}, nil
+		}
+		return authz.Decision{Allow: true}, nil
+	}))
+	f.request(http.MethodPost, "/v1/secrets", f.alice, labeledSecretBody("github", `{"team":"a"}`), http.StatusCreated)
+
+	f.request(http.MethodPut, "/v1/secrets/github", f.alice, `{`, http.StatusBadRequest)
+	f.request(http.MethodPut, "/v1/secrets/github", f.alice,
+		`{"apiVersion":"`+v1.APIVersion+`","kind":"Secret","spec":{}}`, http.StatusBadRequest)
+	if n := asked.Load(); n != 0 {
+		t.Fatalf("secret.update was asked %d times for bodies that do not resolve, want never", n)
+	}
+
+	f.request(http.MethodPut, "/v1/secrets/github", f.alice,
+		`{"apiVersion":"`+v1.APIVersion+`","kind":"Secret","metadata":{"labels":{"team":"b"}},`+
+			`"spec":{"scope":{"hosts":["api.other.com"]},"value":"refused"}}`,
+		http.StatusForbidden)
+	got := decodeSecret(t, f.request(http.MethodGet, "/v1/secrets/github", f.alice, "", http.StatusOK))
+	if got.Metadata.Labels["team"] != "a" || !slices.Equal(got.Spec.Scope.Hosts, []string{"api.example.com"}) || got.Status.Version != 1 {
+		t.Fatalf("the refused update changed the secret: %+v", got)
+	}
+
+	// The same change with the label kept is allowed and writes the value.
+	kept := decodeSecret(t, f.request(http.MethodPut, "/v1/secrets/github", f.alice,
+		`{"apiVersion":"`+v1.APIVersion+`","kind":"Secret","metadata":{"labels":{"team":"a"}},`+
+			`"spec":{"scope":{"hosts":["api.other.com"]},"value":"allowed"}}`,
+		http.StatusOK))
+	if !slices.Equal(kept.Spec.Scope.Hosts, []string{"api.other.com"}) || kept.Status.Version != 2 {
+		t.Fatalf("the allowed update answered %+v", kept)
+	}
+	if n := asked.Load(); n != 2 {
+		t.Fatalf("secret.update was asked %d times, want twice", n)
+	}
+}
+
+// TestAProposalOnAResourceWithNoFields: a resource that carries no field
+// still takes the proposal rather than panicking on the map write.
+func TestAProposalOnAResourceWithNoFields(t *testing.T) {
+	res := withProposal(authz.Resource{Kind: authorizer.KindSecret}, "owner", v1.Metadata{Name: "n"}, v1.SecretSpec{})
+	p, ok := res.Fields["proposed"].(map[string]any)
+	if !ok || p["owner"] != "owner" {
+		t.Fatalf("the resource is %+v", res)
+	}
+}
