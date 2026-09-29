@@ -195,6 +195,21 @@ func terminated(pod *corev1.Pod) (code int, finished time.Time, ok bool) {
 	return 0, time.Time{}, false
 }
 
+// started reports whether the workload container is running, which is what
+// an exec into the sandbox's own Pod needs. A Pod still pulling its image or
+// running its init containers has no such container yet, and the kubelet
+// refuses the exec with a bare "container not found". A container reported
+// ready is running whatever its state says. A Pod whose container statuses
+// are not written yet falls back to the Pod's phase.
+func started(pod *corev1.Pod) bool {
+	for _, cs := range pod.Status.ContainerStatuses {
+		if cs.Name == Container {
+			return cs.Ready || cs.State.Running != nil
+		}
+	}
+	return pod.Status.Phase == corev1.PodRunning
+}
+
 func terminationReason(pod *corev1.Pod) string {
 	for _, cs := range pod.Status.ContainerStatuses {
 		if cs.Name == Container && cs.State.Terminated != nil && cs.State.Terminated.Reason != "" {

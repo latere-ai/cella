@@ -152,7 +152,9 @@ func (d *Driver) wrapExec(err error, diagnostic *tail) error {
 
 // transferPod names the Pod a transfer runs in. A running sandbox is its own;
 // a stopped one gets a helper built from its own image with the same hardening
-// and the same claim, which is deleted when the transfer ends.
+// and the same claim, which is deleted when the transfer ends. A sandbox whose
+// Pod is still starting is ErrNotRunning: its container is not there to exec
+// into, and a helper would race the Pod for the claim it is attaching.
 func (d *Driver) transferPod(ctx context.Context, id string, spec driver.CreateSpec) (string, func(), error) {
 	pod, err := d.getPod(ctx, id)
 	if err != nil {
@@ -160,6 +162,9 @@ func (d *Driver) transferPod(ctx context.Context, id string, spec driver.CreateS
 	}
 	if pod != nil && pod.DeletionTimestamp == nil {
 		if _, _, ended := terminated(pod); !ended {
+			if !started(pod) {
+				return "", nil, startingErr(pod)
+			}
 			return pod.Name, func() {}, nil
 		}
 	}

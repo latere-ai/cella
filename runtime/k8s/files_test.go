@@ -346,6 +346,47 @@ func TestTransferNeedsAClusterConnection(t *testing.T) {
 	}
 }
 
+// TestFilesWhileStarting: a Pod whose workload container is not running yet
+// has nothing to exec into. Every file operation and Exec answer
+// ErrNotRunning with what the Pod waits for, run no command, and start no
+// helper, which would race the Pod for its claim.
+func TestFilesWhileStarting(t *testing.T) {
+	h := newHarness(t)
+	const id = "sbx_startingfiles"
+	h.created(t, spec(id))
+	for _, tc := range []struct {
+		name, reason string
+		status       corev1.PodStatus
+	}{
+		{"pulling", "container main is ContainerCreating", corev1.PodStatus{Phase: corev1.PodPending, ContainerStatuses: []corev1.ContainerStatus{{
+			Name: Container, State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "ContainerCreating"}},
+		}}}},
+		{"unreported", "the sandbox is starting", corev1.PodStatus{Phase: corev1.PodPending}},
+	} {
+		pod := h.podOf(t, id)
+		pod.Status = tc.status
+		if _, err := h.cs.CoreV1().Pods(namespace).UpdateStatus(t.Context(), pod, metav1.UpdateOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		_, err := h.ReadDir(t.Context(), id, driver.DefaultWorkdir)
+		if !errors.Is(err, driver.ErrNotRunning) || !strings.Contains(err.Error(), tc.reason) {
+			t.Errorf("ReadDir on a %s Pod = %v, want ErrNotRunning naming %q", tc.name, err, tc.reason)
+		}
+		if err := h.ExportTar(t.Context(), id, nil, io.Discard); !errors.Is(err, driver.ErrNotRunning) {
+			t.Errorf("ExportTar on a %s Pod = %v, want ErrNotRunning", tc.name, err)
+		}
+		if _, err := h.Exec(t.Context(), id, driver.ExecRequest{Command: []string{"true"}}); !errors.Is(err, driver.ErrNotRunning) {
+			t.Errorf("Exec on a %s Pod = %v, want ErrNotRunning", tc.name, err)
+		}
+	}
+	if n := h.exec.count(); n != 0 {
+		t.Fatalf("a starting sandbox ran %d commands: %+v", n, h.exec.ran())
+	}
+	if _, err := h.cs.CoreV1().Pods(namespace).Get(t.Context(), objectName(id)+"-files", metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+		t.Fatalf("a starting sandbox got a helper Pod: %v", err)
+	}
+}
+
 func TestHelperPodThatNeverStarts(t *testing.T) {
 	h := newHarness(t)
 	const id = "sbx_helperfail"

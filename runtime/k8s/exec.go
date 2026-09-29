@@ -175,7 +175,19 @@ func (d *Driver) runningSpec(ctx context.Context, id string) (driver.CreateSpec,
 	if _, _, ended := terminated(pod); ended {
 		return driver.CreateSpec{}, driver.ErrNotRunning
 	}
+	if !started(pod) {
+		return driver.CreateSpec{}, startingErr(pod)
+	}
 	return specOf(pvc)
+}
+
+// startingErr is the answer for a sandbox whose Pod exists and whose workload
+// container is not running yet, with what the Pod is waiting for.
+func startingErr(pod *corev1.Pod) error {
+	if reason := waiting(pod); reason != "" {
+		return fmt.Errorf("%w: the sandbox is starting: %s", driver.ErrNotRunning, reason)
+	}
+	return fmt.Errorf("%w: the sandbox is starting", driver.ErrNotRunning)
 }
 
 // start runs one command with no input and hands back its streams.
