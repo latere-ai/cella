@@ -315,6 +315,45 @@ func TestLifecycleAuthorizesUnchangedProposal(t *testing.T) {
 	}
 }
 
+// TestAnUpdateIsAuthorizedOnTheStoredSandbox: an apply over an existing
+// sandbox asks sandbox.update about the object as stored, with the body's
+// labels only in the proposal.
+func TestAnUpdateIsAuthorizedOnTheStoredSandbox(t *testing.T) {
+	seen := 0
+	f := setup(t, decisionFunc(func(_ context.Context, r authz.Request) (authz.Decision, error) {
+		if r.Action != authorizer.ActionSandboxUpdate {
+			return authz.Decision{Allow: true}, nil
+		}
+		seen++
+		stored, _ := r.Resource.Fields["labels"].(map[string]any)
+		if r.Resource.Fields["name"] != "work" || stored["team"] != "a" || len(stored) != 1 {
+			t.Errorf("the resource is %v, want the stored sandbox work with team=a", r.Resource.Fields)
+		}
+		b, err := json.Marshal(r.Resource.Fields["proposed"])
+		if err != nil {
+			t.Fatal(err)
+		}
+		var proposed struct {
+			Owner    string      `json:"owner"`
+			Metadata v1.Metadata `json:"metadata"`
+		}
+		if err = json.Unmarshal(b, &proposed); err != nil || proposed.Owner != r.Subject || proposed.Metadata.Labels["team"] != "b" {
+			t.Errorf("the proposal is %s %v, want the stored owner and team=b", b, err)
+		}
+		return authz.Decision{}, nil
+	}))
+	f.request("POST", "/v1/sandboxes?wait=1", f.alice, createBody, 201)
+	f.request("PUT", "/v1/sandboxes/work", f.alice, strings.Replace(createBody, `"team":"a"`, `"team":"b"`, 1), 403)
+	if seen != 1 {
+		t.Fatalf("sandbox.update was asked %d times, want 1", seen)
+	}
+	var obj v1.Sandbox
+	_ = json.Unmarshal(f.request("GET", "/v1/sandboxes/work", f.alice, "", 200), &obj)
+	if obj.Metadata.Labels["team"] != "a" {
+		t.Errorf("a refused update changed the labels to %v", obj.Metadata.Labels)
+	}
+}
+
 type failingExecDriver struct {
 	runtime.Driver
 	execution *brokenExec

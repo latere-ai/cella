@@ -415,7 +415,11 @@ func (h *handler) update(w http.ResponseWriter, r *http.Request, existing v1.San
 		return
 	}
 	obj.Status = existing.Status
-	res := withProposal(resource(obj), obj.Status.Owner, obj.Metadata, obj.Spec)
+	// The resource is the stored sandbox and the body is its proposal: an
+	// authorizer reads the object's tenancy from its labels, so labels the
+	// body names are the change it decides on, never the object it decides
+	// about.
+	res := withProposal(resource(existing), existing.Status.Owner, obj.Metadata, obj.Spec)
 	if _, err = h.decide(r, authorizer.ActionSandboxUpdate, res); err != nil {
 		respondError(w, err)
 		return

@@ -6,6 +6,11 @@ refused before it is pushed.
 
 ## Unreleased
 
+- Fixed: an apply over an existing Sandbox asks `sandbox.update` about the
+  Sandbox as stored, its name and labels included, with the body only in
+  `resource.proposed`. The resource had carried the body's labels, so an
+  authorization endpoint that reads tenancy from labels decided on the
+  labels the request asked for rather than those the Sandbox had.
 - Added: `secret.update` carries `resource.proposed`, the `owner`,
   `metadata` and `spec` of the Secret the request would write, as
   `sandbox.update` does, so an authorization endpoint can refuse a change of
