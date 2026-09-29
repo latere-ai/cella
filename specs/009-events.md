@@ -104,6 +104,7 @@ and that every emission point a spec names is here.
 | `sandbox.updated` | an update applied | `{paths: []string}`, the changed paths | 005 |
 | `sandbox.started`, `.stopped`, `.deleted`, `.failed`, `.lost` | the transition completed, `started` included where a create's first driver read finds the sandbox running | `{phase}`; `Reason` set | 005 |
 | `sandbox.recovered` | a lost sandbox recreated | `{workspace: "kept" or "recreated", volumes: []string}` | 005 |
+| `sandbox.resized`, `sandbox.at_ceiling` (added by [[078-self-sizing-sandboxes]]) | a size change applied; usage passed the warning fraction of `resources.max` with no room left | `{resource, from, to, reason, moved}`; `{resource, used, max}` | 078 |
 | `sandbox.spawned` | a workload created a child | `{child: sbx_..., budgetLeft}` | 022 |
 | `sandbox.exec` | a command ended | `{exitCode, durationMs}`; never the command, its input or its output | 008 |
 | `sandbox.attach`, `sandbox.dial`, `sandbox.screen` | a session ended | `{durationMs, bytesIn, bytesOut}` | 008, 023 |
