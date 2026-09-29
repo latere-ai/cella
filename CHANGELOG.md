@@ -6,6 +6,18 @@ refused before it is pushed.
 
 ## Unreleased
 
+- Added: `secret.update` carries `resource.proposed`, the `owner`,
+  `metadata` and `spec` of the Secret the request would write, as
+  `sandbox.update` does, so an authorization endpoint can refuse a change of
+  labels or scope it does not allow. The rest of the resource is the stored
+  Secret, as before, and the proposed `spec` never carries the value.
+  [Building a plane](docs/plane.md#who-may-do-what) says how to read it.
+- Changed: `PUT /v1/secrets/{name}` on a Secret you hold reads and validates
+  its body before it asks `secret.update`, as a sandbox apply does. A body
+  that does not resolve now answers its own refusal, such as `400
+  invalid_field` or `413 body_too_large`, where a caller the endpoint
+  refuses was answered `403 forbidden` before.
+
 ## v0.9.1 - 2026-09-27
 
 ### Security
