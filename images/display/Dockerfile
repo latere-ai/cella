@@ -30,6 +30,7 @@ ARG BROWSER=chromium
 #                 readiness probe reads
 #   x11-apps      xwd, the root-window capture
 #   x11-utils     xdpyinfo and xprop, the two halves of the readiness probe
+#   x11-xserver-utils  xsetroot, which paints the root window of an empty desktop
 #   imagemagick   the encoder that turns a capture into a PNG or a JPEG
 #   xdotool       the pointer and the keyboard
 #   fonts-dejavu  text that renders as text rather than as boxes
@@ -41,6 +42,7 @@ RUN apt-get update \
         openbox \
         x11-apps \
         x11-utils \
+        x11-xserver-utils \
         xdotool \
         xvfb \
         ${BROWSER} \

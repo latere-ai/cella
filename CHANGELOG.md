@@ -6,6 +6,19 @@ refused before it is pushed.
 
 ## Unreleased
 
+- Fixed: on the k8s driver, a file operation, an archive transfer, an exec
+  or a desktop operation on a sandbox whose Pod is still starting answers
+  `409 phase_conflict`, with what the Pod is waiting for in the detail, such
+  as `container main is ContainerCreating`. It had exec'd into a container
+  that did not exist yet and answered `503 driver_unavailable` with the
+  kubelet's `container not found`.
+- Changed: the display supervisor paints the desktop's root window
+  `#3b4252` once the window manager registers, and again after the manager
+  or the X server restarts, so a desktop with no window open is visible as
+  an empty desktop rather than a black frame. `CELLA_DISPLAY_BACKGROUND`
+  sets another color. The `cella-display` image adds `x11-xserver-utils`
+  for `xsetroot`; an image without it keeps the black root.
+
 ## v0.10.0 - 2026-09-29
 
 - Fixed: an apply over an existing Sandbox asks `sandbox.update` about the

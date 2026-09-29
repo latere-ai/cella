@@ -63,4 +63,17 @@ mutter) supervise "$found" "$found" --x11 ;;
 *) supervise "$found" "$found" ;;
 esac
 
+# The root window is painted each time a window manager registers on it, so
+# a desktop with no window open reads as an empty desktop rather than as a
+# frame that failed to draw. Painting follows the registration because openbox
+# clears the root when it takes the screen, and a restarted manager clears it
+# again. The painter ends with the X server and supervise starts it on the one
+# that replaces it. An image without xsetroot keeps the server's black root.
+BACKGROUND="${CELLA_DISPLAY_BACKGROUND:-#3b4252}"
+if command -v xsetroot >/dev/null 2>&1; then
+	supervise background sh -c 'xprop -root -spy _NET_SUPPORTING_WM_CHECK 2>/dev/null | while read -r line; do
+		case "$line" in *"window id # 0x"*) xsetroot -solid "$0" ;; esac
+	done' "$BACKGROUND"
+fi
+
 wait
