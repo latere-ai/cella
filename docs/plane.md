@@ -91,6 +91,17 @@ narrow `environment.list` to the tenant and allow `environment.read` on the
 default for them; to hide the default from someone, deny that read, which
 hides it from a read by name as well.
 
+An update is decided on the change. `sandbox.update` and `secret.update`
+carry, under `resource.proposed`, the object the request would write: its
+`owner`, its `metadata` and its `spec`. Compare it with the object to refuse
+a change you do not allow, such as a label your tenancy is read from being
+dropped or rewritten. The proposal's labels are the ones the request sent,
+because an apply replaces the object, so a request that leaves a label out
+proposes removing it. The body is read and validated before you are asked,
+so a request that would be refused for its body never reaches you. On
+`secret.update` the rest of the resource is the stored Secret, and the
+proposed `spec` never carries the value.
+
 ### What a manifest becomes
 
 `CELLA_ADMISSION_URL` points at an endpoint that sees a resolved manifest

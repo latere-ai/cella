@@ -50,12 +50,16 @@
 // verbatim, which is where an endpoint reads a plan, a team, or a role
 // from.
 //
-// What is not here yet: the resource shape of each action beyond its
-// kind, which spec 006's table names field by field and which becomes a
-// builder per action once the manifest types of spec 003 exist; and
-// cellad's own side of the contract, the configuration, the verifier and
-// the guard that ask this endpoint, which spec 006 owns and which is not
-// started.
+// The resource carries the object's own members flat beside its kind and
+// id: its name, its owner and its labels, and the members its kind adds,
+// such as a sandbox's environment, parent and root. This package declares
+// no type for them; an endpoint reads them with authz.Resource's
+// accessors. An update carries one more: sandbox.update and secret.update
+// add "proposed", the owner, metadata and spec of the object the request
+// would write, so an endpoint reads the change and can refuse one it does
+// not allow, such as a label it reads tenancy from being dropped. A
+// Secret's proposed spec never carries its value, and no request carries a
+// Secret's value in any member.
 //
 // The promise, as for every package at this module's root: additive
 // within a module major, and the same on every build. An action string

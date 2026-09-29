@@ -8,7 +8,7 @@ depends_on:
 affects: [authorizer/, internal/auth/, internal/config/, internal/api/, test/stubs/]
 effort: medium
 created: 2026-09-12
-updated: 2026-09-24
+updated: 2026-09-29
 author: changkun
 ---
 
@@ -358,6 +358,17 @@ issuer commonly stamps beside two a platform's issuer adds.
 | `volume.create`, `.read`, `.update`, `.delete`, `.list`, `.attach`, `.snapshot` | `{"kind": "Volume", "id", "name", "owner", "environment", "labels"}`; `attach` asked at resolve ([[019-volumes]]) |
 | `set.create`, `.read`, `.update`, `.delete`, `.list` | `{"kind": "SandboxSet", "id", "name", "owner", "environment", "labels"}` ([[020-scheduling-and-sets]]) |
 | `environment.create`, `.read`, `.update`, `.delete`, `.list`, `.key`, `.use` | `{"kind": "Environment", "id", "name", "owner", "isolation", "labels"}`; `use` asked at resolve for the environment a manifest names ([[021-data-plane-workers]]) |
+
+`sandbox.update` and `secret.update` carry one more member, `proposed`:
+`{"owner", "metadata", "spec"}` of the object the request would write,
+so an authorizer reads the change and not only the object it is made
+to, and can refuse a label it reads tenancy from being dropped or
+rewritten. A start and a stop propose the sandbox unchanged. An apply
+reads and resolves its body before it asks, so a body that does not
+resolve is refused before the authorizer sees it. On `secret.update`
+the other members are the stored Secret's, and the proposed `spec`
+never carries `value`, since no authorization request carries a
+secret's value (amended 2026-09-29).
 
 Response, 200:
 

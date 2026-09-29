@@ -266,8 +266,8 @@ and what a proxy in front of the server must allow.
 
 ### Secrets
 
-A secret's value is written and never read back: no answer, event, or log
-line carries it.
+A secret's value is written and never read back: no answer, event, log
+line, or authorization request carries it.
 
 | Route | Action | What it does |
 |---|---|---|
