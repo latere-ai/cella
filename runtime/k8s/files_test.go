@@ -362,6 +362,7 @@ func TestFilesWhileStarting(t *testing.T) {
 			Name: Container, State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "ContainerCreating"}},
 		}}}},
 		{"unreported", "the sandbox is starting", corev1.PodStatus{Phase: corev1.PodPending}},
+		{"evicted", "the sandbox's pod failed: Evicted", corev1.PodStatus{Phase: corev1.PodFailed, Reason: "Evicted"}},
 	} {
 		pod := h.podOf(t, id)
 		pod.Status = tc.status

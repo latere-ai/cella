@@ -182,8 +182,12 @@ func (d *Driver) runningSpec(ctx context.Context, id string) (driver.CreateSpec,
 }
 
 // startingErr is the answer for a sandbox whose Pod exists and whose workload
-// container is not running yet, with what the Pod is waiting for.
+// container is not running yet, with what the Pod is waiting for. A Pod that
+// failed before the container ran, an evicted one among them, is not starting.
 func startingErr(pod *corev1.Pod) error {
+	if pod.Status.Phase == corev1.PodFailed {
+		return fmt.Errorf("%w: the sandbox's pod failed: %s", driver.ErrNotRunning, pod.Status.Reason)
+	}
 	if reason := waiting(pod); reason != "" {
 		return fmt.Errorf("%w: the sandbox is starting: %s", driver.ErrNotRunning, reason)
 	}
