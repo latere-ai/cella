@@ -172,6 +172,7 @@ caller may narrow, only a non-workload actor may widen); `stopped`
 | `workdir` | string | `workspace.path` | no | absolute path |
 | `user` | string | the image's | no | a uid, `uid:gid`, or a name |
 | `resources.cpu`, `.memory`, `.disk` | quantity | `Defaults.CPU`, `.Memory`, `.Disk` | yes, with `Resize` | Kubernetes quantity syntax, decimal (`500m`, `2`) and binary SI (`2Gi`), parsed by the package's own parser; `disk` sizes the workspace volume |
+| `resources.max.cpu`, `.memory`, `.disk` (added by [[078-self-sizing-sandboxes]]) | quantity | absent: fixed at `resources` | yes, with `Autosize` | the ceiling the driver sizes the sandbox inside; each at least its `resources` value, at most `Ceilings`; a resource with no `max` stays fixed |
 | `workspace.path` | string | `/workspace` | no | absolute; not under `/run/cella`; may not equal or nest with a `volumes[].path` (`path_conflict`) |
 | `workspace.source` | enum | `empty` | no | `empty`, `git`, or `volume` |
 | `workspace.git.url`, `.ref` | string | none; url required for `git` | no | `https://` or `ssh://`; a branch, tag, or commit |
@@ -229,6 +230,7 @@ stored status into every response.
 | `parent`, `root`, `mesh`, `spawn` | the spawn tree position: the parent's id and the root's, or empty and the sandbox's own id for a root; the inherited or minted mesh; the budget and what is used ([[022-mesh-and-spawn]]) |
 | `set` | `{name, index}` for a `SandboxSet` replica ([[020-scheduling-and-sets]]); absent otherwise |
 | `preemptions` | how many times the scheduler stopped the sandbox to place one of higher priority ([[020-scheduling-and-sets]]); absent while zero |
+| `resources`, `usage`, `moves` (added by [[078-self-sizing-sandboxes]]) | the size the sandbox has now `{cpu, memory, disk}`; the last usage reading `{memory, disk, readAt}`; how many times a memory resize moved it; absent without `resources.max` |
 | `conditions` | `Ready`, `WorkspaceReady`, `EgressEnforced`, `VolumesAttached`, `Scheduled`, `DisplayReady`, each with `status`, `reason`, `message`, `since`; and `Observed` `False` on a list row whose driver read failed, written on that answer and never stored ([[075-list-page-resilience]]) |
 | `secrets.mounted`, `.notInjectable` | which placeholders are in `env`; and which will leave the sandbox as inert strings, so the request goes out unauthenticated, because the secret was deleted or its scope no longer has a host the sandbox may reach |
 | `volumes[]` | `{name, volume, attached}` per mount |
