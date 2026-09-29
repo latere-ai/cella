@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.10.0 - 2026-09-29
+
 - Fixed: an apply over an existing Sandbox asks `sandbox.update` about the
   Sandbox as stored, its name and labels included, with the body only in
   `resource.proposed`. The resource had carried the body's labels, so an
