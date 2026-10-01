@@ -146,6 +146,66 @@ func (c *Controller) DeleteSecret(ctx context.Context, id string) (v1.Secret, er
 	return manifest.StripSecretValue(held), nil
 }
 
+// ErrSecretNotMounted is a reported use of a secret the sandbox does not bind.
+// A gateway holds only the maps of its environment's sandboxes, so a report
+// like this is a race with an apply that removed the mount, or a gateway that
+// is not telling the truth; either way there is nothing to stamp.
+var ErrSecretNotMounted = errors.New("the sandbox does not mount this secret")
+
+// SecretUsed records that a gateway substituted one secret's value into a
+// request of one sandbox, as the secret's status.lastUsedAt.
+//
+// The stamp moves only to a use at least v1.SecretLastUsedResolution after the
+// one it holds, which is what bounds the writes to one per secret per
+// interval however many gateways and sandboxes report it; a use older than
+// the stamp never moves it back. The time is the gateway's, clamped to this
+// process's clock so a gateway whose clock runs ahead cannot stamp the
+// future, and cut to the second.
+//
+// It writes nothing for a secret that no longer exists or a sandbox that does
+// not bind it, and nothing where the store has no seam for it. A write that
+// fails is returned and not retried: the gateway's next report writes it.
+func (c *Controller) SecretUsed(ctx context.Context, sandboxID, secretID string, at time.Time) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.secretUses == nil {
+		return nil
+	}
+	held, ok := c.secretObjects[secretID]
+	if !ok {
+		return ErrNotFound
+	}
+	sb, ok := c.objects[sandboxID]
+	if !ok {
+		return ErrNotFound
+	}
+	if !bindsSecret(sb, secretID) {
+		return ErrSecretNotMounted
+	}
+	if now := c.clock.Now(); at.IsZero() || at.After(now) {
+		at = now
+	}
+	at = at.UTC().Truncate(time.Second)
+	if last := held.Status.LastUsedAt; !last.IsZero() && at.Sub(last) < v1.SecretLastUsedResolution {
+		return nil
+	}
+	obj := held
+	obj.Status.LastUsedAt = at
+	if err := c.secretUses.WriteSecretUse(ctx, obj); err != nil {
+		return err
+	}
+	c.secretObjects[secretID] = obj
+	return nil
+}
+
+// bindsSecret reports whether a sandbox's boundary carries this secret.
+func bindsSecret(sb v1.Sandbox, secretID string) bool {
+	if sb.Status.EgressState == nil {
+		return false
+	}
+	return slices.ContainsFunc(sb.Status.EgressState.Secrets, func(m v1.MountedSecret) bool { return m.ID == secretID })
+}
+
 // GetSecret reads one Secret by its id, or by the name its owner gave it.
 func (c *Controller) GetSecret(_ context.Context, key, owner string) (v1.Secret, error) {
 	c.mu.Lock()
