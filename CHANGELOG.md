@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.11.0 - 2026-10-01
+
 - Added: a Secret's `status.lastUsedAt`, when an egress gateway last
   substituted its value into a request, as an RFC 3339 time in UTC, at a
   five-minute resolution: it moves at most once every five minutes per
