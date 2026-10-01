@@ -101,19 +101,45 @@ func (s *store) resolverFor(principal string, e egress.Entry) func(context.Conte
 func (s *store) substitutions(m egress.Map) []pkgegress.Entry {
 	var out []pkgegress.Entry
 	for _, e := range m.Entries {
-		entry := pkgegress.Entry{
-			Placeholder:    []byte(e.Placeholder),
-			Secret:         valueOf(e),
-			AllowedHosts:   slices.Clone(e.Hosts),
-			SubstituteBody: e.Body,
-			Resolve:        s.resolverFor(m.Principal, e),
-		}
-		if len(entry.Secret) == 0 && entry.Resolve == nil {
+		value, source := valueOf(e), s.resolverFor(m.Principal, e)
+		if len(value) == 0 && source == nil {
 			continue
 		}
-		out = append(out, entry)
+		out = append(out, pkgegress.Entry{
+			Placeholder:    []byte(e.Placeholder),
+			AllowedHosts:   slices.Clone(e.Hosts),
+			SubstituteBody: e.Body,
+			Resolve:        s.reporting(m.Principal, e.ID, value, source),
+		})
 	}
 	return out
+}
+
+// reporting is one entry's value as the engine's resolver, static or minted,
+// with the use reported once it is produced. The engine asks a resolver only
+// when it is about to substitute, which is when the entry's placeholder
+// occurs in the request toward a host of its scope, and asks it once per
+// request, so a resolve that returned a value is the one moment a use is
+// known on both doors: the proxy door substitutes inside the engine, where
+// nothing else of this role runs.
+//
+// A static value goes through the resolver as well. The engine checks a
+// resolved value for line breaks when it is resolved instead of when the map
+// is built, which changes nothing here, because the contract refuses a value
+// with a line break at apply.
+func (s *store) reporting(principal, secretID string, value []byte, source func(context.Context) ([]byte, error)) func(context.Context) ([]byte, error) {
+	return func(ctx context.Context) ([]byte, error) {
+		out := value
+		if source != nil {
+			minted, err := source(ctx)
+			if err != nil {
+				return nil, err
+			}
+			out = minted
+		}
+		s.used(principal, secretID)
+		return out, nil
+	}
 }
 
 // placed is one entry's own substitution table, which is what makes the

@@ -32,6 +32,7 @@ type stubPlane struct {
 	hellos      []egress.Hello
 	acks        []egress.Ack
 	records     []egress.Record
+	uses        []egress.Use
 	bearer      string
 	subprotocol string
 	connections int
@@ -90,6 +91,8 @@ func newStubPlane(t *testing.T) *stubPlane {
 				p.acks = append(p.acks, *up.Ack)
 			case up.Record != nil:
 				p.records = append(p.records, *up.Record)
+			case up.Use != nil:
+				p.uses = append(p.uses, *up.Use)
 			}
 			p.mu.Unlock()
 		}
@@ -119,7 +122,7 @@ func runClient(t *testing.T, p *stubPlane, s *store, caPEM string) *syncClient {
 	t.Helper()
 	c := &syncClient{
 		url: p.url(t, "default"), key: "key", gatewayID: "gw-test", store: s, caPEM: caPEM,
-		records: make(chan egress.Record, recordBuffer), log: slog.Default(),
+		records: make(chan egress.Record, recordBuffer), uses: make(chan egress.Use, useBuffer), log: slog.Default(),
 		dialer: &websocket.Dialer{Subprotocols: []string{egress.Protocol}, HandshakeTimeout: 5 * time.Second},
 	}
 	ctx, cancel := context.WithCancel(t.Context())

@@ -135,10 +135,13 @@ func New(ctx context.Context, o Options) (*Gateway, error) {
 	s := newStore(&http.Client{Transport: upstream, Timeout: tokenTimeout})
 	client := &syncClient{
 		url: stream, key: o.Key, gatewayID: gatewayID(), store: s, caPEM: caPEM,
-		records: make(chan egress.Record, recordBuffer), log: o.Log,
+		records: make(chan egress.Record, recordBuffer), uses: make(chan egress.Use, useBuffer), log: o.Log,
 		dialer:      &websocket.Dialer{Subprotocols: []string{egress.Protocol}, HandshakeTimeout: 15 * time.Second},
 		onConnected: o.Ready,
 	}
+	// Every substitution on either door is reported up the same stream,
+	// stamped with the clock the records are.
+	s.report, s.now = client.Use, o.Now
 	g := &gate{
 		store: s, controlPlane: hostOf(o.URL), dial: dial,
 		gateway: &pkgegress.Gateway{

@@ -35,6 +35,12 @@ const (
 // that stops serving connections to keep a record has the priority backwards.
 const recordBuffer = 1024
 
+// useBuffer is how many secret uses wait for the stream. A use is reported at
+// most once per sandbox and secret per resolution, so the buffer holds a
+// burst of distinct pairs, such as the first requests after a reconnect; when
+// it is full the oldest is dropped, for the reason a record is.
+const useBuffer = 1024
+
 // syncClient is the gateway's one outbound stream. The control plane never
 // dials a gateway, so everything the gateway learns and everything it reports
 // travels here.
@@ -46,6 +52,7 @@ type syncClient struct {
 	store       *store
 	caPEM       string
 	records     chan egress.Record
+	uses        chan egress.Use
 	log         *slog.Logger
 	dialer      *websocket.Dialer
 	onConnected func()
@@ -69,6 +76,24 @@ func (c *syncClient) Record(r egress.Record) {
 		}
 		select {
 		case <-c.records:
+		default:
+			return
+		}
+	}
+}
+
+// Use queues one secret's use. It never blocks the request that produced it:
+// a full buffer drops its oldest use and keeps going, and the stamp it would
+// have moved moves at the next report.
+func (c *syncClient) Use(u egress.Use) {
+	for {
+		select {
+		case c.uses <- u:
+			return
+		default:
+		}
+		select {
+		case <-c.uses:
 		default:
 			return
 		}
@@ -191,8 +216,8 @@ func (c *syncClient) readLoop(ctx context.Context, cancel context.CancelFunc, co
 }
 
 // writeLoop is the connection's one writer: the acknowledgments the read
-// loop queued, the records the doors produced, and a heartbeat on an idle
-// stream.
+// loop queued, the records the doors produced, the uses of secrets, and a
+// heartbeat on an idle stream.
 func (c *syncClient) writeLoop(ctx context.Context, conn *websocket.Conn, up <-chan egress.Frame) error {
 	beat := time.NewTicker(egress.HeartbeatInterval)
 	defer beat.Stop()
@@ -209,6 +234,12 @@ func (c *syncClient) writeLoop(ctx context.Context, conn *websocket.Conn, up <-c
 				// The record is lost with the connection. It is telemetry:
 				// putting it back would let a dead stream hold every later
 				// record hostage.
+				return err
+			}
+		case u := <-c.uses:
+			if err := writeMessage(conn, egress.Frame{Type: egress.FrameUse, Use: &u}); err != nil {
+				// Lost with the connection, as a record is: the next
+				// use after the reconnect's snapshot is reported again.
 				return err
 			}
 		case <-beat.C:

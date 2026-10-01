@@ -7,11 +7,14 @@ import (
 	"maps"
 	"net/http"
 	"slices"
+	"strings"
 	"sync"
+	"time"
 
 	pkgegress "latere.ai/x/pkg/egress"
 
 	"latere.ai/x/cella/egress"
+	v1 "latere.ai/x/cella/manifest/v1"
 )
 
 // store is what one gateway knows: the boundary of every principal the
@@ -42,6 +45,16 @@ type store struct {
 	// path, so the operator's authority and the dial seam reach the token
 	// endpoint too.
 	tokenClient *http.Client
+
+	// report hands a use to the stream and now is the clock it is stamped
+	// with. A store with no report substitutes the same and reports nothing.
+	report func(egress.Use)
+	now    func() time.Time
+	// reportedMu guards reported, the instant each pair of a principal and
+	// a secret id was last reported. It is its own lock and not mu, because
+	// it is taken on the request path while a map is being applied.
+	reportedMu sync.Mutex
+	reported   map[string]time.Time
 }
 
 func newStore(tokenClient *http.Client) *store {
@@ -52,6 +65,7 @@ func newStore(tokenClient *http.Client) *store {
 		entries:      map[string]map[string]*pkgegress.Map{},
 		resolvers:    map[string]map[string]*resolver{},
 		tokenClient:  tokenClient,
+		reported:     map[string]time.Time{},
 	}
 }
 
@@ -83,6 +97,12 @@ func (s *store) Replace(maps []egress.Map) {
 	for _, m := range maps {
 		s.setLocked(m)
 	}
+	// A snapshot is a stream made whole, which after a handoff is a writer
+	// that has seen none of this gateway's uses, so the next use of every
+	// pair is reported at once.
+	s.reportedMu.Lock()
+	clear(s.reported)
+	s.reportedMu.Unlock()
 }
 
 // Remove drops one principal, which is what a purge and a delete both mean.
@@ -96,6 +116,38 @@ func (s *store) Remove(principal string) {
 	delete(s.entries, principal)
 	delete(s.resolvers, principal)
 	s.registry.Delete(principal)
+	s.reportedMu.Lock()
+	for key := range s.reported {
+		if strings.HasPrefix(key, principal+reportedSeparator) {
+			delete(s.reported, key)
+		}
+	}
+	s.reportedMu.Unlock()
+}
+
+// reportedSeparator joins a principal and a secret id into one key. Neither
+// holds a NUL byte, so no two pairs share a key.
+const reportedSeparator = "\x00"
+
+// used reports that one secret's value went into a request of one sandbox, at
+// most once per pair per v1.SecretLastUsedResolution: the control plane moves
+// the stamp no more often than that, so a report inside the interval would
+// cost a frame and change nothing. The report is queued and never waited on,
+// so the request that caused it is not held by it.
+func (s *store) used(principal, secretID string) {
+	if s.report == nil || s.now == nil || secretID == "" {
+		return
+	}
+	now := s.now()
+	key := principal + reportedSeparator + secretID
+	s.reportedMu.Lock()
+	if last, seen := s.reported[key]; seen && now.Sub(last) < v1.SecretLastUsedResolution {
+		s.reportedMu.Unlock()
+		return
+	}
+	s.reported[key] = now
+	s.reportedMu.Unlock()
+	s.report(egress.Use{Principal: principal, Secret: secretID, At: now})
 }
 
 func (s *store) setLocked(m egress.Map) {
