@@ -93,14 +93,27 @@ type SecretOAuth struct {
 // SecretStatus is the server's. Version counts value writes, so a sandbox's
 // map can be re-pushed on a change that altered no other field, and
 // MountedBy is derived at read from the sandboxes that name this secret.
+//
+// LastUsedAt is when an egress gateway last substituted the value into a
+// request, in UTC to the second, at SecretLastUsedResolution. It is zero,
+// and absent from the JSON, on a secret no gateway has substituted.
 type SecretStatus struct {
-	ID        string    `json:"id"`
-	Owner     string    `json:"owner"`
-	Version   int       `json:"version"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt,omitzero"`
-	MountedBy int       `json:"mountedBy"`
+	ID         string    `json:"id"`
+	Owner      string    `json:"owner"`
+	Version    int       `json:"version"`
+	CreatedAt  time.Time `json:"createdAt"`
+	UpdatedAt  time.Time `json:"updatedAt,omitzero"`
+	MountedBy  int       `json:"mountedBy"`
+	LastUsedAt time.Time `json:"lastUsedAt,omitzero"`
 }
+
+// SecretLastUsedResolution is how far apart two writes of a secret's
+// LastUsedAt are at least. A gateway reports a secret's use at most once per
+// sandbox per this interval, and the control plane moves the stamp only to a
+// use at least this long after the one it holds, so a workload that sends a
+// request a second writes the secret's row once per interval and not once per
+// request.
+const SecretLastUsedResolution = 5 * time.Minute
 
 // SecretIDPrefix is the kind prefix a Secret's id carries.
 const SecretIDPrefix = "sec_"
