@@ -100,7 +100,7 @@ later.
 | [076](.archive/076-rolling-replicas.md) | Rolling replicas: one writer lease gates the controller, every replica answers the API by forwarding to the writer, the lease is handed off on SIGTERM, and readiness means can serve | large | complete | 005, 008, 010, 014, 017, 018, 021, 043, 072 |
 | [077](077-egress-scope-and-confirmation.md) | Egress scope by path and confirmation refusals: a Secret scoped by host, port and path prefix with the longest prefix winning, one header, confirmation patterns refused 403 and recorded for the owner, one-shot allowances, upstream refusals in the same record | large | drafted | 003, 005, 006, 008, 009, 010, 018, 022, 039, 046 |
 | [078](078-self-sizing-sandboxes.md) | Self-sizing sandboxes: `resources.max` as a ceiling in place of a fixed size, a workspace claim that grows before it fills, memory raised in place or by a move that keeps the workspace, CPU bounded by the ceiling, and `sandbox.resized` and `sandbox.at_ceiling` | large | drafted | 003, 004, 005, 009, 010, 035, 036, 047 |
-| [079](079-secret-last-used.md) | Secret last use: `status.lastUsedAt`, written by the writer from a use the egress gateway reports when it substitutes the secret, at most once per secret per five minutes | small | in-progress | 010, 018, 039, 046, 076 |
+| [079](.archive/079-secret-last-used.md) | Secret last use: `status.lastUsedAt`, written by the writer from a use the egress gateway reports when it substitutes the secret, at most once per secret per five minutes | small | complete | 010, 018, 039, 046, 076 |
 
 ## Dependency graph
 

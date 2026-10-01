@@ -1,6 +1,6 @@
 ---
 title: "Secret last use: status.lastUsedAt, written by the writer from a use the egress gateway reports when it substitutes the secret, at most once per secret per five minutes"
-status: in-progress
+status: complete
 track: core
 depends_on:
   - specs/010-state.md
@@ -153,14 +153,35 @@ writes the stamp.
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| A secret never substituted answers no `lastUsedAt`; one stamped answers it in UTC to the second | `TestASecretNeverUsedHasNoLastUse` | not built |
-| Two uses inside the resolution write once, one after it writes again, and a report older than the stamp never moves it back; a future `at` is clamped to the control plane's clock | `TestSecretUsedWritesOncePerResolution` | not built |
-| A use for a secret the sandbox does not bind, a deleted secret, or an unknown sandbox writes nothing; a store without `SecretUses` stamps nothing | `TestSecretUsedNeedsAMount` | not built |
-| The stamp is one conditional row write with no journal record, the next value write is not a version conflict, and an update keeps the stamp; the snapshot store keeps it across a reopen | `TestASecretUseIsWrittenWithoutARecord`, `TestTheFileStoreKeepsASecretsLastUse` | not built |
-| A demoted writer's stamp is refused by the fence | `TestTheFenceRefusesAWriterThatLostItsLease` | not built |
-| The next writer reads the stamp from Postgres at promotion | `TestAPromotedWriterReadsTheLastUse` | not built |
-| The gateway reports a substitution on both doors once per pair per resolution, forgets on a snapshot, and reports nothing for a request that carried no placeholder | `TestTheGatewayReportsASubstitution` | not built |
-| A full report buffer never holds the request | `TestAFullUseBufferDoesNotHoldTheRequest` | not built |
-| The hub hands a use to the controller off the read loop, a failing write leaves the stream serving acknowledgments, and a malformed use is refused | `TestTheHubHandsUsesToTheController` | not built |
-| Through a running control plane, gateway and sandbox, a request on either door stamps the secret it carried | `TestASubstitutionStampsTheSecretsLastUse` | not built |
-| The API document and the manifest reference state the resolution the constant holds | `TestTheLastUseResolutionIsDocumented` | not built |
+| A secret never substituted answers no `lastUsedAt` on a read and a list; one stamped answers it in UTC to the second | `TestASecretNeverUsedHasNoLastUse` | passing |
+| Two uses inside the resolution write once, one after it writes again, and a report older than the stamp never moves it back; a future `at` is clamped to the control plane's clock; an hour of requests a second writes twelve stamps | `TestSecretUsedWritesOncePerResolution` | passing |
+| A use for a secret the sandbox does not bind, a deleted secret, or an unknown sandbox writes nothing; a failed write leaves the stamp for the next report; a store without `SecretUses` stamps nothing and refuses nothing | `TestSecretUsedNeedsAMount` | passing |
+| The stamp is one conditional row write with no journal record, keeps the value and its version, and the next value write is not a version conflict; a stamp never creates a row; an update keeps the stamp; the snapshot store keeps it across a reopen | `TestASecretUseIsWrittenWithoutARecord`, `TestTheFileStoreKeepsASecretsLastUse` | passing |
+| A demoted writer's stamp is refused by the fence | `TestTheFenceRefusesAWriterThatLostItsLease` | passing |
+| The next writer reads the stamp from Postgres at promotion and stamps over it | `TestAPromotedWriterReadsTheLastUse` | passing |
+| The gateway reports a substitution on both doors by the secret's id, once per pair per resolution; a request with no placeholder, toward a host out of scope, or whose token could not be minted is not a use; a snapshot forgets every pair and a purge the principal's; a use is a frame on the stream | `TestTheGatewayReportsASubstitution`, `TestAFailedMintIsNotAUse`, `TestUsesGoUpTheSameStream` | passing; the proxy door's substitution is driven through the engine, as `pkg/egress.Gateway.forward` calls it |
+| A full report buffer never holds the request and keeps the newest uses | `TestAFullUseBufferDoesNotHoldTheRequest` | passing |
+| The hub hands a use to the controller off the read loop: a held writer and a full queue hold neither the read loop nor an acknowledgment; a use the contract refuses never reaches the writer; a failed write leaves the stream serving | `TestTheHubHandsUsesToTheController`, `TestUseNormalize` | passing |
+| Through a running control plane, gateway and sandbox, a mount is not a use and the first request on the reverse door that carries the placeholder stamps the secret | `TestASubstitutionStampsTheSecretsLastUse` | passing; fails with the hub handed no writer |
+| The API document and the manifest reference state the resolution the constant holds | `TestTheLastUseResolutionIsDocumented` | passing |
+
+## Outcome
+
+Built as designed, with these differences:
+
+| Design | Built |
+|---|---|
+| a request on either door stamps the secret through a running control plane | the tier drives the reverse door. The proxy door substitutes inside `pkg/egress`, whose upstream transport takes no dial seam, so a request there would reach a resolver; the gateway's test drives that door's substitution through the engine the way `Gateway.forward` does, and the resolver it reports from is the same on both doors |
+| `WriteSecretUse` is a conditional write at the version last read | it also refuses, with `ErrNotFound`, a row this process holds no version for, so a stamp never recreates a secret deleted under it |
+| the API document carries the field | it gained `Secret` and `SecretStatus` schemas, which `readSecret` and `listSecrets` answer with; no other status field of the document was described before |
+| the map's entry carries the id | `egress.SecretView` and `egress.Entry` carry it as `id`; an entry without one, from a control plane of an earlier release, is substituted and not reported |
+
+| Piece | Where |
+|---|---|
+| `SecretStatus.LastUsedAt`, `SecretLastUsedResolution` | `manifest/v1/secret.go` |
+| `SecretUses`, `Controller.SecretUsed`, `ErrSecretNotMounted` | `controller/secret.go` |
+| `WriteSecretUse` on the snapshot store and the durable adapter | `controller/store.go`, `internal/store/secret.go` |
+| `Entry.ID`, `SecretView.ID`, `FrameUse`, `Use` | `egress/egress.go`, `egress/sync.go` |
+| the reporting resolver, the per pair memory, the use buffer | `internal/egressd/secret.go`, `internal/egressd/store.go`, `internal/egressd/sync.go` |
+| the per stream queue and its pump, `SecretUseWriter` | `internal/api/egress.go`, `internal/api/api.go` |
+| the operator's and the client's reference | `api/openapi.yaml`, `docs/manifest.md` |
