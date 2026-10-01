@@ -10,7 +10,7 @@ depends_on:
 affects: [manifest/v1/, egress/, internal/egressd/, internal/api/, internal/store/, internal/config/, runtime/]
 effort: large
 created: 2026-09-12
-updated: 2026-09-24
+updated: 2026-10-01
 author: changkun
 ---
 
@@ -112,6 +112,7 @@ status:
   createdAt: ...
   updatedAt: ...
   mountedBy: 2                        # derived at read: sandboxes whose desired state names it, not Deleting
+  lastUsedAt: ...                     # the last substitution, at most once per five minutes; absent until the first ([[079-secret-last-used]])
 ```
 
 Rules:
@@ -189,7 +190,7 @@ type Map struct {
 	Mode       v1.EgressMode
 	Allow      []string      // mode allowlist: allowedHosts plus every mounted secret's hosts
 	Deny       []string      // mode open: deniedHosts; a denied host wins over a secret's scope
-	Entries    []Entry       // one per injectable secret: placeholder, kind, hosts, ports, inject, body flag, value or oauth
+	Entries    []Entry       // one per injectable secret: id, placeholder, kind, hosts, ports, inject, body flag, value or oauth
 }
 ```
 
@@ -233,6 +234,7 @@ as one JSON text message per line:
 | `ack {principal, version}` | up | applied, or already held at that version |
 | `heartbeat` | both, every 15 seconds | a connection with none for 45 seconds is closed by either side |
 | `record {...}` | up | one connection handled (below) |
+| `use {principal, secret, at}` | up | one secret, by its id, substituted into a request of that sandbox, at most once per pair per five minutes; the control plane writes it as the secret's `status.lastUsedAt` ([[079-secret-last-used]]) |
 
 The control plane keeps, per environment, the set of connected
 gateways and, per connection and principal, the highest version

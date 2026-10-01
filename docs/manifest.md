@@ -224,6 +224,13 @@ rotates it, and running sandboxes use the new value on their next
 request. `status` carries the id, the owner, the version, and how many
 sandboxes mount it.
 
+`status.lastUsedAt` is when an egress gateway last substituted the value
+into a request, in UTC to the second. It moves at most once every 5
+minutes, so the last use is at or after it and normally less than 5
+minutes after. A secret without it has not been sent anywhere since it
+was created, which is how a secret nothing uses any more is told apart
+from one in use.
+
 ## Environment
 
 An environment is where sandboxes run. The control plane creates its own

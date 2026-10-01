@@ -939,7 +939,19 @@ paths:
         - $ref: "#/components/parameters/ListLimit"
       responses:
         "200":
-          description: The answer this route serves.
+          description: One page of secrets, each without its value.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Secret"
+                  next:
+                    type: string
+                    description: The cursor of the next page; empty on the last.
         default:
           $ref: "#/components/responses/Error"
   /v1/secrets/{name}:
@@ -965,7 +977,11 @@ paths:
       description: Authorized as `secret.read`.
       responses:
         "200":
-          description: The answer this route serves.
+          description: The secret, without its value.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Secret"
         default:
           $ref: "#/components/responses/Error"
     delete:
@@ -1272,6 +1288,57 @@ components:
           schema:
             $ref: "#/components/schemas/Error"
   schemas:
+    Secret:
+      type: object
+      description: >-
+        A Secret as every answer carries it. `spec.value` is write-only and
+        never present; the manifest reference describes every field of
+        `spec`.
+      properties:
+        apiVersion:
+          type: string
+        kind:
+          type: string
+          enum: [Secret]
+        metadata:
+          type: object
+          description: The name and the labels the owner gave it.
+        spec:
+          type: object
+          description: The kind, the scope, the injection place and the oauth grant.
+        status:
+          $ref: "#/components/schemas/SecretStatus"
+    SecretStatus:
+      type: object
+      required: [id, owner, version, createdAt, mountedBy]
+      properties:
+        id:
+          type: string
+          description: The secret's identifier, `sec_` and a ULID; it addresses the secret in every route.
+        owner:
+          type: string
+          description: The subject that created it, `<issuer>|<sub>`.
+        version:
+          type: integer
+          description: The version of the value, raised by every apply that carries one.
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        mountedBy:
+          type: integer
+          description: How many sandboxes mount it and are not being deleted.
+        lastUsedAt:
+          type: string
+          format: date-time
+          description: >-
+            When an egress gateway last substituted the value into a request,
+            in UTC to the second. It moves at most once every 5 minutes, so
+            the last substitution is at or after it and, unless a report was
+            lost, less than 5 minutes after it. Absent on a secret no gateway
+            has substituted.
     FileInfo:
       type: object
       properties:
