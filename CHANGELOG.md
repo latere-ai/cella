@@ -6,6 +6,14 @@ refused before it is pushed.
 
 ## Unreleased
 
+- Added: a Secret's `status.lastUsedAt`, when an egress gateway last
+  substituted its value into a request, as an RFC 3339 time in UTC, at a
+  five-minute resolution: it moves at most once every five minutes per
+  secret, so a busy workload does not write the secret on every request. A
+  secret no gateway has substituted has no `lastUsedAt`. The gateway reports
+  each use to the control plane, so the field fills once both the control
+  plane and its gateways run this release.
+
 ## v0.10.1 - 2026-10-01
 
 - Fixed: on the k8s driver, a file operation, an archive transfer, an exec
