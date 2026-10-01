@@ -89,6 +89,10 @@ const (
 // secret, split on the first colon by the gateway, and OAuth names the
 // endpoint a token is minted at.
 type SecretView struct {
+	// ID is the Secret's status.id, which a gateway names the secret by
+	// when it reports a use, so a rename after the mount stamps the same
+	// object.
+	ID          string
 	Name        string
 	Kind        string
 	Placeholder string
@@ -143,6 +147,9 @@ type Map struct {
 // travels only on the sync stream, inside a map, toward a gateway that
 // authenticated with the environment's own key.
 type Entry struct {
+	// ID is the Secret's status.id; Secret is its name. A gateway reports a
+	// use by the id, which no rename changes.
+	ID          string   `json:"id,omitempty"`
 	Secret      string   `json:"secret"`
 	Kind        string   `json:"kind,omitempty"`
 	Placeholder string   `json:"placeholder"`
@@ -260,6 +267,7 @@ func compileEntry(mode v1.EgressMode, deny []string, view SecretView) (Entry, bo
 	}
 	slices.Sort(ports)
 	entry := Entry{
+		ID:          view.ID,
 		Secret:      view.Name,
 		Kind:        view.Kind,
 		Placeholder: view.Placeholder,

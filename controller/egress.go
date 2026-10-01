@@ -179,6 +179,7 @@ func (c *Controller) bindMount(held []v1.MountedSecret, mount v1.SecretMount, ow
 // decrypted.
 func viewOf(secret v1.Secret, placeholder, value string) egress.SecretView {
 	view := egress.SecretView{
+		ID:          secret.Status.ID,
 		Name:        secret.Metadata.Name,
 		Kind:        secret.Spec.Kind,
 		Placeholder: placeholder,

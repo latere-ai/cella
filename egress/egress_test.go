@@ -295,6 +295,7 @@ func TestFrameRoundTrip(t *testing.T) {
 		{Type: FrameAck, Ack: &Ack{Principal: "sandbox:sbx_1", Version: 3}},
 		{Type: FrameHeartbeat},
 		{Type: FrameRecord, Record: &Record{Principal: "sandbox:sbx_1", Decision: DecisionAllowed}},
+		{Type: FrameUse, Use: &Use{Principal: "sandbox:sbx_1", Secret: "sec_1", At: time.Now()}},
 	} {
 		line, err := Encode(f)
 		if err != nil {
@@ -417,10 +418,34 @@ func TestProjectionEnv(t *testing.T) {
 // TestCompileCarriesTheValueAndTheKind is the half slice 046 added: the
 // control plane decrypts a value at compile and the entry the gateway holds
 // carries it, with the oauth endpoint beside it where the kind has one.
+// TestUseNormalize: a use names a sandbox and a Secret by its id and nothing
+// else, and its time is UTC.
+func TestUseNormalize(t *testing.T) {
+	at := time.Date(2026, 10, 1, 14, 0, 3, 0, time.FixedZone("CEST", 2*60*60))
+	u := Use{Principal: "sandbox:sbx_1", Secret: "sec_1", At: at}
+	if err := u.Normalize(); err != nil {
+		t.Fatal(err)
+	}
+	if !u.At.Equal(at) || u.At.Location() != time.UTC {
+		t.Fatalf("at = %v, want %v in UTC", u.At, at)
+	}
+	for _, refused := range []Use{
+		{Principal: "environment:env_1", Secret: "sec_1"},
+		{Principal: "sandbox:sbx_1", Secret: "github"},
+		{Principal: "sandbox:sbx_1", Secret: MintPlaceholder()},
+		{Principal: "sandbox:sbx_1"},
+	} {
+		if err := refused.Normalize(); !errors.Is(err, ErrUse) {
+			t.Errorf("Normalize(%+v) = %v, want %v", refused, err, ErrUse)
+		}
+	}
+}
+
 func TestCompileCarriesTheValueAndTheKind(t *testing.T) {
 	sb := sandbox(v1.Egress{Mode: v1.EgressAllowlist})
 	grant := &OAuth{TokenURL: "https://login.example.com/token", Scope: "read"}
 	github := view("github", "api.github.com")
+	github.ID = "sec_github"
 	github.Kind = "static"
 	github.Value = "ghp_value"
 	github.Inject = Inject{Header: "Authorization", Scheme: SchemeBearer}
@@ -433,7 +458,7 @@ func TestCompileCarriesTheValueAndTheKind(t *testing.T) {
 	if len(m.Entries) != 2 {
 		t.Fatalf("entries = %d, want 2", len(m.Entries))
 	}
-	if m.Entries[0].Value != "ghp_value" || m.Entries[0].Kind != "static" {
+	if m.Entries[0].Value != "ghp_value" || m.Entries[0].Kind != "static" || m.Entries[0].ID != "sec_github" {
 		t.Fatalf("entry = %+v", m.Entries[0])
 	}
 	if m.Entries[1].OAuth == nil || m.Entries[1].OAuth.TokenURL != grant.TokenURL {
@@ -452,7 +477,8 @@ func TestCompileCarriesTheValueAndTheKind(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(encoded), "ghp_value") || strings.Contains(string(encoded), "gone") {
+	if !strings.Contains(string(encoded), "ghp_value") || !strings.Contains(string(encoded), `"id":"sec_github"`) ||
+		strings.Contains(string(encoded), "gone") {
 		t.Fatalf("the encoded map is %s", encoded)
 	}
 }

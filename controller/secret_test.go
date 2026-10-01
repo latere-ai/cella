@@ -251,7 +251,8 @@ func TestAStoreWithNoSecretCollectionServesNone(t *testing.T) {
 func TestTheMapCarriesTheValue(t *testing.T) {
 	c, gw, _ := sealedController(t)
 	ctx := t.Context()
-	if _, err := c.CreateSecret(ctx, aSecret("github", "api.github.com", "ghp_canary"), "alice"); err != nil {
+	secret, err := c.CreateSecret(ctx, aSecret("github", "api.github.com", "ghp_canary"), "alice")
+	if err != nil {
 		t.Fatal(err)
 	}
 	obj, err := realized(ctx, c, mounting("github", "GITHUB_TOKEN"), "alice", 0)
@@ -263,7 +264,9 @@ func TestTheMapCarriesTheValue(t *testing.T) {
 	}
 	pushed := gw.maps()
 	m := pushed[len(pushed)-1]
-	if len(m.Entries) != 1 || m.Entries[0].Value != "ghp_canary" {
+	// The entry names the secret by its id as well, which is what a
+	// gateway reports a use by.
+	if len(m.Entries) != 1 || m.Entries[0].Value != "ghp_canary" || m.Entries[0].ID != secret.Status.ID {
 		t.Fatalf("the map is %+v", m)
 	}
 	if !slices.Contains(m.Allow, "api.github.com") {

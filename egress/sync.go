@@ -9,6 +9,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	v1 "latere.ai/x/cella/manifest/v1"
 )
 
 // Protocol is the version of the frame vocabulary below. It is the
@@ -42,6 +44,12 @@ const (
 	FrameHeartbeat = "heartbeat"
 	// FrameRecord is one connection the gateway handled.
 	FrameRecord = "record"
+	// FrameUse is the gateway reporting that it substituted one secret's
+	// value into a request of one sandbox, which the control plane writes as
+	// the secret's status.lastUsedAt. A control plane of a release before it
+	// logs the frame as unknown and reads on, so a gateway sends it without
+	// asking what the far end speaks.
+	FrameUse = "use"
 )
 
 // HeartbeatInterval is how often each side sends a heartbeat, and
@@ -62,6 +70,7 @@ type Frame struct {
 	Purge    *Purge    `json:"purge,omitempty"`
 	Ack      *Ack      `json:"ack,omitempty"`
 	Record   *Record   `json:"record,omitempty"`
+	Use      *Use      `json:"use,omitempty"`
 }
 
 // Hello is what a connecting gateway says about itself.
@@ -159,6 +168,31 @@ func (r *Record) Normalize() error {
 	return nil
 }
 
+// Use is one secret substituted into one sandbox's request: the sandbox's
+// principal, the Secret's id, and the instant of the substitution. Like a
+// record it carries no value, no placeholder and no credential, and it carries
+// no host and no path either: the control plane needs to know that a secret is
+// used, not where it went.
+type Use struct {
+	Principal string    `json:"principal"`
+	Secret    string    `json:"secret"`
+	At        time.Time `json:"at"`
+}
+
+// ErrUse is a use the control plane will not write: one that names no
+// sandbox, or no secret by its id.
+var ErrUse = errors.New("egress: a use names no sandbox or no secret id")
+
+// Normalize holds a use to what one may carry, where it enters the control
+// plane: a sandbox's principal, a Secret's id, and a time in UTC.
+func (u *Use) Normalize() error {
+	if SandboxOf(u.Principal) == "" || !strings.HasPrefix(u.Secret, v1.SecretIDPrefix) {
+		return ErrUse
+	}
+	u.At = u.At.UTC()
+	return nil
+}
+
 // Encode writes one frame as one JSON text message. The protocol is one
 // frame per message, so a reader never has to find a boundary inside one.
 func Encode(f Frame) ([]byte, error) { return json.Marshal(f) }
@@ -171,7 +205,7 @@ func Decode(message []byte) (Frame, error) {
 		return Frame{}, err
 	}
 	switch f.Type {
-	case FrameHello, FrameSnapshot, FramePut, FramePurge, FrameAck, FrameHeartbeat, FrameRecord:
+	case FrameHello, FrameSnapshot, FramePut, FramePurge, FrameAck, FrameHeartbeat, FrameRecord, FrameUse:
 		return f, nil
 	default:
 		return Frame{}, errors.New("egress: unknown frame type " + f.Type)
