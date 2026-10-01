@@ -307,3 +307,78 @@ func reverseDo(t *testing.T, target, credential, authorization string) *http.Res
 	}
 	return resp
 }
+
+// TestASubstitutionStampsTheSecretsLastUse is spec 079 over one running
+// control plane, one running gateway and one running sandbox: a secret
+// written and mounted and not yet sent anywhere has no lastUsedAt, and the
+// first request on which the gateway substitutes it stamps it, through the
+// use the gateway reports up its stream and the controller writes. The proxy
+// door substitutes inside pkg/egress, whose transport this tier cannot point
+// at its upstream; the gateway's own test drives that path through the
+// engine.
+func TestASubstitutionStampsTheSecretsLastUse(t *testing.T) {
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "the upstream saw "+r.Header.Get("Authorization"))
+	}))
+	defer upstream.Close()
+	proxyLn, reverseLn := doors(t)
+	plane := startPlaneWith(t, proxyLn.Addr().String(), reverseLn.Addr().String(), map[string]string{
+		"CELLA_SECRET_KEY": base64.StdEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef")),
+	})
+	ready := make(chan struct{})
+	startGateway(t, plane, egressd.Options{
+		ProxyListener: proxyLn, ReverseListener: reverseLn,
+		UpstreamCAPEM: certificatePEM(t, upstream),
+		Dial:          dialTo(upstream.Listener.Addr().String()),
+		Ready:         func() { close(ready) },
+	})
+	select {
+	case <-ready:
+	case <-time.After(15 * time.Second):
+		t.Fatal("the gateway never received its first snapshot")
+	}
+
+	plane.applySecret(t, "vendor", `{"apiVersion":"cella.latere.ai/v1beta1","kind":"Secret",`+
+		`"metadata":{"name":"vendor"},"spec":{"scope":{"hosts":["upstream.example.com"]},"value":"vendor-value"}}`)
+	if body := plane.get(t, "/v1/secrets/vendor"); strings.Contains(body, "lastUsedAt") {
+		t.Fatalf("a secret never used answers a stamp: %s", body)
+	}
+	sandbox := plane.createMounting(t, "vendor", "VENDOR_TOKEN")
+	if body := plane.get(t, "/v1/secrets/vendor"); strings.Contains(body, "lastUsedAt") {
+		t.Fatalf("a mount was stamped as a use: %s", body)
+	}
+
+	gatewayURL := strings.TrimSpace(plane.exec(t, sandbox, "printenv CELLA_GATEWAY_URL"))
+	credential := strings.TrimSpace(plane.exec(t, sandbox, "printenv CELLA_GATEWAY_CREDENTIAL"))
+	token := strings.TrimSpace(plane.exec(t, sandbox, "printenv VENDOR_TOKEN"))
+	before := time.Now().UTC().Truncate(time.Second)
+	if body := reverseGet(t, gatewayURL+"/upstream.example.com/v1/things", credential, "Bearer "+token); body != "the upstream saw Bearer vendor-value" {
+		t.Fatalf("the upstream answered %q", body)
+	}
+
+	var secret struct {
+		Status struct {
+			LastUsedAt string `json:"lastUsedAt"`
+		} `json:"status"`
+	}
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		if err := json.Unmarshal([]byte(plane.get(t, "/v1/secrets/vendor")), &secret); err != nil {
+			t.Fatal(err)
+		}
+		if secret.Status.LastUsedAt != "" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the substitution never stamped the secret")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	stamp, err := time.Parse(time.RFC3339, secret.Status.LastUsedAt)
+	if err != nil || !strings.HasSuffix(secret.Status.LastUsedAt, "Z") || stamp.Nanosecond() != 0 {
+		t.Fatalf("lastUsedAt is %q, want an RFC 3339 time in UTC to the second: %v", secret.Status.LastUsedAt, err)
+	}
+	if stamp.Before(before) || stamp.After(time.Now()) {
+		t.Fatalf("lastUsedAt is %v, want the request's time, after %v", stamp, before)
+	}
+}
