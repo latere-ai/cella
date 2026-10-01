@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.10.1 - 2026-10-01
+
 - Fixed: on the k8s driver, a file operation, an archive transfer, an exec
   or a desktop operation on a sandbox whose Pod is still starting answers
   `409 phase_conflict`, with what the Pod is waiting for in the detail, such
