@@ -116,16 +116,33 @@ type fakeExec struct {
 	typed []byte
 }
 
-// newFake starts an engine on a unix socket in a directory of its own, removed
-// when the test ends. The directory is not t.TempDir: a unix socket path is
-// bounded at around a hundred bytes and a test name in the path overruns it.
-func newFake(t *testing.T) *fake {
+// sunPathMax is the longest unix socket path every supported platform binds:
+// macOS's sun_path holds 104 bytes with its terminator, Linux's 108.
+const sunPathMax = 103
+
+// socketDir makes a directory for one unix socket named "s", removed when the
+// test ends. It is not t.TempDir, whose path carries the test's name, and it
+// leaves the temporary directory for /tmp when that one is too long for the
+// socket's path, as a test runner's per-run TMPDIR can be.
+func socketDir(t *testing.T) string {
 	t.Helper()
-	dir, err := os.MkdirTemp("", "cp")
+	base := os.TempDir()
+	// MkdirTemp appends a separator, the pattern and up to ten digits.
+	if len(base)+len("/cp")+10+len("/s") > sunPathMax {
+		base = "/tmp"
+	}
+	dir, err := os.MkdirTemp(base, "cp")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return dir
+}
+
+// newFake starts an engine on a unix socket in a directory of its own.
+func newFake(t *testing.T) *fake {
+	t.Helper()
+	dir := socketDir(t)
 	f := &fake{
 		socket:     path.Join(dir, "s"),
 		volumes:    map[string]map[string]string{},
@@ -952,4 +969,23 @@ func (f *fake) network(name string) (map[string][]string, bool) {
 		out[container] = slices.Clone(aliases)
 	}
 	return out, true
+}
+
+func TestSocketDirFitsUnderALongTempDir(t *testing.T) {
+	long := path.Join(t.TempDir(), strings.Repeat("d", sunPathMax))
+	if err := os.MkdirAll(long, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TMPDIR", long)
+	socket := path.Join(socketDir(t), "s")
+	if len(socket) > sunPathMax {
+		t.Fatalf("socket path is %d bytes, over %d: %s", len(socket), sunPathMax, socket)
+	}
+	ln, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatalf("listening on %s: %v", socket, err)
+	}
+	if err := ln.Close(); err != nil {
+		t.Fatal(err)
+	}
 }
