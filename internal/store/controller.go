@@ -423,8 +423,9 @@ func decode(row Object) (v1.Sandbox, error) {
 // that breaks the other is a build failure here rather than a nil store at
 // start-up.
 var (
-	_ controller.Store   = (*Controlled)(nil)
-	_ controller.Durable = (*Controlled)(nil)
-	_ controller.Lease   = (*Controlled)(nil)
-	_ controller.Secrets = (*Controlled)(nil)
+	_ controller.Store      = (*Controlled)(nil)
+	_ controller.Durable    = (*Controlled)(nil)
+	_ controller.Lease      = (*Controlled)(nil)
+	_ controller.Secrets    = (*Controlled)(nil)
+	_ controller.SecretUses = (*Controlled)(nil)
 )

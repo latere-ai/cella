@@ -22,10 +22,12 @@ import (
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 
+	"latere.ai/x/cella/controller"
 	"latere.ai/x/cella/internal/events"
 	"latere.ai/x/cella/internal/store"
 	"latere.ai/x/cella/internal/store/postgres"
 	"latere.ai/x/cella/internal/store/storetest"
+	v1 "latere.ai/x/cella/manifest/v1"
 )
 
 // The suite runs against a real server, because half of what this adapter is
@@ -254,6 +256,55 @@ func TestATakeoverWaitsForAFencedWrite(t *testing.T) {
 	}
 	if held {
 		t.Error("the old holder still holds the lease its successor took")
+	}
+}
+
+// TestAPromotedWriterReadsTheLastUse: a writer stamps a secret's last use, a
+// second process over the same database takes the writer lease after it, and
+// the secrets it loads at promotion carry the stamp, so the rule that moves
+// the stamp reads the stored one across a handoff. The successor's own stamp
+// lands on the row it read.
+func TestAPromotedWriterReadsTheLastUse(t *testing.T) {
+	admin := server(t)
+	dsn := database(t, admin)
+	ctx := t.Context()
+	first := store.ForController(open(t, dsn, storetest.Key, time.Hour), "default", store.Delivered).Fence(store.WriterLease)
+	if held, err := first.Acquire(ctx, store.WriterLease, time.Minute); err != nil || !held {
+		t.Fatalf("the first writer taking the lease: %v, %v", held, err)
+	}
+	obj := v1.Secret{
+		APIVersion: v1.APIVersion, Kind: v1.KindSecret, Metadata: v1.Metadata{Name: "github"},
+		Spec:   v1.SecretSpec{Kind: v1.SecretStatic, Scope: v1.SecretScope{Hosts: []string{"api.example.com"}}},
+		Status: v1.SecretStatus{ID: "sec_a", Owner: "alice"},
+	}
+	version, err := first.WriteSecret(ctx, obj, []byte("ghp_canary"), controller.MutationSecretCreated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	obj.Status.Version = version
+	obj.Status.LastUsedAt = time.Date(2026, 10, 1, 12, 0, 3, 0, time.UTC)
+	if err = first.WriteSecretUse(ctx, obj); err != nil {
+		t.Fatal(err)
+	}
+	if err = first.ReleaseAll(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	successor := store.ForController(open(t, dsn, storetest.Key, time.Hour), "default", store.Delivered).Fence(store.WriterLease)
+	if held, err := successor.Acquire(ctx, store.WriterLease, time.Minute); err != nil || !held {
+		t.Fatalf("the successor taking the lease: %v, %v", held, err)
+	}
+	loaded, err := successor.LoadSecrets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := loaded["sec_a"]
+	if !got.Status.LastUsedAt.Equal(obj.Status.LastUsedAt) || got.Status.Version != 1 {
+		t.Fatalf("the promoted writer loaded %+v", got.Status)
+	}
+	got.Status.LastUsedAt = obj.Status.LastUsedAt.Add(v1.SecretLastUsedResolution)
+	if err = successor.WriteSecretUse(ctx, got); err != nil {
+		t.Fatalf("the successor's stamp: %v", err)
 	}
 }
 

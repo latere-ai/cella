@@ -111,6 +111,40 @@ func (c *Controlled) WriteSecret(ctx context.Context, obj v1.Secret, plaintext [
 	return value, nil
 }
 
+// WriteSecretUse stores one Secret's object at the version this process last
+// saw, which is how status.lastUsedAt reaches the row. The value, its version
+// and the journal are untouched: the stamp is the data plane's observation and
+// not an act on the Secret, and a record of it every few minutes per live
+// secret would bury the acts in the feed. The write is fenced as every other
+// write of this adapter is, so a writer that lost its lease stamps nothing.
+//
+// A stamp never creates a row: one this process holds no version for, because
+// it never read it or has deleted it, is ErrNotFound.
+func (c *Controlled) WriteSecretUse(ctx context.Context, obj v1.Secret) error {
+	c.mu.Lock()
+	version, held := c.versions[obj.Status.ID]
+	c.mu.Unlock()
+	if !held {
+		return fmt.Errorf("%w: no secret %q was read by this process", ErrNotFound, obj.Status.ID)
+	}
+	row, err := encodeSecret(obj)
+	if err != nil {
+		return err
+	}
+	var written int64
+	if err := c.write(ctx, func(tx Tx) error {
+		next, err := tx.Desired().Put(ctx, row, version)
+		written = next
+		return err
+	}); err != nil {
+		return err
+	}
+	c.mu.Lock()
+	c.versions[obj.Status.ID] = written
+	c.mu.Unlock()
+	return nil
+}
+
 // RemoveSecret deletes one Secret, its value and its version, and appends the
 // mutation, in one transaction. A row another replica already deleted is not
 // an error: the object is gone either way, and the journal still records that

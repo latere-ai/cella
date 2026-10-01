@@ -33,6 +33,9 @@ func TestTheFenceRefusesAWriterThatLostItsLease(t *testing.T) {
 	if err := old.Write(t.Context(), sandbox("sbx_a", "work", driver.Pending), controller.MutationCreated); err != nil {
 		t.Fatalf("the writer's write: %v", err)
 	}
+	if _, err := old.WriteSecret(t.Context(), secret("sec_a", "github"), []byte("ghp_canary"), controller.MutationSecretCreated); err != nil {
+		t.Fatalf("the writer's secret: %v", err)
+	}
 	time.Sleep(2 * term)
 	if held, err := successor.Acquire(t.Context(), store.WriterLease, time.Minute); err != nil || !held {
 		t.Fatalf("the successor taking the lapsed lease: %v, %v", held, err)
@@ -43,6 +46,11 @@ func TestTheFenceRefusesAWriterThatLostItsLease(t *testing.T) {
 		},
 		"a removal": func() error { return old.Remove(t.Context(), "sbx_a", controller.MutationDeleted) },
 		"a rebuild": func() error { return old.Rebuild(t.Context(), "default", nil) },
+		"a secret's last use": func() error {
+			used := secret("sec_a", "github")
+			used.Status.LastUsedAt = time.Now().UTC()
+			return old.WriteSecretUse(t.Context(), used)
+		},
 	} {
 		if err := write(); !errors.Is(err, controller.ErrNotWriter) {
 			t.Errorf("%s by the demoted writer answered %v, want ErrNotWriter", name, err)

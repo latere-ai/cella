@@ -8,6 +8,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"latere.ai/x/cella/controller"
 	"latere.ai/x/cella/internal/events"
@@ -156,6 +157,67 @@ func TestSecretEvents(t *testing.T) {
 	if !strings.Contains(string(records[2].Data), `"version":1`) ||
 		!strings.Contains(string(records[1].Data), `"version":2`) {
 		t.Fatalf("the versions are %s and %s", records[2].Data, records[1].Data)
+	}
+}
+
+// TestASecretUseIsWrittenWithoutARecord: the stamp is one conditional write of
+// the object, no journal row, the value and its version untouched, and the
+// write after it is not refused as a version this process did not read. A
+// replica that did not read the row is refused, as for every other write.
+func TestASecretUseIsWrittenWithoutARecord(t *testing.T) {
+	bridge, s := bound(t)
+	ctx := t.Context()
+	if _, err := bridge.WriteSecret(ctx, secret("sec_a", "github"), []byte("ghp_canary"), controller.MutationSecretCreated); err != nil {
+		t.Fatal(err)
+	}
+	held, err := bridge.LoadSecrets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stamped := held["sec_a"]
+	stamped.Status.LastUsedAt = time.Date(2026, 10, 1, 12, 0, 3, 0, time.UTC)
+	if err = bridge.WriteSecretUse(ctx, stamped); err != nil {
+		t.Fatal(err)
+	}
+	if records := recordsOf(t, s, "sec_a"); len(records) != 1 {
+		t.Fatalf("the journal holds %d rows for the secret after a stamp, want the create alone", len(records))
+	}
+	reader := store.ForController(s, "default", store.Delivered)
+	if held, err = reader.LoadSecrets(); err != nil {
+		t.Fatal(err)
+	}
+	if got := held["sec_a"].Status; !got.LastUsedAt.Equal(stamped.Status.LastUsedAt) || got.Version != 1 {
+		t.Fatalf("the stored status is %+v", got)
+	}
+	plaintext, version, err := bridge.OpenValue(ctx, "sec_a")
+	if err != nil || string(plaintext) != "ghp_canary" || version != 1 {
+		t.Fatalf("the value after a stamp: %q %d %v", plaintext, version, err)
+	}
+	if _, err = bridge.WriteSecret(ctx, stamped, []byte("ghp_rotated"), controller.MutationSecretUpdated); err != nil {
+		t.Fatalf("the write after a stamp: %v", err)
+	}
+	// The reader's version is the one before the rotation, so its stamp is
+	// refused as any write over a row that moved is.
+	if err = reader.WriteSecretUse(ctx, stamped); !errors.Is(err, store.ErrVersionConflict) {
+		t.Fatalf("a stamp at a version that moved: %v", err)
+	}
+	// A stamp never creates a row: not one this process never read, not one
+	// with no id, and not one it deleted.
+	stranger := store.ForController(s, "default", store.Delivered)
+	if err = stranger.WriteSecretUse(ctx, stamped); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("a stamp of a row this replica never read: %v", err)
+	}
+	if err = bridge.WriteSecretUse(ctx, secret("", "nameless")); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("a stamp with no id: %v", err)
+	}
+	if err = bridge.RemoveSecret(ctx, "sec_a", controller.MutationSecretDeleted); err != nil {
+		t.Fatal(err)
+	}
+	if err = bridge.WriteSecretUse(ctx, stamped); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("a stamp of a deleted row: %v", err)
+	}
+	if held, err = bridge.LoadSecrets(); err != nil || len(held) != 0 {
+		t.Fatalf("the collection after a stamp of a deleted row is %+v: %v", held, err)
 	}
 }
 

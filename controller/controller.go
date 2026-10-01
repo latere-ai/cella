@@ -201,6 +201,9 @@ type Controller struct {
 	// read returns, and a plaintext is read per compile through the seam.
 	secrets       Secrets
 	secretObjects map[string]v1.Secret
+	// secretUses is the store's seam for status.lastUsedAt, where it has
+	// one: a store without it serves every Secret and stamps no use.
+	secretUses SecretUses
 	// spawner is the spawn ledger of design 022 and journaller the seam a
 	// record with a payload of its own is appended through. Both are the
 	// store's, taken where it has them: a store that counts no budget
@@ -324,6 +327,7 @@ func Open(ctx context.Context, o Options) (*Controller, error) {
 	// substitution possible; one that does not serves everything else.
 	if s, ok := store.(Secrets); ok {
 		c.secrets = s
+		c.secretUses, _ = store.(SecretUses)
 		if c.secretObjects, err = s.LoadSecrets(); err != nil {
 			_ = store.Close()
 			return nil, err

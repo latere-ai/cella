@@ -241,6 +241,29 @@ func (s *fileStore) WriteSecret(_ context.Context, obj v1.Secret, plaintext []by
 	return row.Version, nil
 }
 
+// WriteSecretUse replaces one Secret's object in the snapshot and keeps its
+// ciphertext and its value's version, which is how status.lastUsedAt reaches
+// the file. A row the snapshot does not hold is not created: the secret was
+// deleted, and a stamp is no reason to bring it back.
+func (s *fileStore) WriteSecretUse(_ context.Context, obj v1.Secret) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	previous, held := s.secrets[obj.Status.ID]
+	if !held {
+		return ErrNotFound
+	}
+	row := previous
+	row.Object = obj
+	row.Object.Spec.Value = ""
+	row.Object.Status.Version = previous.Version
+	s.secrets[obj.Status.ID] = row
+	if err := s.write(); err != nil {
+		s.restoreSecret(obj.Status.ID, previous, held)
+		return err
+	}
+	return nil
+}
+
 // RemoveSecret drops one Secret and its ciphertext from the snapshot.
 func (s *fileStore) RemoveSecret(_ context.Context, id, _ string) error {
 	s.mu.Lock()
@@ -398,6 +421,7 @@ func (s *fileStore) ForgetSpawns(_ context.Context, parentID string) error {
 var (
 	_ Store        = (*fileStore)(nil)
 	_ Secrets      = (*fileStore)(nil)
+	_ SecretUses   = (*fileStore)(nil)
 	_ Spawner      = (*fileStore)(nil)
 	_ Environments = (*fileStore)(nil)
 )

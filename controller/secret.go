@@ -47,6 +47,17 @@ type Secrets interface {
 	OpenValue(ctx context.Context, secretID string) (plaintext []byte, version int, err error)
 }
 
+// SecretUses is the half of a Secrets store that records when a gateway last
+// substituted a secret. It is optional: a store without it never stamps
+// status.lastUsedAt, and serves every other act the same.
+type SecretUses interface {
+	// WriteSecretUse stores one Secret's object as given, at the version
+	// this process last saw, and leaves its value and its value's version
+	// untouched. It appends no journal record: a use is an observation of
+	// the data plane, not an act on the Secret.
+	WriteSecretUse(ctx context.Context, obj v1.Secret) error
+}
+
 // SecretsEnabled reports whether this control plane stores secret values.
 func (c *Controller) SecretsEnabled() bool { return c.secrets != nil }
 
