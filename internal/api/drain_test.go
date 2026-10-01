@@ -117,7 +117,7 @@ func TestDrainingEndsWhatWouldOutlastAHandoff(t *testing.T) {
 func TestAHubThatDrainsClosesItsGatewayStreams(t *testing.T) {
 	hub := NewEgressHub(EgressHubOptions{Environment: "default"})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		hub.ServeGateway(w, r, "default")
+		hub.ServeGateway(w, r, "default", nil)
 	}))
 	t.Cleanup(server.Close)
 	dialer := websocket.Dialer{Subprotocols: []string{egress.Protocol}}

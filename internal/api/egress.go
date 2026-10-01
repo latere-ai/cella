@@ -32,6 +32,18 @@ const (
 	DefaultRecordsCap = 1000
 )
 
+// useQueue is how many secret uses wait on one gateway's stream for the
+// controller. The stream's read loop never waits on the controller, whose
+// lock is held across driver calls while the acknowledgments a create waits
+// for arrive on the same loop, so a use that finds the queue full is dropped
+// and the gateway's next report of it writes the stamp.
+const useQueue = 256
+
+// SecretUseWriter writes one secret's use as the gateway reported it: the
+// sandbox the request came from, the Secret's id, and when the value was
+// substituted. It is the controller's SecretUsed.
+type SecretUseWriter func(ctx context.Context, sandboxID, secretID string, at time.Time) error
+
 // retryInterval is how often an unacknowledged map is sent again while the
 // create waits. A gateway that dropped the frame gets another without the
 // create having to fail first.
@@ -295,8 +307,12 @@ type gatewayConn struct {
 	id        string
 	principal string
 	out       chan egress.Frame
-	done      chan struct{}
-	once      sync.Once
+	// uses is the queue between the read loop and the one goroutine that
+	// writes uses through the controller. It is nil on a stream served with
+	// no writer, which drops every use.
+	uses chan egress.Use
+	done chan struct{}
+	once sync.Once
 }
 
 // outBuffer is how many frames may queue for one gateway before the hub
@@ -338,8 +354,9 @@ var ErrEgressEnvironment = errors.New("the key names another environment")
 
 // ServeGateway runs one gateway's stream: the hello it opens with, the
 // snapshot that makes it whole, then the puts and purges down and the
-// acknowledgments and records up until either side stops.
-func (h *EgressHub) ServeGateway(w http.ResponseWriter, r *http.Request, environment string) {
+// acknowledgments, records and secret uses up until either side stops. Every
+// use goes to used, off the read loop; a nil used drops them.
+func (h *EgressHub) ServeGateway(w http.ResponseWriter, r *http.Request, environment string, used SecretUseWriter) {
 	if environment != h.environment {
 		respondError(w, &manifest.Error{Code: "not_found", Detail: ErrEgressEnvironment.Error()})
 		return
@@ -363,6 +380,9 @@ func (h *EgressHub) ServeGateway(w http.ResponseWriter, r *http.Request, environ
 		return
 	}
 	c := &gatewayConn{id: hello.GatewayID, principal: hello.Principal, out: make(chan egress.Frame, outBuffer), done: make(chan struct{})}
+	if used != nil {
+		c.uses = make(chan egress.Use, useQueue)
+	}
 	h.join(c, hello)
 	defer h.leave(c)
 
@@ -374,6 +394,9 @@ func (h *EgressHub) ServeGateway(w http.ResponseWriter, r *http.Request, environ
 	h.metrics.GatewaySnapshot()
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
+	if used != nil {
+		go h.usePump(ctx, c, used)
+	}
 	go h.readPump(ctx, cancel, conn, c)
 	h.writePump(ctx, conn, c)
 }
@@ -449,9 +472,50 @@ func (h *EgressHub) readPump(ctx context.Context, cancel context.CancelFunc, con
 			if err = h.onRecord(*f.Record); err != nil {
 				h.log.WarnContext(ctx, "a gateway sent a record this server will not keep", "gateway", c.id, "err", err)
 			}
+		case f.Type == egress.FrameUse && f.Use != nil:
+			h.onUse(ctx, c, *f.Use)
 		case f.Type == egress.FrameHeartbeat:
 		default:
 			h.log.WarnContext(ctx, "a gateway sent a frame that belongs the other way", "gateway", c.id, "frame", f.Type)
+		}
+	}
+}
+
+// onUse queues one secret's use for the stream's use pump. It never waits: a
+// use the contract refuses is dropped, and so is one that finds the queue
+// full, both with a log line, because a stamp that lands later is worth less
+// than an acknowledgment that lands now.
+func (h *EgressHub) onUse(ctx context.Context, c *gatewayConn, u egress.Use) {
+	if err := u.Normalize(); err != nil {
+		h.log.WarnContext(ctx, "a gateway sent a use this server will not write", "gateway", c.id, "err", err)
+		return
+	}
+	if c.uses == nil {
+		return
+	}
+	select {
+	case c.uses <- u:
+	default:
+		h.log.WarnContext(ctx, "a secret's use was dropped because the queue to the controller is full",
+			"gateway", c.id, "secret", u.Secret)
+	}
+}
+
+// usePump writes the stream's queued uses through the controller, one at a
+// time, until the stream ends. A write that fails is logged and not retried:
+// the request it describes was proxied long before, and the gateway reports
+// the secret's next use.
+func (h *EgressHub) usePump(ctx context.Context, c *gatewayConn, used SecretUseWriter) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case u := <-c.uses:
+			sandbox := egress.SandboxOf(u.Principal)
+			if err := used(ctx, sandbox, u.Secret, u.At); err != nil && ctx.Err() == nil {
+				h.log.WarnContext(ctx, "a secret's last use was not written",
+					"gateway", c.id, "sandbox", sandbox, "secret", u.Secret, "err", err)
+			}
 		}
 	}
 }

@@ -240,7 +240,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				respondError(w, &auth.Error{Code: auth.CodeForbidden, Detail: "the key names another environment"})
 				return
 			}
-			h.Egress.ServeGateway(w, r, environment)
+			h.Egress.ServeGateway(w, r, environment, h.Controller.SecretUsed)
 			return
 		}
 		if route, ok := workerPath(r); ok {

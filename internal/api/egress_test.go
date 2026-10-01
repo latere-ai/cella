@@ -26,6 +26,9 @@ import (
 type hubFixture struct {
 	hub    *EgressHub
 	server *httptest.Server
+	// used is the writer each stream hands its uses to; a test sets it
+	// before it connects a gateway.
+	used SecretUseWriter
 }
 
 func newHub(t *testing.T, ackTimeout time.Duration, cap int) *hubFixture {
@@ -33,7 +36,7 @@ func newHub(t *testing.T, ackTimeout time.Duration, cap int) *hubFixture {
 	hub := NewEgressHub(EgressHubOptions{Environment: "default", AckTimeout: ackTimeout, RecordsCap: cap})
 	f := &hubFixture{hub: hub}
 	f.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		hub.ServeGateway(w, r, r.URL.Query().Get("environment"))
+		hub.ServeGateway(w, r, r.URL.Query().Get("environment"), f.used)
 	}))
 	t.Cleanup(f.server.Close)
 	return f
@@ -43,6 +46,9 @@ func newHub(t *testing.T, ackTimeout time.Duration, cap int) *hubFixture {
 // the acknowledgments a test tells it to.
 type gatewayStub struct {
 	conn *websocket.Conn
+	// writeMu makes the acknowledgments the read loop sends and the frames
+	// a test sends one writer, which a WebSocket connection requires.
+	writeMu sync.Mutex
 
 	mu     sync.Mutex
 	frames []egress.Frame
@@ -117,6 +123,8 @@ func (g *gatewayStub) ack(principal string, version int64) {
 	if err != nil {
 		return
 	}
+	g.writeMu.Lock()
+	defer g.writeMu.Unlock()
 	_ = g.conn.WriteMessage(websocket.TextMessage, message)
 }
 
@@ -132,6 +140,8 @@ func (g *gatewayStub) send(t *testing.T, f egress.Frame) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	g.writeMu.Lock()
+	defer g.writeMu.Unlock()
 	if err = g.conn.WriteMessage(websocket.TextMessage, message); err != nil {
 		t.Fatal(err)
 	}
