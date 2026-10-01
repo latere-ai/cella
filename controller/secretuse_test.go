@@ -117,8 +117,7 @@ func TestSecretUsedWritesOncePerResolution(t *testing.T) {
 }
 
 // TestSecretUsedNeedsAMount: only a secret a sandbox of this control plane
-// binds is stamped, a failed write leaves the stamp for the next report, and
-// a store without the seam stamps nothing and refuses nothing.
+// binds is stamped, and a failed write leaves the stamp for the next report.
 func TestSecretUsedNeedsAMount(t *testing.T) {
 	c, store, clock, sandbox, secret := usedController(t)
 	ctx := t.Context()
@@ -161,35 +160,39 @@ func TestSecretUsedNeedsAMount(t *testing.T) {
 	if err := c.SecretUsed(ctx, sandbox, secret, clock.Now()); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("a deleted secret: %v", err)
 	}
+}
 
-	t.Run("aStoreWithoutTheSeam", func(t *testing.T) {
-		opened, err := OpenSealedFileStore(t.TempDir(), newSealer(t))
-		if err != nil {
-			t.Fatal(err)
-		}
-		bare := struct {
-			Store
-			Secrets
-		}{opened, opened.(Secrets)}
-		c := openController(t, Options{
-			Store: bare, Egress: &gateway{},
-			Driver: &gatewayDriver{modes: []v1.EgressMode{v1.EgressAllowlist}},
-		})
-		secret, err := c.CreateSecret(ctx, aSecret("github", "api.github.com", "ghp_canary"), "alice")
-		if err != nil {
-			t.Fatal(err)
-		}
-		obj, err := realized(ctx, c, mounting("github", "GITHUB_TOKEN"), "alice", 0)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := c.SecretUsed(ctx, obj.Status.ID, secret.Status.ID, time.Now()); err != nil {
-			t.Fatalf("a store without the seam refused the report: %v", err)
-		}
-		if got := lastUsed(t, c, secret.Status.ID); !got.IsZero() {
-			t.Fatalf("a store without the seam stamped %v", got)
-		}
+// TestAStoreWithoutTheSeamStampsNothing: a store that holds secrets and has no
+// SecretUses serves every secret and stamps no use, and a report is not an
+// error there.
+func TestAStoreWithoutTheSeamStampsNothing(t *testing.T) {
+	ctx := t.Context()
+	opened, err := OpenSealedFileStore(t.TempDir(), newSealer(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bare := struct {
+		Store
+		Secrets
+	}{opened, opened.(Secrets)}
+	c := openController(t, Options{
+		Store: bare, Egress: &gateway{},
+		Driver: &gatewayDriver{modes: []v1.EgressMode{v1.EgressAllowlist}},
 	})
+	secret, err := c.CreateSecret(ctx, aSecret("github", "api.github.com", "ghp_canary"), "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	obj, err := realized(ctx, c, mounting("github", "GITHUB_TOKEN"), "alice", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.SecretUsed(ctx, obj.Status.ID, secret.Status.ID, time.Now()); err != nil {
+		t.Fatalf("a store without the seam refused the report: %v", err)
+	}
+	if got := lastUsed(t, c, secret.Status.ID); !got.IsZero() {
+		t.Fatalf("a store without the seam stamped %v", got)
+	}
 }
 
 // TestTheFileStoreKeepsASecretsLastUse: the stamp reaches the snapshot and

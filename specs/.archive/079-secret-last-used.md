@@ -155,7 +155,7 @@ writes the stamp.
 |---|---|---|
 | A secret never substituted answers no `lastUsedAt` on a read and a list; one stamped answers it in UTC to the second | `TestASecretNeverUsedHasNoLastUse` | passing |
 | Two uses inside the resolution write once, one after it writes again, and a report older than the stamp never moves it back; a future `at` is clamped to the control plane's clock; an hour of requests a second writes twelve stamps | `TestSecretUsedWritesOncePerResolution` | passing |
-| A use for a secret the sandbox does not bind, a deleted secret, or an unknown sandbox writes nothing; a failed write leaves the stamp for the next report; a store without `SecretUses` stamps nothing and refuses nothing | `TestSecretUsedNeedsAMount` | passing |
+| A use for a secret the sandbox does not bind, a deleted secret, or an unknown sandbox writes nothing; a failed write leaves the stamp for the next report; a store without `SecretUses` stamps nothing and refuses nothing | `TestSecretUsedNeedsAMount`, `TestAStoreWithoutTheSeamStampsNothing` | passing |
 | The stamp is one conditional row write with no journal record, keeps the value and its version, and the next value write is not a version conflict; a stamp never creates a row; an update keeps the stamp; the snapshot store keeps it across a reopen | `TestASecretUseIsWrittenWithoutARecord`, `TestTheFileStoreKeepsASecretsLastUse` | passing |
 | A demoted writer's stamp is refused by the fence | `TestTheFenceRefusesAWriterThatLostItsLease` | passing |
 | The next writer reads the stamp from Postgres at promotion and stamps over it | `TestAPromotedWriterReadsTheLastUse` | passing |
