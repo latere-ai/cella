@@ -6,6 +6,11 @@ refused before it is pushed.
 
 ## Unreleased
 
+- Fixed: `cella help` says that inside a sandbox the token is already in
+  the file `CELLA_TOKEN_FILE` names, or at `/run/cella/token`, and that the
+  address is not: set `CELLA_URL` or pass `--url`. It had said the address
+  was already in the sandbox's environment, which no runtime sets.
+
 ## v0.11.1 - 2026-10-02
 
 - Changed: in the API document, `api/openapi.yaml` and `GET /openapi.yaml`,

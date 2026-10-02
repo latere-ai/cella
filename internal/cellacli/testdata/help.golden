@@ -41,5 +41,6 @@ Exit codes:
   and 127 say that it failed, could not start, or that the server was not
   reachable.
 
-A manifest is JSON. Inside a sandbox the address is already in the
-environment and the token is at /run/cella/token, so no flag is needed.
+A manifest is JSON. Inside a sandbox the token is already there, in the
+file CELLA_TOKEN_FILE names or at /run/cella/token. The address is not:
+set CELLA_URL or pass --url.

@@ -4,6 +4,7 @@
 package cellacli_test
 
 import (
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -55,6 +56,47 @@ func TestTheDocumentCarriesTheCommandsHelp(t *testing.T) {
 	} {
 		if !strings.Contains(body, "cella "+name) {
 			t.Errorf("docs/cli.md does not show `cella %s`", name)
+		}
+	}
+}
+
+// TestTheHelpSaysWhatASandboxIsGiven holds the help's sentence about a
+// sandbox to what a sandbox's environment carries: a driver sets
+// CELLA_TOKEN_FILE to the projected token and sets no CELLA_URL. With that
+// environment alone the command refuses for want of an address, and with
+// CELLA_URL added it sends the projected token, so the help has to say the
+// token is there and the address is the caller's to set.
+func TestTheHelpSaysWhatASandboxIsGiven(t *testing.T) {
+	token := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(token, []byte("workload-token\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	inside := map[string]string{"CELLA_TOKEN_FILE": token}
+	got := runWith(t, cellacli.Env{Args: []string{"get", "sandboxes"}, Getenv: environment(inside)})
+	if got.code != 2 || !strings.Contains(got.stderr, "no control plane address") {
+		t.Fatalf("with a sandbox's environment the command exited %d with %q, want 2 and no control plane address", got.code, got.stderr)
+	}
+	var bearer string
+	p := newPlane(t, func(w http.ResponseWriter, r *http.Request) {
+		bearer = r.Header.Get("Authorization")
+		_, _ = w.Write([]byte(`{"items":[],"next":""}`))
+	})
+	inside["CELLA_URL"] = p.server.URL
+	if got := runWith(t, cellacli.Env{Args: []string{"get", "sandboxes"}, Getenv: environment(inside)}); got.code != 0 {
+		t.Fatalf("with CELLA_URL set the command exited %d with %q", got.code, got.stderr)
+	}
+	if bearer != "Bearer workload-token" {
+		t.Fatalf("the request carried %q, want the projected token", bearer)
+	}
+
+	help := runWith(t, cellacli.Env{Args: []string{"help"}, Getenv: environment(nil)})
+	_, sandbox, ok := strings.Cut(help.stdout, "Inside a sandbox")
+	if !ok {
+		t.Fatal("the help text says nothing about running inside a sandbox")
+	}
+	for _, want := range []string{"CELLA_TOKEN_FILE", "/run/cella/token", "CELLA_URL", "--url"} {
+		if !strings.Contains(sandbox, want) {
+			t.Errorf("the help's sandbox sentence does not name %s:\n%s", want, sandbox)
 		}
 	}
 }
