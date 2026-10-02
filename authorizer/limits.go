@@ -10,21 +10,27 @@ import (
 )
 
 // Limits are what an allow granted the subject, decoded from the
-// answer's limits object one wire name to one figure. Zero is the
-// configured value or no ceiling: an absent field grants nothing and
-// takes nothing away.
+// answer's limits object one wire name to one figure. Zero is no
+// figure: an absent field grants nothing and takes nothing away. No
+// variable of cellad's sets any of the three; the allow is their only
+// source.
 type Limits struct {
-	// RequestsPerMinute overrides CELLA_REQUESTS_PER_MINUTE for this
-	// subject (spec 008); 0 keeps the configured rate.
+	// RequestsPerMinute is a request rate for this subject (spec 008).
+	// cellad holds no rate limit, so it refuses a request whose allow
+	// carries a figure above zero with capability_unsupported rather
+	// than serve it unlimited; 0 limits nothing.
 	RequestsPerMinute int
-	// MaxSandboxes overrides CELLA_MAX_SANDBOXES_PER_SUBJECT, the count
-	// spec 007 defines: every desired sandbox of the subject whose phase
-	// is not Deleting, a queued and a stopped one included, because each
-	// holds a name and a workspace. 0 is no ceiling.
+	// MaxSandboxes is the subject's sandbox ceiling, the count spec 007
+	// defines: every desired sandbox of the subject whose phase is not
+	// Deleting, a queued and a stopped one included, because each holds
+	// a name and a workspace. cellad reads it from the allow of
+	// sandbox.create, for a create and a spawn alike, and refuses a
+	// create past it with quota_exceeded. 0 is no ceiling.
 	MaxSandboxes int
-	// MaxPriority caps scheduling.priority and reaches Resolve as the
-	// manifest's Limits.MaxPriority (spec 003, spec 020); 0 is no
-	// ceiling.
+	// MaxPriority caps scheduling.priority (spec 003, spec 020). cellad
+	// decodes it and does not apply it; a plane built on the packages
+	// applies it by passing it to manifest.Resolve as
+	// Options.Limits.MaxPriority. 0 is no ceiling.
 	MaxPriority int
 }
 
