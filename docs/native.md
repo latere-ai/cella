@@ -98,13 +98,25 @@ and reaps every main process.
 | `image` | refused: host processes run no image |
 | `workspace.path` | `/workspace` only, and the workspace is a directory under the data directory |
 | `resources`, `user` | recorded and not applied, with a warning on the answer |
-| `secrets` | mounted as placeholders the gateway substitutes; needs `CELLA_SECRET_KEY`, which `make run` sets |
-| `network.egress` | recorded and not enforced, with a warning |
+| `secrets` | mounted as placeholders the gateway substitutes; needs `CELLA_SECRET_KEY`, which `make run` sets, and a connected gateway, which it does not start |
+| `network.egress` | recorded and not enforced, with a warning; a mode other than `open`, or a denied host, needs a connected gateway |
 | `network.ports` | yes, see below |
 | `mesh.spawn` | yes: a sandbox may create sandboxes |
 | `mesh.enabled`, `display` | refused: this runtime connects no peers and has no desktop |
 | `lifecycle` | yes |
 | `scheduling` | refused on the default `direct` environment |
+
+A manifest that mounts a secret, declares an egress mode other than
+`open`, or denies a host needs a gateway, and is refused with `503
+egress_gateway_unavailable` while none is connected. With
+`CELLA_GATEWAY` set and a gateway, `cellad egress`, connected, the
+sandbox's processes are pointed at it through the proxy and trust
+variables ([Configuration](configuration.md#set-inside-a-sandbox)). The
+trust file is `egress-ca.pem` in the sandbox's directory under
+`CELLA_DATA_DIR/native/`, and holds the public roots `cellad` read at
+start, from `SSL_CERT_FILE` or the system's bundle, then the gateway's own
+authority. Nothing stops a process that ignores the variables, which is
+why the boundary is recorded and not enforced.
 
 ## Files and logs
 
