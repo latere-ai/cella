@@ -6,7 +6,7 @@ depends_on: []
 affects: [manifest/, runtime/, controller/, egress/, internal/, cmd/cellad/, cmd/cella/, docs/]
 effort: medium
 created: 2026-09-12
-updated: 2026-09-24
+updated: 2026-10-03
 author: changkun
 ---
 
@@ -41,15 +41,54 @@ the invariants. Read it first.
 
 ## Current state
 
-Nothing of the design is built. The repository holds the scaffold of
-[[002-repository-scaffold]]: the binary serving its probes, typed
-configuration, and the gate. The hosted platform this control plane
-was extracted from runs today as one closed binary with its own copies
-of the manifest, the k8s driver, an egress gateway, and the identity,
-billing, and product surfaces this spec names as a platform's; its
-migration onto this control plane is that platform's own work and out
-of scope here, except that the boundary this spec draws must make it
-possible.
+v0.11.1 (2026-10-02) builds most of the design. The slices that carry
+it, 025 to 076 and 079, are complete and archived; the parent specs 003
+to 023 stay `in-progress`, each closing on its own acceptance criteria.
+The hosted plane this control plane was extracted from runs on `cellad`
+([[031-hosted-sandbox-consolidation]]).
+
+Built:
+
+- The kinds `Sandbox`, `Secret` and `Environment`, decoded and resolved
+  by `manifest` and served under `/v1` with exec, attach, files, the
+  desktop, ports, dial, the event feed and the OpenAPI document
+  ([[008-api]], [[023-computer-use-operations]]).
+- The drivers `native`, `podman` and `k8s`, each passing `runtimetest`,
+  and `remote`, the control plane's side of a worker's stream
+  ([[004-runtime-contract]], [[021-data-plane-workers]]).
+- The roles `serve`, `worker`, `egress` and `check`, the `cella`
+  command, the `client` package, and `cella-stubs`.
+- The controller: the phases, the reaper, recovery from desired state,
+  the direct and queued modes, pools and preemption
+  ([[005-lifecycle-controller]], [[020-scheduling-and-sets]]).
+- The store in memory or Postgres with the journal and its retention,
+  and rolling replicas behind one writer lease ([[010-state]]).
+- The boundary: the egress gateway substituting `Secret` placeholders, a
+  NetworkPolicy per sandbox on k8s, and mesh and spawn under the
+  boundary check ([[018-egress-and-secrets]], [[022-mesh-and-spawn]]).
+- The extension points: OIDC issuers, workload and environment tokens,
+  the authorizer webhook with the owner policy as its default, the
+  admission webhook, and the signed event sink.
+- The release images and deploy manifests, `cellad check`, and the
+  conformance suite ([[014-release-and-installation]],
+  [[015-conformance-suite]]).
+
+Open:
+
+- The `Volume` kind ([[019-volumes]], validated) and the `SandboxSet`
+  kind with results collection ([[020-scheduling-and-sets]]).
+- The `local` driver and the `vm` stub: neither package exists, and the
+  VM driver's design is held open by [[024-vm-driver]].
+- `expose: mesh`, `expose: public` and the `Exposer`
+  ([[023-computer-use-operations]]), `capacity: auto`
+  ([[020-scheduling-and-sets]]), and the API's rate limits
+  ([[008-api]]).
+- Egress scope by path with confirmation refusals
+  ([[077-egress-scope-and-confirmation]]) and self-sizing sandboxes
+  ([[078-self-sizing-sandboxes]]), both drafted.
+- Three criteria of this spec, below: resolve agreement between the API
+  and an importer, no connection toward a worker's host across the e2e
+  tier, and a lost sandbox returning after a restart with Postgres.
 
 ## Design
 
