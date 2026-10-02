@@ -34,6 +34,15 @@ func full() *metrics.Registry {
 				{Labels: map[string]string{"environment": "default", "resource": "cpu", "kind": "used"}, Value: 2.5},
 			}
 		},
+		Environments: func() []metrics.Series {
+			return []metrics.Series{
+				{Labels: map[string]string{"phase": "Ready", "reason": ""}, Value: 2},
+				{Labels: map[string]string{"phase": "Offline", "reason": "HeartbeatLost"}, Value: 1},
+			}
+		},
+		Workers: func() []metrics.Series {
+			return []metrics.Series{{Labels: map[string]string{"environment": "default"}, Value: 2}}
+		},
 	})
 }
 
@@ -125,9 +134,9 @@ func TestSeriesExistAtStart(t *testing.T) {
 	}
 }
 
-// TestPullGaugesReadTheirIndex proves the three gauges a scrape asks for read
-// the closure they were built with, with the environment and driver labels
-// the registry owns.
+// TestPullGaugesReadTheirIndex proves the gauges a scrape asks for read the
+// closure they were built with, with the environment and driver labels the
+// registry owns.
 func TestPullGaugesReadTheirIndex(t *testing.T) {
 	r := full()
 	for _, want := range []string{
@@ -138,6 +147,9 @@ func TestPullGaugesReadTheirIndex(t *testing.T) {
 		`cella_queue_depth{environment="default",queue="rollouts"} 4`,
 		`cella_capacity{environment="default",kind="declared",resource="cpu"} 8`,
 		`cella_capacity{environment="default",kind="used",resource="cpu"} 2.5`,
+		`cella_environments{phase="Ready",reason=""} 2`,
+		`cella_environments{phase="Offline",reason="HeartbeatLost"} 1`,
+		`cella_workers_connected{environment="default"} 2`,
 	} {
 		if !series(t, r, want) {
 			t.Errorf("the exposition has no series %q", want)
@@ -150,7 +162,7 @@ func TestPullGaugesReadTheirIndex(t *testing.T) {
 // zero an alert would read as an answer.
 func TestGaugesWithoutAnIndexPublishNothing(t *testing.T) {
 	out := exposition(t, metrics.New(metrics.Options{Environment: "default"}))
-	for _, name := range []string{"cella_sandboxes", "cella_gateways_connected", "cella_events_pending", "cella_lease_held", "cella_pool_size", "cella_queue_depth", "cella_capacity"} {
+	for _, name := range []string{"cella_sandboxes", "cella_gateways_connected", "cella_events_pending", "cella_lease_held", "cella_pool_size", "cella_queue_depth", "cella_capacity", "cella_environments", "cella_workers_connected"} {
 		if strings.Contains(out, "\n"+name) || strings.HasPrefix(out, name) {
 			t.Errorf("a registry with no index published %s", name)
 		}

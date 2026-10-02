@@ -79,6 +79,18 @@ code.
 | `cella_capacity` | `environment`, `resource` (`cpu`, `memory`, `disk`, `sandboxes`), `kind` (`declared`, `used`) |
 | `cella_preemptions_total` | none: sandboxes stopped to make room for one of higher priority |
 
+### Environments
+
+| Metric | Labels |
+|---|---|
+| `cella_environments` | `phase` (`Pending`, `Ready`, `Offline`), `reason` (`HeartbeatLost` or `DriverNotReady` on `Offline`, empty otherwise) |
+| `cella_workers_connected` | `environment`: how many of its workers hold a stream, `0` where none does |
+
+Both read the records `GET /v1/environments` answers with, so the scrape
+and the route agree. Like `cella_sandboxes`, they are published by the
+replica that holds `writer`, or by the one process where there is no
+database.
+
 ### Decisions, records and state
 
 | Metric | Labels |
@@ -179,9 +191,8 @@ move the thresholds against your own figures.
 | `CelladLeaseNotHeld` | No replica holds a lease, read over the whole replica set, so a standby holding none does not fire it. The lease name is on the series: `writer` means no replica answers the API, any other name is a loop that runs nowhere. |
 | `CelladSlowCreates` | The ninety-fifth percentile create is above thirty seconds: capacity, image pulls, or a degraded backend. |
 | `CelladSandboxesLost` | The driver no longer has sandboxes the control plane still wants, and recovery is not bringing them back. |
+| `CelladEnvironmentOffline` | An environment has had no worker, or its own runtime has not been ready, for longer than `CELLA_ENVIRONMENT_OFFLINE`, so nothing can be placed in it. `GET /v1/environments` names it and the reason. |
 
-Two further rules, `CelladEnvironmentOffline` and
-`CelladOperationsRedelivered`, read `cella_environments` and
+One further rule, `CelladOperationsRedelivered`, reads
 `cella_operations_redelivered_total`, which this release does not emit
-yet, so neither fires. Watch an environment's phase through
-`GET /v1/environments` in the meantime.
+yet, so it does not fire.

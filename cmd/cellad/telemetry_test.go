@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -27,6 +28,7 @@ import (
 	"latere.ai/x/cella/internal/events"
 	"latere.ai/x/cella/internal/metrics"
 	"latere.ai/x/cella/internal/store"
+	v1 "latere.ai/x/cella/manifest/v1"
 )
 
 // scrape reads the internal listener's exposition.
@@ -529,6 +531,49 @@ func TestPhaseCountsFolds(t *testing.T) {
 	got := phaseCounts([]string{"Running", "Running", "Stopped"})
 	if got["Running"] != 2 || got["Stopped"] != 1 || len(got) != 2 {
 		t.Errorf("phaseCounts = %v", got)
+	}
+}
+
+// TestEnvironmentSeriesFold is the scrape-time answer for cella_environments
+// and cella_workers_connected: environments are counted by phase and reason,
+// and every environment carries its worker count, zero included.
+func TestEnvironmentSeriesFold(t *testing.T) {
+	environment := func(name, phase, reason string, workers int) v1.Environment {
+		var obj v1.Environment
+		obj.Metadata.Name = name
+		obj.Status.Phase, obj.Status.Reason, obj.Status.Workers = phase, reason, workers
+		return obj
+	}
+	environments := []v1.Environment{
+		environment("default", v1.EnvironmentReady, "", 0),
+		environment("edge", v1.EnvironmentReady, "", 2),
+		environment("lab", v1.EnvironmentOffline, v1.ReasonHeartbeatLost, 0),
+	}
+	render := func(series []metrics.Series) []string {
+		out := make([]string, 0, len(series))
+		for _, s := range series {
+			keys := slices.Sorted(maps.Keys(s.Labels))
+			pairs := make([]string, 0, len(keys))
+			for _, k := range keys {
+				pairs = append(pairs, k+"="+s.Labels[k])
+			}
+			out = append(out, strings.Join(pairs, ",")+" "+strconv.FormatFloat(s.Value, 'g', -1, 64))
+		}
+		slices.Sort(out)
+		return out
+	}
+	if got, want := render(environmentSeries(environments)), []string{
+		"phase=Offline,reason=HeartbeatLost 1",
+		"phase=Ready,reason= 2",
+	}; !slices.Equal(got, want) {
+		t.Errorf("environmentSeries = %v, want %v", got, want)
+	}
+	if got, want := render(workerSeries(environments)), []string{
+		"environment=default 0",
+		"environment=edge 2",
+		"environment=lab 0",
+	}; !slices.Equal(got, want) {
+		t.Errorf("workerSeries = %v, want %v", got, want)
 	}
 }
 

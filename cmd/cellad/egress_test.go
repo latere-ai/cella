@@ -320,9 +320,12 @@ type plane struct {
 	url    string
 	origin string
 	base   string
-	bearer string
-	signer *auth.Signer
-	stop   func() int
+	// internal is the internal listener's origin, where the scrape surface
+	// and the probes are served.
+	internal string
+	bearer   string
+	signer   *auth.Signer
+	stop     func() int
 	// dataDir is where this control plane writes its state, and out and
 	// errOut are everything it printed. A canary test reads all three.
 	dataDir string
@@ -382,7 +385,7 @@ func startPlaneWith(t *testing.T, proxyAddr, reverseAddr string, extra map[strin
 	deadline := time.Now().Add(15 * time.Second)
 	for {
 		if m := listening.FindStringSubmatch(out.String()); m != nil {
-			p.origin, p.base = "http://"+m[1], e["CELLA_BASE_PATH"]
+			p.origin, p.base, p.internal = "http://"+m[1], e["CELLA_BASE_PATH"], "http://"+m[2]
 			p.url = p.origin + p.base
 			return p
 		}

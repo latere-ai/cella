@@ -316,8 +316,9 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	revocations := store.NewRevocations(journal)
 
 	// The one registry of design 017. The pull gauges read an index that is
-	// already current: the controller's map of desired sandboxes, the hub's
-	// connection count, and the journal's backlog. The controller exists
+	// already current: the controller's map of desired sandboxes and its
+	// environment records, the hub's connection count, and the journal's
+	// backlog. The controller exists
 	// only once this process is the writer, so each closure reads it through
 	// active and a standby reports none.
 	var active atomic.Pointer[controller.Controller]
@@ -348,6 +349,20 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 				return nil
 			}
 			return capacitySeries(control.CapacityFigures(ctx))
+		},
+		Environments: func() []metrics.Series {
+			control := active.Load()
+			if control == nil {
+				return nil
+			}
+			return environmentSeries(control.ListEnvironments())
+		},
+		Workers: func() []metrics.Series {
+			control := active.Load()
+			if control == nil {
+				return nil
+			}
+			return workerSeries(control.ListEnvironments())
 		},
 		Pending: func() (int, bool) {
 			// A scrape is bounded like the probes of design 002 and

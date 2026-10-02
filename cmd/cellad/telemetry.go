@@ -15,6 +15,7 @@ import (
 	"latere.ai/x/cella/controller"
 	"latere.ai/x/cella/internal/metrics"
 	"latere.ai/x/cella/internal/version"
+	v1 "latere.ai/x/cella/manifest/v1"
 )
 
 // telemetryTimeout bounds the flush at shutdown. A collector that has stopped
@@ -126,6 +127,39 @@ func capacitySeries(figures []controller.CapacityFigure) []metrics.Series {
 				Value:  s.value,
 			})
 		}
+	}
+	return out
+}
+
+// environmentSeries is the scrape-time answer for cella_environments: how
+// many environments are in each phase, by the reason they are in it, which
+// is empty on Ready.
+func environmentSeries(environments []v1.Environment) []metrics.Series {
+	type state struct{ phase, reason string }
+	counts := map[state]int{}
+	for _, obj := range environments {
+		counts[state{obj.Status.Phase, obj.Status.Reason}]++
+	}
+	out := make([]metrics.Series, 0, len(counts))
+	for s, n := range counts {
+		out = append(out, metrics.Series{
+			Labels: map[string]string{"phase": s.phase, "reason": s.reason},
+			Value:  float64(n),
+		})
+	}
+	return out
+}
+
+// workerSeries is the scrape-time answer for cella_workers_connected: every
+// environment with how many of its workers hold a stream, zero included, so
+// an environment whose workers all left reads zero rather than nothing.
+func workerSeries(environments []v1.Environment) []metrics.Series {
+	out := make([]metrics.Series, 0, len(environments))
+	for _, obj := range environments {
+		out = append(out, metrics.Series{
+			Labels: map[string]string{"environment": obj.Metadata.Name},
+			Value:  float64(obj.Status.Workers),
+		})
 	}
 	return out
 }

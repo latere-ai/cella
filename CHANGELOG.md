@@ -16,6 +16,11 @@ refused before it is pushed.
   example gave sandboxes no lifecycle default. A manifest that names no
   lifecycle runs until it is stopped or deleted; set defaults in your
   admission endpoint.
+- Fixed: the scrape carries `cella_environments`, environments by `phase`
+  and `reason`, and `cella_workers_connected`, the workers of each
+  environment holding a stream. Both were declared and never exported, so
+  the `CelladEnvironmentOffline` alert could not fire; it now fires on an
+  environment that stays `Offline` for five minutes.
 
 ## v0.11.1 - 2026-10-02
 

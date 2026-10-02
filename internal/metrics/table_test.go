@@ -157,6 +157,12 @@ func TestEveryRegisteredRowHasHelp(t *testing.T) {
 		Capacity: func() []metrics.Series {
 			return []metrics.Series{{Labels: map[string]string{"environment": "default", "resource": "cpu", "kind": "used"}}}
 		},
+		Environments: func() []metrics.Series {
+			return []metrics.Series{{Labels: map[string]string{"phase": "Ready", "reason": ""}, Value: 1}}
+		},
+		Workers: func() []metrics.Series {
+			return []metrics.Series{{Labels: map[string]string{"environment": "default"}}}
+		},
 	})
 	r.LeaseHeld(metrics.LeaseReaper, true)
 	r.PoolSize(0, 0)
@@ -167,6 +173,35 @@ func TestEveryRegisteredRowHasHelp(t *testing.T) {
 		}
 		if !strings.Contains(out, "# HELP "+row.Name+" ") {
 			t.Errorf("%s is registered and the exposition carries no HELP line for it", row.Name)
+		}
+	}
+}
+
+// TestTheObservabilityPageListsWhatAScrapeCarries holds the metric tables of
+// docs/observability.md to the registry both ways: every registered row is a
+// row an operator can look up, and every metric row the page lists is one a
+// scrape carries, so a metric declared and never exported is not documented
+// as one to watch.
+func TestTheObservabilityPageListsWhatAScrapeCarries(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("the caller's own file is unknown, so the page cannot be found")
+	}
+	body, err := os.ReadFile(filepath.Join(filepath.Dir(file), "..", "..", "docs", "observability.md"))
+	if err != nil {
+		t.Fatalf("reading the observability page: %v", err)
+	}
+	row := regexp.MustCompile("(?m)^\\| `(cella_[a-z_]+)` \\|")
+	listed := map[string]bool{}
+	for _, m := range row.FindAllStringSubmatch(string(body), -1) {
+		listed[m[1]] = true
+		if !metrics.Registered(m[1]) {
+			t.Errorf("docs/observability.md lists %s, which a scrape does not carry", m[1])
+		}
+	}
+	for _, r := range metrics.Table {
+		if r.Await == "" && !listed[r.Name] {
+			t.Errorf("docs/observability.md lists no row for %s, which a scrape carries", r.Name)
 		}
 	}
 }

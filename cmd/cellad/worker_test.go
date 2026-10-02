@@ -43,6 +43,15 @@ func TestWorkerEndToEnd(t *testing.T) {
 	if obj.Status.LastHeartbeat.IsZero() {
 		t.Errorf("the environment reports a worker and no heartbeat: %+v", obj.Status)
 	}
+	// The scrape reads the same records the route answers from: the
+	// environment's phase and the workers holding a stream to it.
+	out := scrape(t, p.internal)
+	if v, ok := sample(out, `cella_workers_connected{environment="default"}`); !ok || v != 1 {
+		t.Errorf("the scrape reads the connected workers as %v, %v", v, ok)
+	}
+	if v, ok := sample(out, `cella_environments{phase="`+obj.Status.Phase+`",reason="`+obj.Status.Reason+`"}`); !ok || v != 1 {
+		t.Errorf("the scrape reads the environments in %s as %v, %v", obj.Status.Phase, v, ok)
+	}
 
 	// A worker that goes away leaves the environment with none, which is
 	// what the phase of spec 021 is computed from.
@@ -50,6 +59,9 @@ func TestWorkerEndToEnd(t *testing.T) {
 		t.Errorf("the worker exited %d; stderr %q", code, first.errOut.String())
 	}
 	waitFor(t, "the environment to report no worker", func() bool { return p.environment(t).Status.Workers == 0 })
+	if v, ok := sample(scrape(t, p.internal), `cella_workers_connected{environment="default"}`); !ok || v != 0 {
+		t.Errorf("with the worker gone the scrape reads the connected workers as %v, %v", v, ok)
+	}
 
 	// And a worker that comes back registers again and the environment holds
 	// one once more, without anything having dialed it.

@@ -123,8 +123,8 @@ spec:
             description: "The driver no longer has them. cella_recovery_attempts_total says whether recovery is running out of attempts."
     - name: cellad.environments
       rules:
-        # An environment with no worker is an environment nothing can be
-        # placed in. It reads zero until the worker role lands.
+        # An environment with no worker, or whose own runtime is not ready,
+        # is an environment nothing can be placed in.
         - alert: CelladEnvironmentOffline
           expr: sum(cella_environments{phase="Offline"}) > 0
           for: 5m

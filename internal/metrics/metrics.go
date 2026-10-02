@@ -52,6 +52,12 @@ type Options struct {
 	// desired state.
 	Queues   func() []Series
 	Capacity func() []Series
+	// Environments is how many environments are in each phase, labeled
+	// phase and reason, and Workers how many workers of each environment
+	// hold a stream, labeled environment. Both read the controller's
+	// environment records, which its phase loop keeps current.
+	Environments func() []Series
+	Workers      func() []Series
 }
 
 // Series is one labeled value a pull gauge reads from an index its caller
@@ -153,9 +159,9 @@ func New(o Options) *Registry {
 }
 
 // gauges registers the scrape-time callbacks. Each reads an index that is
-// already current: the controller's map of desired sandboxes, the hub's
-// connection count, the journal's undelivered count, and the two the loops
-// pushed.
+// already current: the controller's map of desired sandboxes and its
+// environment records, the hub's connection count, the journal's
+// undelivered count, and the two the loops pushed.
 func (r *Registry) gauges(o Options) {
 	if o.Sandboxes != nil {
 		r.reg.Gauge("cella_sandboxes", help["cella_sandboxes"], func() []pkgmetrics.LabeledValue {
@@ -178,7 +184,12 @@ func (r *Registry) gauges(o Options) {
 			}}
 		})
 	}
-	for name, read := range map[string]func() []Series{"cella_queue_depth": o.Queues, "cella_capacity": o.Capacity} {
+	for name, read := range map[string]func() []Series{
+		"cella_queue_depth":       o.Queues,
+		"cella_capacity":          o.Capacity,
+		"cella_environments":      o.Environments,
+		"cella_workers_connected": o.Workers,
+	} {
 		if read == nil {
 			continue
 		}
