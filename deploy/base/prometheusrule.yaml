@@ -132,7 +132,7 @@ spec:
             severity: critical
           annotations:
             summary: "an environment is Offline"
-            description: "No worker has reported for it inside CELLA_ENVIRONMENT_OFFLINE. Nothing can be placed there."
+            description: "No worker has reported for it, or its own runtime has not been ready, for longer than CELLA_ENVIRONMENT_OFFLINE. Nothing can be placed there. GET /v1/environments names it and the reason."
         # An operation redelivered is a worker that took it and did not
         # acknowledge it, so the same act is being run twice.
         - alert: CelladOperationsRedelivered
