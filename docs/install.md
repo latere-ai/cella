@@ -177,7 +177,8 @@ A create answers as soon as the sandbox is recorded, in phase `Pending`,
 and the control plane brings it to `Running` after: on a cluster that
 provisions and attaches a volume first, that takes as long as the two do.
 `?wait=1` holds the answer until the sandbox runs, which is what the
-command below needs.
+command below needs: a command sent while the Pod is still starting is
+refused with `409 phase_conflict`, naming what the Pod waits for.
 
 A sandbox is addressed by the name its owner gave it, or by the id in
 `status.id`. Run something inside it, and then delete it:
@@ -298,7 +299,10 @@ alike, which the first form needs no rule for.
   one is a Secret you apply and nothing else.
 - Upgrading is applying the next release's archive. The image tag equals
   the git tag, so the version you pinned is the version that runs, and
-  `cellad version` says which one is in the Pod.
+  `cellad version` says which one is in the Pod. An installation that runs
+  more than one replica reads
+  [Running more than one replica](kubernetes.md#running-more-than-one-replica)
+  first: the first rollout from a release before v0.9.0 is a `Recreate`.
 
 ## Removing it
 
