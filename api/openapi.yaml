@@ -216,8 +216,8 @@ paths:
         Delete one sandbox; accepted in every phase. Authorized as
         `sandbox.delete`.
       responses:
-        "200":
-          description: The answer this route serves.
+        "202":
+          description: The deletion is accepted, and the answer is the sandbox as it stands.
           content:
             application/json:
               example:
@@ -347,8 +347,8 @@ paths:
         `{"error": {...}}` with the refusal envelope. Authorized as
         `sandbox.exec`.
       responses:
-        "200":
-          description: The answer this route serves.
+        "101":
+          description: The socket is open.
         default:
           $ref: "#/components/responses/Error"
   /v1/sandboxes/{id}/attach:
@@ -370,8 +370,8 @@ paths:
         frame is `{"exit": 0}` with the exit code, or `{"error": {...}}` with
         the refusal envelope. Authorized as `sandbox.exec`.
       responses:
-        "200":
-          description: The answer this route serves.
+        "101":
+          description: The socket is open.
         default:
           $ref: "#/components/responses/Error"
   /v1/sandboxes/{id}/dial/{port}:
@@ -424,9 +424,9 @@ paths:
           required: true
           description: A path to include; repeat it for more than one.
           schema:
-          type: array
-          items:
-            type: string
+            type: array
+            items:
+              type: string
       responses:
         "200":
           description: The archive.
@@ -452,7 +452,7 @@ paths:
           required: false
           description: The file to write, at or below the sandbox's workspace.
           schema:
-          type: string
+            type: string
         - name: dest
           in: query
           required: false
@@ -492,7 +492,7 @@ paths:
           required: true
           description: The file or directory to remove, below the sandbox's workspace.
           schema:
-          type: string
+            type: string
       responses:
         "204":
           description: Removed.
@@ -516,7 +516,7 @@ paths:
           required: true
           description: The file to read, at or below the sandbox's workspace.
           schema:
-          type: string
+            type: string
       responses:
         "200":
           description: The file's bytes.
@@ -545,7 +545,7 @@ paths:
           required: true
           description: The entry to read, at or below the sandbox's workspace.
           schema:
-          type: string
+            type: string
       responses:
         "200":
           description: The entry.
@@ -582,7 +582,7 @@ paths:
           required: true
           description: The directory to list, at or below the sandbox's workspace.
           schema:
-          type: string
+            type: string
       responses:
         "200":
           description: The entries.
@@ -795,8 +795,8 @@ paths:
         names, at the pace `fps` names, from 1 to 10 frames a second.
         Authorized as `sandbox.exec`.
       responses:
-        "200":
-          description: The answer this route serves.
+        "101":
+          description: The socket is open.
         default:
           $ref: "#/components/responses/Error"
   /v1/sandboxes/{id}/input:
@@ -1256,8 +1256,8 @@ paths:
                   hosts: [api.example.com]
                 value: example-value
       responses:
-        "200":
-          description: The answer this route serves.
+        "201":
+          description: The secret as recorded, without its value.
           content:
             application/json:
               example: &secret
@@ -1338,7 +1338,7 @@ paths:
             example: *secretManifest
       responses:
         "200":
-          description: The answer this route serves.
+          description: The secret the update left, without its value.
           content:
             application/json:
               example:
@@ -1353,6 +1353,11 @@ paths:
                   createdAt: "2026-09-22T12:00:00Z"
                   updatedAt: "2026-09-22T12:30:00Z"
                   mountedBy: 0
+        "201":
+          description: The secret the create recorded, without its value.
+          content:
+            application/json:
+              example: *secret
         default:
           $ref: "#/components/responses/Error"
     get:
@@ -1459,11 +1464,11 @@ paths:
                   memory: 16Gi
                   sandboxes: 10
       responses:
-        "200":
-          description: The answer this route serves.
+        "201":
+          description: The environment as recorded.
           content:
             application/json:
-              example:
+              example: &environmentPending
                 apiVersion: cella.latere.ai/v1beta1
                 kind: Environment
                 metadata: *environmentMetadata
@@ -1534,7 +1539,7 @@ paths:
             example: *environmentManifest
       responses:
         "200":
-          description: The answer this route serves.
+          description: The environment the update left.
           content:
             application/json:
               example:
@@ -1549,6 +1554,11 @@ paths:
                   version: 2
                   createdAt: "2026-09-22T12:00:00Z"
                   updatedAt: "2026-09-22T12:30:00Z"
+        "201":
+          description: The environment the create recorded.
+          content:
+            application/json:
+              example: *environmentPending
         default:
           $ref: "#/components/responses/Error"
     delete:
@@ -1559,8 +1569,8 @@ paths:
         control plane drives itself is not deletable. Authorized as
         `environment.delete`.
       responses:
-        "200":
-          description: The answer this route serves.
+        "204":
+          description: Deleted.
         default:
           $ref: "#/components/responses/Error"
   /v1/environments/{id}/keys:
@@ -1577,8 +1587,8 @@ paths:
       description: >-
         Mint an environment key, shown once. Authorized as `environment.key`.
       responses:
-        "200":
-          description: The answer this route serves.
+        "201":
+          description: The key. No later answer carries its token.
           content:
             application/json:
               example:
@@ -1679,8 +1689,8 @@ paths:
         Revoke one environment key by its identifier. Authorized as
         `environment.key`.
       responses:
-        "200":
-          description: The answer this route serves.
+        "204":
+          description: Revoked.
         default:
           $ref: "#/components/responses/Error"
   /v1/environments/{id}/workers:
@@ -1707,8 +1717,8 @@ paths:
               capabilities:
                 files: true
       responses:
-        "200":
-          description: The answer this route serves.
+        "201":
+          description: The id the worker claims under and the two timings it keeps to.
           content:
             application/json:
               example:
@@ -1734,8 +1744,8 @@ paths:
         upgraded, subprotocol `cella.worker.v1`, every frame is a binary frame
         of that protocol, at most 1 MiB. Authorized as `none beyond the key`.
       responses:
-        "200":
-          description: The answer this route serves.
+        "101":
+          description: The socket is open.
         default:
           $ref: "#/components/responses/Error"
   /v1/environments/{id}/egress:
@@ -1755,8 +1765,8 @@ paths:
         named by its `type`: `hello`, `snapshot`, `put`, `purge`, `ack`,
         `heartbeat`, `record` or `use`. Authorized as `none beyond the key`.
       responses:
-        "200":
-          description: The answer this route serves.
+        "101":
+          description: The socket is open.
         default:
           $ref: "#/components/responses/Error"
 components:
@@ -1892,6 +1902,7 @@ components:
             has substituted.
     FileInfo:
       type: object
+      required: [name, path, size, mode, modTime, isDir]
       properties:
         name:
           type: string
@@ -1901,8 +1912,8 @@ components:
           type: integer
           format: int64
         mode:
-          type: integer
-          description: The permission and type bits.
+          type: string
+          description: The permission bits as octal text, such as `0644`.
         modTime:
           type: string
           format: date-time

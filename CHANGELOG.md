@@ -18,6 +18,14 @@ refused before it is pushed.
   bytes are a file, an image or a stream of frames the document states a
   binary schema under the media type instead. The WebSocket routes say which
   frames travel once the connection is upgraded.
+- Fixed: the API document names the status each route answers. It named
+  `200` where a create answers `201` (a Secret, an Environment, an
+  environment key, a worker registration, and an apply that creates a Secret
+  or an Environment), where deleting a sandbox answers `202`, where deleting
+  an environment and revoking a key answer `204`, and where five WebSocket
+  routes answer `101`. `FileInfo.mode` is octal text such as `0644`, as the
+  server writes it, and the `path` query parameters of the file routes state
+  their type under `schema`. The server's answers are unchanged.
 
 ## v0.11.0 - 2026-10-01
 

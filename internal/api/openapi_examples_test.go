@@ -6,6 +6,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
@@ -41,6 +42,19 @@ type operation struct {
 	Responses map[string]struct {
 		Content map[string]payload `yaml:"content"`
 	} `yaml:"responses"`
+}
+
+// successes is every status the document names for the operation that is not
+// a refusal, in order: its responses below 400, the default left out.
+func (o operation) successes() []string {
+	var out []string
+	for code := range o.Responses {
+		if code != "default" && code < "400" {
+			out = append(out, code)
+		}
+	}
+	slices.Sort(out)
+	return out
 }
 
 // answer is the first success the operation documents, the lowest 2xx, and
@@ -88,40 +102,17 @@ func operations(t *testing.T) map[string]operation {
 	return out
 }
 
-// bodiless is every operation whose documented success has no body to show,
-// and why. The document names 200 for each of them. The server upgrades the
-// five sockets, so their answer is 101 and frames, and it answers the two
-// deletions 204.
-var bodiless = map[string]string{
-	"execSocket":           "upgrades to a WebSocket",
-	"attachSandbox":        "upgrades to a WebSocket",
-	"sandboxScreen":        "upgrades to a WebSocket",
-	"workerOperations":     "upgrades to a WebSocket",
-	"gatewaySync":          "upgrades to a WebSocket",
-	"deleteEnvironment":    "answers 204 with no body",
-	"revokeEnvironmentKey": "answers 204 with no body",
-}
-
 // TestEveryAnswerShowsItsBody holds each operation's first success to a body
 // a reader can see: a wire example, or a schema of format binary where the
 // bytes are a file, an image or a stream of frames. A 204 has none, and an
-// operation with no 2xx has no body this rule reads. A reference built from
-// the document shows the example beside the route, so an operation added
-// without one fails here.
+// operation with no 2xx, one that only redirects or only upgrades, has no
+// body this rule reads. A reference built from the document shows the example
+// beside the route, so an operation added without one fails here.
 func TestEveryAnswerShowsItsBody(t *testing.T) {
-	described := operations(t)
-	for id, op := range described {
+	for id, op := range operations(t) {
 		code, content := op.answer()
-		reason, exempt := bodiless[id]
 		switch {
 		case code == "" || code == "204":
-			if exempt {
-				t.Errorf("%s is listed as bodiless and documents no 2xx body to exempt", id)
-			}
-		case exempt:
-			if len(content) != 0 {
-				t.Errorf("%s is listed as bodiless because it %s, and its %s response describes a body", id, reason, code)
-			}
 		case len(content) == 0:
 			t.Errorf("%s: the %s response describes no body; give it an example, or a binary schema", id, code)
 		default:
@@ -130,11 +121,6 @@ func TestEveryAnswerShowsItsBody(t *testing.T) {
 					t.Errorf("%s: the %s response has neither an example nor a binary schema under %s", id, code, media)
 				}
 			}
-		}
-	}
-	for id := range bodiless {
-		if _, held := described[id]; !held {
-			t.Errorf("%s is listed as bodiless and the document describes no such operation", id)
 		}
 	}
 }

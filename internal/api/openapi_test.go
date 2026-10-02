@@ -118,3 +118,63 @@ func TestEveryRouteIsRegisteredOnce(t *testing.T) {
 		t.Fatalf("a pattern is registered more than once: %v", seen)
 	}
 }
+
+// parameter is one parameter as the document describes it: a reference to a
+// shared one, or its own name and the type its schema states.
+type parameter struct {
+	Ref    string `yaml:"$ref"`
+	Name   string `yaml:"name"`
+	Schema struct {
+		Type string `yaml:"type"`
+	} `yaml:"schema"`
+}
+
+// TestEveryParameterStatesItsType holds each parameter's type to its schema.
+// A type written beside the schema rather than under it still parses and
+// leaves the schema empty, which a generated client reads as a parameter of
+// no stated type.
+func TestEveryParameterStatesItsType(t *testing.T) {
+	var doc struct {
+		Paths      map[string]map[string]yaml.Node `yaml:"paths"`
+		Components struct {
+			Parameters map[string]parameter `yaml:"parameters"`
+		} `yaml:"components"`
+	}
+	if err := yaml.Unmarshal(document.Document, &doc); err != nil {
+		t.Fatalf("api/openapi.yaml does not parse: %v", err)
+	}
+	checked := 0
+	check := func(where string, p parameter) {
+		checked++
+		if p.Ref == "" && p.Schema.Type == "" {
+			t.Errorf("%s: the parameter %q states no type in its schema", where, p.Name)
+		}
+	}
+	for name, p := range doc.Components.Parameters {
+		check("components.parameters."+name, p)
+	}
+	for path, item := range doc.Paths {
+		for key, node := range item {
+			var held struct {
+				Parameters []parameter `yaml:"parameters"`
+			}
+			var err error
+			switch {
+			case key == "parameters":
+				// The parameters every operation of the path shares.
+				err = node.Decode(&held.Parameters)
+			case node.Kind == yaml.MappingNode:
+				err = node.Decode(&held)
+			}
+			if err != nil {
+				t.Fatalf("%s %s does not decode: %v", key, path, err)
+			}
+			for _, p := range held.Parameters {
+				check(key+" "+path, p)
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("the document describes no parameter, so this test would pass vacuously")
+	}
+}
