@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.11.1 - 2026-10-02
+
 - Changed: in the API document, `api/openapi.yaml` and `GET /openapi.yaml`,
   every operation's `summary` is a short action name of at most four words,
   such as `Create a sandbox`, where it was a sentence. The sentence now
