@@ -136,7 +136,8 @@ loops, holds the gateway and worker streams, and answers the API. A standby
 answers every API request by forwarding it to the writer. When the writer
 stops, it hands the lease to a standby within about a second, so a rolling
 update takes the control plane away from nobody. See
-[Running on Kubernetes](kubernetes.md) for the rollout it supports.
+[Running more than one replica](kubernetes.md#running-more-than-one-replica)
+for the rollout it supports.
 
 | Variable | Default | What it is |
 |---|---|---|
@@ -172,7 +173,7 @@ These are read on every start, whether or not the environment exists yet:
 | `CELLA_MAX_PREEMPTIONS` | `3` | how often one sandbox may be stopped to make room for one of higher priority, up to 100. `0` turns preemption off |
 | `CELLA_POOL_IN_FLIGHT` | `2` | how many prewarmed sandboxes one refill starts at once, between 1 and 64 |
 | `CELLA_POOL_GRACE` | `5m` | how long a new prewarmed sandbox is left alone before the pool's rules read it. Between `1s` and `1h` |
-| `CELLA_EGRESS_ACK_TIMEOUT` | `5s` | how long a create waits for a gateway to acknowledge the new sandbox's boundary, up to `1m`. A create no gateway acknowledges fails |
+| `CELLA_EGRESS_ACK_TIMEOUT` | `5s` | how long a create waits for a gateway to acknowledge the new sandbox's boundary, up to `1m`. A create no gateway acknowledges fails. It is also how long, after the control plane starts or a standby becomes the writer, a create that needs a gateway waits for one to connect rather than being refused while none is |
 | `CELLA_EGRESS_RECORDS_CAP` | `1000` | how many connection records are kept per sandbox |
 
 ## Events and the journal
@@ -252,14 +253,18 @@ variables below, because the runtime would overwrite them.
 | `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, and their lowercase forms | the gateway's proxy door with the sandbox's credential, when the sandbox runs behind a gateway |
 | `SSL_CERT_FILE`, `NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`, `GIT_SSL_CAINFO`, `CURL_CA_BUNDLE` | the sandbox's trust file, `/run/cella/egress-ca.pem` on Podman and Kubernetes, when the sandbox runs behind a gateway. It holds the public roots the control plane or the worker read and then the gateway's own authority, so a host the gateway passes through verifies against the first and a host it substitutes a secret for verifies against the second |
 | `CELLA_GATEWAY_URL`, `CELLA_GATEWAY_CREDENTIAL` | the reverse door and the credential it takes, when the environment has one |
-
-A sandbox taken from a warm pool on Kubernetes is the exception: its
-container started before it had a gateway, so the three rows above are
-not in its environment until its next start, whose Pod carries them, and
-until then its commands reach the gateway only where they are pointed at
-it.
 | `DISPLAY` | `:0`, the desktop, on a sandbox with a display |
 | `<env>_HEADER` or `<env>_QUERY` | for a mounted secret whose value goes somewhere a client would not look by itself: the header or the query parameter to put the placeholder in |
+
+On the native runtime the token and the trust file are under the
+sandbox's own directory, `CELLA_DATA_DIR/native/<id>/`, and the variables
+name those paths.
+
+A sandbox taken from a warm pool on Kubernetes is the exception to the
+proxy, trust and gateway rows: its container started before it had a
+gateway, so those variables are not in its environment until its next
+start, whose Pod carries them, and until then its commands reach the
+gateway only where they are pointed at it.
 
 The control plane's address is not set inside a sandbox in this release.
 A process that calls the API from inside passes `--url` to `cella`, or
