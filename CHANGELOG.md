@@ -10,6 +10,12 @@ refused before it is pushed.
   the file `CELLA_TOKEN_FILE` names, or at `/run/cella/token`, and that the
   address is not: set `CELLA_URL` or pass `--url`. It had said the address
   was already in the sandbox's environment, which no runtime sets.
+- Fixed: `deploy/examples/generic/configmap.yaml` no longer sets
+  `CELLA_DEFAULT_AUTOSTOP`, `CELLA_DEFAULT_TTL` and
+  `CELLA_DEFAULT_AUTODELETE`, which `cellad` does not read: a copy of the
+  example gave sandboxes no lifecycle default. A manifest that names no
+  lifecycle runs until it is stopped or deleted; set defaults in your
+  admission endpoint.
 
 ## v0.11.1 - 2026-10-02
 

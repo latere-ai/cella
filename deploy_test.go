@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -343,6 +344,71 @@ func TestNoCredentialIsSharedBetweenTwoVariables(t *testing.T) {
 			}
 		}
 	}
+}
+
+// TestTheDeployTreeSetsOnlyVariablesTheModuleReads: every CELLA_ variable a
+// manifest under deploy/ sets, as a ConfigMap or Secret key or as a
+// container's env entry, is one the module reads. An example is copied as a
+// whole, so a key nothing reads is a setting its reader believes they
+// configured. The files are read as written, not rendered, so the rule
+// holds where kubectl is absent.
+func TestTheDeployTreeSetsOnlyVariablesTheModuleReads(t *testing.T) {
+	read := variablesRead(t)
+	whole := regexp.MustCompile(`^CELLA_[A-Z0-9_]*[A-Z0-9]$`)
+	separator := regexp.MustCompile(`(?m)^---[ \t]*$`)
+	var set []string
+	err := filepath.WalkDir("deploy", func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() || filepath.Ext(path) != ".yaml" {
+			return err
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		for _, doc := range separator.Split(string(body), -1) {
+			var tree any
+			if err := yaml.Unmarshal([]byte(doc), &tree); err != nil {
+				return fmt.Errorf("%s: %w", path, err)
+			}
+			for _, name := range variablesSetIn(tree, whole) {
+				set = append(set, name)
+				if !read(name) {
+					t.Errorf("%s sets %s, which no code in the module reads", path, name)
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(set) < 20 {
+		t.Fatalf("found %d variables set under deploy/, too few to be the tree", len(set))
+	}
+}
+
+// variablesSetIn is every CELLA_ name a YAML tree sets: a map key, which is
+// how a ConfigMap's data and a Secret's stringData name one, and the value
+// of a name field, which is how a container's env entry does.
+func variablesSetIn(tree any, whole *regexp.Regexp) []string {
+	var out []string
+	switch v := tree.(type) {
+	case map[string]any:
+		for key, value := range v {
+			if whole.MatchString(key) {
+				out = append(out, key)
+			}
+			if name, ok := value.(string); ok && key == "name" && whole.MatchString(name) {
+				out = append(out, name)
+			}
+			out = append(out, variablesSetIn(value, whole)...)
+		}
+	case []any:
+		for _, item := range v {
+			out = append(out, variablesSetIn(item, whole)...)
+		}
+	}
+	return out
 }
 
 // unmarshalYAML reads a YAML document into a tree, which the workflow
