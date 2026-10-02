@@ -29,17 +29,18 @@ paths:
   /v1/sandboxes:
     post:
       operationId: createSandbox
-      summary: Create a sandbox from a manifest.
+      summary: Create a sandbox
       description: >-
-        Answers 201 with `Location` and the sandbox as soon as it is recorded,
-        in phase `Pending`, before its workload runs; the control plane then
-        brings it to `Running`, or to `Failed` with its reason. A sandbox
-        adopted from the environment's pool answers after the adoption, and
-        one a queued environment cannot place yet answers `Queued`. With
-        `wait=1` the answer is held until the sandbox has left `Queued`,
-        `Pending` and `Starting`, for at most `timeout`. A boundary that needs
-        an egress gateway while none is connected is refused with
-        `egress_gateway_unavailable`. Authorized as `sandbox.create`.
+        Create a sandbox from a manifest. Answers 201 with `Location` and the
+        sandbox as soon as it is recorded, in phase `Pending`, before its
+        workload runs; the control plane then brings it to `Running`, or to
+        `Failed` with its reason. A sandbox adopted from the environment's
+        pool answers after the adoption, and one a queued environment cannot
+        place yet answers `Queued`. With `wait=1` the answer is held until the
+        sandbox has left `Queued`, `Pending` and `Starting`, for at most
+        `timeout`. A boundary that needs an egress gateway while none is
+        connected is refused with `egress_gateway_unavailable`. Authorized as
+        `sandbox.create`.
       parameters:
         - $ref: "#/components/parameters/Wait"
         - $ref: "#/components/parameters/WaitTimeout"
@@ -50,11 +51,12 @@ paths:
           $ref: "#/components/responses/Error"
     get:
       operationId: listSandboxes
-      summary: List the caller's sandboxes.
+      summary: List sandboxes
       description: >-
-        Answers `{"items": [...], "next": "..."}`. Every selector is
-        intersected with what the caller may read, so a selector outside it
-        is an empty page and never `forbidden`. Authorized as `sandbox.list`.
+        List the caller's sandboxes. Answers
+        `{"items": [...], "next": "..."}`. Every selector is intersected with
+        what the caller may read, so a selector outside it is an empty page
+        and never `forbidden`. Authorized as `sandbox.list`.
       parameters:
         - $ref: "#/components/parameters/ListLabel"
         - $ref: "#/components/parameters/ListOwner"
@@ -93,13 +95,13 @@ paths:
           type: string
     put:
       operationId: applySandbox
-      summary: Apply a sandbox by name.
+      summary: Apply a sandbox
       description: >-
-        A create when the name is free and an update when the caller holds it.
-        A body naming another object is refused at metadata.name. A create
-        answers 201 as `POST /v1/sandboxes` does, and an update 200; `wait=1`
-        holds either answer the same way. Authorized as `sandbox.create` or
-        `sandbox.update`.
+        Apply a sandbox by name. A create when the name is free and an update
+        when the caller holds it. A body naming another object is refused at
+        metadata.name. A create answers 201 as `POST /v1/sandboxes` does, and
+        an update 200; `wait=1` holds either answer the same way. Authorized
+        as `sandbox.create` or `sandbox.update`.
       parameters:
         - $ref: "#/components/parameters/Wait"
         - $ref: "#/components/parameters/WaitTimeout"
@@ -120,8 +122,9 @@ paths:
           type: string
     get:
       operationId: readSandbox
-      summary: Read one sandbox with its status.
-      description: Authorized as `sandbox.read`.
+      summary: Read a sandbox
+      description: >-
+        Read one sandbox with its status. Authorized as `sandbox.read`.
       responses:
         "200":
           description: The answer this route serves.
@@ -129,8 +132,10 @@ paths:
           $ref: "#/components/responses/Error"
     delete:
       operationId: deleteSandbox
-      summary: Delete one sandbox; accepted in every phase.
-      description: Authorized as `sandbox.delete`.
+      summary: Delete a sandbox
+      description: >-
+        Delete one sandbox; accepted in every phase. Authorized as
+        `sandbox.delete`.
       responses:
         "200":
           description: The answer this route serves.
@@ -146,8 +151,8 @@ paths:
           type: string
     post:
       operationId: startSandbox
-      summary: Start a stopped sandbox.
-      description: Authorized as `sandbox.update`.
+      summary: Start a sandbox
+      description: Start a stopped sandbox. Authorized as `sandbox.update`.
       responses:
         "200":
           description: The answer this route serves.
@@ -163,8 +168,10 @@ paths:
           type: string
     post:
       operationId: stopSandbox
-      summary: Stop a running sandbox and keep its workspace.
-      description: Authorized as `sandbox.update`.
+      summary: Stop a sandbox
+      description: >-
+        Stop a running sandbox and keep its workspace. Authorized as
+        `sandbox.update`.
       responses:
         "200":
           description: The answer this route serves.
@@ -180,8 +187,10 @@ paths:
           type: string
     post:
       operationId: execSandbox
-      summary: "Run a command: the framed exec stream, or one JSON result with wait=1."
-      description: Authorized as `sandbox.exec`.
+      summary: Run a command
+      description: >-
+        Run a command: the framed exec stream, or one JSON result with wait=1.
+        Authorized as `sandbox.exec`.
       responses:
         "200":
           description: The answer this route serves.
@@ -189,8 +198,10 @@ paths:
           $ref: "#/components/responses/Error"
     get:
       operationId: execSocket
-      summary: Open the exec WebSocket, for a command with input or a terminal.
-      description: Authorized as `sandbox.exec`.
+      summary: Open the exec socket
+      description: >-
+        Open the exec WebSocket, for a command with input or a terminal.
+        Authorized as `sandbox.exec`.
       responses:
         "200":
           description: The answer this route serves.
@@ -206,8 +217,10 @@ paths:
           type: string
     get:
       operationId: attachSandbox
-      summary: Open the attach WebSocket, which carries a pseudo-terminal.
-      description: Authorized as `sandbox.exec`.
+      summary: Open the attach socket
+      description: >-
+        Open the attach WebSocket, which carries a pseudo-terminal. Authorized
+        as `sandbox.exec`.
       responses:
         "200":
           description: The answer this route serves.
@@ -229,12 +242,13 @@ paths:
           type: integer
     get:
       operationId: dialSandbox
-      summary: Open a raw byte stream to a port inside the sandbox.
+      summary: Dial a port
       description: >-
-        A WebSocket, subprotocol `cella.dial.v1`, whose binary frames are the
-        connection's bytes both ways. It closes with 1000 when the inside
-        closes and with 1011 and the error's code when the dial fails. Needs
-        `Dial`. Authorized as `sandbox.exec`.
+        Open a raw byte stream to a port inside the sandbox. A WebSocket,
+        subprotocol `cella.dial.v1`, whose binary frames are the connection's
+        bytes both ways. It closes with 1000 when the inside closes and with
+        1011 and the error's code when the dial fails. Needs `Dial`.
+        Authorized as `sandbox.exec`.
       responses:
         "101":
           description: The socket is open.
@@ -250,11 +264,12 @@ paths:
           type: string
     get:
       operationId: exportFiles
-      summary: Read the named paths as one tar stream.
+      summary: Read files as tar
       description: >-
-        Authorized as `sandbox.exec`. Every path is absolute and at or below
-        the sandbox's workspace. A failure after the first byte ends the
-        stream and names the error in the `X-Cella-Error` trailer.
+        Read the named paths as one tar stream. Authorized as `sandbox.exec`.
+        Every path is absolute and at or below the sandbox's workspace. A
+        failure after the first byte ends the stream and names the error in
+        the `X-Cella-Error` trailer.
       parameters:
         - name: path
           in: query
@@ -276,8 +291,9 @@ paths:
           $ref: "#/components/responses/Error"
     put:
       operationId: importFiles
-      summary: Write one file, or extract a tar archive under a destination.
+      summary: Write files
       description: >-
+        Write one file, or extract a tar archive under a destination.
         Authorized as `sandbox.exec`. With `path` the body is one file's
         bytes. With `dest` the body is a tar archive, sent as
         `application/x-tar`, extracted below that directory. The two are
@@ -319,8 +335,9 @@ paths:
           $ref: "#/components/responses/Error"
     delete:
       operationId: removeFile
-      summary: Remove a file or a directory tree.
-      description: Authorized as `sandbox.exec`.
+      summary: Remove a file
+      description: >-
+        Remove a file or a directory tree. Authorized as `sandbox.exec`.
       parameters:
         - name: path
           in: query
@@ -343,8 +360,8 @@ paths:
           type: string
     get:
       operationId: readFile
-      summary: Read one file's body.
-      description: Authorized as `sandbox.exec`.
+      summary: Read a file
+      description: Read one file's body. Authorized as `sandbox.exec`.
       parameters:
         - name: path
           in: query
@@ -372,8 +389,8 @@ paths:
           type: string
     get:
       operationId: statFile
-      summary: Read one entry.
-      description: Authorized as `sandbox.exec`.
+      summary: Read a file entry
+      description: Read one entry. Authorized as `sandbox.exec`.
       parameters:
         - name: path
           in: query
@@ -400,8 +417,10 @@ paths:
           type: string
     get:
       operationId: listFiles
-      summary: List a directory's immediate entries, sorted by name.
-      description: Authorized as `sandbox.exec`.
+      summary: List a directory
+      description: >-
+        List a directory's immediate entries, sorted by name. Authorized as
+        `sandbox.exec`.
       parameters:
         - name: path
           in: query
@@ -435,8 +454,10 @@ paths:
           type: string
     post:
       operationId: makeDirectory
-      summary: Make a directory and its missing parents.
-      description: Authorized as `sandbox.exec`.
+      summary: Make a directory
+      description: >-
+        Make a directory and its missing parents. Authorized as
+        `sandbox.exec`.
       requestBody:
         required: true
         content:
@@ -463,8 +484,10 @@ paths:
           type: string
     post:
       operationId: moveFile
-      summary: Move a file or a directory to an exact destination.
-      description: Authorized as `sandbox.exec`.
+      summary: Move a file
+      description: >-
+        Move a file or a directory to an exact destination. Authorized as
+        `sandbox.exec`.
       requestBody:
         required: true
         content:
@@ -494,8 +517,10 @@ paths:
           type: string
     get:
       operationId: sandboxLogs
-      summary: Read the main process output, following it with follow=1.
-      description: Authorized as `sandbox.read`.
+      summary: Read logs
+      description: >-
+        Read the main process output, following it with follow=1. Authorized
+        as `sandbox.read`.
       responses:
         "200":
           description: The answer this route serves.
@@ -511,8 +536,10 @@ paths:
           type: string
     get:
       operationId: sandboxEgress
-      summary: List the connections the gateway reported for this sandbox.
-      description: Authorized as `sandbox.read`.
+      summary: List egress connections
+      description: >-
+        List the connections the gateway reported for this sandbox. Authorized
+        as `sandbox.read`.
       responses:
         "200":
           description: The answer this route serves.
@@ -528,8 +555,10 @@ paths:
           type: string
     get:
       operationId: sandboxDisplay
-      summary: Read the desktop geometry and whether it is up.
-      description: Authorized as `sandbox.read`.
+      summary: Read the desktop state
+      description: >-
+        Read the desktop geometry and whether it is up. Authorized as
+        `sandbox.read`.
       responses:
         "200":
           description: The answer this route serves.
@@ -545,8 +574,8 @@ paths:
           type: string
     get:
       operationId: sandboxScreenshot
-      summary: Read one frame of the desktop.
-      description: Authorized as `sandbox.exec`.
+      summary: Take a screenshot
+      description: Read one frame of the desktop. Authorized as `sandbox.exec`.
       responses:
         "200":
           description: The answer this route serves.
@@ -562,8 +591,10 @@ paths:
           type: string
     get:
       operationId: sandboxScreen
-      summary: Open the screen WebSocket, which carries frames.
-      description: Authorized as `sandbox.exec`.
+      summary: Open the screen socket
+      description: >-
+        Open the screen WebSocket, which carries frames. Authorized as
+        `sandbox.exec`.
       responses:
         "200":
           description: The answer this route serves.
@@ -579,8 +610,10 @@ paths:
           type: string
     post:
       operationId: sandboxInput
-      summary: Run one batch of input events on the desktop.
-      description: Authorized as `sandbox.exec`.
+      summary: Run input events
+      description: >-
+        Run one batch of input events on the desktop. Authorized as
+        `sandbox.exec`.
       responses:
         "200":
           description: The answer this route serves.
@@ -596,8 +629,10 @@ paths:
           type: string
     get:
       operationId: sandboxPorts
-      summary: List each declared port with the driver's probe of it.
-      description: Authorized as `sandbox.read`.
+      summary: List declared ports
+      description: >-
+        List each declared port with the driver's probe of it. Authorized as
+        `sandbox.read`.
       responses:
         "200":
           description: The answer this route serves.
@@ -625,7 +660,7 @@ paths:
           type: string
     get:
       operationId: proxyPortGet
-      summary: Forward a GET request to a declared port.
+      summary: Forward a GET request
       description: &proxyDescription >-
         An HTTP proxy to the port the sandbox declares under `name`, reached
         through the driver's `Dial`. The path suffix, the query, the headers
@@ -641,7 +676,7 @@ paths:
           $ref: "#/components/responses/Error"
     put:
       operationId: proxyPortPut
-      summary: Forward a PUT request to a declared port.
+      summary: Forward a PUT request
       description: *proxyDescription
       responses:
         "200":
@@ -650,7 +685,7 @@ paths:
           $ref: "#/components/responses/Error"
     post:
       operationId: proxyPortPost
-      summary: Forward a POST request to a declared port.
+      summary: Forward a POST request
       description: *proxyDescription
       responses:
         "200":
@@ -659,7 +694,7 @@ paths:
           $ref: "#/components/responses/Error"
     delete:
       operationId: proxyPortDelete
-      summary: Forward a DELETE request to a declared port.
+      summary: Forward a DELETE request
       description: *proxyDescription
       responses:
         "200":
@@ -668,7 +703,7 @@ paths:
           $ref: "#/components/responses/Error"
     options:
       operationId: proxyPortOptions
-      summary: Forward a OPTIONS request to a declared port.
+      summary: Forward an OPTIONS request
       description: *proxyDescription
       responses:
         "200":
@@ -677,7 +712,7 @@ paths:
           $ref: "#/components/responses/Error"
     head:
       operationId: proxyPortHead
-      summary: Forward a HEAD request to a declared port.
+      summary: Forward a HEAD request
       description: *proxyDescription
       responses:
         "200":
@@ -686,7 +721,7 @@ paths:
           $ref: "#/components/responses/Error"
     patch:
       operationId: proxyPortPatch
-      summary: Forward a PATCH request to a declared port.
+      summary: Forward a PATCH request
       description: *proxyDescription
       responses:
         "200":
@@ -695,7 +730,7 @@ paths:
           $ref: "#/components/responses/Error"
     trace:
       operationId: proxyPortTrace
-      summary: Forward a TRACE request to a declared port.
+      summary: Forward a TRACE request
       description: *proxyDescription
       responses:
         "200":
@@ -718,7 +753,7 @@ paths:
           type: string
     get:
       operationId: redirectPortGet
-      summary: Redirect a GET request to the port's path with its trailing slash.
+      summary: Redirect a GET request
       description: &portRedirectDescription >-
         A 307 whose Location is relative: the port's name as the request
         escaped it and a slash, then the query when there is one, written
@@ -739,7 +774,7 @@ paths:
           $ref: "#/components/responses/Error"
     put:
       operationId: redirectPortPut
-      summary: Redirect a PUT request to the port's path with its trailing slash.
+      summary: Redirect a PUT request
       description: *portRedirectDescription
       responses:
         "307":
@@ -753,7 +788,7 @@ paths:
           $ref: "#/components/responses/Error"
     post:
       operationId: redirectPortPost
-      summary: Redirect a POST request to the port's path with its trailing slash.
+      summary: Redirect a POST request
       description: *portRedirectDescription
       responses:
         "307":
@@ -767,7 +802,7 @@ paths:
           $ref: "#/components/responses/Error"
     delete:
       operationId: redirectPortDelete
-      summary: Redirect a DELETE request to the port's path with its trailing slash.
+      summary: Redirect a DELETE request
       description: *portRedirectDescription
       responses:
         "307":
@@ -781,7 +816,7 @@ paths:
           $ref: "#/components/responses/Error"
     options:
       operationId: redirectPortOptions
-      summary: Redirect a OPTIONS request to the port's path with its trailing slash.
+      summary: Redirect an OPTIONS request
       description: *portRedirectDescription
       responses:
         "307":
@@ -795,7 +830,7 @@ paths:
           $ref: "#/components/responses/Error"
     head:
       operationId: redirectPortHead
-      summary: Redirect a HEAD request to the port's path with its trailing slash.
+      summary: Redirect a HEAD request
       description: *portRedirectDescription
       responses:
         "307":
@@ -809,7 +844,7 @@ paths:
           $ref: "#/components/responses/Error"
     patch:
       operationId: redirectPortPatch
-      summary: Redirect a PATCH request to the port's path with its trailing slash.
+      summary: Redirect a PATCH request
       description: *portRedirectDescription
       responses:
         "307":
@@ -823,7 +858,7 @@ paths:
           $ref: "#/components/responses/Error"
     trace:
       operationId: redirectPortTrace
-      summary: Redirect a TRACE request to the port's path with its trailing slash.
+      summary: Redirect a TRACE request
       description: *portRedirectDescription
       responses:
         "307":
@@ -838,8 +873,12 @@ paths:
   /v1/events:
     get:
       operationId: objectEvents
-      summary: Read one object's events, newest first, or follow them as they happen with follow=1.
+      summary: Read or follow events
       description: >-
+        Read one object's events, newest first, or follow them as they happen
+        with follow=1.
+
+
         Without `follow`, one page of the object's records, newest first, and
         the cursor of the next older page in `next`. Authorized as the
         object's own kind's read.
@@ -916,8 +955,9 @@ paths:
   /v1/secrets:
     post:
       operationId: createSecret
-      summary: Create a secret from a manifest.
-      description: Authorized as `secret.create`.
+      summary: Create a secret
+      description: >-
+        Create a secret from a manifest. Authorized as `secret.create`.
       responses:
         "200":
           description: The answer this route serves.
@@ -925,13 +965,14 @@ paths:
           $ref: "#/components/responses/Error"
     get:
       operationId: listSecrets
-      summary: List the caller's secrets; no answer carries a value.
+      summary: List secrets
       description: >-
-        Answers `{"items": [...], "next": "..."}`. `owner` and `label` are
-        intersected with what the caller may read, so naming another
-        subject's owner answers only what the caller could already read of
-        that subject's secrets, and a selector outside it is an empty page,
-        never `forbidden`. Authorized as `secret.list`.
+        List the caller's secrets; no answer carries a value. Answers
+        `{"items": [...], "next": "..."}`. `owner` and `label` are intersected
+        with what the caller may read, so naming another subject's owner
+        answers only what the caller could already read of that subject's
+        secrets, and a selector outside it is an empty page, never
+        `forbidden`. Authorized as `secret.list`.
       parameters:
         - $ref: "#/components/parameters/ListLabel"
         - $ref: "#/components/parameters/ListOwner"
@@ -964,8 +1005,10 @@ paths:
           type: string
     put:
       operationId: applySecret
-      summary: Apply a secret by name; a second apply rotates the value in place.
-      description: Authorized as `secret.create or secret.update`.
+      summary: Apply a secret
+      description: >-
+        Apply a secret by name; a second apply rotates the value in place.
+        Authorized as `secret.create or secret.update`.
       responses:
         "200":
           description: The answer this route serves.
@@ -973,8 +1016,9 @@ paths:
           $ref: "#/components/responses/Error"
     get:
       operationId: readSecret
-      summary: Read one secret without its value.
-      description: Authorized as `secret.read`.
+      summary: Read a secret
+      description: >-
+        Read one secret without its value. Authorized as `secret.read`.
       responses:
         "200":
           description: The secret, without its value.
@@ -986,8 +1030,8 @@ paths:
           $ref: "#/components/responses/Error"
     delete:
       operationId: deleteSecret
-      summary: Delete one secret.
-      description: Authorized as `secret.delete`.
+      summary: Delete a secret
+      description: Delete one secret. Authorized as `secret.delete`.
       responses:
         "200":
           description: The answer this route serves.
@@ -996,8 +1040,10 @@ paths:
   /v1/environments:
     get:
       operationId: listEnvironments
-      summary: List the environments this control plane holds.
-      description: Authorized as `environment.list`.
+      summary: List environments
+      description: >-
+        List the environments this control plane holds. Authorized as
+        `environment.list`.
       responses:
         "200":
           description: The answer this route serves.
@@ -1005,10 +1051,10 @@ paths:
           $ref: "#/components/responses/Error"
     post:
       operationId: createEnvironment
-      summary: Create an environment from a manifest.
+      summary: Create an environment
       description: >-
-        The name is the environment's id, and a taken name is refused.
-        Authorized as `environment.create`.
+        Create an environment from a manifest. The name is the environment's
+        id, and a taken name is refused. Authorized as `environment.create`.
       responses:
         "200":
           description: The answer this route serves.
@@ -1024,8 +1070,10 @@ paths:
           type: string
     get:
       operationId: readEnvironment
-      summary: Read one environment with its capabilities.
-      description: Authorized as `environment.read`.
+      summary: Read an environment
+      description: >-
+        Read one environment with its capabilities. Authorized as
+        `environment.read`.
       responses:
         "200":
           description: The answer this route serves.
@@ -1033,12 +1081,12 @@ paths:
           $ref: "#/components/responses/Error"
     put:
       operationId: applyEnvironment
-      summary: Apply an environment by name.
+      summary: Apply an environment
       description: >-
-        A create when the name is free and an update when it is held. The
-        answer carries an ETag, and an If-Match that names an older version is
-        refused with version_conflict. Authorized as `environment.create` or
-        `environment.update`.
+        Apply an environment by name. A create when the name is free and an
+        update when it is held. The answer carries an ETag, and an If-Match
+        that names an older version is refused with version_conflict.
+        Authorized as `environment.create` or `environment.update`.
       responses:
         "200":
           description: The answer this route serves.
@@ -1046,10 +1094,11 @@ paths:
           $ref: "#/components/responses/Error"
     delete:
       operationId: deleteEnvironment
-      summary: Delete an environment no sandbox is placed on.
+      summary: Delete an environment
       description: >-
-        The environment this control plane drives itself is not deletable.
-        Authorized as `environment.delete`.
+        Delete an environment no sandbox is placed on. The environment this
+        control plane drives itself is not deletable. Authorized as
+        `environment.delete`.
       responses:
         "200":
           description: The answer this route serves.
@@ -1065,8 +1114,9 @@ paths:
           type: string
     post:
       operationId: mintEnvironmentKey
-      summary: Mint an environment key, shown once.
-      description: Authorized as `environment.key`.
+      summary: Mint an environment key
+      description: >-
+        Mint an environment key, shown once. Authorized as `environment.key`.
       responses:
         "200":
           description: The answer this route serves.
@@ -1074,14 +1124,15 @@ paths:
           $ref: "#/components/responses/Error"
     get:
       operationId: listEnvironmentKeys
-      summary: List the keys minted for an environment, oldest first.
+      summary: List environment keys
       description: >-
-        One page of the environment's keys in the order they were minted: each
-        key's `jti`, when it was minted, its `exp`, whether it is revoked and
-        since when, and the subject that minted it. The token is never listed,
-        because the control plane keeps no copy of it. A key stays listed
-        until its `exp` passes. A control plane that signs no environment keys
-        answers `capability_unsupported`. Authorized as `environment.key`.
+        List the keys minted for an environment, oldest first. One page of the
+        environment's keys in the order they were minted: each key's `jti`,
+        when it was minted, its `exp`, whether it is revoked and since when,
+        and the subject that minted it. The token is never listed, because the
+        control plane keeps no copy of it. A key stays listed until its `exp`
+        passes. A control plane that signs no environment keys answers
+        `capability_unsupported`. Authorized as `environment.key`.
       parameters:
         - name: cursor
           in: query
@@ -1150,8 +1201,10 @@ paths:
           type: string
     delete:
       operationId: revokeEnvironmentKey
-      summary: Revoke one environment key by its identifier.
-      description: Authorized as `environment.key`.
+      summary: Revoke an environment key
+      description: >-
+        Revoke one environment key by its identifier. Authorized as
+        `environment.key`.
       responses:
         "200":
           description: The answer this route serves.
@@ -1167,8 +1220,10 @@ paths:
           type: string
     post:
       operationId: registerWorker
-      summary: Register a worker for an environment; environment key only.
-      description: Authorized as `none beyond the key`.
+      summary: Register a worker
+      description: >-
+        Register a worker for an environment; environment key only. Authorized
+        as `none beyond the key`.
       responses:
         "200":
           description: The answer this route serves.
@@ -1184,8 +1239,10 @@ paths:
           type: string
     get:
       operationId: workerOperations
-      summary: Open the worker operations WebSocket; environment key only.
-      description: Authorized as `none beyond the key`.
+      summary: Open the operations socket
+      description: >-
+        Open the worker operations WebSocket; environment key only. Authorized
+        as `none beyond the key`.
       responses:
         "200":
           description: The answer this route serves.
@@ -1201,8 +1258,10 @@ paths:
           type: string
     get:
       operationId: gatewaySync
-      summary: Open the gateway sync WebSocket; environment key only.
-      description: Authorized as `none beyond the key`.
+      summary: Open the gateway socket
+      description: >-
+        Open the gateway sync WebSocket; environment key only. Authorized as
+        `none beyond the key`.
       responses:
         "200":
           description: The answer this route serves.

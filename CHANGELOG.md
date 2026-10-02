@@ -6,6 +6,13 @@ refused before it is pushed.
 
 ## Unreleased
 
+- Changed: in the API document, `api/openapi.yaml` and `GET /openapi.yaml`,
+  every operation's `summary` is a short action name of at most four words,
+  such as `Create a sandbox`, where it was a sentence. The sentence now
+  opens the operation's `description`, except on the port proxy and redirect
+  operations, whose shared description already stated it. A reference that
+  lists operations by their summary can use it as a label.
+
 ## v0.11.0 - 2026-10-01
 
 - Added: a Secret's `status.lastUsedAt`, when an egress gateway last
