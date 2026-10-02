@@ -14,6 +14,10 @@ curl -s -H "Authorization: Bearer $TOKEN" \
   "$CELLA/v1/events?object=$SANDBOX&limit=50"
 ```
 
+`object` is a sandbox's id or name, a secret's id, or an environment's
+name, and its records are yours to read when the object is. `limit` is 1
+to 200, and 50 when absent.
+
 The answer is `{"items": [...], "next": "..."}`, newest first. Each record
 carries `seq`, which counts that object's records from 1 without a gap.
 Pass `next` back as `cursor` for the next older page; an empty `next` is
@@ -72,9 +76,11 @@ This feed has no `cursor`, because `seq` counts within one object and
 there is no order across objects to resume from. To rebuild a view after a
 reconnect, list what you have again and then follow.
 
-On an installation that runs more than one replica of the server against
-one database, this feed carries the records of the replica that serves it.
-Following one object is complete on every installation.
+On an installation that runs
+[more than one replica](kubernetes.md#running-more-than-one-replica) of
+the server, every feed is served by the writer, which the other replicas
+forward to and which commits every record, so this feed carries every
+record there too.
 
 ## What a feed looks like
 
@@ -86,13 +92,35 @@ Following one object is complete on every installation.
 | an empty line | nothing happened for 15 seconds; the feed is still open |
 | a JSON object with an `error` member | the feed ended on a failure; it is the last line |
 
+## What a record says
+
+A record carries `id`, `seq`, `type`, `time`, the `object` it is about
+with its kind, id, name, owner and labels, the `subject` that acted, the
+`requestId` of the request that caused it, and `data` of a fixed shape per
+type. `data` never holds a command line, a file's content, an environment
+value, a secret's value or a token. These are the types:
+
+| Object | Types |
+|---|---|
+| Sandbox | `sandbox.created`, `sandbox.updated`, `sandbox.started`, `sandbox.stopped`, `sandbox.failed`, `sandbox.lost`, `sandbox.recovering`, `sandbox.recovered`, `sandbox.deleted`, and `sandbox.spawned`, on the parent, when it creates a child |
+| An operation on a sandbox | `sandbox.exec`, `sandbox.files`, `sandbox.dial`, `sandbox.screenshot`, `sandbox.input`, `sandbox.screen` |
+| Secret | `secret.created`, `secret.updated`, `secret.deleted` |
+| Environment | `environment.created`, `environment.updated`, `environment.registered`, `environment.offline`, `environment.keyed`, `environment.key_revoked`, `environment.deleted` |
+
+`sandbox.started`, `sandbox.stopped`, `sandbox.failed`, `sandbox.lost` and
+`sandbox.deleted` carry a `reason`, such as `Request`, `AutoStop`,
+`CreateFailed`, `NoCapacity` or `Preempted`. A gateway substituting a
+secret's value moves its `status.lastUsedAt` and writes no record.
+
 ## When a feed ends
 
 | What you see | Why | What to do |
 |---|---|---|
-| the connection closes with no error line | the server is shutting down or restarting | reconnect with the newest `seq` you hold |
+| the connection closes with no error line | the server is shutting down or restarting, or one replica is handing off to another | reconnect with the newest `seq` you hold |
+| 503 `control_plane_unavailable` | no replica took the request while one handed off to another | retry shortly |
 | `unauthenticated` as the last line | your token expired while the feed was open | get a fresh token and reconnect with the newest `seq` you hold |
 | 410 `cursor_expired`, or it as the last line | the server no longer keeps the records after your position | read a page again and continue from its newest record; the records in between are gone |
+| `cursor_expired` as the last line of the feed of every object | your reader fell behind and a record was dropped | list what you have again and follow |
 | 429 `rate_limited` | the server holds as many feeds open as it serves | wait and retry |
 | 400 `invalid_field` on `cursor` | the cursor is not a number, is above the object's newest `seq`, or was sent without `object` | send the newest `seq` you hold, with `object` |
 
