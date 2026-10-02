@@ -120,12 +120,16 @@ Nothing runs a queued sandbox yet, so `start`, `stop` and `exec` answer
 starts, not from when it joined the queue.
 
 The control plane passes over its queues every `CELLA_SCHEDULE_INTERVAL`
-(default `5s`). It also passes at once whenever a sandbox is queued,
-stops, fails or is deleted, and whenever an environment is applied or
-comes back to `Ready`, so a freed slot is taken without waiting for the
-interval. With several replicas, one holds the `scheduler` lease and
-places for all of them. The queue is the set of `Queued` sandboxes, so it
-survives a restart unchanged.
+(default `5s`). It also passes at once whenever a sandbox is created,
+queued, stops, fails or is deleted, and whenever an environment is applied
+or comes back to `Ready`, so a freed slot is taken without waiting for the
+interval. The same pass starts every `Pending` sandbox, on a `direct`
+environment as on a queued one, before it reads any queue. With
+[several replicas](kubernetes.md#running-more-than-one-replica), the
+writer runs the pass and places for all of them. The queue is the set of
+`Queued` sandboxes and a placed create stays `Pending` until it starts, so
+both survive a restart, or a handoff to another replica, unchanged: the
+next process's first pass picks them up.
 
 When an environment declares more than one queue, each pass reads them
 as one line in the order above, head against head, and a head that does
