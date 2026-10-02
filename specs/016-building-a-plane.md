@@ -1,6 +1,6 @@
 ---
 title: "Building a plane: how a platform composes the packages and the webhooks without a fork"
-status: validated
+status: in-progress
 track: core
 depends_on:
   - specs/001-architecture.md
@@ -11,7 +11,7 @@ depends_on:
 affects: [docs/plane.md, manifest/, runtime/, controller/, egress/, examples/plane/]
 effort: small
 created: 2026-09-12
-updated: 2026-09-21
+updated: 2026-10-02
 author: changkun
 ---
 
@@ -30,10 +30,9 @@ it does not.
 
 ## Current state
 
-Not built. The hosted plane runs today as one binary with its own copy
-of the manifest types and runtime backends; its migration onto these
-packages is its own work, tracked in its own repository, and this spec
-is what it migrates against.
+Built in part by [[056-contract-evidence]]: `docs/plane.md` and the
+example server under `examples/plane/`. The Outcome names what shipped
+and what is open.
 
 ## Design
 
@@ -104,3 +103,32 @@ Any platform's own migration plan.
 | A server built from the packages in `examples/plane/` passes the conformance suite | `TestExamplePlaneBuilds` over the example, and the suite against it | built in part ([[056-contract-evidence]]): `examples/plane/` composes `manifest`, `runtime/native` and `controller` behind its own API, reaches nothing under `internal/`, and is compiled by the test; the suite run needs an issuer and an authorizer beside it, which is the stubs tier of [[012-test-stubs-and-tiers]] |
 | The example plane translates a platform-specific field into a `Secret` and an annotation at its edge and the resolved manifest is what the conformance suite expects | `TestExamplePlaneTranslatesAtTheEdge` | not built |
 | Every row of the concerns table names a mechanism that exists in the tree | `TestConcernsTableIsGrounded` reading this file | built ([[056-contract-evidence]]): every name the table carries is a package of this module, a name it declares or a string it holds; `limits`, which the shared authorization contract owns, is the one named exception and is asserted to stay one |
+
+## Outcome
+
+In progress as of 2026-10-02.
+
+Shipped in v0.3.0 (2026-09-23), through [[056-contract-evidence]]:
+
+- `docs/plane.md`, the guide in the user register: the two doors, the
+  authorizer, the admission endpoint and the sink a platform writes,
+  and what each concern costs through either door.
+- `examples/plane/`, a server that composes `manifest`,
+  `runtime/native` and `controller` behind an API of its own and
+  reaches nothing under `internal/`, compiled by
+  `TestExamplePlaneBuilds` and exercised by its own suite over create,
+  read, delete, the plan's ceilings, the catalog and every refusal.
+- `TestConcernsTableIsGrounded`, which holds every name in the
+  concerns table to a package, a declared name or a string in the tree.
+
+What differs from the plan: nothing in what shipped.
+
+What remains:
+
+- `TestPlaneDocEndpointsConform`: the guide's authorizer and admission
+  endpoint run beside `cellad` against the conformance suite's
+  identity and resolve groups.
+- The conformance suite run against the example server, with the
+  stub issuer and authorizer of `cella-stubs` beside it.
+- `TestExamplePlaneTranslatesAtTheEdge`: a platform field translated
+  into a `Secret` and an annotation at the example's edge.
