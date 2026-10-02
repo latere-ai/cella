@@ -8,7 +8,7 @@ depends_on:
 affects: [runtime/vm/, runtime/k8s/, internal/config/]
 effort: large
 created: 2026-09-12
-updated: 2026-09-12
+updated: 2026-10-03
 author: changkun
 ---
 
@@ -32,12 +32,20 @@ the placeholder the tree carries until one is chosen.
 
 ## Current state
 
-Not built, and not scheduled. `runtime/vm` exists as a package whose
-`Preflight` reports not ready and names this spec, so a manifest that
-asks for a `vm` environment is refused with a reason rather than a
-missing case. The `k8s` driver's runtime class path, which is the
-zero-code half of option A below, is part of
-[[004-runtime-contract]] and is not waiting on this spec.
+Not built and not scheduled, as of v0.11.1:
+
+- `runtime/vm` does not exist, so the stub the first two criteria below
+  name is not written.
+- The `k8s` driver reports `container` whatever the cluster runs, and
+  reads neither `CELLA_K8S_RUNTIME_CLASS` nor
+  `CELLA_K8S_RUNTIME_CLASS_ISOLATION`: the configuration half of option
+  A is [[004-runtime-contract]]'s `TestK8sIsolationIsDeclared`, not
+  built, and does not wait on this spec.
+
+The `vm` class is in the isolation vocabulary of `manifest` and of
+`runtimetest`, and no driver in the tree declares it. The choice
+between the options below stays open in the specs index until a
+consumer names a need.
 
 ## Design
 

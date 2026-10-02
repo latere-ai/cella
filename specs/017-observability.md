@@ -15,7 +15,7 @@ depends_on:
 affects: [internal/metrics/, internal/api/, controller/, internal/events/, internal/egressd/, internal/worker/, internal/store/, internal/auth/, cmd/cellad/, tools/rules/, deploy/base/prometheusrule.yaml, .github/workflows/verify.yml]
 effort: small
 created: 2026-09-12
-updated: 2026-09-23
+updated: 2026-10-03
 author: changkun
 ---
 
@@ -35,8 +35,42 @@ variables, and nothing is on by default.
 
 ## Current state
 
-Not built. The scaffold serves `/version` and the probes and no
-metrics.
+v0.2.1 shipped the scrape surface, the server span and the redacting
+logger ([[053-observability]]); later releases added the rows whose
+owning specs landed after it.
+
+Built:
+
+- `/metrics` on `cellad serve`'s internal listener, its registry held
+  to the table below by `TestMetricsTable`, with a series for every
+  labeled histogram at start; one server span per request; one log line
+  per request and per stream; the redacting handler on both paths of
+  the tee; OTLP export from the serve and egress roles; and the rules in
+  `deploy/base/prometheusrule.yaml`, held to the table by
+  `TestAlertsNameKnownMetrics` ([[053-observability]], v0.2.1).
+- `cella_queue_depth`, `cella_capacity` and `cella_preemptions_total`
+  ([[057-scheduling-queue]], [[058-preemption]], v0.3.0).
+- A request its caller closed counted as `client_closed`
+  ([[074-client-closed-requests]], v0.6.3); the route template as
+  `http.route` on the OTel request metrics (v0.8.0), and `unmatched` for
+  a request that reached no endpoint (v0.9.0).
+- `cella_lease_held{name="writer"}`, `cella_forwarded_requests_total`,
+  and the lease alert read over the replica set
+  ([[076-rolling-replicas]], v0.9.0).
+- `cella_environments` and `cella_workers_connected`, registered on main
+  after v0.11.1 and unreleased, which lets the offline alert fire.
+
+Open:
+
+- Three rows declared and registered by nothing:
+  `cella_rate_limited_total`, since there is no limiter ([[008-api]]);
+  `cella_operations_redelivered_total` ([[021-data-plane-workers]]);
+  and `cella_set_replicas`, since there is no `SandboxSet`
+  ([[020-scheduling-and-sets]]).
+- The worker role starts no OTLP export, and no `operation` frame
+  carries a `traceparent`, so a remote driver call is not continued on
+  the worker. The driver and store child spans are not drawn.
+- `tools/rules` and the `rules` job that runs `promtool check rules`.
 
 ## Design
 

@@ -20,7 +20,7 @@ depends_on:
 affects: [internal/auth/, internal/api/, internal/egressd/, internal/worker/, internal/store/, runtime/, egress/, controller/, manifest/, deploy/, test/e2e/, SECURITY.md]
 effort: medium
 created: 2026-09-12
-updated: 2026-09-24
+updated: 2026-10-03
 author: changkun
 ---
 
@@ -38,10 +38,46 @@ table to that rule.
 
 ## Current state
 
-Not built. The controls descend from the hosted platform's, minus the
-ones that belonged to its identity and billing surfaces, plus the ones
-the control plane's own design added: the gateway credential, the
-boundary check, the bounded fetch.
+Most controls shipped with the specs that own them, in v0.2.0 and
+later; this spec's own evidence, the model held to the tree and the
+policy file, shipped in v0.3.0 ([[056-contract-evidence]]).
+
+Built:
+
+- `TestThreatModelControlsHaveTests` holds every control's test to one
+  the module declares, or to the exact `pendingControls` list in
+  `specs_test.go`, which shrinks as each test lands. `SECURITY.md`
+  carries the four commitments and an asset table, held to this file by
+  `TestSecurityPolicyMatchesTheModel` ([[056-contract-evidence]],
+  v0.3.0).
+- A canary secret value followed through the e2e tier and read back
+  only at the upstream in its header ([[046-secret-kind]], v0.2.0), and
+  a canary workload token followed through the same tier
+  ([[056-contract-evidence]], v0.3.0).
+- The authorizer client failing closed (v0.1.0), and the controls of
+  v0.2.0's slices: the Pod baseline in the k8s render, the gateway's two
+  doors and its policy gate, workload tokens and revocation, the spawn
+  boundary check, and the admission client failing closed.
+- On k8s, a NetworkPolicy per sandbox that admits only mesh peers
+  inbound and, with the gateway's Pods named, only DNS, the gateway and
+  mesh peers outbound, proved on the kind tier ([[070-k8s-egress]],
+  v0.6.0).
+- The gateway refuses a request inside a terminated tunnel whose `Host`
+  or `:authority` names another authority, with `421` (v0.9.1).
+
+Open:
+
+- Sixteen controls whose test is not written, listed in
+  `pendingControls`: among them the rate limits, body caps, handler
+  order and route actions of [[008-api]], the running Pod's baseline and
+  the decorator check of [[004-runtime-contract]], the volume rows of
+  [[019-volumes]], and no inbound toward a worker in
+  [[021-data-plane-workers]]. The rate limits do not exist, so the flood
+  control is a claim.
+- The second half of the cross-check: that each control's test is named
+  by the acceptance criteria of the spec its row names.
+- `TestPodSecurityFields`, `TestWorkloadCannotWiden`,
+  `TestControlPlaneURLRule`, and the worker tier with inbound refused.
 
 ## Design
 

@@ -8,7 +8,7 @@ depends_on:
 affects: [manifest/, internal/admission/, internal/api/, internal/config/, test/stubs/]
 effort: small
 created: 2026-09-12
-updated: 2026-09-20
+updated: 2026-10-03
 author: changkun
 ---
 
@@ -29,9 +29,43 @@ the per-subject sandbox ceiling.
 
 ## Current state
 
-Not built. The hosted platform applied defaults, catalog resolution,
-and policy gates in three per-surface code paths; this spec is where
-they become one function behind one contract.
+The webhook, the image rule, and the count ceiling shipped in v0.2.0
+([[047-admission-client]]); the operator's own defaults and ceilings
+did not.
+
+Built:
+
+- `AdmitFunc` at stage 3 of `Resolve`, the identity when
+  `CELLA_ADMISSION_URL` is unset, and the client over that URL with
+  `CELLA_ADMISSION_TOKEN` and `CELLA_ADMISSION_TIMEOUT`: the envelope,
+  the returned manifest decoded strictly and held against `existing`,
+  warnings into `status.warnings`, a refusal as `admission_refused`
+  with the code verbatim, and every other answer as
+  `admission_unavailable` with no retry.
+- The image rule after stage 3, and `CELLA_DEFAULT_IMAGE` where the
+  environment runs images.
+- `Defaults` and `Ceilings` as options of `Resolve`, applied with and
+  without a webhook, for an importer that sets them.
+- The count ceiling from the authorizer's `limits.max_sandboxes`,
+  counted under the controller's lock with `Queued` and `Stopped`
+  sandboxes included. A spawn is counted against its parent's owner,
+  which is the root's ([[022-mesh-and-spawn]], v0.2.0).
+- The boundary check of stage 6 runs after admission in `Resolve`, so a
+  webhook cannot open a child's boundary.
+
+Open:
+
+- `cellad` loads none of the six resource and lifecycle
+  `CELLA_DEFAULT_*`, the four `CELLA_MAX_*`, or
+  `CELLA_MAX_SANDBOXES_PER_SUBJECT`: it applies no default or ceiling of
+  its own, and the count ceiling comes from the authorizer alone. The
+  precedence of the environment's `defaultQueue` over those defaults has
+  nothing to order yet.
+- `parent` and `set` in the envelope are always `null`: `AdmitRequest`
+  carries no parent although a spawn runs admission, and the
+  `SandboxSet` kind does not exist ([[020-scheduling-and-sets]]).
+- The tests of the spawn's count, of a webhook reopening a boundary,
+  `TestAdmissionCannotOpenABoundary`, and of one call per replica.
 
 ## Design
 

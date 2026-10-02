@@ -10,7 +10,7 @@ depends_on:
 affects: [manifest/v1/, runtime/remote/, internal/worker/, internal/api/, internal/auth/, internal/config/, controller/, internal/store/]
 effort: large
 created: 2026-09-12
-updated: 2026-09-24
+updated: 2026-10-03
 author: changkun
 ---
 
@@ -29,10 +29,56 @@ how one control plane spans regions.
 
 ## Current state
 
-Not built. The hosted platform drives one cluster in-process. The
-split-plane design it drafted put a remote driver behind the same
-interface, which is what `runtime/remote` is, with the direction of
-connection reversed so that the data plane needs no inbound route.
+v0.3.0 shipped the `Environment` kind, the worker and the stream
+between them ([[051-environments-and-workers]],
+[[054-environments-desired-state]], [[061-worker-stream-credit]]);
+later releases added the key list and the worker's place among
+replicas. `runtime/remote` is the driver behind the interface, with the
+direction of connection reversed so the data plane needs no inbound
+route.
+
+Built:
+
+- The `Environment` kind and its field rules; environment keys minted
+  and revoked; worker registration with its mismatch refusals; the
+  worker stream; `runtime/remote` passing `runtimetest` against a worker
+  running `native`; and the `worker` role ([[051-environments-and-workers]],
+  v0.3.0).
+- The stored `Environment` with its apply, read and delete routes, the
+  controller's per-environment driver registry, the phase loop for
+  `Pending`, `Ready` and `Offline` under the environments lease, and
+  the default environment seeded from the variables at first start
+  ([[054-environments-desired-state]], v0.3.0).
+- Credit per sub-stream agreed in the hello, and `Watch` across the
+  seam with the `relist` that issues a `List`
+  ([[061-worker-stream-credit]], v0.3.0); placement against
+  `spec.capacity` ([[057-scheduling-queue]], v0.3.0).
+- The environment list under the authorizer's filter and
+  `GET /v1/environments/{id}/keys`
+  ([[067-environment-list-ports-redirect-keys]], v0.5.0); the worker
+  composing under a control plane URL with a path
+  ([[071-serving-under-a-base-path]], v0.5.0).
+- The worker reads the public roots at start and refuses to start
+  without them ([[073-sandbox-trust-bundle]], v0.6.2). With replicas,
+  the writer holds every worker's stream and a worker dials the next
+  writer at once after a stream that worked ([[076-rolling-replicas]],
+  v0.9.0).
+
+Open:
+
+- `Degraded` and its reasons: the phase is declared and never written,
+  because the gateway hub serves one environment.
+- Placement against the lesser of `spec.capacity` and what the live
+  workers report.
+- The `remote` driver implements neither `Dialer` nor `DisplayDriver`,
+  so dial, the port proxy and the desktop do not reach a worker's
+  sandboxes.
+- The `Lost` hold on an `Offline` environment's running sandboxes
+  ([[005-lifecycle-controller]]), the `CELLA_RUNTIME=none` default
+  environment, which is not a selectable runtime, and
+  `cella_operations_redelivered_total`.
+- `TestNoInboundToTheDataPlane` across the worker and kind tiers, and
+  `TestConfigTableAgrees`.
 
 ## Design
 

@@ -15,7 +15,7 @@ depends_on:
 affects: [cmd/cella/, internal/cellacli/, client/, skills/cella/, docs/cli.md, docs/client.md, internal/config/]
 effort: medium
 created: 2026-09-12
-updated: 2026-09-24
+updated: 2026-10-03
 author: changkun
 ---
 
@@ -35,8 +35,43 @@ is never exercised only through `curl`.
 
 ## Current state
 
-Not built. A platform's own CLI may wrap or replace it; this one is the
-control plane's and knows only the control plane's API.
+v0.2.0 shipped the `cella` command for the two kinds the API then
+served, `Sandbox` and `Secret` ([[050-cella-command]]); the typed
+client it is built on became a public package in v0.5.0. A platform's
+own CLI may wrap or replace it; this one knows only the control plane's
+API.
+
+Built:
+
+- `apply`, `get`, `delete`, `start`, `stop`, `exec`, `attach`, `logs`,
+  `cp`, `files`, `egress` and `version`; the exit scheme, under `exec`
+  included; the columns and `-o json|yaml|wide|name`; the token file
+  read per request; a transport that reads no proxy variable; the
+  skill; and the four client archives ([[050-cella-command]], v0.2.0).
+- `-o yaml` for one object as the server's bytes
+  ([[055-api-contract-gaps]]), `port-forward`
+  ([[060-dial-and-port-proxy]]), and the agent scenario as conformance
+  case `case011AgentScenario` ([[059-conformance-closure]]), all v0.3.0.
+- `latere.ai/x/cella/client`, which also reaches environments, their
+  keys and the event feed ([[069-client-package]], v0.5.0); `apply
+  --wait` holding the create with `?wait=1`
+  ([[072-create-answers-at-once]], v0.6.0); and
+  `get secrets --owner` (v0.7.0).
+
+Open:
+
+- The `Volume`, `SandboxSet` and snapshot commands, whose kinds the
+  server does not serve ([[019-volumes]], [[020-scheduling-and-sets]]).
+- Commands over routes the server does serve: the `Environment` kind
+  in `apply` and `get`, `env key`, `events`, `screenshot`, `screen`,
+  `input` and `display`. `token` waits on its route ([[008-api]]).
+- `exec` without `-i` or `-t` reads the held `?wait=1` answer, not the
+  framed stream; `--if-match` is not built, and the Sandbox `PUT`
+  carries no `ETag` to send; a YAML list that spans pages is one page;
+  the server's identity is not printed after `unsupported_version`.
+- No runtime sets `CELLA_URL` inside a sandbox, so a caller there
+  passes the address with `CELLA_URL` or `--url`; `cella help` says so
+  on main after v0.11.1, unreleased.
 
 ## Design
 

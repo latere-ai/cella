@@ -9,7 +9,7 @@ depends_on:
 affects: [.github/workflows/release.yml, .github/workflows/verify.yml, Dockerfile.ci, deploy/, tools/release/, docs/install.md, docs/upgrades/, cmd/cellad/]
 effort: medium
 created: 2026-09-12
-updated: 2026-09-23
+updated: 2026-10-03
 author: changkun
 ---
 
@@ -27,9 +27,43 @@ manifest.
 
 ## Current state
 
-Not built. `verify.yml` runs the gate; there is no `release.yml`, no
-`deploy/`, and no install document. The CHANGELOG rule is already in
-force through the gate.
+The pipeline first ran on v0.2.0 ([[048-release-and-check]],
+[[049-stubs-and-tiers]]) and has run on every `v*` tag since. It holds
+back a release whose checks fail: v0.2.0, v0.6.0 and v0.7.0 were tagged
+and not published, and v0.2.1, v0.6.1 and v0.7.1 carry their notes'
+changes. A release cited below is the CHANGELOG section that describes
+the change.
+
+Built:
+
+- `release.yml` on a `v*` tag: the tag's commit must have passed
+  verify; the eight archives and `checksums.txt`; `cellad` pushed by
+  digest, signed, with SBOM and provenance attestations; the kind stack
+  from the candidate running the conformance suite; then the release,
+  whose notes are the CHANGELOG section; then `install-release` and
+  `release-verify` from clean runners ([[048-release-and-check]],
+  v0.2.0). `cella-display` joined it, built and signed the same way
+  ([[064-k8s-display]], v0.4.0). `cella-stubs` is pushed under the tag
+  for amd64, neither signed nor attested, because nothing an operator
+  deploys names it.
+- `deploy/`, its base with the Pod security fields, the disruption
+  budget, the network policy and the PrometheusRule, the bootstrap and
+  the examples; `cellad check`; and `docs/install.md`, walked against a
+  kind cluster with `cella-stubs` by the `install` job on every push
+  ([[048-release-and-check]], [[049-stubs-and-tiers]], v0.2.0).
+- The refusal of a tag without a CHANGELOG section, at pre-push and in
+  the pipeline.
+- More than one replica: `docs/kubernetes.md` names what a Deployment
+  changes to roll with no gap ([[076-rolling-replicas]], v0.9.0).
+
+Open:
+
+- `docs/upgrades/` does not exist: an upgrade's steps are in its
+  CHANGELOG section. The rollback walk, `TestUpgradeDocRollback`, and
+  the restore walk over the schema guard, `TestRestoreSchemaGuard`, are
+  not written.
+- The release notes name no image digest; they are the CHANGELOG
+  section alone.
 
 ## Design
 

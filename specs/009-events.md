@@ -9,7 +9,7 @@ depends_on:
 affects: [internal/events/, internal/api/, internal/config/, test/stubs/]
 effort: small
 created: 2026-09-12
-updated: 2026-09-23
+updated: 2026-10-03
 author: changkun
 ---
 
@@ -29,15 +29,45 @@ signature, and what an event never carries.
 
 ## Current state
 
-Not built. The hosted platform wrote an audit stream to object storage
-and derived activity and usage from it; the event shape here is the
-part of that stream that describes the objects rather than the
-platform. `latere.ai/x/pkg/audit` exists and is not adopted for the
-envelope: its `Subject` names the resource acted on where this spec's
-`subject` names the actor, its `Category` is an open string where the
-type here is a closed enum a test checks, and its `OrgID` and `Policy`
-are platform concepts the control plane pushes out. Its `RedactJSON` is
-used over `data` as a second line behind the structural strip below.
+v0.2.0 shipped the record, the signature and delivery
+([[042-events]]); v0.3.0 and v0.4.0 added the feed and the journal's
+bounds. `latere.ai/x/pkg/audit` is not the envelope, because its
+`Subject` names the resource where this spec's `subject` names the
+actor, its `Category` is an open string where the type here is a closed
+enum, and its `OrgID` and `Policy` are a platform's; its `RedactJSON`
+runs over every `data` behind the structural strip.
+
+Built:
+
+- One record per mutation and operation for the `Sandbox` types,
+  committed with the mutation, signed with `Cella-Signature` per
+  attempt, and delivered to `CELLA_EVENTS_URL` in `seq` order per
+  object with the retry, hold and drop rules, on the lease holder
+  ([[042-events]], v0.2.0); `secret.*` with the `Secret` kind
+  ([[046-secret-kind]], v0.2.0).
+- `environment.*` with the `Environment` kind
+  ([[051-environments-and-workers]], [[054-environments-desired-state]],
+  v0.3.0), and `Preempted`,
+  `NoCapacity` and `StartDeadline` in the reason enum
+  ([[058-preemption]], v0.3.0).
+- `GET /v1/events?object=` for any kind
+  ([[055-api-contract-gaps]], v0.3.0), retention by
+  `CELLA_JOURNAL_RETENTION`, and the memory journal's ring of
+  `CELLA_JOURNAL_CAP` per object ([[062-journal-retention]], v0.3.0).
+- `follow=1`, for one object from a cursor or for every readable
+  record from now, with retention keeping each object's newest record
+  ([[066-events-follow]], v0.4.0).
+
+Open:
+
+- Types in the table that nothing emits: `sandbox.attach`;
+  `sandbox.port` and `sandbox.egress`, whose flags `CELLA_EVENTS_PORTS`
+  and `CELLA_EVENTS_EGRESS` are not read; `sandbox.token`, whose route
+  is not served ([[006-identity]]); every `volume.*` and `set.*` type,
+  whose kinds do not exist; and the two types of
+  [[078-self-sizing-sandboxes]].
+- `TestEventTableMatchesTheSpecs`, which holds the table to the
+  emission points the specs name.
 
 ## Design
 
