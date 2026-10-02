@@ -152,10 +152,13 @@ cellad worker
 cellad: v0.5.0 worker driver=podman isolation=container control-plane=https://cella.example.com
 ```
 
-The worker checks its own driver first. A host whose engine does not
-answer exits rather than registering, because a control plane that
-believed the registration would place sandboxes on a machine that cannot
-run them.
+The worker reads the public certificate authorities first, which every
+sandbox it runs behind an egress gateway trusts beside the gateway's own,
+and exits when it finds none; `SSL_CERT_FILE` names the bundle when the
+system's is not where Go looks for it. Then it checks its own driver. A
+host whose engine does not answer exits rather than registering, because a
+control plane that believed the registration would place sandboxes on a
+machine that cannot run them.
 
 Then it registers what its driver provides, opens its stream, and starts
 taking work. Read the environment to see it arrive:
@@ -229,6 +232,7 @@ holds no database, no issuer and no authorizer.
 | `CELLA_CAPACITY_CPU`, `_MEMORY`, `_DISK`, `_SANDBOXES` | no | unset | what this worker declares it can hold |
 | `CELLA_WORKER_LABELS` | no | unset | `key=value` pairs describing this worker, comma separated |
 | `CELLA_INSECURE_CONTROL_PLANE` | no | unset | `1` admits an `http://` control plane that is not on loopback |
+| `SSL_CERT_FILE` | no | the first of Go's Linux bundle files that holds a certificate | the public roots written into each sandbox's trust file ahead of the gateway's authority. The worker refuses to start when it finds none, or more than 512 KiB. The released image ships `/etc/ssl/certs/ca-certificates.crt`; point this at a bundle of your own to add a private authority beside the public ones |
 
 A key travels on every request, so `CELLA_URL` must be `https://` unless
 it is a loopback address. Setting `CELLA_INSECURE_CONTROL_PLANE=1` is the
@@ -241,8 +245,17 @@ running. A sandbox does not stop because the control plane stopped
 watching it.
 
 The worker reconnects with a backoff that starts at one second and
-doubles to thirty. Each connection begins with a registration, so the
-control plane always knows which process is claiming work.
+doubles to thirty. A stream the control plane accepted sets it back to one
+second, so a worker whose stream ended because the control plane restarted
+dials again after a second, however often that has happened before. Each
+connection begins with a registration, so the control plane always knows
+which process is claiming work.
+
+A control plane that runs
+[several replicas](kubernetes.md#running-more-than-one-replica) holds every
+worker's stream on its writer, whichever replica the worker reaches. When
+the writer hands off to another replica, the stream is closed and the
+worker reconnects to the new writer.
 
 The control plane stops counting a worker after
 `CELLA_ENVIRONMENT_OFFLINE` (two minutes by default) without a heartbeat,
