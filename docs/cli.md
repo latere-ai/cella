@@ -25,16 +25,22 @@ reaches its routes under that path.
 
 The token comes from the OpenID Connect issuer the control plane verifies
 against; there is no `cella login`. `--url` and `--token` override the two
-variables, `--token-file` reads the token from a file instead, and `--ca`
-adds one certificate authority to the system roots.
+variables, `--token-file` reads the token from a file instead, as
+`CELLA_TOKEN_FILE` does, and `--ca` adds one certificate authority to the
+system roots.
 
 **Inside a sandbox the token is already there.** The sandbox's own token
-is at `/run/cella/token`, which is where `cella` looks when `CELLA_TOKEN`
-is unset, so only the address needs setting: export `CELLA_URL`, or pass
+is in the file its environment names in `CELLA_TOKEN_FILE`, which is
+`/run/cella/token` on every runtime but the native one. `cella` reads it
+when `CELLA_TOKEN` is unset, and `/run/cella/token` when neither is set,
+so only the address needs setting: export `CELLA_URL`, or pass
 `--url`. The file is read for every request, so a command that runs for
 hours keeps working when the token is replaced under it. A sandbox's token
 reads and runs commands in its own sandbox, reads the sandboxes below it,
-and creates a child within its spawn budget, and nothing else.
+and creates a child within its spawn budget, and nothing else. On
+Kubernetes, once sandboxes are confined to the egress gateway, a sandbox
+does not reach the control plane at all, so `cella` inside it cannot call
+the API ([What a sandbox can reach](kubernetes.md#what-a-sandbox-can-reach)).
 
 ## The commands
 
@@ -92,8 +98,10 @@ cella get sandbox dev --json
 ```
 
 `cella get` lists by default and follows the server's pages to the end;
-`--limit` stops it earlier. `-o name` prints `sandbox/<name>` per line, for
-a shell loop. `--json` and `-o json` write the API's own bytes, so what you
+`--limit` stops it earlier. `-l key=value`, repeatable, and `--owner`, the
+`status.owner` an object carries, narrow either kind; `--phase` and
+`--environment` narrow sandboxes only. `-o name` prints `sandbox/<name>`
+per line, for a shell loop. `--json` and `-o json` write the API's own bytes, so what you
 pipe into `jq` is exactly what the server sent. `-o yaml` asks the server for
 the same object as YAML and writes that through; a list under `-o yaml` is
 the one page the server answered, with its cursor, because the pages are
@@ -110,7 +118,9 @@ cella attach dev
 ```
 
 Without `-i` and `-t` the command runs and its output arrives when it
-finishes. `-i` sends your standard input to the command and `-t` runs it
+finishes. `--workdir` sets the directory it runs in, `--env K=V`,
+repeatable, adds to its environment, and `--timeout 30s` ends it after
+that long. `-i` sends your standard input to the command and `-t` runs it
 under a terminal; either opens a session, and a session carries your input
 either way. `attach` is a terminal on the sandbox with your window
 following it, and your terminal is restored however the session ends.
@@ -193,7 +203,11 @@ cella egress dev
 
 A `Secret`'s value is written and never read back: no command prints it, no
 answer carries it, and the sandbox that uses it holds a placeholder rather
-than the value. `cella egress` shows the connections the gateway recorded
+than the value. `--value-from-env` sets the value from a variable of your
+environment and `--value-file` from a file, so the manifest file need not
+hold it. `cella get secret <name> -o json` shows `status.lastUsedAt`, when
+a gateway last substituted the value ([Secret](manifest.md#secret)).
+`cella egress` shows the connections the gateway recorded
 for a sandbox: where they went, whether they were allowed, and which
 secrets were substituted, by name.
 
@@ -233,7 +247,10 @@ codes are the client's own: `125` the command failed, `126` it could not
 start, `127` the server was not reachable.
 
 The command never retries. A caller that wants one has the exit code, and
-`3`, `4` and `5` are answers rather than accidents.
+`3`, `4` and `5` are answers rather than accidents. A `1` whose code, under
+`-v`, is `control_plane_unavailable` is a control plane that runs several
+replicas handing off from one to another, and the same command shortly
+after reaches the next.
 
 ## What it does not do
 
