@@ -42,13 +42,13 @@ takes a few minutes; with images and a cluster, up to fifteen.
 | `-capabilities` | what this environment provides, comma separated: `files`, `attach`, `dial`, `display`, `input`, `volumes`, `mesh`, `egress` | every capability case skips |
 | `-sink` | the event sink's address, whose `/events` route the run reads back | the delivery case skips |
 | `-authorizer-control`, `-admission-control` | the control address of the permission service and the policy service, which the run drives to reach their refusals and their outages | those cases skip |
-| `-display-image`, `-upstream`, `-queued-environment`, `-worker-environment`, `-cella` | the inputs of the desktop, the network boundary, queued work, a second environment, and the command line client. `-upstream` is a `host:port` a sandbox may be allowed to reach, answering any request with at least one byte; with `egress` declared, the run checks that a sandbox reaches it through its gateway, is refused a host its allow list does not name, and reaches nothing around the gateway, using `nc` and `base64` inside the sandbox's image | each group skips naming what is missing |
+| `-display-image`, `-upstream`, `-queued-environment`, `-worker-environment`, `-cella` | the inputs of the desktop, the network boundary, queued work, a second environment, and the command line client. `-upstream` is a `host:port` a sandbox may be allowed to reach, answering any request with at least one byte; with `egress` declared, the run checks that a sandbox whose allow list names it reports `EgressEnforced` true, reaches it through its gateway, is refused a host its allow list does not name, reaches nothing around the gateway, and finds the refused connection in its records. The check runs `nc` and `base64` under `/bin/sh` inside the sandbox, and a sandbox without them, or without `HTTPS_PROXY` in its environment, skips it | each group skips naming what is missing |
 | `-known` | a file declaring the cases this server fails and why | every failure is a failure |
 | `-skip` | group or case names to leave out | nothing is left out |
 
-Every flag has an environment variable of the same meaning, `CELLA_TEST_URL`,
-`CELLA_TEST_TOKEN` and so on, so a stack that exports them runs the command
-with no flag at all.
+Every flag but `-known` and `-skip` has an environment variable of the same
+meaning, `CELLA_TEST_URL`, `CELLA_TEST_TOKEN` and so on, so a stack that
+exports them runs the command with no flag at all.
 
 ## Reading the report
 
@@ -135,6 +135,10 @@ error envelope with its fixed sentences, the list envelope, the stream
 framing. It shares no type with any implementation, so a server written from
 the API documentation alone passes it. Run it from a checkout of this
 repository against your own address, with your own tokens.
+
+A create may answer before its sandbox runs. Every case that runs a command
+in a sandbox reads it until it is `Running`, and one case holds a create with
+`?wait=1` and expects the answer to be `Running` already.
 
 Some defaults are part of the contract and some are yours. A sandbox applied
 with no workspace, working directory, egress or spawn fields has to come back
