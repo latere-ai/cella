@@ -11,8 +11,7 @@ your own infrastructure running a worker that connects outbound.
 Identity comes from any OpenID Connect issuer. Permission comes from an
 endpoint you write.
 
-Latere runs Cella inside its hosted platform; this repository is the
-control plane that platform is built on, and anyone can run it.
+This repository is the whole control plane, and anyone can run it.
 
 [![CI](https://github.com/latere-ai/cella/actions/workflows/verify.yml/badge.svg)](https://github.com/latere-ai/cella/actions/workflows/verify.yml)
 [![Release](https://img.shields.io/github/v/release/latere-ai/cella)](https://github.com/latere-ai/cella/releases)
