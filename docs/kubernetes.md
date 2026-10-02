@@ -27,6 +27,12 @@ A capability the environment does not provide is refused before anything
 runs: the route answers `422` with `capability_unsupported`, and a manifest
 that needs one is refused when it is created.
 
+While a sandbox's Pod is still starting, pulling its image or attaching its
+workspace, a command, a terminal, a file operation, an archive transfer and
+a desktop operation answer `409 phase_conflict`, and `details.detail` says
+what the Pod is waiting for, such as `container main is ContainerCreating`.
+Create with `?wait=1`, or wait for `Running`, before using a new sandbox.
+
 ## Reaching a port
 
 Declare the port by name in the manifest. Only a declared port is
@@ -169,9 +175,9 @@ each made with `create` and replaced or removed with `delete` on
 `cellad serve` checks every access in the Role when it starts and does not
 start without all of them, naming the ones it is missing; `cellad check`
 answers the same question at any time. An installation whose Role was
-written for an earlier release adds `get` on `pods/exec` and the
-`pods/portforward` rule before it moves to this one. A worker that runs this runtime checks the same list
-when it starts.
+written for a release before v0.4.0 adds `get` on `pods/exec` and the
+`pods/portforward` rule before it moves to a later one. A worker that runs
+this runtime checks the same list when it starts.
 
 ## Running more than one replica
 
@@ -209,20 +215,22 @@ per starting replica while its migrations run. A standby holds about one.
 Two replicas with a surge of one and `CELLA_DB_MAX_CONNS=3` is at most nine,
 and about four in steady state.
 
-**The first rollout.** A release before this one runs no standby, and a new
-replica beside it would become a second writer. The first rollout onto this
-release is a `Recreate`; every rollout after it can be rolling. Set
-`CELLA_ADVERTISE_URL` and the policy between the replicas in that `Recreate`
-already, so the writer it starts advertises where the next rollout's
-standbys forward to.
+**The first rollout.** A release before v0.9.0 runs no standby, and a new
+replica beside it would become a second writer. The first rollout from such
+a release onto v0.9.0 or later is a `Recreate`; every rollout after it can
+be rolling. Set `CELLA_ADVERTISE_URL` and the policy between the replicas
+in that `Recreate` already, so the writer it starts advertises where the
+next rollout's standbys forward to.
 
 **Streams.** A WebSocket or a following stream ends when the replica it runs
 through stops, and one a standby forwards ends when either the standby or
 the writer stops. A rollout therefore ends every terminal, screen, dial and
-following feed at least once, closed with `1001` where the writer closes it.
-A client reconnects: a terminal starts a new session, a following feed
-resumes from the newest `seq` it holds, and a gateway or a worker dials
-again at once and is made whole by the writer's snapshot.
+following feed at least once, closed with `1001` where the writer closes it,
+and a create held with `?wait=1` answers the sandbox as it stands rather
+than holding the handoff. A client reconnects: a terminal starts a new
+session, a following feed resumes from the newest `seq` it holds, and a
+gateway or a worker dials again at once and is made whole by the writer's
+snapshot.
 
 **One replica with a database.** Without `CELLA_ADVERTISE_URL` the process
 never forwards: it waits for the writer lease and then serves. After a crash
