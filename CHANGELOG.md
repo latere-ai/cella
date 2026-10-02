@@ -12,6 +12,12 @@ refused before it is pushed.
   opens the operation's `description`, except on the port proxy and redirect
   operations, whose shared description already stated it. A reference that
   lists operations by their summary can use it as a label.
+- Added: the API document shows the answer of every operation that has a
+  body, and every JSON request body, as a wire example: the object as the
+  server encodes it, or a few lines of a log or of the event feed. Where the
+  bytes are a file, an image or a stream of frames the document states a
+  binary schema under the media type instead. The WebSocket routes say which
+  frames travel once the connection is upgraded.
 
 ## v0.11.0 - 2026-10-01
 

@@ -14,6 +14,7 @@ import (
 
 	"latere.ai/x/cella/api"
 	"latere.ai/x/cella/client"
+	v1 "latere.ai/x/cella/manifest/v1"
 )
 
 // TestTheDocumentIsServed: the handler answers the carried document as YAML,
@@ -44,11 +45,17 @@ func TestTheDocumentIsServed(t *testing.T) {
 	}
 }
 
+// exampleIssuer is the issuer the document's wire examples render an owner
+// from, under the domain reserved for documentation.
+const exampleIssuer = "https://issuer.example.com"
+
 // TestTheDocumentNamesNoInstallation: the document travels to every reader of
 // this open control plane, so the one server it names is the one it was
-// served from and no host of anyone's.
+// served from and no host of anyone's. Its wire examples carry two strings
+// that read like a host and name none: the apiVersion every manifest states,
+// and the example issuer. Both are set aside before the document is read.
 func TestTheDocumentNamesNoInstallation(t *testing.T) {
-	body := string(api.Document)
+	body := strings.NewReplacer(v1.APIVersion, "", exampleIssuer, "").Replace(string(api.Document))
 	for _, coordinate := range []string{"https://", "http://", ".latere.ai"} {
 		if strings.Contains(body, coordinate) {
 			t.Errorf("the document names %q", coordinate)

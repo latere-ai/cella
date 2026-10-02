@@ -44,9 +44,43 @@ paths:
       parameters:
         - $ref: "#/components/parameters/Wait"
         - $ref: "#/components/parameters/WaitTimeout"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            example: &sandboxManifest
+              apiVersion: cella.latere.ai/v1beta1
+              kind: Sandbox
+              metadata: &sandboxMetadata
+                name: work
+              spec: {}
       responses:
         "201":
           description: The sandbox as recorded, or as it stands when a held answer ends.
+          content:
+            application/json:
+              example: &sandboxPending
+                apiVersion: cella.latere.ai/v1beta1
+                kind: Sandbox
+                metadata: *sandboxMetadata
+                spec: &sandboxSpec
+                  environment: default
+                  workdir: /workspace
+                  workspace:
+                    path: /workspace
+                    source: empty
+                  network:
+                    egress:
+                      mode: open
+                status:
+                  id: sbx_example
+                  owner: "https://issuer.example.com|alice"
+                  environment: default
+                  driver: native
+                  isolation: none
+                  phase: Pending
+                  root: sbx_example
+                  createdAt: "2026-09-22T12:00:00Z"
         default:
           $ref: "#/components/responses/Error"
     get:
@@ -83,6 +117,37 @@ paths:
       responses:
         "200":
           description: The answer this route serves.
+          content:
+            application/json:
+              example:
+                items:
+                  - &sandboxRunning
+                    apiVersion: cella.latere.ai/v1beta1
+                    kind: Sandbox
+                    metadata: *sandboxMetadata
+                    spec: *sandboxSpec
+                    status:
+                      id: sbx_example
+                      owner: "https://issuer.example.com|alice"
+                      environment: default
+                      driver: native
+                      isolation: none
+                      phase: Running
+                      root: sbx_example
+                      conditions: &sandboxConditions
+                        - type: EgressEnforced
+                          status: "False"
+                          reason: NotEnforcedByDriver
+                          message: This environment records the boundary and does not confine the workload to it.
+                          since: "2026-09-22T12:00:00Z"
+                        - type: Scheduled
+                          status: "True"
+                          reason: Placed
+                          since: "2026-09-22T12:00:00Z"
+                      createdAt: "2026-09-22T12:00:00Z"
+                      startedAt: "2026-09-22T12:00:01Z"
+                      lastActivityAt: "2026-09-22T12:00:01Z"
+                next: ""
         default:
           $ref: "#/components/responses/Error"
   /v1/sandboxes/{name}:
@@ -105,11 +170,22 @@ paths:
       parameters:
         - $ref: "#/components/parameters/Wait"
         - $ref: "#/components/parameters/WaitTimeout"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            example: *sandboxManifest
       responses:
         "200":
           description: The sandbox the update left.
+          content:
+            application/json:
+              example: *sandboxRunning
         "201":
           description: The sandbox the create recorded.
+          content:
+            application/json:
+              example: *sandboxPending
         default:
           $ref: "#/components/responses/Error"
   /v1/sandboxes/{id}:
@@ -128,6 +204,9 @@ paths:
       responses:
         "200":
           description: The answer this route serves.
+          content:
+            application/json:
+              example: *sandboxRunning
         default:
           $ref: "#/components/responses/Error"
     delete:
@@ -139,6 +218,25 @@ paths:
       responses:
         "200":
           description: The answer this route serves.
+          content:
+            application/json:
+              example:
+                apiVersion: cella.latere.ai/v1beta1
+                kind: Sandbox
+                metadata: *sandboxMetadata
+                spec: *sandboxSpec
+                status:
+                  id: sbx_example
+                  owner: "https://issuer.example.com|alice"
+                  environment: default
+                  driver: native
+                  isolation: none
+                  phase: Deleting
+                  root: sbx_example
+                  conditions: *sandboxConditions
+                  createdAt: "2026-09-22T12:00:00Z"
+                  startedAt: "2026-09-22T12:00:01Z"
+                  lastActivityAt: "2026-09-22T12:00:01Z"
         default:
           $ref: "#/components/responses/Error"
   /v1/sandboxes/{id}/start:
@@ -156,6 +254,9 @@ paths:
       responses:
         "200":
           description: The answer this route serves.
+          content:
+            application/json:
+              example: *sandboxRunning
         default:
           $ref: "#/components/responses/Error"
   /v1/sandboxes/{id}/stop:
@@ -175,6 +276,26 @@ paths:
       responses:
         "200":
           description: The answer this route serves.
+          content:
+            application/json:
+              example:
+                apiVersion: cella.latere.ai/v1beta1
+                kind: Sandbox
+                metadata: *sandboxMetadata
+                spec: *sandboxSpec
+                status:
+                  id: sbx_example
+                  owner: "https://issuer.example.com|alice"
+                  environment: default
+                  driver: native
+                  isolation: none
+                  phase: Stopped
+                  root: sbx_example
+                  conditions: *sandboxConditions
+                  createdAt: "2026-09-22T12:00:00Z"
+                  startedAt: "2026-09-22T12:00:01Z"
+                  stoppedAt: "2026-09-22T12:30:00Z"
+                  lastActivityAt: "2026-09-22T12:29:00Z"
         default:
           $ref: "#/components/responses/Error"
   /v1/sandboxes/{id}/exec:
@@ -191,17 +312,40 @@ paths:
       description: >-
         Run a command: the framed exec stream, or one JSON result with wait=1.
         Authorized as `sandbox.exec`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            example:
+              command: [sh, -c, echo hello]
       responses:
         "200":
           description: The answer this route serves.
+          content:
+            application/json:
+              example:
+                exitCode: 0
+                stdout: "hello\n"
+                stderr: ""
+                truncated: false
+                durationMs: 6
+            application/vnd.cella.exec-stream:
+              schema:
+                type: string
+                format: binary
         default:
           $ref: "#/components/responses/Error"
     get:
       operationId: execSocket
       summary: Open the exec socket
       description: >-
-        Open the exec WebSocket, for a command with input or a terminal.
-        Authorized as `sandbox.exec`.
+        Open the exec WebSocket, for a command with input or a terminal. Once
+        upgraded, the first text frame is the JSON request, binary frames
+        carry the command's input and output, a text frame
+        `{"resize": {"cols": 120, "rows": 40}}` resizes a terminal, and the
+        last text frame is `{"exit": 0}` with the exit code, or
+        `{"error": {...}}` with the refusal envelope. Authorized as
+        `sandbox.exec`.
       responses:
         "200":
           description: The answer this route serves.
@@ -219,8 +363,12 @@ paths:
       operationId: attachSandbox
       summary: Open the attach socket
       description: >-
-        Open the attach WebSocket, which carries a pseudo-terminal. Authorized
-        as `sandbox.exec`.
+        Open the attach WebSocket, which carries a pseudo-terminal. Once
+        upgraded, the first text frame is the JSON request, binary frames
+        carry the terminal's bytes both ways, a text frame
+        `{"resize": {"cols": 120, "rows": 40}}` resizes it, and the last text
+        frame is `{"exit": 0}` with the exit code, or `{"error": {...}}` with
+        the refusal envelope. Authorized as `sandbox.exec`.
       responses:
         "200":
           description: The answer this route serves.
@@ -403,6 +551,13 @@ paths:
           description: The entry.
           content:
             application/json:
+              example: &fileEntry
+                name: notes.txt
+                path: /workspace/notes.txt
+                size: 6
+                mode: "0644"
+                modTime: "2026-09-22T12:00:00Z"
+                isDir: false
               schema:
                 $ref: "#/components/schemas/FileInfo"
         default:
@@ -433,6 +588,10 @@ paths:
           description: The entries.
           content:
             application/json:
+              example:
+                items:
+                  - *fileEntry
+                next: ""
               schema:
                 type: object
                 properties:
@@ -462,6 +621,8 @@ paths:
         required: true
         content:
           application/json:
+            example:
+              path: /workspace/reports
             schema:
               type: object
               required: [path]
@@ -492,6 +653,9 @@ paths:
         required: true
         content:
           application/json:
+            example:
+              from: /workspace/notes.txt
+              to: /workspace/reports/notes.txt
             schema:
               type: object
               required: [from, to]
@@ -524,6 +688,11 @@ paths:
       responses:
         "200":
           description: The answer this route serves.
+          content:
+            text/plain:
+              example: |
+                listening on port 8080
+                GET /healthz 200
         default:
           $ref: "#/components/responses/Error"
   /v1/sandboxes/{id}/egress:
@@ -543,6 +712,19 @@ paths:
       responses:
         "200":
           description: The answer this route serves.
+          content:
+            application/json:
+              example:
+                items:
+                  - principal: "sandbox:sbx_example"
+                    at: "2026-09-22T12:00:05Z"
+                    door: proxy
+                    host: api.example.com
+                    port: 443
+                    decision: allowed
+                    bytesOut: 512
+                    bytesIn: 2048
+                    durationMs: 120
         default:
           $ref: "#/components/responses/Error"
   /v1/sandboxes/{id}/display:
@@ -562,6 +744,12 @@ paths:
       responses:
         "200":
           description: The answer this route serves.
+          content:
+            application/json:
+              example:
+                width: 1280
+                height: 800
+                ready: true
         default:
           $ref: "#/components/responses/Error"
   /v1/sandboxes/{id}/screenshot:
@@ -579,6 +767,15 @@ paths:
       responses:
         "200":
           description: The answer this route serves.
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
         default:
           $ref: "#/components/responses/Error"
   /v1/sandboxes/{id}/screen:
@@ -593,8 +790,10 @@ paths:
       operationId: sandboxScreen
       summary: Open the screen socket
       description: >-
-        Open the screen WebSocket, which carries frames. Authorized as
-        `sandbox.exec`.
+        Open the screen WebSocket, which carries frames. Once upgraded, each
+        binary frame is one image of the desktop, PNG or JPEG as `format`
+        names, at the pace `fps` names, from 1 to 10 frames a second.
+        Authorized as `sandbox.exec`.
       responses:
         "200":
           description: The answer this route serves.
@@ -614,9 +813,26 @@ paths:
       description: >-
         Run one batch of input events on the desktop. Authorized as
         `sandbox.exec`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            example:
+              events:
+                - type: move
+                  x: 10
+                  y: 20
+                - type: click
+                  button: left
+                - type: type
+                  text: hello
       responses:
         "200":
           description: The answer this route serves.
+          content:
+            application/json:
+              example:
+                executed: 3
         default:
           $ref: "#/components/responses/Error"
   /v1/sandboxes/{id}/ports:
@@ -636,6 +852,14 @@ paths:
       responses:
         "200":
           description: The answer this route serves.
+          content:
+            application/json:
+              example:
+                items:
+                  - name: web
+                    port: 8080
+                    state: listening
+                next: ""
         default:
           $ref: "#/components/responses/Error"
   /v1/sandboxes/{id}/ports/{name}/{path}:
@@ -672,6 +896,11 @@ paths:
       responses:
         "200":
           description: The answer the server inside the sandbox gave.
+          content:
+            "*/*":
+              schema:
+                type: string
+                format: binary
         default:
           $ref: "#/components/responses/Error"
     put:
@@ -681,6 +910,11 @@ paths:
       responses:
         "200":
           description: The answer the server inside the sandbox gave.
+          content:
+            "*/*":
+              schema:
+                type: string
+                format: binary
         default:
           $ref: "#/components/responses/Error"
     post:
@@ -690,6 +924,11 @@ paths:
       responses:
         "200":
           description: The answer the server inside the sandbox gave.
+          content:
+            "*/*":
+              schema:
+                type: string
+                format: binary
         default:
           $ref: "#/components/responses/Error"
     delete:
@@ -699,6 +938,11 @@ paths:
       responses:
         "200":
           description: The answer the server inside the sandbox gave.
+          content:
+            "*/*":
+              schema:
+                type: string
+                format: binary
         default:
           $ref: "#/components/responses/Error"
     options:
@@ -708,6 +952,11 @@ paths:
       responses:
         "200":
           description: The answer the server inside the sandbox gave.
+          content:
+            "*/*":
+              schema:
+                type: string
+                format: binary
         default:
           $ref: "#/components/responses/Error"
     head:
@@ -717,6 +966,11 @@ paths:
       responses:
         "200":
           description: The answer the server inside the sandbox gave.
+          content:
+            "*/*":
+              schema:
+                type: string
+                format: binary
         default:
           $ref: "#/components/responses/Error"
     patch:
@@ -726,6 +980,11 @@ paths:
       responses:
         "200":
           description: The answer the server inside the sandbox gave.
+          content:
+            "*/*":
+              schema:
+                type: string
+                format: binary
         default:
           $ref: "#/components/responses/Error"
     trace:
@@ -735,6 +994,11 @@ paths:
       responses:
         "200":
           description: The answer the server inside the sandbox gave.
+          content:
+            "*/*":
+              schema:
+                type: string
+                format: binary
         default:
           $ref: "#/components/responses/Error"
   /v1/sandboxes/{id}/ports/{name}:
@@ -936,6 +1200,23 @@ paths:
           description: A page, or with follow=1 a following feed.
           content:
             application/json:
+              example:
+                items:
+                  - id: evt_example2
+                    seq: 2
+                    type: sandbox.started
+                    time: "2026-09-22T12:00:01Z"
+                    object:
+                      kind: Sandbox
+                      id: sbx_example
+                      name: work
+                      owner: "https://issuer.example.com|alice"
+                    subject: "https://issuer.example.com|alice"
+                    requestId: req_example
+                    reason: Request
+                    data:
+                      phase: Running
+                next: "2"
               schema:
                 type: object
                 required: [items, next]
@@ -947,6 +1228,9 @@ paths:
                   next:
                     type: string
             application/x-ndjson:
+              example: |
+                {"id":"evt_example1","seq":1,"type":"sandbox.created","time":"2026-09-22T12:00:00Z","object":{"kind":"Sandbox","id":"sbx_example","name":"work","owner":"https://issuer.example.com|alice"},"subject":"https://issuer.example.com|alice","requestId":"req_example","data":{"environment":"default","workdir":"/workspace","workspace":{"path":"/workspace","source":"empty"}}}
+                {"id":"evt_example2","seq":2,"type":"sandbox.started","time":"2026-09-22T12:00:01Z","object":{"kind":"Sandbox","id":"sbx_example","name":"work","owner":"https://issuer.example.com|alice"},"subject":"https://issuer.example.com|alice","requestId":"req_example","reason":"Request","data":{"phase":"Running"}}
               schema:
                 type: string
                 description: One record per line, an empty line as a heartbeat, and a refusal envelope as the last line of a feed that ended on a failure.
@@ -958,9 +1242,43 @@ paths:
       summary: Create a secret
       description: >-
         Create a secret from a manifest. Authorized as `secret.create`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            example: &secretManifest
+              apiVersion: cella.latere.ai/v1beta1
+              kind: Secret
+              metadata: &secretMetadata
+                name: api-key
+              spec:
+                scope:
+                  hosts: [api.example.com]
+                value: example-value
       responses:
         "200":
           description: The answer this route serves.
+          content:
+            application/json:
+              example: &secret
+                apiVersion: cella.latere.ai/v1beta1
+                kind: Secret
+                metadata: *secretMetadata
+                spec: &secretSpec
+                  kind: static
+                  scope:
+                    hosts: [api.example.com]
+                    ports: [443]
+                  inject:
+                    header: Authorization
+                    scheme: bearer
+                status:
+                  id: sec_example
+                  owner: "https://issuer.example.com|alice"
+                  version: 1
+                  createdAt: "2026-09-22T12:00:00Z"
+                  updatedAt: "2026-09-22T12:00:00Z"
+                  mountedBy: 0
         default:
           $ref: "#/components/responses/Error"
     get:
@@ -983,6 +1301,10 @@ paths:
           description: One page of secrets, each without its value.
           content:
             application/json:
+              example:
+                items:
+                  - *secret
+                next: ""
               schema:
                 type: object
                 properties:
@@ -1009,9 +1331,28 @@ paths:
       description: >-
         Apply a secret by name; a second apply rotates the value in place.
         Authorized as `secret.create or secret.update`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            example: *secretManifest
       responses:
         "200":
           description: The answer this route serves.
+          content:
+            application/json:
+              example:
+                apiVersion: cella.latere.ai/v1beta1
+                kind: Secret
+                metadata: *secretMetadata
+                spec: *secretSpec
+                status:
+                  id: sec_example
+                  owner: "https://issuer.example.com|alice"
+                  version: 2
+                  createdAt: "2026-09-22T12:00:00Z"
+                  updatedAt: "2026-09-22T12:30:00Z"
+                  mountedBy: 0
         default:
           $ref: "#/components/responses/Error"
     get:
@@ -1024,6 +1365,7 @@ paths:
           description: The secret, without its value.
           content:
             application/json:
+              example: *secret
               schema:
                 $ref: "#/components/schemas/Secret"
         default:
@@ -1035,6 +1377,9 @@ paths:
       responses:
         "200":
           description: The answer this route serves.
+          content:
+            application/json:
+              example: *secret
         default:
           $ref: "#/components/responses/Error"
   /v1/environments:
@@ -1047,6 +1392,46 @@ paths:
       responses:
         "200":
           description: The answer this route serves.
+          content:
+            application/json:
+              example:
+                items:
+                  - apiVersion: cella.latere.ai/v1beta1
+                    kind: Environment
+                    metadata:
+                      name: default
+                    spec:
+                      mode: inprocess
+                      isolation: none
+                      capacity: auto
+                      scheduling: &environmentScheduling
+                        mode: direct
+                        queues: [default]
+                        defaultQueue: default
+                    status:
+                      id: default
+                      owner: controller
+                      phase: Ready
+                      driver: native
+                      isolation: none
+                      capabilities: &environmentCapabilities
+                        egress: null
+                        mesh: false
+                        ingress: false
+                        volumes: false
+                        snapshots: false
+                        attach: true
+                        dial: true
+                        display: false
+                        input: false
+                        resize: false
+                        pool: true
+                        files: true
+                        detach: false
+                      version: 1
+                      createdAt: "2026-09-22T12:00:00Z"
+                      updatedAt: "2026-09-22T12:00:00Z"
+                next: ""
         default:
           $ref: "#/components/responses/Error"
     post:
@@ -1055,9 +1440,45 @@ paths:
       description: >-
         Create an environment from a manifest. The name is the environment's
         id, and a taken name is refused. Authorized as `environment.create`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            example: &environmentManifest
+              apiVersion: cella.latere.ai/v1beta1
+              kind: Environment
+              metadata: &environmentMetadata
+                name: eu-gpu
+                labels:
+                  region: eu
+              spec:
+                mode: worker
+                isolation: none
+                capacity: &environmentCapacity
+                  cpu: "8"
+                  memory: 16Gi
+                  sandboxes: 10
       responses:
         "200":
           description: The answer this route serves.
+          content:
+            application/json:
+              example:
+                apiVersion: cella.latere.ai/v1beta1
+                kind: Environment
+                metadata: *environmentMetadata
+                spec: &environmentSpec
+                  mode: worker
+                  isolation: none
+                  capacity: *environmentCapacity
+                  scheduling: *environmentScheduling
+                status:
+                  id: eu-gpu
+                  owner: "https://issuer.example.com|admin"
+                  phase: Pending
+                  version: 1
+                  createdAt: "2026-09-22T12:00:00Z"
+                  updatedAt: "2026-09-22T12:00:00Z"
         default:
           $ref: "#/components/responses/Error"
   /v1/environments/{id}:
@@ -1077,6 +1498,25 @@ paths:
       responses:
         "200":
           description: The answer this route serves.
+          content:
+            application/json:
+              example:
+                apiVersion: cella.latere.ai/v1beta1
+                kind: Environment
+                metadata: *environmentMetadata
+                spec: *environmentSpec
+                status:
+                  id: eu-gpu
+                  owner: "https://issuer.example.com|admin"
+                  phase: Ready
+                  driver: native
+                  isolation: none
+                  capabilities: *environmentCapabilities
+                  workers: 1
+                  lastHeartbeat: "2026-09-22T12:30:00Z"
+                  version: 1
+                  createdAt: "2026-09-22T12:00:00Z"
+                  updatedAt: "2026-09-22T12:05:00Z"
         default:
           $ref: "#/components/responses/Error"
     put:
@@ -1087,9 +1527,28 @@ paths:
         update when it is held. The answer carries an ETag, and an If-Match
         that names an older version is refused with version_conflict.
         Authorized as `environment.create` or `environment.update`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            example: *environmentManifest
       responses:
         "200":
           description: The answer this route serves.
+          content:
+            application/json:
+              example:
+                apiVersion: cella.latere.ai/v1beta1
+                kind: Environment
+                metadata: *environmentMetadata
+                spec: *environmentSpec
+                status:
+                  id: eu-gpu
+                  owner: "https://issuer.example.com|admin"
+                  phase: Pending
+                  version: 2
+                  createdAt: "2026-09-22T12:00:00Z"
+                  updatedAt: "2026-09-22T12:30:00Z"
         default:
           $ref: "#/components/responses/Error"
     delete:
@@ -1120,6 +1579,12 @@ paths:
       responses:
         "200":
           description: The answer this route serves.
+          content:
+            application/json:
+              example:
+                token: eyJ...example
+                jti: &keyID "01EXAMPLE00000000000000000"
+                exp: "2026-09-22T13:00:00Z"
         default:
           $ref: "#/components/responses/Error"
     get:
@@ -1151,6 +1616,14 @@ paths:
           description: One page of the environment's keys.
           content:
             application/json:
+              example:
+                items:
+                  - jti: *keyID
+                    mintedAt: "2026-09-22T12:00:00Z"
+                    exp: "2026-09-22T13:00:00Z"
+                    revoked: false
+                    mintedBy: "https://issuer.example.com|admin"
+                next: ""
               schema:
                 type: object
                 required: [items, next]
@@ -1224,9 +1697,25 @@ paths:
       description: >-
         Register a worker for an environment; environment key only. Authorized
         as `none beyond the key`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            example:
+              driver: podman
+              isolation: container
+              capabilities:
+                files: true
       responses:
         "200":
           description: The answer this route serves.
+          content:
+            application/json:
+              example:
+                worker: wrk_example
+                heartbeatInterval: 15s
+                lease: 45s
+                environment: default
         default:
           $ref: "#/components/responses/Error"
   /v1/environments/{id}/operations:
@@ -1241,8 +1730,9 @@ paths:
       operationId: workerOperations
       summary: Open the operations socket
       description: >-
-        Open the worker operations WebSocket; environment key only. Authorized
-        as `none beyond the key`.
+        Open the worker operations WebSocket; environment key only. Once
+        upgraded, subprotocol `cella.worker.v1`, every frame is a binary frame
+        of that protocol, at most 1 MiB. Authorized as `none beyond the key`.
       responses:
         "200":
           description: The answer this route serves.
@@ -1260,8 +1750,10 @@ paths:
       operationId: gatewaySync
       summary: Open the gateway socket
       description: >-
-        Open the gateway sync WebSocket; environment key only. Authorized as
-        `none beyond the key`.
+        Open the gateway sync WebSocket; environment key only. Once upgraded,
+        each text frame is one JSON object of the `cella.egress.v1` protocol,
+        named by its `type`: `hello`, `snapshot`, `put`, `purge`, `ack`,
+        `heartbeat`, `record` or `use`. Authorized as `none beyond the key`.
       responses:
         "200":
           description: The answer this route serves.
