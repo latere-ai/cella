@@ -8,7 +8,7 @@ depends_on:
 affects: [authorizer/, internal/auth/, internal/config/, internal/api/, test/stubs/]
 effort: medium
 created: 2026-09-12
-updated: 2026-09-29
+updated: 2026-10-03
 author: changkun
 ---
 
@@ -28,196 +28,61 @@ a self-hosted data plane registers with one an operator can revoke.
 
 ## Current state
 
-Not built, apart from the vocabulary package the 2026-09-16 amendment
-below names. The design replaces a shared identity type aliased into an
-authorization vocabulary with a subject string and an HTTP decision,
-so that a hosted platform, a company's own issuer, and a laptop's stub
-issuer are one code path.
+v0.1.0 (2026-09-17) shipped the identity this spec designs, and later
+releases added the parts other specs' slices carry. The vocabulary
+package and the grants of a narrowed credential, amended into this spec
+on 2026-09-16 and 2026-09-17, are in the Design below under their own
+heading.
 
-Amended on 2026-09-13 by the decision "one platform over open cores":
-the claims forwarded, the cache and retry rules, the verifier, the
-subject string and the probe id are one contract shared by the three
-open cores, Cella, Lux and Origo, so one authorizer serves all three.
+Built:
 
-Amended on 2026-09-16 by the identity leaf "one authorizer library",
-which names the library and the vocabulary's home. The library is
-`latere.ai/x/pkg/authz` at v0.70.0: the envelope, the client with its
-cache and retry, the owner policy's frame, `authz.Vocabulary`, the stub
-of `authz/stub`, the conformance suite of `authz/conformance`, and the
-endpoint scaffold of `authz/server`. The vocabulary's home is
-`cella/authorizer`, an importable package at this module's root beside
-`lux/authorizer`: the thirty-two actions of the resource table below,
-each a constant with the resource kind it acts on, `Vocabulary()` as
-`authz.Vocabulary`, and `WireLimits`/`DecodeLimits` over the three
-figures of the `limits` object. It is built, and its proofs are that the
-table matches this spec's, that the shared stub told the vocabulary
-passes `conformance.Run` driven from it, and that an endpoint written on
-`authz/server` with the owner policy behind it passes the same run.
+- The verifier over `CELLA_OIDC_ISSUERS`, with every key set read and
+  kept at start, the 24-hour age bound, issuer-qualified subjects, and
+  the reserved prefixes; the signer over `CELLA_TOKEN_KEY` and the key
+  set at `/.well-known/jwks.json`; the authorizer client with its
+  cache, its one retry and its fail-closed rules; the owner policy; the
+  vocabulary package `latere.ai/x/cella/authorizer`; and the grants of
+  a personal access token (v0.1.0). `go tool lateregate identity`
+  passes with no waiver. The conformance tier runs
+  `authkit/conformance` against the verifier, and `authz/conformance`
+  against the owner policy and against the stub, or instead of the stub
+  the endpoint `CELLA_TEST_AUTHORIZER_URL` and
+  `CELLA_TEST_AUTHORIZER_TOKEN` name.
+- Workload tokens minted at create and at recovery, projected by every
+  driver, re-minted at two thirds of their life, and revoked by `jti`
+  at a rotation, a recovery and a delete ([[045-workload-tokens]]);
+  `cellad check` sending the probe id and reading an allow as a
+  misconfiguration ([[048-release-and-check]]); the stub issuer and
+  authorizer of `cella-stubs` ([[049-stubs-and-tiers]]); all v0.2.0.
+- Environment keys minted, revoked, and refused off their
+  environment's worker and gateway routes
+  ([[051-environments-and-workers]], v0.3.0), and listed under
+  `environment.key`, with every list held to the decision's `filter`
+  ([[067-environment-list-ports-redirect-keys]], v0.5.0).
+- Tokens minted under a `CELLA_PUBLIC_URL` with a path name that URL as
+  `iss` ([[071-serving-under-a-base-path]], v0.5.0).
+- A token minted from a service account's key is narrowed by its grants
+  under the owner policy (v0.9.0), and `sandbox.update` and
+  `secret.update` carry `resource.proposed` (v0.10.0).
 
-Amended on 2026-09-17 by the maintainer's decision on the family's age
-bound: every core verifies an issuer-minted token against the same
-bound, the `MaxTokenAge` default of `latere.ai/x/pkg/authkit/jwt`, 24
-hours. A caller's token whose `iat` is older than that is refused
-whatever `exp` it carries, so the list below of what refuses a caller's
-token gains the age; Origo names the same figure and Lux inherits it.
-A token that stamps no `iat` is refused for the same reason, because an
-age no one can read is not an age within the bound.
-Environment keys are not bounded by age, because one lives
-`CELLA_ENVIRONMENT_KEY_TTL`, a year by default, and its `exp` is its
-bound. Nothing else in this spec changes.
+The `resource` builders live in `internal/auth` and not in the
+vocabulary package, because an object's fields are
+[[003-manifest-contract]]'s types and the published package promises
+only the action and the kind it acts on.
 
-Amended on 2026-09-17 by the identity leaf "PAT scopes"
-(infrastructure/identity id-13), which narrows a credential below the
-person who holds it. A personal access token carries the grants its
-holder chose as RFC 9396's `authorization_details`, one entry per pair
-of an action and a resource selector, and an action is named from a
-published vocabulary: `cella:sandbox.read` is one of Cella's. Both
-halves below are within this spec's published design rather than beside
-it. The decision point is still the seam this spec draws, the envelope
-is still every claim of the verified token verbatim, and the vocabulary
-is still the table below.
+Open:
 
-**The door reads the claim.** `jwt.Config.ReadsGrants` is a service's
-promise that the restriction is applied somewhere, and a validator with
-it false refuses a token carrying grants with `grants_unread`: a claim
-that says what a credential may *not* do widens that credential when it
-is ignored, and a refusal is visible where an ignored restriction is
-not. `cellad` sets it on the validator for the listed issuers, which is
-the one that sees a person's token. The validator for the tokens
-`cellad` mints is left alone: no token `cellad` signs carries a
-`token_use`, so none of them is a personal access token and there is no
-grant on that path to read.
-
-**The decision point applies it.** The answer is the decision point's
-own decision and the grants, intersected:
-
-```
-allow(req) = decide(req) AND ( token_use(req) != pat
-                               OR EXISTS g in G(req) : covers(g, req) )
-
-covers(g, req) = "cella:" + req.action in g.actions
-                 AND ( g.identifier = "" OR g.identifier = req.resource.id )
-```
-
-The conjunction turns an allow into a deny and never a deny into an
-allow. The role is the ceiling, and a grant is a restriction and never
-authority: a grant naming a sandbox the person does not own still
-reaches nothing, because `decide` answers first. `authz.Restrict` is
-that function, written once in `latere.ai/x/pkg/authz`, and `cellad`
-takes it rather than writing a second. An operator's endpoint on
-`authz/server` applies it to whatever its `Decider` returned, with no
-option to switch it off. The owner policy runs in this process with no
-endpoint in front of it, so the policy calls `Restrict` on its own
-decision, over the claims the envelope already carried verbatim: a
-request built with empty claims would restrict nothing, which is why
-`Envelope` forwards the token as it came and a test pins that it does.
-
-The deny's reason is `grant`, which a caller reads as the developer
-detail of the 403 a refused action answers, or of the 404 a refused
-lookup answers. A personal access token carrying no grant at all is
-denied too: the claim is a restriction, so an absent one is not full
-authority, and auth writes a grant list onto every key rather than
-leaving one empty.
-
-`authz/conformance` drives the rule as case A13 under `WithVocabulary`,
-and this repository runs it twice, for a reason the scaffold makes
-necessary. `authz/server` narrows whatever its decider returned, so a
-suite driven through the scaffold passes whether or not the policy
-narrows anything; the second run serves the owner policy over the
-contract's wire and the bearer alone, and reads the policy's own
-answer. That is the run that holds the promise `ReadsGrants` makes.
-
-`Vocabulary()` also carries a heading per resource kind now, read
-through `Vocabulary.Label`: Sandboxes, Secrets, Volumes, Sandbox sets,
-Environments. A key's grant picker groups by kind, because an action
-acts on exactly one kind and `set.*` is why the grouping is the kind
-and not the action's prefix, and it names each group from this table
-rather than from a word of its own. `SandboxSet` is a type name and not
-a heading.
-
-One thing here is pkg v0.75.0's and not id-13's. `jwt.Validator.Warm`
-reads every configured issuer's key set once. `cellad` already reads
-each one at start and refuses to start when one does not answer, but
-the validator holds its own cache and that check filled none of it, so
-the first request a node ever served paid for a discovery document and
-a key set on the request path. The cache is warmed at start now,
-through the same client, and a set that does not answer there is
-refused the way the start-up check's is: one rule, and at start every
-issuer answers or `cellad` does not start.
-
-Nothing else in this spec changes. The resource table, the subjects,
-the tokens `cellad` mints and the owner policy's own rows are
-unchanged: the grants narrow the answer the policy gives and rewrite
-none of it.
-
-Built on 2026-09-17, on pkg v0.72.0: the `CELLA_*` configuration, the
-verifier over the issuers, the signer and the key set at
-`/.well-known/jwks.json`, the client and the guard that ask the
-endpoint, the owner policy's own rows, and the node wiring that brings
-the three up before the listeners. `CELLA_OIDC_ISSUERS` is
-`jwt.Config.Issuers` and `CELLA_TOKEN_KEY` is `jwt.Config.LocalKeys`,
-both of which pkg added for this spec; the cache, the retry and the
-failure rules are `authz.Client`'s and nothing here restates them. The
-gate's `verifier` waiver is gone: `go tool lateregate identity` prints
-`PASS verifier` and `PASS authorizer` with no waiver, and `cellad`
-reaches the OpenTelemetry SDK, which spec 001 admits and the gate's
-`depcheck` rows now record.
-
-The conformance tier runs `authkit/conformance` against the
-authenticator `cellad` runs and `authz/conformance` against both the
-stub of `authz/stub` and the owner policy served through
-`authz/server`; `CELLA_TEST_AUTHORIZER_URL` and
-`CELLA_TEST_AUTHORIZER_TOKEN` point the second half at a deployed
-endpoint, which is what a release run sets. Those two names are the
-tiers' and belong in [[012-test-stubs-and-tiers]]'s table.
-
-Completed on 2026-09-20 by [[045-workload-tokens]]: the controller mints
-a workload token at create and at recovery, every driver projects it,
-the reaper re-mints and re-projects it at two thirds of its lifetime,
-and the revocation list of [[010-state]] is written at a rotation, a
-recovery and a delete and read by the verifier on every token `cellad`
-signed. The sandbox phase is not read on that path and needs no read: a
-delete revokes, so a deleted sandbox's token is refused at once by the
-list. A token `cellad` minted that carries no `jti` is refused, because
-a credential that cannot be revoked is not one this control plane
-issued.
-
-Amended on 2026-09-24 by [[067-environment-list-ports-redirect-keys]]:
-the `filter` of a list decision narrows every list, not the sandbox list
-alone. Each list holds every row to the filter's owners and labels and
-then asks the kind's read on each row the filter admits, leaving out a
-row the read refuses; a read that produced no decision refuses the whole
-list. The default environment is the one row the filter does not narrow:
-every subject may use it, it carries no caller's owner or labels, so no
-filter over owners and labels names it without naming what the filter
-hides, and it is listed whenever `environment.read` on it is allowed. An
-authorizer that narrows `environment.list` to a tenant keeps the default
-visible by allowing that read, and hides it by denying it, which hides it
-from the read by id as well. `environment.key` also authorizes `GET
-/v1/environments/{id}/keys`, the listing of an environment's keys, which
-the control plane now records at mint with the subject that minted them.
-
-What is left of this spec waits on other specs rather than on a
-decision, and the acceptance table says which per row: the
-routes an environment key authorizes ([[008-api]],
-[[021-data-plane-workers]]), the ceilings an allow overrides
-([[007-admission]], [[008-api]], [[003-manifest-contract]]), the
-`cellad check` subcommand ([[014-release-and-installation]]), and the
-stub of [[012-test-stubs-and-tiers]]. The resource builders are
-`internal/auth`'s for now rather than the vocabulary package's, because
-the fields of an object are [[003-manifest-contract]]'s types and the
-published package promises what an endpoint imports: the action and its
-kind.
-
-One note the resource table below does not carry. Cella's list answer is
-not a page of its own: it is a decision, an allow whose optional
-`filter` narrows the page to owners and labels, as the response below
-shows. On pkg v0.70.0 the scaffold of `authz/server` routed every action
-whose name ends in `.list` to a `Lister`, which is a page; v0.70.1
-corrected that, and an endpoint now names the actions whose answer is a
-page in `server.Options.PageActions`. Cella names none, so one `Decider`
-answers all thirty-two rows and writes the filter itself. `authz.IsList`
-reads the verb and routes nothing.
+- `limits.requests_per_minute`: there is no rate limit ([[008-api]]),
+  so an allow that carries a figure above zero is refused with
+  `capability_unsupported`. `limits.max_priority` is decoded and not
+  applied by `cellad`; a plane applies it by passing it to `Resolve` as
+  `Limits.MaxPriority`.
+- `POST /v1/sandboxes/{id}/token` is not served, so nothing asks
+  `sandbox.token` ([[008-api]]).
+- `TestRefusedReferencesLookMissing`, the control of
+  [[013-security-and-threat-model]] that holds a refused reference to
+  the same answer as a missing one, is not written; the guard's half is
+  `TestDenyMapping`.
 
 ## Design
 
@@ -450,6 +315,61 @@ Rules:
   ([[022-mesh-and-spawn]]) and by nothing else; an authorizer or the
   owner policy may refuse a `sandbox.create` from a workload for its
   own reasons, but neither reads the ledger and neither is the budget.
+
+### The vocabulary and a credential's grants
+
+Amended on 2026-09-16, 2026-09-17 and 2026-09-27.
+
+The vocabulary is `latere.ai/x/cella/authorizer`, an importable package
+at the module root: the thirty-two actions of the table above as
+constants with the kind each acts on, `Vocabulary()` as
+`authz.Vocabulary` with a heading per kind read through
+`Vocabulary.Label` (Sandboxes, Secrets, Volumes, Sandbox sets,
+Environments), and `WireLimits` and `DecodeLimits` over the `limits`
+object. A key's grant picker groups actions by kind and names each group
+from this table, because an action acts on exactly one kind. Cella's
+list answer is a decision whose `filter` narrows the page, not a page,
+so an endpoint on `authz/server` names no action in
+`server.Options.PageActions` and one `Decider` answers every row.
+
+A personal access token, and a token minted from a service account's
+key, carries the grants its holder chose as RFC 9396's
+`authorization_details`: one entry per pair of an action, named from a
+published vocabulary as `cella:sandbox.read` is, and a resource
+selector. A grant narrows a credential below its holder and is never
+authority:
+
+```
+allow(req) = decide(req) AND ( NOT narrowed(token_use(req))
+                               OR EXISTS g in G(req) : covers(g, req) )
+
+covers(g, req) = "cella:" + req.action in g.actions
+                 AND ( g.identifier = "" OR g.identifier = req.resource.id )
+```
+
+`narrowed` is `authkit.NarrowedByGrants`, true for those two credential
+classes and false for every other. The conjunction turns an allow into
+a deny and never a deny into an allow, so a grant naming a sandbox its
+holder does not own reaches nothing. `authz.Restrict` is that function,
+written once in `latere.ai/x/pkg/authz`: an endpoint on `authz/server`
+applies it to its `Decider`'s answer with no option to switch it off,
+and the owner policy applies it to its own decision over the claims the
+envelope carries verbatim, which is why `Envelope` forwards the token as
+it came. The deny's reason is `grant`, the developer detail of the 403
+or 404 the refusal answers. A narrowed token that carries no grant is
+denied, because the claim is a restriction and an absent one is not
+full authority.
+
+The door reads the claim. `jwt.Config.ReadsGrants` is set on the
+validator for the listed issuers, and a validator without it refuses a
+token carrying grants with `grants_unread`, since a restriction that is
+ignored widens the credential. The validator for the tokens `cellad`
+mints is left alone: none of them carries a `token_use`. Case A13 of
+`authz/conformance` drives the rule under `WithVocabulary` twice: once
+through the scaffold, which narrows whatever its decider returned, and
+once serving the owner policy over the contract's wire and the bearer
+alone, `TestOwnerPolicyNarrowsByTheGrants`, which is the run that reads
+the policy's own answer.
 
 ### The owner policy
 
