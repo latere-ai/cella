@@ -51,9 +51,11 @@ before anything is sent.
 
 ### Inside a sandbox
 
-Code running in a sandbox needs no configuration. The control plane gives
-the sandbox its address in `CELLA_URL` and its own token at
-`/run/cella/token`:
+Code running in a sandbox needs no token configured. The control plane
+gives the sandbox its own token in the file `CELLA_TOKEN_FILE` names,
+`/run/cella/token` on every runtime but the native one. It does not set the
+control plane's address there, so the program or its environment sets
+`CELLA_URL`:
 
 ```go
 c, err := client.New(client.Environment(os.Getenv))
@@ -62,7 +64,8 @@ c, err := client.New(client.Environment(os.Getenv))
 `client.Environment` reads `CELLA_URL`, then takes the token from
 `CELLA_TOKEN`, else from the file `CELLA_TOKEN_FILE` names, else from
 `/run/cella/token`. It is the same order the `cella` command uses.
-`client.New` never reads the environment by itself.
+`client.New` never reads the environment by itself, and refuses a
+configuration with no address.
 
 ### Your own HTTP client
 
@@ -77,7 +80,10 @@ socket call fails with a message saying so. Put a deadline on the call's
 context instead.
 
 The package's own transport reads no proxy variable. A sandbox reaches its
-control plane directly, not through its egress gateway.
+control plane directly, not through its egress gateway. On Kubernetes,
+once sandboxes are confined to the gateway, a sandbox does not reach the
+control plane at all
+([What a sandbox can reach](kubernetes.md#what-a-sandbox-can-reach)).
 
 ## Manifests
 
@@ -91,9 +97,9 @@ typed, err := client.Encode(v1.Sandbox{...}) // a typed object, sent as JSON
 
 | Call | What it does |
 |---|---|
-| `CreateSandbox(ctx, m, opts...)` | Creates a sandbox. The manifest may leave the name out. The answer is the sandbox as soon as it is recorded, `Pending`; pass `client.Wait(timeout)` to have the server hold it until the sandbox runs or fails, for at most `timeout` (zero takes the server's ten minutes). |
+| `CreateSandbox(ctx, m, opts...)` | Creates a sandbox. The manifest may leave the name out. The answer is the sandbox as soon as it is recorded, `Pending`; pass `client.Wait(timeout)` to have the server hold it until the sandbox runs or fails, for at most `timeout` (zero takes the server's ten minutes). A server that stops, or hands off to another replica, answers a held create early with the sandbox as it stands, so read `Status.Phase` before you use it. |
 | `ApplySandbox(ctx, name, m, opts...)` | Creates the sandbox under that name, or updates the one you hold, so applying the same manifest again makes no second sandbox. `client.Wait` holds the answer the same way. |
-| `CreateSecret`, `ApplySecret` | The same for a Secret. No answer ever carries its value. |
+| `CreateSecret`, `ApplySecret` | The same for a Secret. No answer ever carries its value. `Status.LastUsedAt` says when a gateway last substituted it, at a [five-minute resolution](manifest.md#secret), and is zero until one has. |
 | `CreateEnvironment`, `ApplyEnvironment` | The same for an Environment. |
 
 Your bytes are sent unchanged. If the server refuses a field, the error
@@ -112,7 +118,7 @@ sandbox, raw, err := c.GetSandbox(ctx, "agent-7")
 | Call | What it does |
 |---|---|
 | `GetSandbox`, `GetSecret`, `GetEnvironment` | Read one object by name or id. |
-| `ListSandboxes`, `ListSecrets`, `ListEnvironments` | List with `ListOptions`: labels (`team=core`), phase, owner, environment, and a total `Limit`. The sandbox list honors every selector and the secret list labels and owner. The client follows the pages for you. |
+| `ListSandboxes`, `ListSecrets`, `ListEnvironments` | List with `ListOptions`: labels (`team=core`), phase, owner, environment, and a total `Limit`. The sandbox list honors every selector and the secret list labels and owner. A server before v0.7.0 ignores both on the secret list, so a program that acts on the answer, such as one that deletes a person's secrets, compares `Status.Owner` as well. The client follows the pages for you. |
 | `GetAs`, `ListAs` | The same reads in a syntax you name with an `Accept` value, such as `application/yaml`, returned as the server wrote it. |
 | `StartSandbox`, `StopSandbox` | Start a stopped sandbox or stop a running one. |
 | `Delete(ctx, kind, ref)` | Delete an object of `client.KindSandbox`, `KindSecret` or `KindEnvironment`. |
@@ -124,6 +130,7 @@ sandbox, raw, err := c.GetSandbox(ctx, "agent-7")
 | `Dial(ctx, ref, port)` | A byte stream to a port inside the sandbox. To forward a local port, accept connections yourself and call `Dial` once for each. |
 | `EgressRecords(ctx, ref, n)` | The connections the egress gateway recorded for the sandbox, newest first. |
 | `MintEnvironmentKey`, `RevokeEnvironmentKey` | Issue a key that a worker or a gateway of an environment connects with, and end it by its `jti`. The key's value is returned once, when it is minted. |
+| `ListEnvironmentKeys(ctx, ref)` | The keys an environment holds a record of, oldest first: each one's `JTI`, when it was minted and by whom, when it expires, and whether it was revoked. Never the key itself. |
 | `ServerVersion` | The server's version. No token needed. |
 
 ## Events
@@ -181,8 +188,13 @@ case "not_found":
     // gone already
 case "phase_conflict":
     // not in a state that allows this; read it and decide
+case "control_plane_unavailable":
+    // one replica is handing off to another; retry shortly
 }
 ```
 
 The client never retries. A caller that wants to retry decides by the code
-or by the type.
+or by the type. A `503` is worth a retry after a short wait:
+`control_plane_unavailable` lasts while one replica of a control plane
+hands off to another, and the next request reaches the new one.
+`egress_gateway_unavailable` lasts until a gateway is connected.
