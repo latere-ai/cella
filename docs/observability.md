@@ -89,7 +89,22 @@ code.
 | `cella_events_delivered_total` | `outcome` (`acknowledged`, `deferred`, `dropped`) |
 | `cella_event_delivery_duration_seconds` | none |
 | `cella_store_query_duration_seconds` | `op` |
-| `cella_lease_held` | `name` (`reaper`, `journal`, `pool`, `environments`, `scheduler`) |
+| `cella_lease_held` | `name` (`writer`, `reaper`, `journal`, `pool`, `environments`, `scheduler`) |
+| `cella_forwarded_requests_total` | `outcome` (`forwarded`, `no_writer`, `failed`) |
+
+`cella_lease_held` is `1` on the replica that holds the named lease and `0`
+on one whose loop runs under it without holding it. `writer` appears only
+with `CELLA_DB_URL`, and the replica holding it answers the API and runs
+the `reaper`, `pool`, `environments` and `scheduler` loops. Event delivery
+runs on whichever replica holds `journal`, which may be a standby.
+
+`cella_forwarded_requests_total` counts what a standby did with a request:
+`forwarded` where the writer answered it, `no_writer` where no replica
+took it within `CELLA_FORWARD_HOLD` and it was answered `503
+control_plane_unavailable`, and `failed` where the writer went away after
+the request reached it, answered the same way. The writer counts a
+forwarded request in `cella_requests_total` as one of its own; the standby
+does not count it there.
 
 `cella_decisions_total{endpoint="authorizer"}` counts every authorization
 question, whether your endpoint or the built-in owner policy answered it.
@@ -156,12 +171,12 @@ move the thresholds against your own figures.
 
 | Alert | It means |
 |---|---|
-| `CelladDown` | The scrape is failing. No sandbox can be created, read or stopped. |
+| `CelladDown` | A replica's scrape is failing. With one replica, no sandbox can be created, read or stopped; with more, a writer or a standby is gone, and `CelladLeaseNotHeld` says whether any replica is still the writer. |
 | `CelladNotReady` | A Pod is up and failing a readiness check. `/readyz` on the internal listener names which. |
 | `CelladDecisionEndpointUnavailable` | Your authorizer or admission endpoint is giving no decision, so every request needing it is refused. `cellad check` names the endpoint. |
 | `CelladEventsUndelivered` | Records are queued for the sink. The journal holds them until the retry window passes. |
 | `CelladEventsDropped` | Records are being dropped undelivered. This is the one failure the pipeline cannot make good later. |
-| `CelladLeaseNotHeld` | A control-plane loop is running on no replica. The lease name is on the series. |
+| `CelladLeaseNotHeld` | No replica holds a lease, read over the whole replica set, so a standby holding none does not fire it. The lease name is on the series: `writer` means no replica answers the API, any other name is a loop that runs nowhere. |
 | `CelladSlowCreates` | The ninety-fifth percentile create is above thirty seconds: capacity, image pulls, or a degraded backend. |
 | `CelladSandboxesLost` | The driver no longer has sandboxes the control plane still wants, and recovery is not bringing them back. |
 
