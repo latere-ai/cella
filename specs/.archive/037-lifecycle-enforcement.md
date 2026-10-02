@@ -4,7 +4,7 @@ status: complete
 track: core
 depends_on:
   - specs/005-lifecycle-controller.md
-  - specs/031-hosted-sandbox-consolidation.md
+  - specs/.archive/031-hosted-sandbox-consolidation.md
   - specs/.archive/032-runtime-conformance-suite.md
 affects: [controller/, runtime/, internal/api/, internal/config/, cmd/cellad/, specs/]
 effort: medium

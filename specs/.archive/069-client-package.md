@@ -7,7 +7,7 @@ depends_on:
   - specs/009-events.md
   - specs/011-agent-client.md
   - specs/021-data-plane-workers.md
-  - specs/031-hosted-sandbox-consolidation.md
+  - specs/.archive/031-hosted-sandbox-consolidation.md
   - specs/.archive/050-cella-command.md
   - specs/.archive/055-api-contract-gaps.md
   - specs/.archive/066-events-follow.md

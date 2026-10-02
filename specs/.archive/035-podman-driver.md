@@ -4,7 +4,7 @@ status: complete
 track: core
 depends_on:
   - specs/004-runtime-contract.md
-  - specs/031-hosted-sandbox-consolidation.md
+  - specs/.archive/031-hosted-sandbox-consolidation.md
   - specs/.archive/032-runtime-conformance-suite.md
   - specs/.archive/044-manifest-fields.md
 affects: [runtime/podman/, cmd/cellad/, internal/config/, arch_test.go, specs/]

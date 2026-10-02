@@ -5,7 +5,7 @@ track: core
 depends_on:
   - specs/018-egress-and-secrets.md
   - specs/003-manifest-contract.md
-  - specs/031-hosted-sandbox-consolidation.md
+  - specs/.archive/031-hosted-sandbox-consolidation.md
   - specs/.archive/039-egress-gateway.md
   - specs/.archive/043-postgres-store.md
 affects: [manifest/, manifest/v1/, egress/, internal/store/, internal/store/memory/, internal/store/postgres/, internal/egressd/, internal/api/, internal/events/, controller/, cmd/cellad/, specs/]

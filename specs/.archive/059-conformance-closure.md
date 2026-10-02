@@ -7,7 +7,7 @@ depends_on:
   - specs/003-manifest-contract.md
   - specs/011-agent-client.md
   - specs/012-test-stubs-and-tiers.md
-  - specs/031-hosted-sandbox-consolidation.md
+  - specs/.archive/031-hosted-sandbox-consolidation.md
   - specs/.archive/052-conformance-suite.md
 affects: [internal/config/, cmd/cellad/, test/conformance/, .github/workflows/, release_test.go, docs/, CHANGELOG.md, specs/]
 effort: medium

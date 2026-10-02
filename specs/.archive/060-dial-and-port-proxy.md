@@ -8,7 +8,7 @@ depends_on:
   - specs/011-agent-client.md
   - specs/013-security-and-threat-model.md
   - specs/023-computer-use-operations.md
-  - specs/031-hosted-sandbox-consolidation.md
+  - specs/.archive/031-hosted-sandbox-consolidation.md
   - specs/.archive/034-terminal-attach.md
   - specs/.archive/041-display-and-input.md
   - specs/.archive/055-api-contract-gaps.md

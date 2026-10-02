@@ -4,7 +4,7 @@ status: complete
 track: core
 depends_on:
   - specs/003-manifest-contract.md
-  - specs/031-hosted-sandbox-consolidation.md
+  - specs/.archive/031-hosted-sandbox-consolidation.md
 affects: [manifest/, manifest/v1/, runtime/driver.go, controller/, internal/api/]
 effort: medium
 created: 2026-09-19

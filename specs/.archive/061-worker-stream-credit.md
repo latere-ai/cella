@@ -5,7 +5,7 @@ track: core
 depends_on:
   - specs/021-data-plane-workers.md
   - specs/004-runtime-contract.md
-  - specs/031-hosted-sandbox-consolidation.md
+  - specs/.archive/031-hosted-sandbox-consolidation.md
   - specs/.archive/051-environments-and-workers.md
 affects: [runtime/remote/, internal/worker/, docs/workers.md, CHANGELOG.md]
 effort: medium

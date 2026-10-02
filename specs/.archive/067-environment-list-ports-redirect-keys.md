@@ -8,7 +8,7 @@ depends_on:
   - specs/010-state.md
   - specs/021-data-plane-workers.md
   - specs/023-computer-use-operations.md
-  - specs/031-hosted-sandbox-consolidation.md
+  - specs/.archive/031-hosted-sandbox-consolidation.md
   - specs/.archive/051-environments-and-workers.md
   - specs/.archive/054-environments-desired-state.md
   - specs/.archive/060-dial-and-port-proxy.md

@@ -6,7 +6,7 @@ depends_on:
   - specs/008-api.md
   - specs/009-events.md
   - specs/010-state.md
-  - specs/031-hosted-sandbox-consolidation.md
+  - specs/.archive/031-hosted-sandbox-consolidation.md
   - specs/.archive/055-api-contract-gaps.md
   - specs/.archive/062-journal-retention.md
 affects: [internal/store/, internal/events/, internal/api/, cmd/cellad/, test/conformance/, api/openapi.yaml, docs/, CHANGELOG.md]

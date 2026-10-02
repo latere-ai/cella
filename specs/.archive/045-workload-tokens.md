@@ -5,7 +5,7 @@ track: core
 depends_on:
   - specs/006-identity.md
   - specs/005-lifecycle-controller.md
-  - specs/031-hosted-sandbox-consolidation.md
+  - specs/.archive/031-hosted-sandbox-consolidation.md
   - specs/.archive/037-lifecycle-enforcement.md
   - specs/.archive/043-postgres-store.md
 affects: [runtime/, controller/, internal/auth/, internal/store/, internal/api/, manifest/v1/, cmd/cellad/, specs/]

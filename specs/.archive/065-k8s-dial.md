@@ -9,7 +9,7 @@ depends_on:
   - specs/013-security-and-threat-model.md
   - specs/015-conformance-suite.md
   - specs/023-computer-use-operations.md
-  - specs/031-hosted-sandbox-consolidation.md
+  - specs/.archive/031-hosted-sandbox-consolidation.md
   - specs/.archive/036-k8s-driver.md
   - specs/.archive/060-dial-and-port-proxy.md
 affects: [runtime/k8s/, deploy/, deploy_test.go, test/kind/, .github/workflows/, docs/, CHANGELOG.md, specs/]

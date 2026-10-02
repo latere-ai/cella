@@ -6,7 +6,7 @@ depends_on:
   - specs/020-scheduling-and-sets.md
   - specs/004-runtime-contract.md
   - specs/005-lifecycle-controller.md
-  - specs/031-hosted-sandbox-consolidation.md
+  - specs/.archive/031-hosted-sandbox-consolidation.md
   - specs/.archive/037-lifecycle-enforcement.md
   - specs/.archive/039-egress-gateway.md
   - specs/.archive/045-workload-tokens.md

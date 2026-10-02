@@ -1,13 +1,13 @@
 ---
 title: "Hosted sandbox consolidation: every package of latere-ai/sandbox lands in cella, in the platform, or is dropped"
-status: in-progress
+status: complete
 track: core
 depends_on:
   - specs/001-architecture.md
 affects: [runtime/, controller/, egress/, manifest/, internal/, specs/]
 effort: large
 created: 2026-09-19
-updated: 2026-09-24
+updated: 2026-10-02
 author: changkun
 ---
 
@@ -152,6 +152,9 @@ the destination already or is not wanted.
 | `deploy/`, `tools/deploy`, `tools/smoke` | - | platform deploy of `cellad serve` and `cellad egress` | platform 60 | [[014-release-and-installation]] |
 | `docs/internal`, user docs | - | platform docs where user facing; cella `docs/` where operator facing | platform 62 | - |
 | `test/cellae2e` | 0.6k | drop: [[015-conformance-suite]] is the executable contract | - | - |
+| `internal/drive`, `internal/kernel/mountmode` | 1.8k | drop: drive workspace mounts are not carried; a sandbox's durable storage is the `Volume` kind | - | [[019-volumes]] |
+| `internal/kernel/labels` | 0.3k | drop: the k8s driver stamps its own keys under the reserved key domain, `runtime/k8s/render.go` | - | [[004-runtime-contract]] |
+| `internal/testdb` | 0.05k | drop: the Postgres suite starts its own server in a container | - | [[010-state]] |
 | (no source: the admission client of 007, which the platform's webhook of slice 58 answers) | - | cella `manifest` `AdmitFunc` over HTTP, `CELLA_ADMISSION_URL`, fail closed, no retry | 047 | [[007-admission]] |
 | (no source: the release pipeline of 014, which the platform's deploy of slice 60 pins) | - | the `v*` tag pipeline, the deploy tree, `cellad check`, the install walk | 048 | [[014-release-and-installation]] |
 
@@ -290,6 +293,46 @@ sandbox tree and is built from its spec.
 | Criterion | Test that proves it | State |
 |---|---|---|
 | Every row of the map names a slice, `drop`, or a platform spec | review of this table | done |
-| Every cella slice is archived with an Outcome naming its coverage and e2e | `go tool lateregate spec` over `.archive/` | open |
+| Every cella slice is archived with an Outcome naming its coverage and e2e | `go tool lateregate spec` over `.archive/` | met: 032 to 048 are `complete` in `.archive/`, each Outcome naming its coverage and its end-to-end run |
 | No file under `runtime/`, `controller/`, `egress/`, or `manifest/` names a Latere host, image, pool, or namespace outside an example | `TestNoLatereCoordinates`, `TestNoLatereCoordinatesInReleasedArtifacts`, `TestSchemaGroupTellsTheGroupFromAHost` | built: every tracked file outside `specs/` is walked, with the API group legal only in the forms the schema spells it and a URL's host never |
-| The sandbox repository's `internal/` has no package without a settled row | the map, on archive | open |
+| The sandbox repository's `internal/` has no package without a settled row | the map, on archive | met: the repository was archived on 2026-09-26, and the four packages that had no row then are added as `drop` (Outcome) |
+
+## Outcome
+
+Closed on 2026-10-02. The sandbox repository is emptied and archived,
+and the hosted plane runs on `cellad`.
+
+- **The slices.** The seventeen slices of the map, 032 to 048, are
+  `complete` and archived, each with an Outcome that names its
+  coverage and its end-to-end run; all seventeen were released in
+  v0.2.0 (2026-09-20). The slices the parent specs opened afterwards,
+  049 to 076 and 079, followed the same rule.
+- **The platform half.** Platform specs 57 to 61 are implemented. The
+  sunset checklist of platform spec 62 ran on 2026-09-26: the two
+  consumers switched to `/v1` through `latere.ai/x/cella/client`
+  ([[069-client-package]]), the hosted deployment and its data plane
+  were removed, and `latere-ai/sandbox` was archived the same day. On
+  2026-10-02 the hosted plane runs `cellad` v0.11.0 (2026-10-01) with a
+  writer and a standby ([[076-rolling-replicas]]).
+
+### What differs from the plan
+
+- **Four packages had no row.** `internal/drive`,
+  `internal/kernel/mountmode`, `internal/kernel/labels` and
+  `internal/testdb` were not in the map when the repository was
+  archived. No code from them moved; the map now carries them as
+  `drop`. Drive mounts have no successor in Cella: the `Volume` kind of
+  [[019-volumes]] is the designed replacement and is not built.
+- **The parent specs do not move in one act.** The design said specs
+  003 to 023 change status together once the platform runs on `cellad`
+  and the conformance suite passes against it. The platform runs on
+  `cellad`, but the suite's dispatch run against a deployed server
+  ([[059-conformance-closure]]) has not been recorded, and every parent
+  still has criteria whose tests are not in the tree. Each parent stays
+  `in-progress` and closes on its own criteria.
+
+### What remains
+
+Nothing in this spec. Outside it, platform spec 62 keeps the pruning
+of the retired repository's images and the removal of a deleted
+person's workloads, both the platform's.

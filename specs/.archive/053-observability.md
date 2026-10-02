@@ -4,7 +4,7 @@ status: complete
 track: core
 depends_on:
   - specs/017-observability.md
-  - specs/031-hosted-sandbox-consolidation.md
+  - specs/.archive/031-hosted-sandbox-consolidation.md
   - specs/.archive/042-events.md
   - specs/.archive/048-release-and-check.md
 affects: [internal/metrics/, internal/api/, internal/auth/, internal/admission/, internal/events/, internal/store/, controller/, cmd/cellad/, deploy/base/prometheusrule.yaml, docs/observability.md]

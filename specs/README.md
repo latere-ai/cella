@@ -71,7 +71,7 @@ later.
 | [022](022-mesh-and-spawn.md) | Mesh and spawn: peers that reach each other, sandboxes that create sandboxes, a boundary that never moves | medium | in-progress | 003, 005, 006, 010, 018 |
 | [023](023-computer-use-operations.md) | Computer use operations: the desktop, screenshot, screen, input, ports and the proxy, browser-ready sandboxes | medium | in-progress | 003, 004, 005, 008, 009 |
 | [024](024-vm-driver.md) | VM driver: a hardware-isolated sandbox per environment; the design held open | large | vague | 004, 019 |
-| [031](031-hosted-sandbox-consolidation.md) | Hosted sandbox consolidation: every package of latere-ai/sandbox lands in cella, in the platform, or is dropped | large | in-progress | 001 |
+| [031](.archive/031-hosted-sandbox-consolidation.md) | Hosted sandbox consolidation: every package of latere-ai/sandbox lands in cella, in the platform, or is dropped | large | complete | 001 |
 | [050](.archive/050-cella-command.md) | Cella command: the agent client over /v1, its client package, exit codes and the skill | medium | complete | 008, 011, 031, 048 |
 | [051](.archive/051-environments-and-workers.md) | Environments and workers: the Environment kind, its keys, the worker stream, the remote driver and the worker role | large | complete | 004, 006, 010, 021, 031, 039, 045 |
 | [052](.archive/052-conformance-suite.md) | Conformance suite: the /v1 contract as executable cases, the report, the declared gaps, the pipeline job | large | complete | 008, 015, 031, 049, 050 |

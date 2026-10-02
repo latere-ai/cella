@@ -6,7 +6,7 @@ depends_on:
   - specs/008-api.md
   - specs/003-manifest-contract.md
   - specs/009-events.md
-  - specs/031-hosted-sandbox-consolidation.md
+  - specs/.archive/031-hosted-sandbox-consolidation.md
   - specs/.archive/052-conformance-suite.md
 affects: [manifest/, internal/api/, internal/events/, internal/store/, internal/cellacli/, api/, cmd/cellad/, test/conformance/, docs/]
 effort: large

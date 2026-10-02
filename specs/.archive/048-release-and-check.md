@@ -4,7 +4,7 @@ status: complete
 track: core
 depends_on:
   - specs/014-release-and-installation.md
-  - specs/031-hosted-sandbox-consolidation.md
+  - specs/.archive/031-hosted-sandbox-consolidation.md
   - specs/.archive/002-repository-scaffold.md
   - specs/.archive/036-k8s-driver.md
 affects: [.github/workflows/, Dockerfile, Dockerfile.ci, tools/release/, deploy/, docs/, internal/check/, cmd/cellad/, .lateregate.yaml, specs/]

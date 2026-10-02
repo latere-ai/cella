@@ -5,7 +5,7 @@ track: core
 depends_on:
   - specs/015-conformance-suite.md
   - specs/008-api.md
-  - specs/031-hosted-sandbox-consolidation.md
+  - specs/.archive/031-hosted-sandbox-consolidation.md
   - specs/.archive/049-stubs-and-tiers.md
   - specs/.archive/050-cella-command.md
 affects: [test/conformance/, test/run/, .github/workflows/, docs/, specs/]

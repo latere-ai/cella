@@ -8,7 +8,7 @@ depends_on:
   - specs/005-lifecycle-controller.md
   - specs/009-events.md
   - specs/017-observability.md
-  - specs/031-hosted-sandbox-consolidation.md
+  - specs/.archive/031-hosted-sandbox-consolidation.md
   - specs/.archive/038-environment-pools.md
   - specs/.archive/057-scheduling-queue.md
 affects: [controller/, manifest/v1/, internal/config/, internal/metrics/, internal/events/, internal/api/, cmd/cellad/, docs/, CHANGELOG.md]

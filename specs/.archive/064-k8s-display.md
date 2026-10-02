@@ -7,7 +7,7 @@ depends_on:
   - specs/014-release-and-installation.md
   - specs/015-conformance-suite.md
   - specs/023-computer-use-operations.md
-  - specs/031-hosted-sandbox-consolidation.md
+  - specs/.archive/031-hosted-sandbox-consolidation.md
   - specs/.archive/036-k8s-driver.md
   - specs/.archive/041-display-and-input.md
 affects: [internal/config/, deploy/examples/kind-stubs/, .github/workflows/, docs/, CHANGELOG.md]

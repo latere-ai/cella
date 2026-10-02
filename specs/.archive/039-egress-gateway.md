@@ -5,7 +5,7 @@ track: core
 depends_on:
   - specs/018-egress-and-secrets.md
   - specs/003-manifest-contract.md
-  - specs/031-hosted-sandbox-consolidation.md
+  - specs/.archive/031-hosted-sandbox-consolidation.md
   - specs/.archive/044-manifest-fields.md
 affects: [manifest/, manifest/v1/, egress/, internal/egressd/, internal/api/, internal/config/, controller/, runtime/, runtime/native/, runtime/podman/, cmd/cellad/]
 effort: large

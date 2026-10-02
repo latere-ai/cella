@@ -6,7 +6,7 @@ depends_on:
   - specs/022-mesh-and-spawn.md
   - specs/003-manifest-contract.md
   - specs/006-identity.md
-  - specs/031-hosted-sandbox-consolidation.md
+  - specs/.archive/031-hosted-sandbox-consolidation.md
   - specs/.archive/045-workload-tokens.md
   - specs/.archive/047-admission-client.md
 affects: [manifest/, manifest/v1/, controller/, internal/auth/, internal/api/, internal/store/, internal/events/, runtime/, runtime/podman/, runtime/k8s/, cmd/cellad/, specs/]

@@ -8,7 +8,7 @@ depends_on:
   - specs/012-test-stubs-and-tiers.md
   - specs/014-release-and-installation.md
   - specs/015-conformance-suite.md
-  - specs/031-hosted-sandbox-consolidation.md
+  - specs/.archive/031-hosted-sandbox-consolidation.md
   - specs/.archive/034-terminal-attach.md
   - specs/.archive/036-k8s-driver.md
 affects: [runtime/k8s/, deploy/, deploy_test.go, .github/workflows/, docs/, specs/, CHANGELOG.md]

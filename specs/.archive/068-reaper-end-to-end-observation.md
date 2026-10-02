@@ -5,7 +5,7 @@ track: core
 depends_on:
   - specs/005-lifecycle-controller.md
   - specs/009-events.md
-  - specs/031-hosted-sandbox-consolidation.md
+  - specs/.archive/031-hosted-sandbox-consolidation.md
   - specs/.archive/037-lifecycle-enforcement.md
 affects: [controller/, CHANGELOG.md]
 effort: small

@@ -7,7 +7,7 @@ depends_on:
   - specs/012-test-stubs-and-tiers.md
   - specs/018-egress-and-secrets.md
   - specs/021-data-plane-workers.md
-  - specs/031-hosted-sandbox-consolidation.md
+  - specs/.archive/031-hosted-sandbox-consolidation.md
   - specs/.archive/039-egress-gateway.md
   - specs/.archive/070-k8s-egress.md
 affects: [egress/, runtime/, runtime/native/, runtime/podman/, runtime/k8s/, controller/, cmd/cellad/, docs/, CHANGELOG.md]

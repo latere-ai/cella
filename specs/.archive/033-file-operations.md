@@ -5,7 +5,7 @@ track: core
 depends_on:
   - specs/004-runtime-contract.md
   - specs/008-api.md
-  - specs/031-hosted-sandbox-consolidation.md
+  - specs/.archive/031-hosted-sandbox-consolidation.md
   - specs/.archive/032-runtime-conformance-suite.md
 affects: [runtime/, runtime/native/, runtime/podman/, runtime/k8s/, runtime/runtimetest/, runtime/internal/fileshell/, controller/, internal/api/, internal/events/, specs/]
 effort: medium

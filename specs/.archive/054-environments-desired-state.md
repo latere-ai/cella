@@ -8,7 +8,7 @@ depends_on:
   - specs/004-runtime-contract.md
   - specs/005-lifecycle-controller.md
   - specs/008-api.md
-  - specs/031-hosted-sandbox-consolidation.md
+  - specs/.archive/031-hosted-sandbox-consolidation.md
   - specs/010-state.md
 affects: [controller/, internal/api/, internal/store/, internal/config/, internal/events/, manifest/, manifest/v1/, cmd/cellad/, test/conformance/, docs/, CHANGELOG.md]
 effort: large

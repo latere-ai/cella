@@ -5,7 +5,7 @@ track: core
 depends_on:
   - specs/011-agent-client.md
   - specs/008-api.md
-  - specs/031-hosted-sandbox-consolidation.md
+  - specs/.archive/031-hosted-sandbox-consolidation.md
   - specs/.archive/048-release-and-check.md
 affects: [cmd/cella/, internal/cellacli/, internal/cellaclient/, skills/cella/, docs/cli.md, tools/release/, .github/workflows/release.yml, .lateregate.yaml]
 effort: medium

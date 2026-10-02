@@ -5,7 +5,7 @@ track: core
 depends_on:
   - specs/012-test-stubs-and-tiers.md
   - specs/014-release-and-installation.md
-  - specs/031-hosted-sandbox-consolidation.md
+  - specs/.archive/031-hosted-sandbox-consolidation.md
   - specs/.archive/048-release-and-check.md
 affects: [cmd/cella-stubs/, internal/stubs/, Makefile, tools/run/, deploy/examples/kind-stubs/, test/kind/, .github/workflows/, Dockerfile.stubs, docs/, .lateregate.yaml, specs/]
 effort: medium

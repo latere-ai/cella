@@ -9,7 +9,7 @@ depends_on:
   - specs/010-state.md
   - specs/017-observability.md
   - specs/021-data-plane-workers.md
-  - specs/031-hosted-sandbox-consolidation.md
+  - specs/.archive/031-hosted-sandbox-consolidation.md
   - specs/.archive/038-environment-pools.md
   - specs/.archive/054-environments-desired-state.md
 affects: [manifest/, manifest/v1/, controller/, internal/config/, internal/metrics/, cmd/cellad/, docs/, CHANGELOG.md]

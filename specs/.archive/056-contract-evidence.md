@@ -6,7 +6,7 @@ depends_on:
   - specs/003-manifest-contract.md
   - specs/013-security-and-threat-model.md
   - specs/016-building-a-plane.md
-  - specs/031-hosted-sandbox-consolidation.md
+  - specs/.archive/031-hosted-sandbox-consolidation.md
 affects: [manifest/, manifest/testdata/, cmd/cellad/, examples/plane/, docs/, SECURITY.md, specs/]
 effort: medium
 created: 2026-09-21

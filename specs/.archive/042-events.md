@@ -4,7 +4,7 @@ status: complete
 track: core
 depends_on:
   - specs/009-events.md
-  - specs/031-hosted-sandbox-consolidation.md
+  - specs/.archive/031-hosted-sandbox-consolidation.md
   - specs/.archive/043-postgres-store.md
   - specs/.archive/037-lifecycle-enforcement.md
 affects: [internal/events/, internal/store/, internal/api/, internal/config/, controller/, cmd/cellad/, specs/]

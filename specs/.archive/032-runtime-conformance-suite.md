@@ -4,7 +4,7 @@ status: complete
 track: core
 depends_on:
   - specs/004-runtime-contract.md
-  - specs/031-hosted-sandbox-consolidation.md
+  - specs/.archive/031-hosted-sandbox-consolidation.md
 affects: [runtime/runtimetest/, runtime/native/, runtime/, arch_test.go, specs/]
 effort: medium
 created: 2026-09-19

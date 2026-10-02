@@ -7,7 +7,7 @@ depends_on:
   - specs/004-runtime-contract.md
   - specs/006-identity.md
   - specs/010-state.md
-  - specs/031-hosted-sandbox-consolidation.md
+  - specs/.archive/031-hosted-sandbox-consolidation.md
   - specs/.archive/039-egress-gateway.md
   - specs/.archive/045-workload-tokens.md
 affects: [manifest/v1/, manifest/, internal/store/, internal/api/, internal/auth/, internal/events/, internal/worker/, runtime/remote/, cmd/cellad/, internal/config/, controller/, arch_test.go, docs/, CHANGELOG.md]

@@ -5,7 +5,7 @@ track: core
 depends_on:
   - specs/007-admission.md
   - specs/003-manifest-contract.md
-  - specs/031-hosted-sandbox-consolidation.md
+  - specs/.archive/031-hosted-sandbox-consolidation.md
   - specs/.archive/044-manifest-fields.md
   - specs/.archive/046-secret-kind.md
 affects: [internal/admission/, manifest/, internal/api/, internal/config/, cmd/cellad/, authorizer/, specs/]

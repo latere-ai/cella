@@ -9,7 +9,7 @@ depends_on:
   - specs/015-conformance-suite.md
   - specs/018-egress-and-secrets.md
   - specs/022-mesh-and-spawn.md
-  - specs/031-hosted-sandbox-consolidation.md
+  - specs/.archive/031-hosted-sandbox-consolidation.md
   - specs/.archive/036-k8s-driver.md
   - specs/.archive/039-egress-gateway.md
   - specs/.archive/065-k8s-dial.md

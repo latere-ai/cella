@@ -6,7 +6,7 @@ depends_on:
   - specs/023-computer-use-operations.md
   - specs/004-runtime-contract.md
   - specs/008-api.md
-  - specs/031-hosted-sandbox-consolidation.md
+  - specs/.archive/031-hosted-sandbox-consolidation.md
   - specs/.archive/035-podman-driver.md
   - specs/.archive/036-k8s-driver.md
 affects: [runtime/, runtime/display/, runtime/podman/, runtime/k8s/, runtime/native/, runtime/runtimetest/, controller/, internal/api/, internal/events/, manifest/, manifest/v1/, images/display/, specs/]

@@ -6,7 +6,7 @@ depends_on:
   - specs/010-state.md
   - specs/009-events.md
   - specs/005-lifecycle-controller.md
-  - specs/031-hosted-sandbox-consolidation.md
+  - specs/.archive/031-hosted-sandbox-consolidation.md
   - specs/.archive/042-events.md
   - specs/.archive/043-postgres-store.md
 affects: [internal/store/, internal/config/, controller/, cmd/cellad/, CHANGELOG.md]
