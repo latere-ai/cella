@@ -17,7 +17,7 @@ platform on the packages.
 | [Install](install.md) | a cluster, the manifests from a release's deploy archive, the first sandbox, and `cellad check` |
 | [Configuration](configuration.md) | every environment variable, its default, and which role reads it |
 | [Deploy reference](../deploy/README.md) | what each manifest and each Secret of `deploy/` is, and why the Role grants what it does |
-| [Sandboxes on Kubernetes](kubernetes.md) | what a sandbox on a cluster can do, reaching a server inside one, what a sandbox can reach itself, and what the Role has to allow |
+| [Sandboxes on Kubernetes](kubernetes.md) | what a sandbox on a cluster can do, reaching a server inside one, what a sandbox can reach itself, what the Role has to allow, and running more than one replica |
 | [Self-hosting a data plane](workers.md) | running sandboxes on your own machines against somebody else's control plane: the key, the worker, and the outbound-only rule |
 | [Capacity and queues](scheduling.md) | what an environment holds, what happens to a create it cannot fit, priority, preemption, and warm pools |
 | [Observability](observability.md) | the scrape surface, traces and logs over OTLP, redaction, and the alert rules |
@@ -35,7 +35,8 @@ platform on the packages.
 | [Conformance](conformance.md) | the suite that checks a server against the API: what to give it, what the report says, and how to declare what you do not serve |
 
 The OpenAPI document is [`api/openapi.yaml`](../api/openapi.yaml), and
-every installation serves it at `GET /openapi.yaml`.
+every installation serves it at `GET /openapi.yaml`, under its base path
+where it has one.
 
 ## Changing it
 
