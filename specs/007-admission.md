@@ -232,10 +232,12 @@ Rules:
 `CELLA_MAX_SANDBOXES_PER_SUBJECT` (default `0`, no ceiling), or the
 authorizer's `limits.max_sandboxes` when present, bounds how many
 sandboxes one subject holds. `Resolve` has no count, so the check is
-the API handler's, taken in the same store transaction as the
-desired-state write ([[010-state]]) so two concurrent creates cannot
-both pass at the ceiling: the count is every desired `Sandbox` of the
-subject whose phase is not `Deleting`, `Queued` and `Stopped` included.
+the controller's, taken under its lock with the desired-state write,
+and where there are replicas only the one holding the writer lease runs
+the controller ([[010-state]], [[076-rolling-replicas]]), so two
+concurrent creates cannot both pass at the ceiling: the count is every
+desired `Sandbox` of the subject whose phase is not `Deleting`, `Queued`
+and `Stopped` included.
 For a workload creating a child, the subject counted is the root's
 owner, so a spawn tree never escapes its owner's ceiling. The refusal
 is `quota_exceeded`, 422; [[008-api]] carries its sentence.
@@ -265,14 +267,14 @@ so every rule above is drivable.
 | A nil `AdmitFunc` is the identity; `Defaults` and `Ceilings` apply with and without a webhook | `TestDefaultsFillOnlyAbsentFields`, `TestCeilings` | partial: both apply with and without a step; the six `CELLA_DEFAULT_*` and four `CELLA_MAX_*` are loaded by nothing yet |
 | The environment's `defaultQueue` wins over `CELLA_DEFAULT_*`; a caller's value wins over both | `TestDefaultsPrecedence` | not built |
 | With no webhook, `Admit` returns its input unchanged | `TestAdmissionOutputIsValidated`, `TestServeWithoutAdmissionSaysBuiltin` | built |
-| The webhook receives every field of the request shape, `workload` and `parent` set for a spawn, `set` for a replica | `TestEnvelopeMatchesTheEndpoint`, `TestAdmitCarriesTheWorkloadAndTheExisting`, `TestCreatePassesTheCallerToAdmission` | partial: every member is sent and `workload` is set; `parent` and `set` wait on specs 022 and 020 |
+| The webhook receives every field of the request shape, `workload` and `parent` set for a spawn, `set` for a replica | `TestEnvelopeMatchesTheEndpoint`, `TestAdmitCarriesTheWorkloadAndTheExisting`, `TestCreatePassesTheCallerToAdmission` | partial: every member is sent and `workload` is set; `parent` is always `null` because `AdmitRequest` carries no parent although a spawn runs admission ([[022-mesh-and-spawn]]), and `set` waits on the `SandboxSet` kind of [[020-scheduling-and-sets]] |
 | The webhook's returned manifest is what the driver gets; an absent `manifest` leaves the input unchanged; warnings land in `status.warnings` | `TestAllowMutationReachesTheCaller`, `TestAllowWithoutAManifestLeavesTheInput`, `TestServeWithAdmission` | built |
 | A webhook that returns an unknown field is `unknown_field`; one that changes `kind`, or `image` on update, is refused naming the path; one that pins `image` at create passes | `TestReturnedManifestIsDecodedStrictly`, `TestAdmissionOutputIsValidated`, `TestImageIsRequiredAfterAdmission` | built |
 | A webhook that widens a child's boundary is `boundary_exceeded` | `TestAdmissionCannotOpenABoundary` | not built |
 | Each failure mode is `admission_unavailable` and never a pass; nothing is retried | `TestFailsClosedWithoutRetry`, `TestServeWithAdmission` | built |
 | A non-loopback `http://` URL and a URL without a token are start-up failures | `TestAdmissionStartupRules`, `TestServeRefusesAnEndpointWithoutABearer` | built |
 | A webhook cannot raise a value above `CELLA_MAX_*` | `TestCeilingsAreAFloorOnStrictness` | built at the resolver; the variables themselves are loaded by nothing yet |
-| The count ceiling refuses the (n+1)th sandbox with `quota_exceeded`, counts `Queued` and `Stopped`, admits after a delete, and holds under two concurrent creates at the ceiling; a spawned child counts against the root's owner | `TestCountCeilingCountsEveryDesiredSandbox` | partial: the count, the stopped sandbox and the delete are proven and the count is taken under the controller's own lock; the spawn row waits on spec 022 |
+| The count ceiling refuses the (n+1)th sandbox with `quota_exceeded`, counts `Queued` and `Stopped`, admits after a delete, and holds under two concurrent creates at the ceiling; a spawned child counts against the root's owner | `TestCountCeilingCountsEveryDesiredSandbox`, `TestQuotaAndNameAtomic`, `TestDeletingObjectsDoNotConsumeCountQuota`, `TestSpawnInheritance` | partial: the refusal, a stopped sandbox counted and a delete freeing the slot hold over the API, `TestCountCeilingCountsEveryDesiredSandbox`; a `Deleting` sandbox is not counted, `TestDeletingObjectsDoNotConsumeCountQuota`; eight concurrent creates at a ceiling of one admit one, because the count is taken under the controller's lock, `TestQuotaAndNameAtomic`. The controller counts a spawn under its parent's owner, which is the root's, `TestSpawnInheritance`, and no test refuses a spawn at that owner's ceiling or counts a `Queued` sandbox |
 | A set of eight replicas produces eight admission calls, each with its index | `TestSetReplicasAreAdmittedEach` | not built: waits on spec 020 |
 | An image is required after admission and not before: a webhook may supply one, `CELLA_DEFAULT_IMAGE` supplies one without a webhook, and a manifest with neither is `missing_field` | `TestImageIsRequiredAfterAdmission`, `TestDefaultImageReachesTheResolver` | built |
 | A policy refusal is a 200 with `allow: false` and reaches the caller as `admission_refused` carrying the webhook's code verbatim | `TestRefusalCarriesTheCode`, `TestAdmissionRefusalAndOutageAreTheirOwnAnswers` | built |
