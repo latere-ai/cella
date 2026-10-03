@@ -22,7 +22,7 @@ spec:
   require: [title, status, track, depends_on, affects, effort, created, updated, author]
   wikilinks: true
   numbered: true
-  started: [dispatched, in-progress, testing, complete]
+  # No started list: status records a spec's own criteria; review holds the depends_on order.
   settled: [complete, superseded]
   require_section:
     - Overview
