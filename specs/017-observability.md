@@ -64,8 +64,9 @@ Open:
 
 - Three rows declared and registered by nothing:
   `cella_rate_limited_total`, since there is no limiter ([[008-api]]);
-  `cella_operations_redelivered_total` ([[021-data-plane-workers]]);
-  and `cella_set_replicas`, since there is no `SandboxSet`
+  `cella_operations_redelivered_total`, since the store redelivers a
+  lapsed claim and nothing counts it ([[021-data-plane-workers]]); and
+  `cella_set_replicas`, since there is no `SandboxSet`
   ([[020-scheduling-and-sets]]).
 - The worker role starts no OTLP export, and no `operation` frame
   carries a `traceparent`, so a remote driver call is not continued on
@@ -189,12 +190,13 @@ publishes does not carry the prefix and is not checked.
 
 | Alert | Expression, in words |
 |---|---|
+| a replica down | the scrape of a `cellad` replica failing, `up` zero, for 5 minutes |
 | readiness failing | `kube_pod_status_ready` false for the `cellad` Pods for 5 minutes, from kube-state-metrics |
 | slow creates | `cella_sandbox_create_duration_seconds` p95 above 30 seconds for 10 minutes |
 | a decision endpoint unavailable | `cella_decisions_total{outcome="unavailable"}` increasing in 5 minutes |
 | events backing up | `cella_events_pending` above 1000 for 10 minutes, or `cella_events_delivered_total{outcome="dropped"}` increasing |
 | an environment offline | `cella_environments{phase="Offline"}` above zero for 5 minutes |
-| sandboxes lost on a ready environment | `cella_sandboxes{phase="Lost"}` above zero for 15 minutes where the environment's `cella_environments{phase="Ready"}` is one |
+| sandboxes lost | `cella_sandboxes{phase="Lost"}`, summed, above zero for 15 minutes; `cella_environments` carries no `environment` label, so the rule cannot narrow it to a ready environment |
 | a lease not held | `cella_lease_held` zero for a name on every replica for 2 minutes: a standby holds no lease, so one replica not holding a lease is the ordinary case and none holding it is the alert |
 | operations redelivered | `cella_operations_redelivered_total` increasing for 10 minutes |
 
@@ -208,10 +210,10 @@ Dashboards; a platform builds those from the same metrics. The
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| The registry holds exactly the metrics, labels, and buckets in the table, and every labeled histogram has a series at start | `TestMetricsTable` reading this file through `runtime.Caller` | built for the twenty-four rows whose owning spec has landed, as `TestMetricsTable`, `TestAwaitingRowsAreRegisteredByNobody` and `TestSeriesExistAtStart` ([[053-observability]]), `cella_queue_depth` and `cella_capacity` among them ([[057-scheduling-queue]]) and `cella_preemptions_total` ([[058-preemption]]); the five rows of 008's limiter, 020's sets and 021 are declared in the same table and registered by nothing |
+| The registry holds exactly the metrics, labels, and buckets in the table, and every labeled histogram has a series at start | `TestMetricsTable` reading this file through `runtime.Caller` | built for the twenty-seven rows a scrape carries, of the thirty in the table, as `TestMetricsTable`, `TestAwaitingRowsAreRegisteredByNobody` and `TestSeriesExistAtStart` ([[053-observability]]), `cella_queue_depth` and `cella_capacity` among them ([[057-scheduling-queue]]), `cella_preemptions_total` ([[058-preemption]]), and `cella_environments` and `cella_workers_connected`, read from the environment records, `TestPullGaugesReadTheirIndex`, `TestEnvironmentSeriesFold` and the scrape in `TestWorkerEndToEnd`, on main after v0.11.1 and unreleased; the three rows of 008's limiter, 020's sets and 021's redelivery count are declared in the same table and registered by nothing, and `TestTheObservabilityPageListsWhatAScrapeCarries` holds `docs/observability.md` to the twenty-seven |
 | No label value is a sandbox id, a subject, a name, or a path over a full e2e run | `TestLabelValuesAreBounded`, `TestObservabilityEndToEnd` | built as `TestLabelValuesAreBounded` and the scrape `TestObservabilityEndToEnd` reads after a create, two execs, a stop and a delete ([[053-observability]]) |
-| The worker and gateway roles open no metrics listener and their telemetry arrives over OTLP | `TestEgressRoleServesNoScrapeSurface` and `TestTelemetryExportsOverOTLP` with an in-memory collector | built for the gateway as `TestEgressRoleServesNoScrapeSurface` and `TestTelemetryExportsOverOTLP` ([[053-observability]]); the worker role lands with [[021-data-plane-workers]] and takes the same seam |
-| A request produces one parent span with the route pattern, the request id and trace id as attributes, and the four child spans under stub webhooks; a remote driver call's child span is continued on the worker | `TestRequestSpans`, `TestTheAPIDrawsAServerSpan` | the parent span, its name and its attributes are built as `TestRequestSpans` and `TestTheAPIDrawsAServerSpan`, which configures a stub authorizer and reads its client span back off the collector; the parent link is in the span context and is not decoded, and the driver and store children are not drawn ([[053-observability]]). The seam has nothing to cross until [[021-data-plane-workers]] |
+| The worker and gateway roles open no metrics listener and their telemetry arrives over OTLP | `TestEgressRoleServesNoScrapeSurface` and `TestTelemetryExportsOverOTLP` with an in-memory collector | built for the gateway as `TestEgressRoleServesNoScrapeSurface` and `TestTelemetryExportsOverOTLP` ([[053-observability]]); the worker role of [[021-data-plane-workers]] starts no telemetry, so nothing of it leaves over OTLP, and no test holds it to opening no listener |
+| A request produces one parent span with the route pattern, the request id and trace id as attributes, and the four child spans under stub webhooks; a remote driver call's child span is continued on the worker | `TestRequestSpans`, `TestTheAPIDrawsAServerSpan` | the parent span, its name and its attributes are built as `TestRequestSpans` and `TestTheAPIDrawsAServerSpan`, which configures a stub authorizer and reads its client span back off the collector; the parent link is in the span context and is not decoded, and the driver and store children are not drawn ([[053-observability]]). No `operation` frame carries a `traceparent` and the worker exports nothing, so a remote driver call is not continued on the worker ([[021-data-plane-workers]]) |
 | One canary per kind (env value, secret value, placeholder, credential, token, `Authorization`, `Proxy-Authorization`, `Cella-Egress-Credential`) appears in no log line on either path of the tee | `TestLogsRedact` | built as `TestLogsRedact`, `TestCanaryNeverReachesALogLine` and `TestTelemetryExportsOverOTLP`, which reads the canary back off the bridge ([[053-observability]]) |
 | One log line per request, one per stream open and close, none per frame or egress connection | `TestOneLogLinePerRequest`, `TestOneLogLinePerStreamAndNonePerFrame` | built as `TestOneLogLinePerRequest` and `TestOneLogLinePerStreamAndNonePerFrame` ([[053-observability]]). A stream is one request and so one line, not two |
 | The rules document extracted by `tools/rules` passes `promtool check rules` and names only metrics in the table | the `rules` job, `TestAlertsNameKnownMetrics` | the table half is built as `TestAlertsNameKnownMetrics`, `TestAlertsAggregateOnLabelsThatExist` and `TestEveryAlertCarriesItsRunbookSentence` over `deploy/base/prometheusrule.yaml` ([[053-observability]]); `tools/rules` and the `promtool` job are open |
