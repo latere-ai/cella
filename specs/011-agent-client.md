@@ -57,6 +57,9 @@ Built:
   --wait` holding the create with `?wait=1`
   ([[072-create-answers-at-once]], v0.6.0); and
   `get secrets --owner` (v0.7.0).
+- `cella help` says that inside a sandbox the token is in the file
+  `CELLA_TOKEN_FILE` names, or at `/run/cella/token`, and that the
+  address is the caller's to set, on main after v0.11.1, unreleased.
 
 Open:
 
@@ -69,9 +72,6 @@ Open:
   framed stream; `--if-match` is not built, and the Sandbox `PUT`
   carries no `ETag` to send; a YAML list that spans pages is one page;
   the server's identity is not printed after `unsupported_version`.
-- No runtime sets `CELLA_URL` inside a sandbox, so a caller there
-  passes the address with `CELLA_URL` or `--url`; `cella help` says so
-  on main after v0.11.1, unreleased.
 
 ## Design
 
@@ -81,16 +81,19 @@ Every command reads `CELLA_URL` and one of `CELLA_TOKEN` or
 `CELLA_TOKEN_FILE`, overridable by `--url`, `--token`, `--token-file`,
 and nothing else from the environment: no config file and no login,
 because a token comes from the caller's issuer, or, inside a sandbox,
-from the projection. Inside a sandbox `CELLA_URL` is injected by the
-control plane ([[004-runtime-contract]]) and the token is at
-`/run/cella/token`, the default of `--token-file` when `CELLA_TOKEN` is
-unset; the file is read per request, never once at start, because the
-controller re-projects it before expiry and a `logs -f` must outlive
-one token. The client package builds its own transport with `Proxy: nil`
-and reads no proxy or trust-store variable, so a `cella` run inside a
-sandbox reaches `CELLA_URL` directly through the driver's rule rather
-than through the egress gateway, whose allow list has no entry for the
-control plane ([[018-egress-and-secrets]]).
+from the projection. Inside a sandbox the driver projects the workload
+token and sets `CELLA_TOKEN_FILE` to its path, `/run/cella/token` where
+the sandbox has a mount namespace of its own and a directory the driver
+owns where it has none ([[004-runtime-contract]]); with `CELLA_TOKEN`
+unset, `--token-file` falls back to `CELLA_TOKEN_FILE` and then to
+`/run/cella/token`. No runtime sets `CELLA_URL`, so a caller inside a
+sandbox sets it or passes `--url`. The file is read per request, never
+once at start, because the controller re-projects it before expiry and
+a `logs -f` must outlive one token. The client package builds its own
+transport with `Proxy: nil` and reads no proxy or trust-store variable,
+so a `cella` run inside a sandbox reaches `CELLA_URL` directly through
+the driver's rule rather than through the egress gateway, whose allow
+list has no entry for the control plane ([[018-egress-and-secrets]]).
 
 ### Commands
 
@@ -253,7 +256,7 @@ semantics ([[008-api]]).
 | With `CELLA_TOKEN` unset and a token file that changes between two requests, each request sends the file's current bytes | `TestTheTokenFileIsReadPerRequest` | passing, as `TestTheTokenFileIsReadPerRequest` ([[050-cella-command]]) |
 | `CELLA_TOKEN`, the token file, and a secret's value reach no stdout or stderr byte, under `-v` included | `TestNoTokenReachesAnOutput` and `TestASecretValueIsPlacedInTheDocumentAndPrintedNowhere` with canaries | passing, as `TestNoTokenReachesAnOutput` and `TestASecretValueIsPlacedInTheDocumentAndPrintedNowhere` ([[050-cella-command]]) |
 | `-o json` and `-o yaml` for one object are byte-identical to the response; a two-page list is one envelope with every item's bytes unchanged and `next` empty | `TestOneObjectUnderJSONIsTheAPIsOwnBytes`, `TestOneObjectUnderYAMLIsTheAPIsOwnBytes`, `TestAListThatSpannedPagesIsOneEnvelope` | built for one object and for a JSON list, as `TestOneObjectUnderJSONIsTheAPIsOwnBytes`, `TestAListThatSpannedPagesIsOneEnvelope` ([[050-cella-command]]) and `TestOneObjectUnderYAMLIsTheAPIsOwnBytes` ([[055-api-contract-gaps]]). A YAML list is the one page the server rendered, with its cursor: joining pages means re-encoding an envelope, and this command holds no encoder for a syntax the server produced |
-| Each output row in the columns table renders as stated for each kind; `-o name` and `-o wide` do | `TestTheOutputsAreWhatTheGoldenFilesHold` | passing for the two kinds this API serves, as `TestTheOutputsAreWhatTheGoldenFilesHold` ([[050-cella-command]]) |
+| Each output row in the columns table renders as stated for each kind; `-o name` and `-o wide` do | `TestTheOutputsAreWhatTheGoldenFilesHold` | passing for the two kinds this command renders, `Sandbox` and `Secret`, as `TestTheOutputsAreWhatTheGoldenFilesHold` ([[050-cella-command]]); the `Environment` the API also serves has no columns here yet |
 | `exec` writes channel 1 and 2 to the right descriptors as frames arrive, 64 MiB without buffering; `-i` pumps stdin; `attach` enters and restores raw mode and sends a resize; `port-forward` carries bytes both ways; `cp` streams both ways | `TestExecWithInputIsTheSocket`, `TestATerminalSessionSetsRawModeAndRestoresIt`, `TestPortForward` | the socket half passes, as `TestExecWithInputIsTheSocket`, `TestATerminalSessionSetsRawModeAndRestoresIt` and the transfers of [[050-cella-command]]. The server now serves the framed `POST` stream ([[055-api-contract-gaps]]) and this command still takes `?wait=1`: reading the frames changes what `--json` answers and what `exec` exits with, which is this spec's exit table and not the handler's. `port-forward` is built ([[060-dial-and-port-proxy]]): one dial socket per accepted connection, a refusal at start as the exit of its code, and a port nothing listens on yet reported per connection, as `TestPortForward`, `TestPortForwardRefusals` and `TestPortForwardReportsAConnectionItCouldNotCarry`, and against a running node in `TestDialAndPortProxy` |
 | A list follows `next` to the end and stops at `--limit`; every selector flag becomes its query parameter | `TestAListFollowsTheCursorAndCarriesTheSelectors`, `TestALimitStopsTheListAndNeverAsksPastTheCeiling` | passing, as `TestAListFollowsTheCursorAndCarriesTheSelectors` and `TestALimitStopsTheListAndNeverAsksPastTheCeiling` ([[050-cella-command]]) |
 | The three output examples above are what the binary prints | `TestTheOutputsAreWhatTheGoldenFilesHold` over the golden forms | the forms pass as golden files ([[050-cella-command]]); the examples themselves carry an `OWNER` and an id of one installation and are not compared byte for byte |
