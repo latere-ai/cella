@@ -258,7 +258,7 @@ result is the method's non-stream returns. The exceptions:
 | `ExportTar` | `4` up; `ImportTar` `4` down |
 | `Screen` | `4` up, one frame per message |
 | `Watch` | one long-lived operation per connection; `event` messages up; a `relist` event tells the control plane to issue `List` |
-| `Create` | the payload carries the workload token, the CA, `CELLA_URL`, and the placeholders the worker's driver projects; the worker never mints a token |
+| `Create` | the payload carries the workload token, the CA, and the placeholders the worker's driver projects; the worker never mints a token |
 
 A sub-stream is closed by a zero-length frame. A caller's disconnect at
 the API ([[008-api]]) sends `cancel`. Frames are at most 1 MiB. On

@@ -8,7 +8,7 @@ depends_on:
 affects: [runtime/, runtime/k8s/, runtime/podman/, runtime/native/, runtime/local/, runtime/vm/, runtime/remote/, runtime/runtimetest/, internal/config/]
 effort: large
 created: 2026-09-12
-updated: 2026-09-24
+updated: 2026-10-03
 author: changkun
 ---
 
@@ -212,9 +212,10 @@ Every driver projects into the sandbox, read-only: the workload token
 at `/run/cella/token` and the trust file at `/run/cella/egress-ca.pem`,
 the public roots the driver was given at construction and then the
 gateway's CA ([[006-identity]], [[018-egress-and-secrets]],
-[[073-sandbox-trust-bundle]]), and sets `CELLA_URL` to the control
-plane's public URL, so a process inside reaches the API with the token
-beside it ([[011-agent-client]]). `Change.Token` re-projects a token before
+[[073-sandbox-trust-bundle]]), and sets `CELLA_TOKEN_FILE` to the
+token's path. No driver sets `CELLA_URL`: a process inside names the
+control plane's address itself and presents the token beside it
+([[011-agent-client]]). `Change.Token` re-projects a token before
 expiry without a restart; on k8s the projected Secret is updated, with the
 trust file written again beside the token and again at every start, on
 podman and `local` the file is rewritten.
