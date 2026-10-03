@@ -133,6 +133,7 @@ and that every emission point a spec names is here.
 | `sandbox.created` | `Create` accepted | the resolved manifest with `spec.env` reduced to its keys and `spec.secrets[]` to names | 005 |
 | `sandbox.updated` | an update applied | `{paths: []string}`, the changed paths | 005 |
 | `sandbox.started`, `.stopped`, `.deleted`, `.failed`, `.lost` | the transition completed, `started` included where a create's first driver read finds the sandbox running | `{phase}`; `Reason` set | 005 |
+| `sandbox.recovering` | the recreation of a lost sandbox begins | `{phase}` | 005 |
 | `sandbox.recovered` | a lost sandbox recreated | `{workspace: "kept" or "recreated", volumes: []string}` | 005 |
 | `sandbox.resized`, `sandbox.at_ceiling` (added by [[078-self-sizing-sandboxes]]) | a size change applied; usage passed the warning fraction of `resources.max` with no room left | `{resource, from, to, reason, moved}`; `{resource, used, max}` | 078 |
 | `sandbox.spawned` | a workload created a child | `{child: sbx_..., budgetLeft}` | 022 |
@@ -198,7 +199,7 @@ concurrently, so a slow object never holds another. A 2xx is
 `Acknowledge`. A 408, a 429, a 5xx, a connection failure, or a timeout
 of `CELLA_EVENTS_TIMEOUT` (default `10s`) is `Defer` with exponential
 backoff from 1 second to 5 minutes; after `CELLA_EVENTS_RETRY_WINDOW`
-(default `24h`) of attempts the event is `Drop`ped, `cella_events_dropped_total` moves, and a log line
+(default `24h`) of attempts the event is `Drop`ped, `cella_events_delivered_total{outcome="dropped"}` moves, and a log line
 names it. A 401 is `Defer`red with the same backoff and logged at error:
 it is the one 4xx that says nothing about the bytes, because it says the
 two ends hold different secrets, and dropping would discard every record
@@ -209,8 +210,9 @@ for one object are delivered in `seq` order: a deferred event holds
 the ones behind it for that object and no other. `cella_events_pending`
 is the journal's unacknowledged count. With Postgres a restart resumes
 where it was; without, the memory ring of `CELLA_JOURNAL_CAP` per
-object loses whatever was not yet acknowledged at process end, which
-the start-up log says. `CELLA_EVENTS_URL` without `CELLA_EVENTS_SECRET`
+object loses whatever was not yet acknowledged at process end; the
+start-up line names the store in use, `store=postgres` where records
+survive. `CELLA_EVENTS_URL` without `CELLA_EVENTS_SECRET`
 is a start-up failure, and so is a secret without the URL, which is a
 deployment that believes it delivers; with no URL a record is journaled
 acknowledged, so the per-object feed still reads it and retention forgets
@@ -243,13 +245,13 @@ journal's columns ([[010-state]]); the routes' envelope ([[008-api]]).
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| Every type in the table is named as an emission point by its owning spec and every emission point in the specs is in the table | `TestEventTableMatchesTheSpecs`, reading `specs/` | not built: the types of 018 to 023 wait on the slices that emit them |
+| Every type in the table is named as an emission point by its owning spec and every emission point in the specs is in the table | `TestEventTableMatchesTheSpecs`, reading `specs/` | not built: the test is not written, and the types listed as open under Current state are emitted by nothing yet |
 | Every type is emitted by the act in its row with the `data` named, `Object.Kind` right per kind, `Sandbox` set for attach and detach, and one `Reason` from the enum on every terminal transition | `TestRecordShapes`, `TestRecordCarriesLabelsAndSeqEverywhere`, table-driven | built for the `Sandbox` types, as `TestRecordShapes` and `TestRecordCarriesLabelsAndSeqEverywhere` ([[042-events]]); the scheduler's `Preempted`, `NoCapacity` and `StartDeadline` joined the enum with [[058-preemption]], as `TestReasonOfHoldsTheEnum`, so a terminal record of the scheduler's no longer reads `DriverFailed` |
 | No event body contains an env value, a secret value, a placeholder, a credential, a token, exec output, frame bytes, input text, a query string, or a header | `TestNoContentInEvents` with canary strings through every emission point | built as `TestNoContentInEvents` over a whole `cellad` session ([[042-events]]) |
 | The signature verifies with the documented formula for each of two secrets, is recomputed with a fresh `t` on a retry, and a body changed by one byte does not verify | `TestSignatureFormula`, `TestSignatureVerifies`, `TestSignatureRejects`, `TestSignatureIsFreshOnEveryAttempt`, and [[012-test-stubs-and-tiers]]'s `TestTheSinkVerifiesWhatTheDelivererSigns` | built as `TestSignatureVerifies`, `TestSignatureRejects`, `TestSignatureIsFreshOnEveryAttempt` and `TestSignatureFormula` ([[042-events]]) |
 | A sink failing three times receives the event on the fourth try and the object's later events after it, in `seq` order; another object's events flow meanwhile; a 400 drops at once; a 401 is held; a record past the retry window drops and is counted | `TestDeliveryIsOrderedPerObject`, `TestDeliveryRetries`, `TestDropRules` under a fake clock | built ([[042-events]]) |
 | Delivery runs only on the lease holder, in batches with bounded concurrency | `TestDeliveryNeedsTheLease` | built ([[042-events]]) |
 | The record commits with the mutation it explains, and one object's records keep their order under concurrent mutations | `TestRecordCommitsWithTheMutation`, `TestOrderUnderConcurrentMutations` | built ([[042-events]]) |
-| A restart with Postgres resumes delivery of an unacknowledged event; without, the ring holds the cap and unacknowledged events are gone | the `Delivery` case of `TestSuiteHoldsTheMemoryAdapter` and `TestPostgresStore`; the memory ring's cap | the Postgres row survives a restart and the delivery columns are proved over both adapters by the store suite; the memory ring's cap is not built ([[042-events]]) |
+| A restart with Postgres resumes delivery of an unacknowledged event; without, the ring holds the cap and unacknowledged events are gone | the `Delivery` case of `TestSuiteHoldsTheMemoryAdapter` and `TestPostgresStore`; `TestDurable`; `TestTheMemoryJournalKeepsARing`, `TestJournalRetentionEndToEnd` | built in part: the delivery columns are proved over both adapters by the store suite's `Delivery` case, and a Postgres row outlives the process that wrote it, `TestDurable` ([[042-events]]); the memory ring keeps the newest `CELLA_JOURNAL_CAP` records of each object, `TestTheMemoryJournalKeepsARing`, and on a running `cellad`, `TestJournalRetentionEndToEnd` ([[062-journal-retention]]). No test reopens a store holding an unacknowledged record and watches it delivered |
 | A URL without a secret, a secret without a URL, and a non-loopback `http://` sink are start-up failures; the escape hatch admits the stub | `TestSinkStartupRules` | built ([[042-events]]) |
 | `GET /v1/events?object=` serves each kind's events newest first, authorizes the kind's read, pages by `seq`, and follows | `TestObjectFeed`, `TestObjectFeedRefusals`, `TestObjectFeedAuthorizesTheObjectsKind`, `TestTheFeedReadsAnyEnvironment`, `TestFollowedFeed`, `TestFollowedFeedRefusals` | built: the route serves one object's records newest first, pages by the sequence the journal assigned, and authorizes the kind the id names, `TestObjectFeed`, `TestObjectFeedRefusals` and `TestObjectFeedAuthorizesTheObjectsKind`, with every environment the control plane holds read by its name, `TestTheFeedReadsAnyEnvironment` with the read half of the journal as `TestFeedReadsOneObjectNewestFirst` and `TestByObjectRebuildsTheRecord`, and over HTTP as conformance case `case009ObjectFeed` ([[055-api-contract-gaps]]). `follow=1` replays from the cursor and stays open, `TestFollowedFeed`, `TestFollowedFeedRefusals`, `TestFollowedFeedHeartbeat`, `TestFollowedFeedEnds` and `TestFollowReplaysThenStaysLive`, follows every readable object from now, `TestFollowedFeedOfEveryObject`, ends at a stop, `TestFollowedFeedEndToEnd`, and holds over HTTP as conformance case `case009FollowFeed` ([[066-events-follow]]) |
