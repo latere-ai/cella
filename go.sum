@@ -302,8 +302,8 @@ k8s.io/kube-openapi v0.0.0-20260721132016-d427ff9ee9ad h1:oXImqH8mQNk7PmvzKhmN3d
 k8s.io/kube-openapi v0.0.0-20260721132016-d427ff9ee9ad/go.mod h1:0/mqHCVhlumdJ3BhCfnjSZQE037nAhNodh1/hK0T8/I=
 k8s.io/utils v0.0.0-20260210185600-b8788abfbbc2 h1:AZYQSJemyQB5eRxqcPky+/7EdBj0xi3g0ZcxxJ7vbWU=
 k8s.io/utils v0.0.0-20260210185600-b8788abfbbc2/go.mod h1:xDxuJ0whA3d0I4mf/C4ppKHxXynQ+fxnkmQH0vTHnuk=
-latere.ai/x/ci-gate v0.50.2 h1:C+Tm8Q+AQp4cPc1RiFiu4BPqvQNxW3ADutLevMN8XzI=
-latere.ai/x/ci-gate v0.50.2/go.mod h1:kg1CjxG++fy21VRkwTQSzW4JgGwjOFSeisERzZfarWo=
+latere.ai/x/ci-gate v0.50.3 h1:HYonTmNp/gLJji+SizCVff6swLDvFBC9YkTaFUDTD1k=
+latere.ai/x/ci-gate v0.50.3/go.mod h1:kg1CjxG++fy21VRkwTQSzW4JgGwjOFSeisERzZfarWo=
 latere.ai/x/pkg v0.90.2 h1:W3QFzuf9ujTdmD4zIbeitO3tcP1dDXPZ09etVlEM5pc=
 latere.ai/x/pkg v0.90.2/go.mod h1:3E3SkHqudqH1mka1Rt7N8aExh+EJvvDqtNYKb25Ond4=
 pgregory.net/rapid v1.2.0 h1:keKAYRcjm+e1F0oAuU5F5+YPAWcyxNNRK2wud503Gnk=
