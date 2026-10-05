@@ -35,6 +35,10 @@ const (
 	// PhaseQueued is a sandbox a queued environment holds until it fits. No
 	// driver holds it (spec 057).
 	PhaseQueued = "Queued"
+	// PhaseStarting is a sandbox the runtime has taken and not yet reported
+	// ready. A driver reports it; the controller writes it after a start
+	// whose read did not yet show the start (spec 080).
+	PhaseStarting = "Starting"
 )
 
 var (
@@ -571,6 +575,40 @@ func refused(err error) bool {
 		errors.Is(err, ErrNoGateway)
 }
 
+// holdsSlot reports whether a sandbox in this phase takes a slot of its
+// owner's count ceiling: every phase that runs, or that reaches running with
+// no start anyone asks for, which is the scheduler placing a queued sandbox
+// and the reaper recovering a lost one (spec 080). A stopped sandbox runs
+// nothing and goes back to running only through Start, which counts it then;
+// a failed one never runs again; a deleting one is on its way out. A phase
+// this list does not name takes a slot, so a driver's phase the controller
+// does not know errs toward refusing. It is not holdsCompute, which asks what
+// the environment's resources hold now.
+func holdsSlot(phase string) bool {
+	switch phase {
+	case driver.Stopped, PhaseFailed, PhaseDeleting:
+		return false
+	}
+	return true
+}
+
+// countLocked is how many of the owner's sandboxes take a slot of the count
+// ceiling, leaving out the one id names. It reads the phase this control
+// plane last wrote: a transition the runtime made on its own, a main process
+// that exited, is not written until the next act on the sandbox, so the count
+// can hold a slot that no longer runs and never misses one that does. It runs
+// under the controller's lock, which is what makes the count and the write
+// that follows it one act.
+func (c *Controller) countLocked(owner, except string) int {
+	count := 0
+	for id, v := range c.objects {
+		if id != except && v.Status.Owner == owner && holdsSlot(v.Status.Phase) {
+			count++
+		}
+	}
+	return count
+}
+
 // observeCreate records one create's duration where the driver was asked for
 // the sandbox. One that was queued, placed for the loop, or refused for
 // capacity asked no driver; the loop records it when it realizes it.
@@ -630,19 +668,15 @@ func (c *Controller) createLocked(ctx context.Context, obj v1.Sandbox, owner str
 	if obj.Metadata.Name == "" {
 		obj.Metadata.Name = "sandbox-" + id[len(id)-10:]
 	}
-	count := 0
 	for _, v := range c.objects {
-		if v.Status.Owner == owner {
-			if v.Status.Phase != "Deleting" {
-				count++
-			}
-			if v.Metadata.Name == obj.Metadata.Name {
-				return obj, ErrNameTaken
-			}
+		if v.Status.Owner == owner && v.Metadata.Name == obj.Metadata.Name {
+			return obj, ErrNameTaken
 		}
 	}
-	if max > 0 && count >= max {
-		return obj, ErrQuota
+	// A new sandbox runs once it is placed, so a create takes a slot of the
+	// owner's count (spec 080).
+	if count := c.countLocked(owner, ""); max > 0 && count >= max {
+		return obj, fmt.Errorf("%w: the owner runs %d sandboxes of a ceiling of %d", ErrQuota, count, max)
 	}
 	// Step 2 of the create order. An adoption always fits: it turns one
 	// entry into one sandbox and moves nothing. A real create may not, and
@@ -1136,8 +1170,12 @@ func lifecycleOf(l v1.Lifecycle) (driver.Lifecycle, error) {
 	return out, nil
 }
 
-// Act serializes lifecycle changes; failed deletes retain the desired record.
-func (c *Controller) Act(ctx context.Context, id, verb string) (v1.Sandbox, error) {
+// Start starts a stopped sandbox under its owner's count ceiling, max, zero
+// being no ceiling: the ceiling a create is held to holds the start that
+// brings a stopped sandbox back to running (spec 080). The count, the
+// driver's start and the record of it are one act under the controller's
+// lock, so two starts racing for the last slot start one.
+func (c *Controller) Start(ctx context.Context, id string, max int) (v1.Sandbox, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	obj, ok := c.objects[id]
@@ -1148,24 +1186,78 @@ func (c *Controller) Act(ctx context.Context, id, verb string) (v1.Sandbox, erro
 	if err != nil {
 		return obj, err
 	}
-	// A sandbox whose create the loop has not finished has nothing a driver
-	// can start or stop yet, and one whose driver call is in flight must not
-	// be crossed by another: both are phase_conflict until the create
-	// settles. A delete is accepted in every phase, and the create's settle
-	// removes what it made.
-	if _, busy := c.realizing[id]; (busy || placed(obj)) && (verb == "start" || verb == "stop") {
+	if c.creating(obj) {
+		return obj, ErrPhase
+	}
+	obj, err = c.refresh(ctx, obj)
+	if err != nil {
+		return obj, err
+	}
+	if obj.Status.Phase != driver.Stopped {
+		return obj, ErrPhase
+	}
+	owner := obj.Status.Owner
+	if count := c.countLocked(owner, id); max > 0 && count >= max {
+		return obj, fmt.Errorf("%w: starting %s would make %d running sandboxes of a ceiling of %d", ErrQuota, id, count+1, max)
+	}
+	if err := d.Start(ctx, id); err != nil {
+		return obj, err
+	}
+	// The record is what the next count reads, so it must hold the slot
+	// whatever the read after the start says. A read that fails, or a runtime
+	// whose read does not yet show a start it took, is written Starting, the
+	// phase design 005 gives a start.
+	read, rerr := c.refresh(ctx, obj)
+	if rerr != nil {
+		c.log.WarnContext(ctx, "a started sandbox could not be read after its start", "sandbox", id, "err", rerr)
+		read = obj
+	}
+	if rerr != nil || read.Status.Phase == driver.Stopped {
+		read.Status.Phase, read.Status.Reason = PhaseStarting, ""
+	}
+	if err := c.persist(ctx, read, MutationStarted); err != nil {
+		// The record still says Stopped, which takes no slot, so the
+		// sandbox is stopped again: none runs that the count does not hold.
+		if serr := d.Stop(ctx, id); serr != nil {
+			return obj, errors.Join(err, fmt.Errorf("stopping %s after its start could not be recorded: %w", id, serr))
+		}
+		return obj, err
+	}
+	return export(read), nil
+}
+
+// creating reports whether a sandbox's create is still the scheduler loop's:
+// placed and not yet handed to a driver, or with its driver call in flight.
+// Such a sandbox has nothing a driver can start or stop yet, and its driver
+// call must not be crossed by another, so a start or a stop is phase_conflict
+// until the create settles. A delete is accepted in every phase, and the
+// create's settle removes what it made. It runs under the controller's lock.
+func (c *Controller) creating(obj v1.Sandbox) bool {
+	_, busy := c.realizing[obj.Status.ID]
+	return busy || placed(obj)
+}
+
+// Act stops or deletes one sandbox; a delete that fails keeps the desired
+// record. A start is Start, which takes the owner's ceiling, so no caller
+// starts a sandbox past one by leaving the figure out.
+func (c *Controller) Act(ctx context.Context, id, verb string) (v1.Sandbox, error) {
+	if verb == "start" {
+		return v1.Sandbox{}, fmt.Errorf("%w: a start is Controller.Start, which takes the owner's count ceiling", ErrPhase)
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	obj, ok := c.objects[id]
+	if !ok {
+		return obj, ErrNotFound
+	}
+	d, err := c.driverFor(obj.Status.Environment)
+	if err != nil {
+		return obj, err
+	}
+	if verb == "stop" && c.creating(obj) {
 		return obj, ErrPhase
 	}
 	switch verb {
-	case "start":
-		obj, err = c.refresh(ctx, obj)
-		if err != nil {
-			return obj, err
-		}
-		if obj.Status.Phase != driver.Stopped {
-			return obj, ErrPhase
-		}
-		err = d.Start(ctx, id)
 	case "stop":
 		obj, err = c.refresh(ctx, obj)
 		if err != nil {
@@ -1201,7 +1293,7 @@ func (c *Controller) Act(ctx context.Context, id, verb string) (v1.Sandbox, erro
 	if err != nil {
 		return obj, err
 	}
-	return export(obj), c.persist(ctx, obj, verbMutation(verb))
+	return export(obj), c.persist(ctx, obj, MutationStopped)
 }
 
 // deleteOne ends one sandbox: the driver's object, the touch and lost
@@ -1251,14 +1343,6 @@ func (c *Controller) cascade(ctx context.Context, id string) error {
 	return nil
 }
 
-// verbMutation is the act one API verb performed, which is the type of the
-// record it produces.
-func verbMutation(verb string) string {
-	if verb == "start" {
-		return MutationStarted
-	}
-	return MutationStopped
-}
 func (c *Controller) Exec(ctx context.Context, id string, req driver.ExecRequest) (driver.Exec, error) {
 	d, err := c.driverOf(id)
 	if err != nil {

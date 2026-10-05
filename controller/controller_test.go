@@ -96,7 +96,7 @@ func TestDurableLifecycle(t *testing.T) {
 	if _, err = c.Get(ctx, "work", "bob"); !errors.Is(err, ErrNotFound) {
 		t.Fatal(err)
 	}
-	if _, err = c.Act(ctx, obj.Status.ID, "start"); !errors.Is(err, ErrPhase) {
+	if _, err = c.Start(ctx, obj.Status.ID, 0); !errors.Is(err, ErrPhase) {
 		t.Fatal(err)
 	}
 	if _, err = c.Act(ctx, obj.Status.ID, "unknown"); !errors.Is(err, ErrPhase) {
@@ -127,7 +127,7 @@ func TestDurableLifecycle(t *testing.T) {
 	if err != nil || got.Status.Owner != "alice" {
 		t.Fatal(got, err)
 	}
-	started, err := c.Act(ctx, obj.Status.ID, "start")
+	started, err := c.Start(ctx, obj.Status.ID, 0)
 	if err != nil || started.Status.Phase != driver.Running {
 		t.Fatal(started, err)
 	}
@@ -214,7 +214,7 @@ func TestFailuresRemainRecoverable(t *testing.T) {
 	if _, err = c.Refresh(t.Context(), obj); err == nil {
 		t.Fatal("inspection error lost")
 	}
-	if _, err = c.Act(t.Context(), obj.Status.ID, "start"); err == nil {
+	if _, err = c.Start(t.Context(), obj.Status.ID, 0); err == nil {
 		t.Fatal("inspection error lost")
 	}
 	if _, err = c.Act(t.Context(), obj.Status.ID, "stop"); err == nil {
