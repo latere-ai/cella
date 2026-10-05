@@ -156,7 +156,7 @@ code in the `X-Cella-Error` trailer.
 | `PUT /v1/sandboxes/{name}` | `sandbox.create` or `sandbox.update` | apply by name: create when the name is free, update when you hold it |
 | `GET /v1/sandboxes/{id}` | `sandbox.read` | read one sandbox with its status |
 | `DELETE /v1/sandboxes/{id}` | `sandbox.delete` | delete it, and every sandbox it created, in any phase |
-| `POST /v1/sandboxes/{id}/start` | `sandbox.update` | start a stopped sandbox |
+| `POST /v1/sandboxes/{id}/start` | `sandbox.update` | start a stopped sandbox, unless you already run as many as your sandbox limit allows |
 | `POST /v1/sandboxes/{id}/stop` | `sandbox.update` | stop a running sandbox and keep its workspace |
 
 A create also asks `environment.use` on the environment it runs on, and
@@ -178,6 +178,13 @@ Everything that refuses a create still refuses it on the request, with
 nothing recorded: a manifest the server rejects, a denied action, your
 sandbox limit, a name you already hold, an environment that is not ready,
 and a boundary that needs an egress gateway while none is connected.
+
+**Your sandbox limit counts what runs.** A sandbox that is pending,
+queued, starting, running or being recovered takes a place in your
+limit; a stopped, failed or deleting one does not. When you are at the
+limit, a create is refused with `quota_exceeded`, and so is a start of a
+stopped sandbox: stop or delete one first. A stopped sandbox keeps its
+workspace until it is deleted, by you or by its `ttl` or `autoDelete`.
 
 **Holding the answer.** `?wait=1` holds the answer until the sandbox has
 left `Queued`, `Pending` and `Starting`: it is `Running`, `Failed` with

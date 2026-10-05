@@ -55,9 +55,9 @@ create that does not fit:
 Either way the create answers `201` with the sandbox as soon as it is
 recorded, and its `phase` says what happened: `Pending` is a sandbox that
 fit and is being started, which holds its share of the capacity from that
-moment. A `Failed` sandbox keeps its name and counts toward
-your own sandbox limit until you delete it, the same as one that failed
-at the driver.
+moment. A `Failed` sandbox keeps its name until you delete it,
+the same as one that failed at the driver, and does not count toward
+your own sandbox limit, which counts the sandboxes that run.
 
 For the environment `cellad` drives itself, `CELLA_SCHEDULING_MODE=queued`
 sets the mode at first start. On an environment you apply, set it in the

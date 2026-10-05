@@ -250,7 +250,7 @@ paths:
     post:
       operationId: startSandbox
       summary: Start a sandbox
-      description: Start a stopped sandbox. Authorized as `sandbox.update`.
+      description: Start a stopped sandbox. Authorized as `sandbox.update`. A start that would take the owner past the count ceiling on that allow, `limits.max_sandboxes`, which counts the sandboxes that run, is refused with `quota_exceeded`.
       responses:
         "200":
           description: The answer this route serves.

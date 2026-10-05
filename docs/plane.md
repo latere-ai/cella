@@ -67,9 +67,13 @@ Three rules the core holds you to. Deny the reserved probe id: an endpoint
 that allows it is one that does not read the request, and `cellad check`
 fails on it. Answer a deny as a decision and not as an error, because an
 error is read as "no decision" and refuses the request either way. Carry
-your plan's sandbox limit on the allow of `sandbox.create`, as
-`max_sandboxes` in `authorizer.WireLimits`, rather than enforcing it in a
-proxy in front: a create past it is refused with `quota_exceeded`. Of the
+your plan's sandbox limit on the allow of `sandbox.create` and of
+`sandbox.update`, as `max_sandboxes` in `authorizer.WireLimits`, rather
+than enforcing it in a proxy in front: a create or a start past it is
+refused with `quota_exceeded`. The limit counts the sandboxes that run,
+so a stopped one holds no slot and starting it again takes one; bound
+what your subjects keep stopped with `ttl` or `autoDelete` from your
+admission endpoint. Of the
 other two figures the type carries, this release does not apply
 `max_priority`, and refuses any request whose allow carries
 `requests_per_minute` with `capability_unsupported`, so leave both out.
@@ -168,7 +172,7 @@ plans, and its own image catalog.
 | Concern | Through the webhooks | Through the packages |
 |---|---|---|
 | accounts and organizations | the claims of your issuer, read by your authorizer | your own middleware, before `Resolve` |
-| plans and quotas | `max_sandboxes` on an allow, and the ceilings your admission endpoint applies | `Options.Ceilings` and the count you pass to `Create` |
+| plans and quotas | `max_sandboxes` on an allow, and the ceilings your admission endpoint applies | `Options.Ceilings` and the count you pass to `Create` and `Start` |
 | an image catalog | admission rewrites the image | an admission function in `Options` |
 | secrets | the `Secret` kind holds the value; your authorizer decides who may mount one | the same kind through the store you construct |
 | audit and usage | the event sink | your own implementation of the controller's event seam |
