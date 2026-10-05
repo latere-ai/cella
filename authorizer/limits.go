@@ -21,11 +21,13 @@ type Limits struct {
 	// than serve it unlimited; 0 limits nothing.
 	RequestsPerMinute int
 	// MaxSandboxes is the subject's sandbox ceiling, the count spec 007
-	// defines: every desired sandbox of the subject whose phase is not
-	// Deleting, a queued and a stopped one included, because each holds
-	// a name and a workspace. cellad reads it from the allow of
-	// sandbox.create, for a create and a spawn alike, and refuses a
-	// create past it with quota_exceeded. 0 is no ceiling.
+	// defines: the subject's sandboxes that run or will run without a
+	// start, a queued one included and a stopped, failed or deleting one
+	// not (spec 080). cellad reads it from the allow of sandbox.create,
+	// for a create and a spawn alike, and from the allow of
+	// sandbox.update for a start, and refuses either past it with
+	// quota_exceeded. An endpoint carries it on both, since an allow
+	// without it is no ceiling on that request. 0 is no ceiling.
 	MaxSandboxes int
 	// MaxPriority caps scheduling.priority (spec 003, spec 020). cellad
 	// decodes it and does not apply it; a plane built on the packages
