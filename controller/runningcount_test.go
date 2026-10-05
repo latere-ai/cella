@@ -6,6 +6,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -218,7 +219,8 @@ func TestTwoStartsRaceForOneSlot(t *testing.T) {
 		t.Fatalf("%d starts ran and %d were refused, want one each", won.Load(), refused.Load())
 	}
 	phases := []string{phaseOf(c, ids[0]), phaseOf(c, ids[1])}
-	if !(phases[0] == PhaseStarting && phases[1] == driver.Stopped) && !(phases[0] == driver.Stopped && phases[1] == PhaseStarting) {
+	slices.Sort(phases)
+	if !slices.Equal(phases, []string{PhaseStarting, driver.Stopped}) {
 		t.Fatalf("desired state holds %v, want one Starting and one Stopped", phases)
 	}
 }
