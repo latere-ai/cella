@@ -218,11 +218,11 @@ func TestDefaultImageReachesTheResolver(t *testing.T) {
 	}
 }
 
-// TestCountCeilingCountsEveryDesiredSandbox is design 007's definition of
-// the per-subject count: every desired sandbox of the subject whose phase
-// is not Deleting, a stopped one included. The ceiling is the authorizer's
-// limits.max_sandboxes, which means that same figure.
-func TestCountCeilingCountsEveryDesiredSandbox(t *testing.T) {
+// TestCountCeilingCountsRunningSandboxes is spec 080's count over the API:
+// the sandboxes of the subject that run or will run without a start, read
+// against the authorizer's limits.max_sandboxes. A stopped sandbox holds no
+// slot, and starting it again takes one.
+func TestCountCeilingCountsRunningSandboxes(t *testing.T) {
 	f := setup(t, limit(2))
 	var first, second v1.Sandbox
 	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice, createBody, 201), &first); err != nil {
@@ -237,21 +237,62 @@ func TestCountCeilingCountsEveryDesiredSandbox(t *testing.T) {
 	if !strings.Contains(string(body), "quota_exceeded") {
 		t.Fatalf("body = %s", body)
 	}
-	// A stopped sandbox holds a workspace and a name, so it counts.
+	// A stopped sandbox runs nothing, so it frees its slot.
 	f.request("POST", "/v1/sandboxes/"+second.Status.ID+"/stop", f.alice, "", 200)
-	f.request("POST", "/v1/sandboxes?wait=1", f.alice, third, 422)
-	// A delete frees the slot.
-	f.request("DELETE", "/v1/sandboxes/"+second.Status.ID, f.alice, "", 202)
 	f.request("POST", "/v1/sandboxes?wait=1", f.alice, third, 201)
+	// Starting it again would make three, past the ceiling.
+	f.request("POST", "/v1/sandboxes/"+second.Status.ID+"/start", f.alice, "", 422)
+	// A delete of a running one frees a slot the start then takes.
+	f.request("DELETE", "/v1/sandboxes/"+first.Status.ID, f.alice, "", 202)
+	f.request("POST", "/v1/sandboxes/"+second.Status.ID+"/start", f.alice, "", 200)
 	// Another subject's sandboxes are not this subject's count.
 	f.request("POST", "/v1/sandboxes?wait=1", f.bob, createBody, 201)
 }
 
-// limit is an authorizer that allows everything and grants one ceiling.
+// TestAStartPastTheCeilingIsQuotaExceeded: the start reads its ceiling from
+// the allow of sandbox.update, and a start past it answers 422
+// quota_exceeded with the code's one sentence and a developer detail naming
+// the count the start would make.
+func TestAStartPastTheCeilingIsQuotaExceeded(t *testing.T) {
+	f := setup(t, limit(1))
+	var first v1.Sandbox
+	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice, createBody, 201), &first); err != nil {
+		t.Fatal(err)
+	}
+	f.request("POST", "/v1/sandboxes/"+first.Status.ID+"/stop", f.alice, "", 200)
+	f.request("POST", "/v1/sandboxes?wait=1", f.alice, strings.Replace(createBody, `"work"`, `"second"`, 1), 201)
+	var refusal struct {
+		Error struct {
+			Code    string         `json:"code"`
+			Message string         `json:"message"`
+			Details map[string]any `json:"details"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes/"+first.Status.ID+"/start", f.alice, "", 422), &refusal); err != nil {
+		t.Fatal(err)
+	}
+	e := refusal.Error
+	detail, _ := e.Details["detail"].(string)
+	if e.Code != "quota_exceeded" || e.Message != "You have reached your sandbox limit." ||
+		!strings.Contains(detail, "would make 2 running sandboxes of a ceiling of 1") {
+		t.Fatalf("the refusal: %+v", e)
+	}
+	var read v1.Sandbox
+	if err := json.Unmarshal(f.request("GET", "/v1/sandboxes/"+first.Status.ID, f.alice, "", 200), &read); err != nil {
+		t.Fatal(err)
+	}
+	if read.Status.Phase != "Stopped" {
+		t.Fatalf("the refused start left the sandbox %s", read.Status.Phase)
+	}
+}
+
+// limit is an authorizer that allows everything and grants one ceiling on
+// the two actions a plane carries it on: the create and the update a start is
+// decided as.
 type limit int
 
 func (l limit) Authorize(_ context.Context, req authz.Request) (authz.Decision, error) {
-	if req.Action != "sandbox.create" {
+	if req.Action != "sandbox.create" && req.Action != "sandbox.update" {
 		return authz.Decision{Allow: true}, nil
 	}
 	max := int(l)

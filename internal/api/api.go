@@ -612,7 +612,7 @@ func (h *handler) awaitStart(ctx context.Context, obj v1.Sandbox, timeout time.D
 // flight: waiting in a queue, placed or coming up.
 func started(obj v1.Sandbox) bool {
 	switch obj.Status.Phase {
-	case controller.PhaseQueued, driver.Pending, "Starting":
+	case controller.PhaseQueued, driver.Pending, controller.PhaseStarting:
 		return false
 	}
 	return true
@@ -667,12 +667,18 @@ func (h *handler) item(w http.ResponseWriter, r *http.Request) {
 	if action == authorizer.ActionSandboxUpdate {
 		res = withProposal(res, obj.Status.Owner, obj.Metadata, obj.Spec)
 	}
-	if _, err = h.decide(r, action, res); err != nil {
+	d, err := h.decide(r, action, res)
+	if err != nil {
 		respondError(w, err)
 		return
 	}
 	switch verb {
-	case "start", "stop", "delete":
+	case "start":
+		// A start brings a stopped sandbox back to running, so it is held to
+		// the ceiling a create is, the figure on the allow of sandbox.update
+		// (spec 080).
+		obj, err = h.Controller.Start(r.Context(), obj.Status.ID, d.Limits.MaxSandboxes)
+	case "stop", "delete":
 		obj, err = h.Controller.Act(r.Context(), obj.Status.ID, verb)
 	default:
 		obj, err = h.Controller.Refresh(r.Context(), obj)
