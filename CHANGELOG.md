@@ -6,6 +6,26 @@ refused before it is pushed.
 
 ## Unreleased
 
+- Changed: the sandbox limit, `max_sandboxes` on an allow, counts the
+  sandboxes that run or will run without a start: pending, queued,
+  starting, running, stopping, lost and recovering ones. A stopped,
+  failed or deleting sandbox no longer counts, so a subject at the limit
+  stops one and creates another. A stopped sandbox is now bounded by its
+  `ttl` and `autoDelete` alone; set them from your admission endpoint to
+  bound what a subject keeps.
+- Changed: starting a stopped sandbox is checked against the limit, and
+  a start past it is refused with `quota_exceeded`. The start reads the
+  figure from the allow of `sandbox.update`: an authorization endpoint
+  carries `max_sandboxes` on that allow as well as on `sandbox.create`,
+  and an allow without it puts no ceiling on the start.
+- Changed: the message of `quota_exceeded` is "You have reached your
+  limit of running sandboxes. Stop one to start another." It was "You
+  have reached your sandbox limit."
+- Changed: in the `controller` package, `Controller.Start(ctx, id, max)`
+  starts a stopped sandbox under its owner's ceiling, as `Create` creates
+  one under it. `Act` takes `stop` and `delete` and refuses `start` with
+  `ErrPhase`; a plane that started sandboxes through `Act` calls `Start`
+  with the figure it passes to `Create`.
 - Fixed: `cella help` says that inside a sandbox the token is already in
   the file `CELLA_TOKEN_FILE` names, or at `/run/cella/token`, and that the
   address is not: set `CELLA_URL` or pass `--url`. It had said the address
