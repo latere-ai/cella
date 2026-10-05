@@ -101,6 +101,7 @@ every spec in its `depends_on` is at `testing` or later, not `complete`.
 | [077](077-egress-scope-and-confirmation.md) | Egress scope by path and confirmation refusals: a Secret scoped by host, port and path prefix with the longest prefix winning, one header, confirmation patterns refused 403 and recorded for the owner, one-shot allowances, upstream refusals in the same record | large | drafted | 003, 005, 006, 008, 009, 010, 018, 022, 039, 046 |
 | [078](078-self-sizing-sandboxes.md) | Self-sizing sandboxes: `resources.max` as a ceiling in place of a fixed size, a workspace claim that grows before it fills, memory raised in place or by a move that keeps the workspace, CPU bounded by the ceiling, and `sandbox.resized` and `sandbox.at_ceiling` | large | drafted | 003, 004, 005, 009, 010, 035, 036, 047 |
 | [079](.archive/079-secret-last-used.md) | Secret last use: `status.lastUsedAt`, written by the writer from a use the egress gateway reports when it substitutes the secret, at most once per secret per five minutes | small | complete | 010, 018, 039, 046, 076 |
+| [080](080-running-sandbox-count.md) | Running sandbox count: the count ceiling holds the sandboxes that run or will run without a start, a stopped, failed or deleting one holds no slot, and a start is checked under the controller's lock as a create is | small | drafted | 005, 007, 008 |
 
 ## Dependency graph
 
