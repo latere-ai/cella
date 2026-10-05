@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.12.0 - 2026-10-05
+
 - Changed: the sandbox limit, `max_sandboxes` on an allow, counts the
   sandboxes that run or will run without a start: pending, queued,
   starting, running, stopping, lost and recovering ones. A stopped,
