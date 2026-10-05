@@ -1,6 +1,6 @@
 ---
 title: "Running sandbox count: the count ceiling holds the sandboxes that run or will run without a start, a stopped, failed or deleting one holds no slot, and a start is checked under the controller's lock as a create is"
-status: drafted
+status: complete
 track: core
 depends_on:
   - specs/005-lifecycle-controller.md
@@ -141,9 +141,34 @@ volume. An installation that bounds what its subjects keep sets `ttl` or
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| A create counts the owner's `Pending`, `Queued`, `Starting`, `Running`, `Stopping`, `Lost` and `Recovering` sandboxes and an unknown phase, and not the `Stopped`, `Failed` and `Deleting` ones | `TestTheCountHoldsWhatRunsOrWillRun` | not built |
-| A start past the ceiling is refused with `ErrQuota` and leaves the sandbox stopped; a start under it runs and holds a slot | `TestAStartPastTheCeilingIsRefused` | not built |
-| A stop frees a slot for a create and for a start | `TestAStopFreesASlot` | not built |
-| Two starts racing for the last slot start one, on a runtime whose read still says `Stopped` after it took the start | `TestTwoStartsRaceForOneSlot` | not built |
-| `Act` refuses a start | `TestActTakesNoStart` | not built |
-| Over the API a start reads the figure from the allow of `sandbox.update`, and a refused start is 422 `quota_exceeded` with the fixed sentence and a detail naming the count; a stopped sandbox no longer counts toward a create | `TestCountCeilingCountsRunningSandboxes`, `TestAStartPastTheCeilingIsQuotaExceeded` | not built |
+| A create counts the owner's `Pending`, `Queued`, `Starting`, `Running`, `Stopping`, `Lost` and `Recovering` sandboxes and an unknown phase, and not the `Stopped`, `Failed` and `Deleting` ones | `TestTheCountHoldsWhatRunsOrWillRun` | built |
+| A start past the ceiling is refused with `ErrQuota` and leaves the sandbox stopped; a start under it runs and holds a slot | `TestAStartPastTheCeilingIsRefused` | built |
+| A stop frees a slot for a create and for a start | `TestAStopFreesASlot` | built |
+| Two starts racing for the last slot start one, on a runtime whose read still says `Stopped` after it took the start | `TestTwoStartsRaceForOneSlot` | built |
+| A start whose record cannot be written is stopped again and stays `Stopped` in desired state | `TestAStartThatCannotBeRecordedIsStoppedAgain` | built |
+| `Act` refuses a start | `TestActTakesNoStart` | built |
+| Over the API a start reads the figure from the allow of `sandbox.update`, and a refused start is 422 `quota_exceeded` with the fixed sentence and a detail naming the count; a stopped sandbox no longer counts toward a create | `TestCountCeilingCountsRunningSandboxes`, `TestAStartPastTheCeilingIsQuotaExceeded` | built |
+
+## Outcome
+
+Built as designed on 2026-10-05. `holdsSlot` is the phase table and
+`countLocked` the count, shared by the create and by
+`Controller.Start`; the route passes the allow of `sandbox.update` to
+the start. Every criterion has its test, and each new controller test
+fails against the count and the start before this change.
+
+Two points the design fixed while it was built. A start whose read
+after the runtime took it still says `Stopped`, or fails, is written
+`Starting`, because the record is what the next count reads: without
+it two starts racing for the last slot on such a runtime both pass,
+which `TestTwoStartsRaceForOneSlot` shows with a runtime that lags. The
+start's own read failing is no longer the caller's error once the
+runtime took the start; it is logged and the record written as above,
+as the scheduler's resume of a preempted sandbox already did.
+
+Removing `start` from `Act` changes the `controller` package's surface
+for an importer: a start through `Act` is `ErrPhase` naming `Start`.
+The change log says so. The user sentence of `quota_exceeded` changed
+with it, and a plane that shows Cella's messages, or quotes the table
+in its own documents, carries the new one.
+
