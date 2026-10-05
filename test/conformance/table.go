@@ -43,7 +43,7 @@ var errorTable = map[string]row{
 	"capability_unsupported":     {422, "The environment cannot provide this."},
 	"environment_mismatch":       {422, "The worker does not match the environment it registered for."},
 	"admission_refused":          {422, "The request was refused by this server's policy."},
-	"quota_exceeded":             {422, "You have reached your sandbox limit."},
+	"quota_exceeded":             {422, "You have reached your limit of running sandboxes. Stop one to start another."},
 	"boundary_exceeded":          {422, "A child sandbox cannot exceed its parent's boundary."},
 	"spawn_budget_exhausted":     {422, "The sandbox has no spawn budget left."},
 	"cursor_expired":             {410, "The feed no longer holds the records after that position; read it again from the newest."},

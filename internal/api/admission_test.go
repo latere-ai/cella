@@ -273,7 +273,7 @@ func TestAStartPastTheCeilingIsQuotaExceeded(t *testing.T) {
 	}
 	e := refusal.Error
 	detail, _ := e.Details["detail"].(string)
-	if e.Code != "quota_exceeded" || e.Message != "You have reached your sandbox limit." ||
+	if e.Code != "quota_exceeded" || e.Message != "You have reached your limit of running sandboxes. Stop one to start another." ||
 		!strings.Contains(detail, "would make 2 running sandboxes of a ceiling of 1") {
 		t.Fatalf("the refusal: %+v", e)
 	}

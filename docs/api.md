@@ -131,7 +131,7 @@ code in the `X-Cella-Error` trailer.
 | `unsupported_media_type` | 415 | the body is in a type this route does not take |
 | `capability_unsupported` | 422 | the environment cannot provide what the request or the manifest needs |
 | `ceiling_exceeded` | 422 | a value is above what this server allows |
-| `quota_exceeded` | 422 | you are at your sandbox limit |
+| `quota_exceeded` | 422 | you run as many sandboxes as your limit allows; stop one to create or start another |
 | `admission_refused` | 422 | the admission step refused the manifest, with its reason in `detail` |
 | `boundary_exceeded` | 422 | a child asked for more than its parent has |
 | `spawn_budget_exhausted` | 422 | the sandbox has no spawn budget left |

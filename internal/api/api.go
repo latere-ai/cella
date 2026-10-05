@@ -1015,7 +1015,7 @@ func errorEnvelope(err error, requestID string) (int, httpjson.Error) {
 		message = "The object changed since you read it; read it again and retry."
 	case "quota_exceeded":
 		status = 422
-		message = "You have reached your sandbox limit."
+		message = "You have reached your limit of running sandboxes. Stop one to start another."
 	case "body_too_large":
 		status = 413
 		message = "The request body is larger than this server accepts."
