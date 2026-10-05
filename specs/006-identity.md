@@ -8,7 +8,7 @@ depends_on:
 affects: [authorizer/, internal/auth/, internal/config/, internal/api/, test/stubs/]
 effort: medium
 created: 2026-09-12
-updated: 2026-10-03
+updated: 2026-10-05
 author: changkun
 ---
 
@@ -255,9 +255,11 @@ every field in it is optional: an absent field means the configured
 value. `requests_per_minute` overrides
 `CELLA_REQUESTS_PER_MINUTE` for this subject ([[008-api]]);
 `max_sandboxes` overrides `CELLA_MAX_SANDBOXES_PER_SUBJECT`, and it means
-the count [[007-admission]] defines: every desired `Sandbox` of the
-subject whose phase is not `Deleting`, a queued and a stopped one
-included, because each holds a name and a workspace;
+the count [[007-admission]] defines: the subject's sandboxes that run or
+will run without a start, a queued one included and a stopped, failed or
+deleting one not ([[080-running-sandbox-count]]). It is read from the
+allow of `sandbox.create` for a create and of `sandbox.update` for a
+start;
 `max_priority` caps `scheduling.priority` and
 reaches `Resolve` as `Limits.MaxPriority` ([[003-manifest-contract]]).
 `filter`, on a list action, narrows the list to the owners and labels
@@ -435,7 +437,7 @@ the HTTP envelope of 401 and 403 ([[008-api]]); the revocation store
 | A deny on an own action is `forbidden`; a deny through `Lookup` is `not_found` and identical to a missing object | `TestDenyMapping` | built: the two codes hold at the guard; the 403 and the 404 they render as are [[008-api]]'s |
 | The cache serves a second identical decision without a call, expires an allow at the answer's `ttl` and at the `600s` cap, a deny at `5s`, never caches unavailability, and keys `create` and `list` without a resource id | `TestDecisionCache` | built |
 | The probe id is denied by the stub authorizer and by the owner policy for every subject and action, and `cellad check` reports an authorizer that allows it | `TestProbeIdIsAlwaysDenied`, `TestAuthorizerConformance`, `TestTheAuthorizerDeniesTheProbe`, `TestCheckNamesEachFailure`, `TestCheckHoldsUnderTheOwnerPolicyAndAnEndpoint` | built: the owner policy denies it for every subject and action, `TestProbeIdIsAlwaysDenied`; the stub denies it for every action through the probe case of the shared suite, `TestAuthorizerConformance`, and the authorizer of `cella-stubs` for every action, `TestTheAuthorizerDeniesTheProbe`; `cellad check` fails its `authorizer` line against an endpoint that allows the probe, `TestCheckNamesEachFailure`, and passes it, naming the probe id, under the owner policy and under the stub, `TestCheckHoldsUnderTheOwnerPolicyAndAnEndpoint` ([[048-release-and-check]]) |
-| `limits` override the rate limit, the count ceiling, and the priority cap; `filter` narrows a list | `TestLimitsAndFilterReachTheCaller`, `TestCountCeilingCountsEveryDesiredSandbox`, `TestEnvironmentListAppliesTheFilter`, `TestTheDefaultEnvironmentIsListedByItsRead`, `TestSecretListAppliesTheWholeFilter` | partial: `max_sandboxes` is honored at create as the count [[007-admission]] defines, and the filter narrows the sandbox, secret and environment lists by owners and labels, with the default environment decided by its read alone ([[067-environment-list-ports-redirect-keys]]); there is still no rate limit ([[008-api]]), and `cellad` passes no `max_priority` to `Resolve`, whose `Limits.MaxPriority` caps `scheduling.priority` for a plane that sets it ([[003-manifest-contract]]) |
+| `limits` override the rate limit, the count ceiling, and the priority cap; `filter` narrows a list | `TestLimitsAndFilterReachTheCaller`, `TestCountCeilingCountsRunningSandboxes`, `TestEnvironmentListAppliesTheFilter`, `TestTheDefaultEnvironmentIsListedByItsRead`, `TestSecretListAppliesTheWholeFilter` | partial: `max_sandboxes` is honored at create and at start as the count [[007-admission]] defines, and the filter narrows the sandbox, secret and environment lists by owners and labels, with the default environment decided by its read alone ([[067-environment-list-ports-redirect-keys]]); there is still no rate limit ([[008-api]]), and `cellad` passes no `max_priority` to `Resolve`, whose `Limits.MaxPriority` caps `scheduling.priority` for a plane that sets it ([[003-manifest-contract]]) |
 | The owner policy's rules hold for every kind and action, including that only an admin creates an environment and only the default environment is usable by a non-admin | `TestOwnerPolicy`, table-driven | built |
 | A sandbox's token reads and execs itself, reads its descendants, cannot read a sibling or delete itself, and cannot mount a secret its parent did not | `TestWorkloadIsLeastPrivileged`; `TestWorkloadReachesItsOwnSandbox` over the served routes | built, and held over the API as well as over the policy ([[045-workload-tokens]]); a sandbox creating a child is [[040-mesh-and-spawn]]'s `TestSpawnOverTheAPI`, and the secret a child's parent mounts is not reachable through the API yet |
 | A workload token and an environment key minted under a public URL with a path name the URL with its path as `iss`, and the control plane accepts both under the base it is served at | `TestServingUnderABasePathEndToEnd` | built ([[071-serving-under-a-base-path]]) |

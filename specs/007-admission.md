@@ -8,7 +8,7 @@ depends_on:
 affects: [manifest/, internal/admission/, internal/api/, internal/config/, test/stubs/]
 effort: small
 created: 2026-09-12
-updated: 2026-10-03
+updated: 2026-10-05
 author: changkun
 ---
 
@@ -47,9 +47,11 @@ Built:
 - `Defaults` and `Ceilings` as options of `Resolve`, applied with and
   without a webhook, for an importer that sets them.
 - The count ceiling from the authorizer's `limits.max_sandboxes`,
-  counted under the controller's lock with `Queued` and `Stopped`
-  sandboxes included. A spawn is counted against its parent's owner,
-  which is the root's ([[022-mesh-and-spawn]], v0.2.0).
+  counted under the controller's lock over the sandboxes that run or
+  will run without a start, `Queued` included and `Stopped`, `Failed`
+  and `Deleting` not, and checked again when a stopped sandbox starts
+  ([[080-running-sandbox-count]]). A spawn is counted against its
+  parent's owner, which is the root's ([[022-mesh-and-spawn]], v0.2.0).
 - The boundary check of stage 6 runs after admission in `Resolve`, so a
   webhook cannot open a child's boundary.
 
@@ -235,9 +237,12 @@ sandboxes one subject holds. `Resolve` has no count, so the check is
 the controller's, taken under its lock with the desired-state write,
 and where there are replicas only the one holding the writer lease runs
 the controller ([[010-state]], [[076-rolling-replicas]]), so two
-concurrent creates cannot both pass at the ceiling: the count is every
-desired `Sandbox` of the subject whose phase is not `Deleting`, `Queued`
-and `Stopped` included.
+concurrent creates cannot both pass at the ceiling: the count is the
+subject's sandboxes that run or will run without a start. A stopped,
+failed or deleting sandbox takes no slot, and a start, which brings a
+stopped one back, is checked against the same figure, read from the
+allow of `sandbox.update`, under the same lock
+([[080-running-sandbox-count]] holds the phase table and the start).
 For a workload creating a child, the subject counted is the root's
 owner, so a spawn tree never escapes its owner's ceiling. The refusal
 is `quota_exceeded`, 422; [[008-api]] carries its sentence.
@@ -274,7 +279,7 @@ so every rule above is drivable.
 | Each failure mode is `admission_unavailable` and never a pass; nothing is retried | `TestFailsClosedWithoutRetry`, `TestServeWithAdmission` | built |
 | A non-loopback `http://` URL and a URL without a token are start-up failures | `TestAdmissionStartupRules`, `TestServeRefusesAnEndpointWithoutABearer` | built |
 | A webhook cannot raise a value above `CELLA_MAX_*` | `TestCeilingsAreAFloorOnStrictness` | built at the resolver; the variables themselves are loaded by nothing yet |
-| The count ceiling refuses the (n+1)th sandbox with `quota_exceeded`, counts `Queued` and `Stopped`, admits after a delete, and holds under two concurrent creates at the ceiling; a spawned child counts against the root's owner | `TestCountCeilingCountsEveryDesiredSandbox`, `TestQuotaAndNameAtomic`, `TestDeletingObjectsDoNotConsumeCountQuota`, `TestSpawnInheritance` | partial: the refusal, a stopped sandbox counted and a delete freeing the slot hold over the API, `TestCountCeilingCountsEveryDesiredSandbox`; a `Deleting` sandbox is not counted, `TestDeletingObjectsDoNotConsumeCountQuota`; eight concurrent creates at a ceiling of one admit one, because the count is taken under the controller's lock, `TestQuotaAndNameAtomic`. The controller counts a spawn under its parent's owner, which is the root's, `TestSpawnInheritance`, and no test refuses a spawn at that owner's ceiling or counts a `Queued` sandbox |
+| The count ceiling refuses the (n+1)th running sandbox with `quota_exceeded`, counts `Queued` and not `Stopped`, admits after a stop or a delete, checks a start, and holds under two concurrent creates at the ceiling; a spawned child counts against the root's owner | `TestCountCeilingCountsRunningSandboxes`, `TestTheCountHoldsWhatRunsOrWillRun`, `TestQuotaAndNameAtomic`, `TestDeletingObjectsDoNotConsumeCountQuota`, `TestSpawnInheritance` | partial: the refusal, a stop and a delete freeing a slot, and a start past the ceiling refused hold over the API, `TestCountCeilingCountsRunningSandboxes`; the phase table, a `Queued` sandbox counted among it, is `TestTheCountHoldsWhatRunsOrWillRun` ([[080-running-sandbox-count]]); a `Deleting` sandbox is not counted, `TestDeletingObjectsDoNotConsumeCountQuota`; eight concurrent creates at a ceiling of one admit one, because the count is taken under the controller's lock, `TestQuotaAndNameAtomic`. The controller counts a spawn under its parent's owner, which is the root's, `TestSpawnInheritance`, and no test refuses a spawn at that owner's ceiling |
 | A set of eight replicas produces eight admission calls, each with its index | `TestSetReplicasAreAdmittedEach` | not built: waits on spec 020 |
 | An image is required after admission and not before: a webhook may supply one, `CELLA_DEFAULT_IMAGE` supplies one without a webhook, and a manifest with neither is `missing_field` | `TestImageIsRequiredAfterAdmission`, `TestDefaultImageReachesTheResolver` | built |
 | A policy refusal is a 200 with `allow: false` and reaches the caller as `admission_refused` carrying the webhook's code verbatim | `TestRefusalCarriesTheCode`, `TestAdmissionRefusalAndOutageAreTheirOwnAnswers` | built |
