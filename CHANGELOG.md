@@ -6,6 +6,10 @@ refused before it is pushed.
 
 ## Unreleased
 
+### Security
+
+- Built with Go 1.27.2 and golang.org/x/net v0.60.0, which fix GO-2026-6611, GO-2026-6612, GO-2026-6613 and GO-2026-6617.
+
 ## v0.12.0 - 2026-10-05
 
 - Changed: the sandbox limit, `max_sandboxes` on an allow, counts the
