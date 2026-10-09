@@ -46,6 +46,40 @@ func TestSuiteCatchesAStoreThatFailsEverything(t *testing.T) {
 	forEachCase(t, func(TB, []byte) store.Store { return &stubStore{err: failing} })
 }
 
+// TestSuiteCatchesAKeySweepThatForgetsNothing: a store right in every
+// statement but the key sweep, which drops no row and reports none, fails the
+// Keys case twice, on the count the sweep reports and on the rows it left.
+func TestSuiteCatchesAKeySweepThatForgetsNothing(t *testing.T) {
+	r := &recorder{}
+	r.run(func() {
+		keys(r, func(t TB, key []byte) store.Store {
+			s, err := memory.Open(memory.Options{Key: key})
+			if err != nil {
+				t.Fatalf("opening the memory store: %v", err)
+			}
+			return sweepless{s}
+		})
+	})
+	if r.fatal != "" || len(r.errors) != 2 {
+		t.Errorf("the Keys case reported %q and %q, want the sweep's count and the rows it left", r.errors, r.fatal)
+	}
+}
+
+// sweepless is a store whose key sweep forgets nothing.
+type sweepless struct{ store.Store }
+
+func (s sweepless) Tx(ctx context.Context, fn func(store.Tx) error) error {
+	return s.Store.Tx(ctx, func(tx store.Tx) error { return fn(sweeplessTx{tx}) })
+}
+
+type sweeplessTx struct{ store.Tx }
+
+func (tx sweeplessTx) Keys() store.Keys { return sweeplessKeys{tx.Tx.Keys()} }
+
+type sweeplessKeys struct{ store.Keys }
+
+func (sweeplessKeys) Forget(context.Context, time.Time) (int, error) { return 0, nil }
+
 // forEachCase runs every case against one wrong adapter and requires each to
 // report a failure.
 func forEachCase(t *testing.T, open Opener) {
