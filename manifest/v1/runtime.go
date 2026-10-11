@@ -38,6 +38,25 @@ type Capabilities struct {
 	Pool      bool         `json:"pool"`
 	Files     bool         `json:"files"`
 	Detach    bool         `json:"detach"`
+	// Autosize says which resources the driver sizes inside a manifest's
+	// spec.resources.max. It is always on the wire, each flag false where
+	// the driver holds that resource fixed.
+	Autosize Autosize `json:"autosize"`
+}
+
+// Autosize is one flag per resource a driver can size inside a ceiling
+// (spec 078). CPU is a limit at the ceiling with the request at the floor;
+// Memory is a limit raised as the workload needs it; Disk is a workspace
+// that grows before it fills.
+type Autosize struct {
+	CPU    bool `json:"cpu"`
+	Memory bool `json:"memory"`
+	Disk   bool `json:"disk"`
+}
+
+// And is what two declarations both provide, flag by flag.
+func (a Autosize) And(other Autosize) Autosize {
+	return Autosize{CPU: a.CPU && other.CPU, Memory: a.Memory && other.Memory, Disk: a.Disk && other.Disk}
 }
 
 // Equal reports whether two declarations say the same thing. The egress modes
@@ -55,5 +74,6 @@ func (c Capabilities) Equal(other Capabilities) bool {
 	return c.Mesh == other.Mesh && c.Ingress == other.Ingress && c.Volumes == other.Volumes &&
 		c.Snapshots == other.Snapshots && c.Attach == other.Attach && c.Dial == other.Dial &&
 		c.Display == other.Display && c.Input == other.Input && c.Resize == other.Resize &&
-		c.Pool == other.Pool && c.Files == other.Files && c.Detach == other.Detach
+		c.Pool == other.Pool && c.Files == other.Files && c.Detach == other.Detach &&
+		c.Autosize == other.Autosize
 }

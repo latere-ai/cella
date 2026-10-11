@@ -68,6 +68,7 @@ func corpusEnvironment() v1.Environment {
 			Pool:      true,
 			Files:     true,
 			Detach:    true,
+			Autosize:  v1.Autosize{CPU: true, Memory: true, Disk: true},
 		},
 	}
 	return env

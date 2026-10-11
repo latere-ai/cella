@@ -343,11 +343,17 @@ func imageRule(obj *v1.Sandbox, env *v1.Environment) error {
 // ceilings, the authorizer's limits, immutability against the stored object,
 // and the lifecycle rule that relates two fields.
 func semantic(obj *v1.Sandbox, o Options) error {
+	if err := ceilingFloor(obj.Spec.Resources); err != nil {
+		return err
+	}
 	if err := ceilings(obj, o); err != nil {
 		return err
 	}
 	if o.Existing != nil {
 		if err := immutable(o.Existing, obj); err != nil {
+			return err
+		}
+		if err := ceilingHeld(o.Existing, obj); err != nil {
 			return err
 		}
 		// The narrow fields are the boundary. Any caller may move one
@@ -370,6 +376,9 @@ func ceilings(obj *v1.Sandbox, o Options) error {
 		{"spec.resources.cpu", obj.Spec.Resources.CPU, o.Ceilings.CPU},
 		{"spec.resources.memory", obj.Spec.Resources.Memory, o.Ceilings.Memory},
 		{"spec.resources.disk", obj.Spec.Resources.Disk, o.Ceilings.Disk},
+		{pathMaxCPU, obj.Spec.Resources.Max.CPU, o.Ceilings.CPU},
+		{pathMaxMemory, obj.Spec.Resources.Max.Memory, o.Ceilings.Memory},
+		{pathMaxDisk, obj.Spec.Resources.Max.Disk, o.Ceilings.Disk},
 	} {
 		if c.value == "" || c.ceiling == "" {
 			continue
@@ -484,8 +493,19 @@ func capabilities(obj *v1.Sandbox, env *v1.Environment, o Options) ([]string, er
 	if obj.Spec.Workspace.Source != v1.WorkspaceSourceEmpty {
 		return nil, failAt("capability_unsupported", "spec.workspace.source", "This server fills a workspace from "+v1.WorkspaceSourceEmpty+" only.")
 	}
-	if o.Existing != nil && obj.Spec.Resources != o.Existing.Spec.Resources && !env.Status.Capabilities.Resize {
-		return nil, failAt("capability_unsupported", "spec.resources", "This environment cannot change the resources of a sandbox that exists.")
+	// The amounts a sandbox starts at change under Resize, and its ceiling
+	// under the Autosize flag of each resource it names, so an update that
+	// raises a ceiling is not read as a change of size.
+	if o.Existing != nil && !sameAmounts(obj.Spec.Resources, o.Existing.Spec.Resources) {
+		if !env.Status.Capabilities.Resize {
+			return nil, failAt("capability_unsupported", pathResources, "This environment cannot change the resources of a sandbox that exists.")
+		}
+		if obj.Spec.Resources.Disk != o.Existing.Spec.Resources.Disk {
+			return nil, failAt("capability_unsupported", pathResourcesDisk, "This environment cannot change the size of a workspace that exists.")
+		}
+	}
+	if err := ceilingCapability(obj, env); err != nil {
+		return nil, err
 	}
 	// A desktop is two capabilities, not one: a screen with no way to act on
 	// it is not what the field asks for, so an environment that serves only

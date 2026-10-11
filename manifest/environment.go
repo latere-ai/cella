@@ -216,6 +216,11 @@ func validateEnvironmentPool(p v1.PoolSpec, caps v1.Capabilities) error {
 	if p.Size < 0 {
 		return failAt("invalid_field", pathEnvironmentPoolSize, "A pool size is zero or above.")
 	}
+	// An entry is made at one size and adopted as it stands, so a pool is
+	// a fixed shape: a ceiling on it would describe entries nothing sizes.
+	if p.Resources.Max != (v1.ResourceMax{}) {
+		return failAt("invalid_field", pathPoolMax, "A pool's entries have one size; a pool takes no ceiling.")
+	}
 	if p.Size == 0 {
 		return nil
 	}

@@ -13,7 +13,10 @@
     "args": ["sleep 60"],
     "workdir": "/workspace/src",
     "user": "1000:1000",
-    "resources": {"cpu": "2", "memory": "4Gi", "disk": "20Gi"},
+    "resources": {
+      "cpu": "2", "memory": "4Gi", "disk": "20Gi",
+      "max": {"cpu": "4", "memory": "16Gi", "disk": "50Gi"}
+    },
     "workspace": {"path": "/workspace", "source": "empty"},
     "env": {"MODEL": "small"},
     "network": {

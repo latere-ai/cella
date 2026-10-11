@@ -26,7 +26,12 @@
       "resources": {
         "cpu": "2",
         "memory": "4Gi",
-        "disk": "20Gi"
+        "disk": "20Gi",
+        "max": {
+          "cpu": "4",
+          "memory": "16Gi",
+          "disk": "50Gi"
+        }
       },
       "workspace": {
         "path": "/workspace",

@@ -220,15 +220,20 @@ func boundary(obj *v1.Sandbox, parent *v1.Sandbox, now time.Time) error {
 
 	// 5: the compute a child asks for is inside its parent's. A parent that
 	// named no amount for an axis bounds nothing on it, which is the same
-	// reading a ceiling of zero has.
+	// reading a ceiling of zero has. A parent sized inside a ceiling bounds
+	// its child at that ceiling, which is the most the parent itself may
+	// hold, and the child's own ceiling is held to the same bound.
 	childRes, parentRes := obj.Spec.Resources, parent.Spec.Resources
 	for _, f := range []struct {
 		path         string
 		child, above v1.Quantity
 	}{
-		{pathResources + ".cpu", childRes.CPU, parentRes.CPU},
-		{pathResources + ".memory", childRes.Memory, parentRes.Memory},
-		{pathResources + ".disk", childRes.Disk, parentRes.Disk},
+		{pathResources + ".cpu", childRes.CPU, ceilingOf(parentRes.Max.CPU, parentRes.CPU)},
+		{pathResources + ".memory", childRes.Memory, ceilingOf(parentRes.Max.Memory, parentRes.Memory)},
+		{pathResources + ".disk", childRes.Disk, ceilingOf(parentRes.Max.Disk, parentRes.Disk)},
+		{pathMaxCPU, childRes.Max.CPU, ceilingOf(parentRes.Max.CPU, parentRes.CPU)},
+		{pathMaxMemory, childRes.Max.Memory, ceilingOf(parentRes.Max.Memory, parentRes.Memory)},
+		{pathMaxDisk, childRes.Max.Disk, ceilingOf(parentRes.Max.Disk, parentRes.Disk)},
 	} {
 		if f.child == "" || f.above == "" {
 			continue

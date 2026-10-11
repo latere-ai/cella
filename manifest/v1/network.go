@@ -58,10 +58,11 @@ func EgressModeRank(m EgressMode) int {
 	return -1
 }
 
-// The condition types a Sandbox's status carries. The driver owns the first
-// five and the controller owns Scheduled; each says what the environment
-// actually does, never what the manifest asked for. Observed is the list's,
-// written on one answer and never stored.
+// The condition types a Sandbox's status carries. The driver owns Ready,
+// WorkspaceReady, EgressEnforced, VolumesAttached and DisplayReady, and the
+// controller owns Scheduled and MemoryAtCeiling; each says what the
+// environment actually does, never what the manifest asked for. Observed is
+// the list's, written on one answer and never stored.
 const (
 	ConditionReady           = "Ready"
 	ConditionWorkspaceReady  = "WorkspaceReady"
@@ -69,6 +70,12 @@ const (
 	ConditionVolumesAttached = "VolumesAttached"
 	ConditionScheduled       = "Scheduled"
 	ConditionDisplayReady    = "DisplayReady"
+	// ConditionMemoryAtCeiling True says the sandbox's memory is at its
+	// spec.resources.max.memory and its workload is using nearly all of it,
+	// or lost a process to the limit, so there is no room left to give. It
+	// is the controller's, written when a reading crosses the line either
+	// way, and absent for a sandbox with no memory ceiling (spec 078).
+	ConditionMemoryAtCeiling = "MemoryAtCeiling"
 	// ConditionObserved False on a row of a list page says the environment's
 	// driver did not answer the read that page made of this sandbox, so the
 	// phase, the conditions and the instants are the ones the control plane
@@ -107,4 +114,10 @@ const (
 	// holds no environment of the name the sandbox is placed on, so there
 	// is no driver to ask.
 	ReasonEnvironmentNotHeld = "EnvironmentNotHeld"
+	// ReasonUsage and ReasonOOM are MemoryAtCeiling true: the working set
+	// passed the warning line, or the kernel killed a process for memory.
+	// ReasonBelowCeiling is the condition false again.
+	ReasonUsage        = "Usage"
+	ReasonOOM          = "OOM"
+	ReasonBelowCeiling = "BelowCeiling"
 )

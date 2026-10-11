@@ -209,7 +209,7 @@ func validateResources(r v1.Resources) error {
 			return failAt("invalid_field", field.path, "The amount must be positive.")
 		}
 	}
-	return nil
+	return validateCeiling(r)
 }
 
 func validateWorkspace(w v1.Workspace) error {

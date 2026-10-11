@@ -120,6 +120,34 @@ type Resources struct {
 	CPU    Quantity `json:"cpu,omitempty"`
 	Memory Quantity `json:"memory,omitempty"`
 	Disk   Quantity `json:"disk,omitempty"`
+	// Max is the ceiling the sandbox is sized inside. Absent, the sandbox
+	// is fixed at the three amounts above, as it was before the field
+	// existed; set for a resource, that resource starts at its amount above
+	// and grows to the ceiling as the workload needs it (spec 078).
+	Max ResourceMax `json:"max,omitzero"`
+}
+
+// ResourceMax is the ceiling of each resource, each one optional. A
+// resource with no ceiling stays fixed at its amount in Resources.
+type ResourceMax struct {
+	CPU    Quantity `json:"cpu,omitempty"`
+	Memory Quantity `json:"memory,omitempty"`
+	Disk   Quantity `json:"disk,omitempty"`
+}
+
+// Size is what a sandbox holds now: the CPU limit, the memory limit and the
+// workspace's capacity, each in quantity syntax.
+type Size struct {
+	CPU    Quantity `json:"cpu,omitempty"`
+	Memory Quantity `json:"memory,omitempty"`
+	Disk   Quantity `json:"disk,omitempty"`
+}
+
+// Usage is the last reading of what a sandbox's workload uses. Memory is the
+// working set in bytes and ReadAt the instant the substrate sampled it.
+type Usage struct {
+	Memory int64     `json:"memory"`
+	ReadAt time.Time `json:"readAt"`
 }
 
 // Workspace is the initial state and mount point of the sandbox's own files.
@@ -175,8 +203,16 @@ type SandboxStatus struct {
 	// place one of higher priority (spec 020). It is status and not a
 	// label or a table of its own because the bound it is held to must
 	// survive a restart and a change of the replica that schedules.
-	Preemptions int      `json:"preemptions,omitempty"`
-	Warnings    []string `json:"warnings,omitempty"`
+	Preemptions int `json:"preemptions,omitempty"`
+	// Resources is the size the sandbox has now, Usage the last reading of
+	// what its workload uses, and Moves how many times raising its memory
+	// took a restart on a node with room (spec 078). All three are absent
+	// for a sandbox whose manifest names no spec.resources.max, which is
+	// fixed at spec.resources.
+	Resources Size     `json:"resources,omitzero"`
+	Usage     *Usage   `json:"usage,omitempty"`
+	Moves     int      `json:"moves,omitempty"`
+	Warnings  []string `json:"warnings,omitempty"`
 	// EgressState is the control plane's own record of the sandbox's
 	// boundary: the credential both gateway doors authenticate and the
 	// generation of the map that carries it. It is desired state, not
