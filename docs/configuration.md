@@ -91,8 +91,8 @@ PersistentVolumeClaim and one Pod in the namespace below.
 | `CELLA_K8S_DEFAULT_CPU` | `1` | the cpu limit of a sandbox whose manifest names none |
 | `CELLA_K8S_DEFAULT_MEMORY` | `1Gi` | the memory limit of a sandbox whose manifest names none |
 | `CELLA_K8S_DEFAULT_DISK` | `5Gi` | the size of the workspace claim of a sandbox whose manifest names none |
-| `CELLA_K8S_CPU_REQUEST_RATIO` | `0.1` | the cpu request as a fraction of the limit, above 0 and at most 1. Lower packs idle sandboxes more densely |
-| `CELLA_K8S_MEMORY_REQUEST_RATIO` | `1` | the memory request as a fraction of the limit |
+| `CELLA_K8S_CPU_REQUEST_RATIO` | `0.1` | the cpu request as a fraction of `spec.resources.cpu`, above 0 and at most 1. Lower packs idle sandboxes more densely. The cpu limit is `spec.resources.cpu` too, unless the manifest names a cpu ceiling, which is then the limit and leaves the request where it was |
+| `CELLA_K8S_MEMORY_REQUEST_RATIO` | `1` | the memory request as a fraction of the limit, which follows the limit when a sandbox's memory is raised inside its ceiling |
 | `CELLA_K8S_READY_TIMEOUT` | `90s` | how long a create or a start waits for the Pod to be ready |
 | `CELLA_K8S_GRACE_PERIOD` | `10s` | the termination grace period of a sandbox Pod |
 | `CELLA_K8S_DISPLAY_IMAGE` | unset | the desktop image, `ghcr.io/<owner>/cella-display:<tag>` from the same release. Set, a sandbox that asks for `display` gets a screen, screenshots, and input; unset, such a manifest is refused |
