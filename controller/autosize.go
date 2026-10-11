@@ -120,6 +120,10 @@ type sizer struct {
 	// busy is every sandbox with a reading or a move in flight. A second
 	// one for the same sandbox is dropped rather than run beside it.
 	busy map[string]struct{}
+	// unread counts the readings of the kill count in a row that failed,
+	// so one that fails while a container is ending is not reported and
+	// one that keeps failing is.
+	unread map[string]int
 	// closed says the controller is closing, after which no reading leaves
 	// work running behind it.
 	closed bool
@@ -130,6 +134,7 @@ func newSizer() sizer {
 		sessions: map[string]int{}, watched: map[string]struct{}{},
 		readings: map[string]*autosize.Readings{}, usage: map[string]v1.Usage{},
 		reasons: map[string]string{}, hold: map[string]time.Time{}, busy: map[string]struct{}{},
+		unread: map[string]int{},
 	}
 }
 
@@ -227,6 +232,7 @@ func (c *Controller) unwatch(id string) {
 	delete(c.size.usage, id)
 	delete(c.size.reasons, id)
 	delete(c.size.hold, id)
+	delete(c.size.unread, id)
 }
 
 func (c *Controller) watched(id string) bool {
@@ -674,19 +680,36 @@ func (c *Controller) sizeOne(ctx context.Context, id string, observed *driver.St
 	return nil
 }
 
+// killReadsBeforeWarning is how many readings of the kill count in a row
+// fail before the failure is logged. A container the kernel just killed
+// fails the one reading that was in flight, which is the kill being found
+// and not a reading the operator is missing.
+const killReadsBeforeWarning = 2
+
 // countKills reads the kernel's count of kills for memory in one sandbox and
 // reports whether it rose since the last reading of the same workload
 // instance, and whether it could be read at all. A sandbox that is not
 // running and a substrate that serves no count are no signal and no
-// failure; any other error is logged, because it is a reading the operator
-// expects and is not getting.
+// failure; any other error that repeats is logged once, because it is a
+// reading the operator expects and is not getting, as from an image with
+// no cat in it.
 func (c *Controller) countKills(ctx context.Context, id string, reader driver.MemoryReader) (rose, counted bool) {
 	kills, err := reader.MemoryKills(ctx, id)
-	switch {
-	case err == nil:
+	if err == nil {
+		c.sizeMu.Lock()
+		delete(c.size.unread, id)
+		c.sizeMu.Unlock()
 		return c.readingsOf(id, func(r *autosize.Readings) bool { return r.Kills(kills.Count, kills.Instance) }), true
-	case ctx.Err() == nil && !errors.Is(err, driver.ErrNotRunning) && !errors.Is(err, driver.ErrUnsupported):
-		c.log.WarnContext(ctx, "the count of kills for memory could not be read", "sandbox", id, "err", err)
+	}
+	if ctx.Err() != nil || errors.Is(err, driver.ErrNotRunning) || errors.Is(err, driver.ErrUnsupported) {
+		return false, false
+	}
+	c.sizeMu.Lock()
+	c.size.unread[id]++
+	failed := c.size.unread[id]
+	c.sizeMu.Unlock()
+	if failed == killReadsBeforeWarning {
+		c.log.WarnContext(ctx, "the count of kills for memory cannot be read, so a process killed for memory in this sandbox raises nothing", "sandbox", id, "err", err)
 	}
 	return false, false
 }
