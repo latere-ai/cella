@@ -221,9 +221,16 @@ paths:
         `spec.resources.max.memory`, or that is being restarted on a node with
         room, answers phase `Starting` with reason `MemoryRaised` from the
         kill until it runs again, and never `Failed` or `Stopped` in between:
-        its workspace is kept and it needs no act of the caller. Killed at its
-        ceiling, or with no ceiling, it answers `Failed` with reason
-        `OOMKilled`, and a start brings it back with its workspace.
+        its workspace is kept and it needs no act of the caller. Where no
+        node had room for a larger size, it carries the condition
+        `MemoryUnplaced` with status `True`, reason `NoRoom` and the size
+        that found no room in `message`, and a kill is answered by a start
+        at the size it holds: it answers `Starting` with reason
+        `MemoryNotRaised` until it runs again. Killed at its ceiling, with
+        no ceiling, or again after each of the starts the control plane
+        makes at the same size, where the condition's reason is
+        `RestartsExhausted`, it answers `Failed` with reason `OOMKilled`,
+        and a start brings it back with its workspace.
         Authorized as `sandbox.read`.
       responses:
         "200":
@@ -292,7 +299,8 @@ paths:
         `details.detail`. A sandbox
         that reads `Starting` is already on its way up, with reason
         `MemoryRaised` where the control plane is starting it again at a
-        larger memory size.
+        larger memory size and `MemoryNotRaised` where it is starting it
+        again at the size it holds.
       responses:
         "200":
           description: The answer this route serves.
