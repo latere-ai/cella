@@ -40,6 +40,7 @@ func resolveCases() []Case {
 		{"resolve", "case008NameOnPathAndBody", case008NameOnPathAndBody},
 		{"resolve", "case007AdmissionRefused", case007AdmissionRefused},
 		{"resolve", "case007AdmissionUnavailable", case007AdmissionUnavailable},
+		{"resolve", "case078Ceiling", case078Ceiling},
 	}
 }
 
@@ -342,4 +343,164 @@ func canonical(raw json.RawMessage) []byte {
 		return raw
 	}
 	return out
+}
+
+// ceilings are the three resources a manifest may name a ceiling for, each
+// with an amount to start at and a ceiling above it.
+var ceilings = []struct{ resource, ceiling string }{
+	{"cpu", "200m"}, {"memory", "128Mi"}, {"disk", "2Gi"},
+}
+
+// sizedObject is the part of a sandbox a ceiling shows up in: the ceiling as
+// the manifest wrote it, and the size the sandbox holds.
+type sizedObject struct {
+	Spec struct {
+		Resources struct {
+			Max map[string]string `json:"max"`
+		} `json:"resources"`
+	} `json:"spec"`
+	Status struct {
+		Environment string            `json:"environment"`
+		Resources   map[string]string `json:"resources"`
+	} `json:"status"`
+}
+
+// case078Ceiling: spec.resources.max is a ceiling per resource. One below the
+// amount it bounds is refused at that field by every server. For each of the
+// three resources, a server either sizes it inside a ceiling or refuses the
+// ceiling at that field as a capability its environment lacks, and nothing
+// in between: a sandbox created under a ceiling reads the ceiling back and
+// reports the size it holds, with the cpu limit at the cpu ceiling. Where an
+// administrator's token reads the environment, what the server did agrees
+// with the autosize flag the environment declares.
+func case078Ceiling(ctx context.Context, e *Env) error {
+	under := func(resource, ceiling string) []byte {
+		return e.manifest(e.name(), func(body map[string]any) {
+			spec, _ := body["spec"].(map[string]any)
+			spec["resources"] = map[string]any{
+				"cpu": "100m", "memory": "64Mi", "disk": "1Gi",
+				"max": map[string]any{resource: ceiling},
+			}
+		})
+	}
+	x, err := e.caller.post(ctx, "/v1/sandboxes", under("memory", "32Mi"))
+	if err != nil {
+		return err
+	}
+	if obj, decodeErr := x.object(); decodeErr == nil && obj.Status.ID != "" {
+		e.record(e.caller, "/v1/sandboxes", obj.Status.ID)
+	}
+	if err := x.refusal("invalid_field"); err != nil {
+		return err
+	}
+	if path := "spec.resources.max.memory"; !slices.Contains(x.paths(), path) {
+		return x.disagree("the refusal of a ceiling below its amount at "+path, fmt.Sprintf("paths %v", x.paths()))
+	}
+	sizes := map[string]bool{}
+	environment := ""
+	for _, c := range ceilings {
+		path := "spec.resources.max." + c.resource
+		x, err := e.caller.post(ctx, "/v1/sandboxes", under(c.resource, c.ceiling))
+		if err != nil {
+			return err
+		}
+		if x.Status != http.StatusCreated {
+			if err := x.refusal("capability_unsupported"); err != nil {
+				return err
+			}
+			if !slices.Contains(x.paths(), path) {
+				return x.disagree("the refusal of a ceiling the environment does not size at "+path, fmt.Sprintf("paths %v", x.paths()))
+			}
+			continue
+		}
+		obj, err := x.object()
+		if err != nil {
+			return err
+		}
+		if obj.Status.ID == "" {
+			return x.disagree("status.id on a created object", "no id")
+		}
+		e.record(e.caller, "/v1/sandboxes", obj.Status.ID)
+		sizes[c.resource] = true
+		if _, err := e.await(ctx, e.caller, obj.Status.ID, "Running"); err != nil {
+			return err
+		}
+		read, err := e.caller.get(ctx, "/v1/sandboxes/"+obj.Status.ID)
+		if err != nil {
+			return err
+		}
+		if err := read.status(http.StatusOK); err != nil {
+			return err
+		}
+		var sized sizedObject
+		if err := json.Unmarshal(read.Body, &sized); err != nil {
+			return read.disagree("one object as JSON", "a body that does not decode: "+err.Error())
+		}
+		environment = sized.Status.Environment
+		if got := sized.Spec.Resources.Max[c.resource]; got != c.ceiling {
+			return read.disagree(path+" "+c.ceiling+" as the manifest wrote it", path+" "+cmpOr(got, "absent"))
+		}
+		if sized.Status.Resources[c.resource] == "" {
+			return read.disagree("status.resources."+c.resource+" on a sandbox sized inside a ceiling", fmt.Sprintf("status.resources %v", sized.Status.Resources))
+		}
+		// The cpu ceiling is the limit the sandbox runs under from the
+		// start, so the size it holds is the ceiling itself.
+		if got := sized.Status.Resources["cpu"]; c.resource == "cpu" && got != c.ceiling {
+			return read.disagree("status.resources.cpu "+c.ceiling+", the cpu ceiling", "status.resources.cpu "+got)
+		}
+	}
+	if e.admin == nil {
+		return nil
+	}
+	declared, x, err := e.autosize(ctx, environment)
+	if err != nil || declared == nil {
+		return err
+	}
+	for _, c := range ceilings {
+		if declared[c.resource] != sizes[c.resource] {
+			return x.disagree(fmt.Sprintf("capabilities.autosize.%s %v, which is what the server did with a ceiling on it", c.resource, sizes[c.resource]),
+				fmt.Sprintf("capabilities.autosize.%s %v", c.resource, declared[c.resource]))
+		}
+	}
+	return nil
+}
+
+// autosize reads the three autosize flags one environment declares: the one
+// named, or the only one where the server drives one. It answers nil where
+// the environment cannot be told from the list, which is a server that
+// refused every ceiling on one of several environments.
+func (e *Env) autosize(ctx context.Context, name string) (map[string]bool, *exchange, error) {
+	x, err := e.admin.get(ctx, "/v1/environments?limit=50")
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := x.status(http.StatusOK); err != nil {
+		return nil, x, err
+	}
+	var page struct {
+		Items []struct {
+			Metadata objectMetadata `json:"metadata"`
+			Status   struct {
+				Capabilities struct {
+					Autosize map[string]bool `json:"autosize"`
+				} `json:"capabilities"`
+			} `json:"status"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(x.Body, &page); err != nil {
+		return nil, x, x.disagree("a list of environments", err.Error())
+	}
+	for _, item := range page.Items {
+		if item.Metadata.Name != name && (name != "" || len(page.Items) != 1) {
+			continue
+		}
+		flags := item.Status.Capabilities.Autosize
+		for _, c := range ceilings {
+			if _, ok := flags[c.resource]; !ok {
+				return nil, x, x.disagree("capabilities.autosize with the flags cpu, memory and disk on "+item.Metadata.Name, fmt.Sprintf("autosize %v", flags))
+			}
+		}
+		return flags, x, nil
+	}
+	return nil, x, nil
 }

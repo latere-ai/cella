@@ -144,6 +144,19 @@ func case021EnvironmentRead(ctx context.Context, e *Env) error {
 		if len(item.Status.Capabilities) == 0 {
 			return x.disagree("the capabilities each environment declares", "an environment that declares none: "+item.Metadata.Name)
 		}
+		// The autosize flags are an object of three, each always written,
+		// so an admission step reads a flag and never the absence of one.
+		var declared struct {
+			Autosize map[string]*bool `json:"autosize"`
+		}
+		if err := json.Unmarshal(item.Status.Capabilities, &declared); err != nil {
+			return x.disagree("the capabilities of "+item.Metadata.Name+" as an object", err.Error())
+		}
+		for _, flag := range []string{"cpu", "memory", "disk"} {
+			if declared.Autosize[flag] == nil {
+				return x.disagree("capabilities.autosize."+flag+" on "+item.Metadata.Name, "a declaration without it: "+string(item.Status.Capabilities))
+			}
+		}
 	}
 	return nil
 }

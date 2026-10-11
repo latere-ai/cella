@@ -336,6 +336,10 @@ func (f *fake) create(w http.ResponseWriter, r *http.Request) {
 		f.refuse(w, "boundary_exceeded", widened...)
 		return
 	}
+	if code, path := ceilingRefusal(body); code != "" {
+		f.refuse(w, code, path)
+		return
+	}
 	metadata, _ := body["metadata"].(map[string]any)
 	name, _ := metadata["name"].(string)
 	f.mu.Lock()
@@ -345,6 +349,47 @@ func (f *fake) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	f.write(w, http.StatusCreated, f.store(body, name))
+}
+
+// fakeAutosize is what this fake's one environment sizes inside a ceiling:
+// cpu and nothing else, so a run meets a ceiling that is taken and two that
+// are refused.
+var fakeAutosize = map[string]any{"cpu": true, "memory": false, "disk": false}
+
+// amount reads the quantities a case writes: a number with one of the
+// suffixes m, Mi and Gi, or none.
+func amount(q string) float64 {
+	scale := 1.0
+	for suffix, by := range map[string]float64{"m": 1e-3, "Mi": 1 << 20, "Gi": 1 << 30} {
+		if rest, ok := strings.CutSuffix(q, suffix); ok {
+			q, scale = rest, by
+			break
+		}
+	}
+	n, _ := strconv.ParseFloat(q, 64)
+	return n * scale
+}
+
+// ceilingRefusal is the two refusals of a ceiling: one below the amount it
+// bounds, and one on a resource this fake's environment does not size.
+func ceilingRefusal(body map[string]any) (code, path string) {
+	spec, _ := body["spec"].(map[string]any)
+	resources, _ := spec["resources"].(map[string]any)
+	ceiling, _ := resources["max"].(map[string]any)
+	for _, resource := range []string{"cpu", "memory", "disk"} {
+		limit, named := ceiling[resource].(string)
+		if !named {
+			continue
+		}
+		path = "spec.resources.max." + resource
+		if floor, _ := resources[resource].(string); floor != "" && amount(limit) < amount(floor) {
+			return "invalid_field", path
+		}
+		if sizes, _ := fakeAutosize[resource].(bool); !sizes {
+			return "capability_unsupported", path
+		}
+	}
+	return "", ""
 }
 
 // apply is the apply by name of design 008: the path names the object and a
@@ -398,6 +443,18 @@ func (f *fake) store(body map[string]any, name string) map[string]any {
 		"id": id, "owner": "fake", "environment": "default",
 		"driver": "fake", "isolation": "none", "phase": "Running",
 		"conditions": []any{map[string]any{"type": "EgressEnforced", "status": enforced, "reason": "Enforced"}},
+	}
+	// A sandbox under a ceiling reports the size it holds: the ceiling as
+	// its cpu limit, and the amounts it started at.
+	if spec, ok := body["spec"].(map[string]any); ok {
+		resources, _ := spec["resources"].(map[string]any)
+		if ceiling, _ := resources["max"].(map[string]any); len(ceiling) > 0 {
+			held := map[string]any{"cpu": resources["cpu"], "memory": resources["memory"], "disk": resources["disk"]}
+			if cpu, named := ceiling["cpu"]; named && !f.wrongValues {
+				held["cpu"] = cpu
+			}
+			body["status"].(map[string]any)["resources"] = held
+		}
 	}
 	if f.wrongValues {
 		// A status that leaves out what every answer carries, and a
@@ -1228,6 +1285,7 @@ func (f *fake) environments(w http.ResponseWriter, _ *http.Request) {
 		"metadata": map[string]any{"name": "default"},
 		"status": map[string]any{"id": "env_fake", "capabilities": map[string]any{
 			"files": true, "attach": true, "display": true, "input": true, "dial": true,
+			"autosize": fakeAutosize,
 		}},
 	}}, "next": ""})
 }
