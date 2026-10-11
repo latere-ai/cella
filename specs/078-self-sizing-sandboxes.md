@@ -262,13 +262,13 @@ so its baseline is taken before its first interval ends. A kill no
 command reports, a child of a command that goes on, or one in a
 terminal session, is found at the next interval.
 
-Measured on a single-node cluster over two runs each, from the start of
-a command that allocates past the limit: where the node kills one
-process, the command ended after 0.3 to 0.4 seconds with the raise
-already asked for, and the new limit was applied and recorded at 1.3 to
-1.4 seconds; where the node kills the whole container, the command
-ended after 0.3 to 0.5 seconds and the sandbox was running again at the
-larger size at 3.3 to 4.5 seconds.
+Measured on a single-node cluster, from the start of a command that
+allocates past the limit: where the node kills one process, over two
+runs, the command ended after 0.3 to 0.4 seconds with the raise already
+asked for, and the new limit was applied and recorded at 1.3 to 1.4
+seconds; where the node kills the whole container, over seven runs, the
+command ended after 0.3 to 0.5 seconds and the sandbox was running
+again at the larger size at 3.3 to 5.3 seconds.
 
 On any signal, with the limit below `max.memory`, the next size is the
 greater of the limit times `autosize.MemoryStepFactor` and the limit
