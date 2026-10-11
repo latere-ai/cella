@@ -105,20 +105,21 @@ is taken. They are told apart by who reported the failure:
 | a direct environment had no room | `NoCapacity` | none: no runtime was asked | `phase_conflict` |
 | a queued sandbox was never placed | `StartDeadline` | none: no runtime was asked | `phase_conflict` |
 | the runtime lost the sandbox and recovery gave up | `RecoveryExhausted` | none the runtime reports | `phase_conflict` |
+| the runtime lost the sandbox and recovery found one of its volumes gone | `VolumeMissing` | none the runtime reports | `phase_conflict` |
 
 The rule in the controller is the general one, of which the table is
 the cases: a start of a `Failed` sandbox is taken when the runtime's
 own read finds the sandbox, which is what holding its workspace means,
-and the stored status is not one of the four the control plane writes
+and the stored status is not one of the five the control plane writes
 itself. The reason a runtime gives is not consulted, so a reason this
 table does not list, from a runtime that holds the sandbox, starts.
-The stored reason is consulted for the four because the undo of a
+The stored reason is consulted for the five because the undo of a
 create ends the sandbox's identity and its boundary, and no object a
 runtime happened to keep under the id is a sandbox to run without
-them. `VolumeMissing`, which the diagram gives a recovery that finds a
-volume gone, is written by no code yet; it joins the four when it is.
-The refusal is `phase_conflict` with the reason in the developer
-detail.
+them. `VolumeMissing` is refused by the rule although recovery does
+not write it yet, since recovery reattaches no volume
+([[043-postgres-store]]). The refusal is `phase_conflict` with the
+reason in the developer detail.
 
 A start of a `Failed` sandbox is the start of a `Stopped` one in
 everything else. It is held to the owner's count ceiling, since a
@@ -366,7 +367,7 @@ store behind `Store` ([[010-state]]); the token's shape
 | A spawn debits the budget in the same transaction as the desired write; two concurrent spawns against a budget of one yield one child and one `spawn_budget_exhausted` | `TestSpawnDebitIsAtomic` | built ([[040-mesh-and-spawn]]): the debit, the child's row and its record commit together, a refused spawn leaves no object and takes no name, and `status.spawn.used` tracks the ledger |
 | A narrowing update and an owner's widening update each keep the effective boundary within both manifests at every instant, observed through fake gateway and driver | `TestUpdateNeverWidensMidChange` | not built |
 | `Change.Volumes` is sent only while `Stopped`; a secret update re-pushes; a secret delete re-pushes and writes `notInjectable` | `TestUpdatePaths` | not built |
-| A start of a `Failed` sandbox whose runtime holds its workspace runs the workload again on it, whatever reason the runtime gave, and the started sandbox carries nothing of the failure; a start of one the control plane failed itself, or that its runtime no longer holds, is `phase_conflict` naming why, and reaches no runtime | `TestAFailedSandboxStartsAgain`, `TestAFailureTheControlPlaneRecordedIsNotStarted`, `TestAFailedSandboxIsStartedAgainWithItsWorkspace` and `TestAStartOfASandboxThatNeverRanIsRefused` over HTTP, `k8s.TestAFailedSandboxIsStartedOnItsClaim` and `k8s.TestAStartOfAFailedCreateOnTheClusterIsRefused` on a client double, `TestClusterAFailedSandboxIsStartedWithItsWorkspace` on kind | built |
+| A start of a `Failed` sandbox whose runtime holds its workspace runs the workload again on it, whatever reason the runtime gave, and the started sandbox carries nothing of the failure; a start of one the control plane failed itself, or that its runtime no longer holds, is `phase_conflict` naming why, and reaches no runtime | `TestAFailedSandboxStartsAgain`, `TestAFailureTheControlPlaneRecordedIsNotStarted`, `TestAFailedSandboxIsStartedAgainWithItsWorkspace` and `TestAStartOfASandboxThatNeverRanIsRefused` over HTTP, `k8s.TestAFailedSandboxIsStartedOnItsClaim` and `k8s.TestAStartOfAFailedCreateOnTheClusterIsRefused` on a client double, `TestClusterAFailedSandboxIsStartedWithItsWorkspace` on kind | built. On a single-node cluster, for a main process that exited non-zero and for a container killed for memory with no ceiling, the sandbox read `Failed` and stayed so, and a start had it `Running` on the same claim in 1.0 to 1.3 seconds with the file written before the failure read back and the one under `/tmp` gone |
 | A server that refuses the start of a sandbox whose main process failed, starts it on an empty workspace, or answers the start and runs nothing fails the suite | conformance case `case005StartAfterFailure`, `TestTheStartAfterFailureCaseReadsEveryAnswer` | built |
 | A start of a failed sandbox is held to the owner's count ceiling, is one start however the workload then ends, and is refused while the control plane is starting the sandbox at a larger size itself | `TestAStartOfAFailedSandboxIsHeldToTheCountCeiling`, `TestAStartOfAFailedSandboxIsOneStart`, `TestAKillAtOrUnderAMemoryCeilingAndAStart` | built |
 | A failed sandbox is deleted by its `ttl` and is asked of neither `autoDelete` nor `autoStop` | `TestReaperRules` | built |

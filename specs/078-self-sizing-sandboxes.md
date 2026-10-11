@@ -266,9 +266,11 @@ Measured on a single-node cluster, from the start of a command that
 allocates past the limit: where the node kills one process, over two
 runs, the command ended after 0.3 to 0.4 seconds with the raise already
 asked for, and the new limit was applied and recorded at 1.3 to 1.4
-seconds; where the node kills the whole container, over seven runs, the
-command ended after 0.3 to 0.5 seconds and the sandbox was running
-again at the larger size at 3.3 to 5.3 seconds.
+seconds; where the node kills the whole container, over thirteen runs,
+the command ended after 0.3 to 0.5 seconds and the sandbox was running
+again at the larger size at 3.3 to 5.5 seconds in twelve of them and at
+28.8 seconds in one, whose cause was not found and in which every read
+of the sandbox meanwhile answered `Running` or `Starting`.
 
 On any signal, with the limit below `max.memory`, the next size is the
 greater of the limit times `autosize.MemoryStepFactor` and the limit
