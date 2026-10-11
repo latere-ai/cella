@@ -223,6 +223,32 @@ func (d staleTokenLiar) Update(ctx context.Context, id string, c runtime.Change)
 	return d.Driver.Update(ctx, id, c)
 }
 
+// restartRefuser treats a workload that ended in failure as final: it
+// refuses the start that would run it again, which leaves a client nothing
+// to do with the sandbox but delete it, and its workspace with it.
+type restartRefuser struct{ *native.Driver }
+
+func (d restartRefuser) Start(ctx context.Context, id string) error {
+	if state, err := d.Inspect(ctx, id); err == nil && state.Phase == "Failed" {
+		return runtime.ErrUnsupported
+	}
+	return d.Driver.Start(ctx, id)
+}
+
+// workspaceResetter starts a failed sandbox on a workspace it emptied, as a
+// driver that makes the sandbox anew instead of running its workload again
+// does.
+type workspaceResetter struct{ *native.Driver }
+
+func (d workspaceResetter) Start(ctx context.Context, id string) error {
+	if state, err := d.Inspect(ctx, id); err == nil && state.Phase == "Failed" {
+		if err := d.Remove(ctx, id, runtime.DefaultWorkdir+"/keep.txt"); err != nil {
+			return err
+		}
+	}
+	return d.Driver.Start(ctx, id)
+}
+
 // sizeLiar declares that it sizes a sandbox's memory inside a ceiling over a
 // driver that changes no size at all.
 type sizeLiar struct{ *native.Driver }
@@ -323,6 +349,18 @@ func TestConformanceCatchesAFalseCapability(t *testing.T) {
 			wants: "a change of size on a driver that declares none",
 		},
 		{
+			name:  "AFailureTreatedAsFinal",
+			kase:  "StartAfterFailureKeepsTheWorkspace",
+			wrap:  func(d *native.Driver) runtime.Driver { return restartRefuser{d} },
+			wants: "Start of a sandbox whose workload failed",
+		},
+		{
+			name:  "AStartThatEmptiesTheWorkspace",
+			kase:  "StartAfterFailureKeepsTheWorkspace",
+			wrap:  func(d *native.Driver) runtime.Driver { return workspaceResetter{d} },
+			wants: "workspace after the start",
+		},
+		{
 			name:  "IsolationOutsideTheFourClasses",
 			kase:  "NameIsolationCapabilities",
 			wrap:  func(d *native.Driver) runtime.Driver { return isolationLiar{d} },
@@ -378,6 +416,11 @@ func TestUndeclaredCapabilitiesAreSkippedNotAsserted(t *testing.T) {
 	r = drive(caseNamed(t, "LogsFollow"), opener(openNative(t)), Options{NoMainCommand: true})
 	if !strings.Contains(r.skipped(), "NoMainCommand") {
 		t.Errorf("LogsFollow did not skip under NoMainCommand: %s", r.report())
+	}
+
+	r = drive(caseNamed(t, "StartAfterFailureKeepsTheWorkspace"), opener(openNative(t)), Options{NoMainCommand: true})
+	if !strings.Contains(r.skipped(), "NoMainCommand") {
+		t.Errorf("StartAfterFailureKeepsTheWorkspace did not skip under NoMainCommand: %s", r.report())
 	}
 
 	r = drive(caseNamed(t, "PreflightAndReady"), opener(openNative(t)), Options{})

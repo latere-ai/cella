@@ -144,6 +144,52 @@ func stopStartKeepsTheWorkspace(t tb, open func() runtime.Driver, opts Options) 
 	expect(t, got == "kept", "workspace after the cycle: %q, want %q", got, "kept")
 }
 
+// failsWhenTold is a main command that runs until a file named fail appears
+// in its working directory, removes it, and ends with exit code 3. Run again
+// it waits again, so a start after the failure finds a workload that stays
+// up, and a second file fails it a second time.
+const failsWhenTold = "while [ ! -f fail ]; do sleep 0.01; done; rm fail; exit 3"
+
+// startAfterFailureKeepsTheWorkspace holds a driver to what a start means for
+// a workload that ran and ended in failure: the sandbox is Failed with the
+// exit code and the instant it ended, the workspace is still the driver's,
+// and Start runs the workload again on it. The sandbox is Running with
+// nothing of the failure left, its start instant advanced and its creation
+// instant where it was, and the files are the ones written before. It is one
+// run per Start: failed again, the sandbox is Failed again until the next.
+func startAfterFailureKeepsTheWorkspace(t tb, open func() runtime.Driver, opts Options) {
+	if opts.NoMainCommand {
+		t.Skipf("Options.NoMainCommand: the driver runs no main command, so no workload of its own ends in failure")
+	}
+	d := open()
+	ctx := context.Background()
+	const id = "sbx_cnf_restart"
+	s0 := create(t, d, opts, runtime.CreateSpec{ID: id, Name: "restart", Owner: "alice", Command: opts.shell(failsWhenTold)})
+	importFiles(t, d, id, runtime.DefaultWorkdir, entry{name: "keep.txt", body: "kept"})
+	importFiles(t, d, id, runtime.DefaultWorkdir, entry{name: "fail"})
+	s1 := waitPhase(t, d, id, "Failed")
+	expect(t, s1.ExitCode != nil && *s1.ExitCode == 3, "exit code of the failed workload: %v, want 3", s1.ExitCode)
+	expect(t, !s1.StoppedAt.IsZero(), "StoppedAt is zero after the workload failed")
+	must(t, d.Start(ctx, id), "Start of a sandbox whose workload failed")
+	s2 := waitPhase(t, d, id, runtime.Running)
+	expect(t, s2.ExitCode == nil && s2.Reason == "", "the started sandbox still carries the failure: reason %q, exit code %v", s2.Reason, s2.ExitCode)
+	expect(t, s2.StoppedAt.IsZero(), "StoppedAt %v still set after Start", s2.StoppedAt)
+	expect(t, !s2.StartedAt.Before(s1.StoppedAt), "StartedAt %v not advanced past the failure at %v", s2.StartedAt, s1.StoppedAt)
+	expect(t, s2.CreatedAt.Equal(s0.CreatedAt), "CreatedAt moved from %v to %v", s0.CreatedAt, s2.CreatedAt)
+	kept := func(when string) {
+		t.Helper()
+		out, _, code, err := run(t, d, id, runtime.ExecRequest{Command: opts.shell("cat keep.txt")})
+		must(t, err, "Exec after "+when)
+		expect(t, code == 0 && out == "kept", "workspace after %s: %q with exit code %d, want %q", when, out, code, "kept")
+	}
+	kept("the start")
+	importFiles(t, d, id, runtime.DefaultWorkdir, entry{name: "fail"})
+	waitPhase(t, d, id, "Failed")
+	must(t, d.Start(ctx, id), "second Start of a sandbox whose workload failed")
+	waitPhase(t, d, id, runtime.Running)
+	kept("the second start")
+}
+
 func updateEveryMutableField(t tb, open func() runtime.Driver, opts Options) {
 	d := open()
 	ctx := context.Background()

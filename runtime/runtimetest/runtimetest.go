@@ -70,6 +70,7 @@ var cases = []caseDef{
 	{"PreflightAndReady", preflightAndReady},
 	{"CreateInspectDelete", createInspectDelete},
 	{"StopStartKeepsTheWorkspace", stopStartKeepsTheWorkspace},
+	{"StartAfterFailureKeepsTheWorkspace", startAfterFailureKeepsTheWorkspace},
 	{"UpdateEveryMutableField", updateEveryMutableField},
 	{"SizeChangeIsHonoredOrRefused", sizeChangeIsHonoredOrRefused},
 	{"ListReadsIdentityBack", listReadsIdentityBack},
