@@ -81,10 +81,18 @@ refused before it is pushed.
   sandbox killed at its ceiling is `Failed` with reason `OOMKilled`, as
   before; a start brings it back at the size it holds, and raising
   `spec.resources.max.memory` on it starts it again at the next size,
-  each with its workspace. Where a restart found no node with room, a
-  kill that follows reads `Starting` until the control plane asks for
-  more memory again, and not `Failed`. See `docs/manifest.md`, "What a
-  client can rely on".
+  each with its workspace. Where a restart found no node with room, the
+  sandbox runs on at the size it holds and carries the new
+  `MemoryUnplaced` condition, `True` with reason `NoRoom` and the size
+  that found no room in its message. A kill that follows is answered at
+  once by a start at that size, with no act of the client: the sandbox
+  reads `Starting` with reason `MemoryNotRaised`, then `Running`, and
+  more memory is asked for again later. That start is made a few times
+  in a row and no more, with a short wait between two of them; a sandbox
+  killed again after the last reads `Failed` with reason `OOMKilled`,
+  its condition says `RestartsExhausted`, and a start or a delete of it
+  is the client's to choose. See `docs/manifest.md`, "What a client can
+  rely on", and `docs/kubernetes.md` for the figures.
 - Added: `CELLA_AUTOSIZE_INTERVAL`, default `1m`, how often a sandbox
   with a ceiling is read. The loop runs on the writer under the
   `autosize` lease, which `cella_lease_held` now reports.
