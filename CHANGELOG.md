@@ -6,6 +6,29 @@ refused before it is pushed.
 
 ## Unreleased
 
+- Changed: a start of a `Failed` sandbox whose main process ran and ended
+  is taken, and keeps the workspace. `POST /v1/sandboxes/{id}/start`,
+  `cella start` and `StartSandbox` answered `phase_conflict` for every
+  `Failed` sandbox before, which left a client one act on a sandbox whose
+  process had exited non-zero or been killed for memory: the delete that
+  discards its files. The start now runs the sandbox's command again from
+  the specification it was created with, on the same workspace, for any
+  failure its runtime reports (`status.reason` `Exited`, `Error`,
+  `OOMKilled` and the like), under the caller's sandbox limit. Every file
+  of the workspace is kept; processes, and files outside the workspace,
+  are gone as after a stop and a start. It is one start: a process that
+  ends again leaves the sandbox `Failed` again. A `Failed` sandbox that
+  never ran is still refused with `phase_conflict`, now with the reason
+  in `details.detail`: `CreateFailed`, `NoCapacity`, `StartDeadline` and
+  `RecoveryExhausted`. **A client that relied on `phase_conflict` to tell
+  that a failed sandbox was beyond recovery, and deleted it, should start
+  it instead**; deleting is what loses the files. The lifecycle rules are
+  as they were: `ttl` deletes a failed sandbox, and `autoDelete` and
+  `autoStop` do not apply to one. A runtime built on the driver contract
+  is held to the same by the driver suite's new case,
+  `StartAfterFailureKeepsTheWorkspace`, and a server by the conformance
+  case `case005StartAfterFailure`. See `docs/manifest.md`, "Recovering a
+  failed sandbox".
 - Added: a manifest may name a ceiling per resource in
   `spec.resources.max`, as `{"cpu": "2", "memory": "6Gi"}`. The sandbox
   starts at `spec.resources` and is sized inside the ceiling: its CPU
@@ -56,9 +79,12 @@ refused before it is pushed.
   replaces a sandbox when it reads `Failed` therefore keeps a sandbox
   that is only being given more memory, and its workspace with it. A
   sandbox killed at its ceiling is `Failed` with reason `OOMKilled`, as
-  before; raising `spec.resources.max.memory` on it starts it again with
-  its workspace. A start of a `Failed` sandbox stays `phase_conflict`.
-  See `docs/manifest.md`, "What a client can rely on".
+  before; a start brings it back at the size it holds, and raising
+  `spec.resources.max.memory` on it starts it again at the next size,
+  each with its workspace. Where a restart found no node with room, a
+  kill that follows reads `Starting` until the control plane asks for
+  more memory again, and not `Failed`. See `docs/manifest.md`, "What a
+  client can rely on".
 - Added: `CELLA_AUTOSIZE_INTERVAL`, default `1m`, how often a sandbox
   with a ceiling is read. The loop runs on the writer under the
   `autosize` lease, which `cella_lease_held` now reports.
