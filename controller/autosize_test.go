@@ -1477,7 +1477,7 @@ func (s *dataStore) WriteData(ctx context.Context, obj v1.Sandbox, mutation stri
 	if s.fail != nil {
 		return s.fail
 	}
-	if err := s.durableStore.Write(ctx, obj, mutation); err != nil {
+	if err := s.Write(ctx, obj, mutation); err != nil {
 		return err
 	}
 	s.mu.Lock()

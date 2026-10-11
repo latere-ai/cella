@@ -448,7 +448,7 @@ func TestStateReportsTheSizeHeldAndTheKubeletsVerdict(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
 		conditions []corev1.PodCondition
-		legacy     corev1.PodResizeStatus
+		legacy     string
 		held       string
 		reason     string
 		message    string
@@ -460,8 +460,8 @@ func TestStateReportsTheSizeHeldAndTheKubeletsVerdict(t *testing.T) {
 			conditions: []corev1.PodCondition{{Type: corev1.PodResizePending, Status: corev1.ConditionTrue, Reason: corev1.PodReasonDeferred, Message: "the node has no room"}}},
 		{name: "infeasible", held: "256Mi", reason: driver.ResizeInfeasible, message: "more than the node holds",
 			conditions: []corev1.PodCondition{{Type: corev1.PodResizePending, Status: corev1.ConditionTrue, Reason: corev1.PodReasonInfeasible, Message: "more than the node holds"}}},
-		{name: "deferred in the older status field", held: "256Mi", reason: driver.ResizeDeferred, legacy: corev1.PodResizeStatusDeferred},
-		{name: "infeasible in the older status field", held: "256Mi", reason: driver.ResizeInfeasible, legacy: corev1.PodResizeStatusInfeasible},
+		{name: "deferred in the older status field", held: "256Mi", reason: driver.ResizeDeferred, legacy: corev1.PodReasonDeferred},
+		{name: "infeasible in the older status field", held: "256Mi", reason: driver.ResizeInfeasible, legacy: corev1.PodReasonInfeasible},
 		{name: "a pending condition that is not true is no verdict", held: "256Mi", reason: driver.ResizeInProgress,
 			conditions: []corev1.PodCondition{{Type: corev1.PodResizePending, Status: corev1.ConditionFalse, Reason: corev1.PodReasonDeferred}}},
 		{name: "applied", held: "768Mi"},
@@ -470,7 +470,14 @@ func TestStateReportsTheSizeHeldAndTheKubeletsVerdict(t *testing.T) {
 			h.kubelet(t, id, limits("2", tc.held), tc.conditions...)
 			if tc.legacy != "" {
 				pod := h.podOf(t, id)
-				pod.Status.Resize = tc.legacy
+				// The older field spells its two verdicts as the
+				// condition's reasons are spelled.
+				switch tc.legacy {
+				case corev1.PodReasonDeferred:
+					pod.Status.Resize = corev1.PodResizeStatusDeferred
+				case corev1.PodReasonInfeasible:
+					pod.Status.Resize = corev1.PodResizeStatusInfeasible
+				}
 				if _, err := h.cs.CoreV1().Pods(namespace).Update(t.Context(), pod, metav1.UpdateOptions{}); err != nil {
 					t.Fatal(err)
 				}
@@ -786,14 +793,18 @@ func TestAContainerThatEndedMidReadIsNotRunning(t *testing.T) {
 	h := sizing(t)
 	const id = "sbx_ended"
 	h.created(t, spec(id))
-	h.exec.handle = func(context.Context, execCall, io.Reader, io.Writer, io.Writer) error {
-		pod := h.podOf(t, id)
+	h.exec.handle = func(ctx context.Context, _ execCall, _ io.Reader, _, _ io.Writer) error {
+		pods := h.cs.CoreV1().Pods(namespace)
+		pod, err := pods.Get(ctx, objectName(id), metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
 		pod.Status.Phase = corev1.PodFailed
 		pod.Status.ContainerStatuses = []corev1.ContainerStatus{{
 			Name: Container, State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 137, Reason: "OOMKilled"}},
 		}}
-		if _, err := h.cs.CoreV1().Pods(namespace).Update(t.Context(), pod, metav1.UpdateOptions{}); err != nil {
-			t.Error(err)
+		if _, err := pods.Update(ctx, pod, metav1.UpdateOptions{}); err != nil {
+			return err
 		}
 		return errors.New("container not found")
 	}
