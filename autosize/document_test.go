@@ -27,6 +27,9 @@ func figures() map[string]string {
 		"`autosize.MemoryQuantum`":      Quantity(MemoryQuantum),
 		"`autosize.CeilingWarnAt`":      fmt.Sprintf("%.2f", CeilingWarnAt),
 		"`autosize.MoveBackoff`":        "`" + short(MoveBackoff) + "`",
+
+		"`autosize.SameSizeRestarts`":       strconv.Itoa(SameSizeRestarts),
+		"`autosize.SameSizeRestartBackoff`": "`" + short(SameSizeRestartBackoff) + "`",
 	}
 }
 

@@ -45,6 +45,14 @@ const (
 	// MoveBackoff is how long a sandbox's memory is left alone after a
 	// move that found no room for it.
 	MoveBackoff = 10 * time.Minute
+	// SameSizeRestarts is how many times in a row a sandbox killed for
+	// memory inside MoveBackoff is started again at the size it holds. The
+	// kill after the last of them leaves it Failed for a client to decide.
+	SameSizeRestarts = 3
+	// SameSizeRestartBackoff is the least time between two such starts of
+	// one sandbox, so a workload that is killed as it starts is not
+	// started again the moment it ends.
+	SameSizeRestartBackoff = 15 * time.Second
 )
 
 // NextMemory is the memory limit a sandbox holding limit bytes is raised to

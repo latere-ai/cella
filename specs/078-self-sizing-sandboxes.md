@@ -465,6 +465,8 @@ is the operator's to set.
 | `autosize.MemoryQuantum` | 256Mi | a memory size is a multiple of this, or the ceiling |
 | `autosize.CeilingWarnAt` | 0.95 | the fraction of `max` that emits `sandbox.at_ceiling` |
 | `autosize.MoveBackoff` | `10m` | how long memory is left alone after a move that found no room |
+| `autosize.SameSizeRestarts` | 3 | how many times in a row a sandbox killed for memory inside `MoveBackoff` is started again at the size it holds, before the next kill leaves it `Failed` |
+| `autosize.SameSizeRestartBackoff` | `15s` | the least time between two such starts of one sandbox |
 
 Every check, schema and message that names one of these reads the
 constant.
