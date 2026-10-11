@@ -220,7 +220,7 @@ with `reason` `oom`.
 #### What a client can rely on
 
 After a command is killed for memory in a sandbox with room left under
-`max.memory`, read the sandbox. It is in one of two states, and in both
+`max.memory`, read the sandbox. It is in one of three states, and in each
 you wait and run the command again. You never need to delete the sandbox
 and create another.
 
@@ -228,18 +228,26 @@ and create another.
 |---|---|---|
 | `Running` | one process was killed and the rest of the sandbox went on. Its memory is being raised in place | run the command again |
 | `Starting` with reason `MemoryRaised` | the kill took the whole sandbox, or the node had no room for the raise, and the control plane is starting it again at the larger size | read again until it is `Running`, then run the command again |
+| `Starting` with reason `MemoryNotRaised` | the kill took the whole sandbox and no node had room for a larger size a moment ago, so the control plane is starting it again at the size it holds | read again until it is `Running`. The sandbox is yours to use again, but the command needs more memory than it can be given for now, so expect the same command to be killed again |
 
 A sandbox on its way back never reads `Failed`, `Stopped` or not found, at
 any moment between the kill and running again: not by a read of the
 sandbox, not in a list, and not in its events, which carry no
-`sandbox.failed` for it. The wait is a few seconds on a cluster with room.
-Where no node had room for the larger size a moment ago, the sandbox was
-started again at the size it had, and a kill that follows waits, reading
-`Starting`, until the control plane asks for more memory again
-([Sandboxes on Kubernetes](kubernetes.md#sizing-a-sandbox)). `Starting` with reason `MemoryRaised` is a phase
-the control plane is already acting on, so a start or a stop of the sandbox
-in that time is refused with `phase_conflict`, and so is a command, which
-needs a running sandbox.
+`sandbox.failed` for it. The wait is a few seconds. `Starting` with either
+reason is a phase the control plane is already acting on, so a start or a
+stop of the sandbox in that time is refused with `phase_conflict`, and so
+is a command, which needs a running sandbox.
+
+Where no node has room for the larger size, the sandbox carries the
+`MemoryUnplaced` condition, whose message names the size that found no
+room. It is kept running at the size it holds: a kill is answered by a
+start at that size, at once, and more memory is asked for again later
+([Sandboxes on Kubernetes](kubernetes.md#sizing-a-sandbox)). That is done
+3 times in a row. A sandbox killed for memory again after the last of
+them reads `Failed` with reason `OOMKilled`, and its condition says
+`RestartsExhausted`: its command does not fit in the memory it can have,
+and whether to [start it again](#recovering-a-failed-sandbox) is yours to
+decide. Its workspace is intact.
 
 What a restart costs is what any restart costs:
 
@@ -279,6 +287,7 @@ A sandbox with a ceiling reports what it holds:
 | `status.usage` | the last reading of what its workload uses: `memory` in bytes and `readAt`. Readings are taken every `CELLA_AUTOSIZE_INTERVAL` |
 | `status.moves` | how many times raising its memory restarted it on another node |
 | the `MemoryAtCeiling` condition | `True` while its memory is at `max.memory` and its workload uses 95% or more of it, or lost a process to the limit. `sandbox.at_ceiling` is recorded once each time that begins |
+| the `MemoryUnplaced` condition | `True` once the sandbox needed more memory, inside its ceiling, and no node had room for the larger size, which its `message` names. Its `reason` is `NoRoom` while the sandbox is kept running at the size it holds, and `RestartsExhausted` once it was killed for memory too often there and is left `Failed`. `False` with reason `MemoryRaised` once a later raise was given. Absent on a sandbox no raise ever failed for |
 
 A spawned child's ceilings may not exceed its parent's. An environment's
 warm pool keeps sandboxes of one fixed size, so a manifest with a ceiling
@@ -341,9 +350,12 @@ start of one answers `phase_conflict`, with the reason in the error's
 
 A sandbox with a [memory ceiling](#sizing-inside-a-ceiling) and room under
 it does not reach `Failed` when it is killed for memory: the control plane
-starts it again itself at a larger size, and it reads `Starting`
-meanwhile. A start of it then answers `phase_conflict`, because the start
-is already being made.
+starts it again itself, at a larger size or, where none could be placed,
+at the one it holds, and it reads `Starting` meanwhile. A start of it then
+answers `phase_conflict`, because the start is already being made. It
+reads `Failed` only once it was killed again after each of the starts the
+control plane makes at the same size, with the `MemoryUnplaced` condition
+saying `RestartsExhausted`; your start then runs it again at that size.
 
 A failed sandbox is kept until you start or delete it. Its
 `spec.lifecycle.ttl` still deletes it when it runs out; `autoDelete`,
@@ -359,7 +371,7 @@ The server writes `status`; it is ignored on the way in.
 | `owner` | the subject that created it, `<issuer>|<sub>` |
 | `environment`, `driver`, `isolation` | where it runs and the boundary that runtime provides: `container`, `process`, or `none` |
 | `phase` | `Pending`, `Queued`, `Starting`, `Running`, `Stopping`, `Stopped`, `Failed`, `Lost`, `Recovering`, or `Deleting`. `Pending`, `Queued`, `Starting` and `Recovering` are on the way to `Running` without any act of yours; `Failed` stays until you act, and a start [brings back](#recovering-a-failed-sandbox) one whose process ended |
-| `reason` | why it is in that phase, such as `NoCapacity`, `StartDeadline`, `Preempted`, the lifecycle rule that stopped it, the runtime's word for how a failed sandbox's process ended (`Exited`, `Error`, `OOMKilled`), or `MemoryRaised` on one that is `Starting` because it is being [started again at a larger memory size](#what-a-client-can-rely-on) |
+| `reason` | why it is in that phase, such as `NoCapacity`, `StartDeadline`, `Preempted`, the lifecycle rule that stopped it, the runtime's word for how a failed sandbox's process ended (`Exited`, `Error`, `OOMKilled`), or `MemoryRaised` or `MemoryNotRaised` on one that is `Starting` because it is being [started again after a kill for memory](#what-a-client-can-rely-on), at a larger size or at the one it holds |
 | `conditions` | statements with a type, a status, a reason, and a time: `Scheduled`, `EgressEnforced`, `DisplayReady`, and others. A row of a list page whose environment did not answer carries `Observed` `False`: its status is the one last recorded, not a fresh read |
 | `parent`, `root`, `mesh`, `spawn` | where it sits in a spawn tree, its mesh, and its budget with how much is used |
 | `ports` | each declared port, `listening` or `closed` |

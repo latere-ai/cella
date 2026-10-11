@@ -108,13 +108,17 @@ func TestThePagesStateTheConstants(t *testing.T) {
 		"the smallest step":     "to " + Quantity(MemoryStepMin) + " more",
 		"the quantum":           "a\n  multiple of " + Quantity(MemoryQuantum),
 		"the warning line":      "uses " + percent(CeilingWarnAt) + " or more of it",
+		"the starts at a size":  fmt.Sprintf("That is done\n%d times in a row", SameSizeRestarts),
 	} {
 		if !strings.Contains(section, phrase) {
 			t.Errorf("docs/manifest.md does not state %s as %q", what, phrase)
 		}
 	}
 	for path, phrases := range map[string][]string{
-		"kubernetes.md":    {fmt.Sprintf("left alone for %.0f minutes", MoveBackoff.Minutes())},
+		"kubernetes.md": {
+			fmt.Sprintf("left alone for %.0f minutes", MoveBackoff.Minutes()),
+			fmt.Sprintf("up to %d times in a row, at least %.0f seconds apart", SameSizeRestarts, SameSizeRestartBackoff.Seconds()),
+		},
 		"events.md":        {"uses " + percent(CeilingWarnAt) + " or more of it"},
 		"configuration.md": {"| `CELLA_AUTOSIZE_INTERVAL` | `" + short(DefaultInterval) + "` |"},
 	} {
