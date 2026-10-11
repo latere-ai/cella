@@ -89,7 +89,7 @@ Not in this spec.
 
 | Field | Type | Default | Mutable | Rule |
 |---|---|---|---|---|
-| `resources.cpu`, `.memory`, `.disk` | quantity | `Defaults` | yes, with `Resize` | unchanged: the size the sandbox starts at, and with `max` its floor |
+| `resources.cpu`, `.memory`, `.disk` | quantity | `Defaults` | `.cpu` and `.memory` with `Resize`, which no driver declares yet; `.disk` no | unchanged: the size the sandbox starts at, and with `max` its floor |
 | `resources.max.cpu`, `.memory`, `.disk` (added) | quantity | absent: fixed at `resources` | yes, with `Autosize` | each at least its `resources` value (`invalid_field`), at most the environment's `Ceilings` (`ceiling_exceeded`); a resource with no `max` stays fixed |
 
 ```yaml

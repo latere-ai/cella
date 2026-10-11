@@ -171,7 +171,7 @@ caller may narrow, only a non-workload actor may widen); `stopped`
 | `command`, `args` | []string | the image's | no | `args` without `command` appends to the image's entrypoint |
 | `workdir` | string | `workspace.path` | no | absolute path |
 | `user` | string | the image's | no | a uid, `uid:gid`, or a name |
-| `resources.cpu`, `.memory`, `.disk` | quantity | `Defaults.CPU`, `.Memory`, `.Disk` | yes, with `Resize` | Kubernetes quantity syntax, decimal (`500m`, `2`) and binary SI (`2Gi`), parsed by the package's own parser; `disk` sizes the workspace volume |
+| `resources.cpu`, `.memory`, `.disk` | quantity | `Defaults.CPU`, `.Memory`, `.Disk` | `.cpu` and `.memory` with `Resize`, which no driver declares yet; `.disk` no | Kubernetes quantity syntax, decimal (`500m`, `2`) and binary SI (`2Gi`), parsed by the package's own parser; `disk` sizes the workspace volume |
 | `resources.max.cpu`, `.memory`, `.disk` ([[078-self-sizing-sandboxes]]) | quantity | absent: fixed at `resources` | yes, with the `Autosize` flag of that resource | the ceiling the sandbox is sized inside; each at least its `resources` value (`invalid_field`), at most `Ceilings` (`ceiling_exceeded`); on an update, memory's and the workspace's not below `status.resources` (`ceiling_exceeded`); a resource with no `max` stays fixed |
 | `workspace.path` | string | `/workspace` | no | absolute; not under `/run/cella`; may not equal or nest with a `volumes[].path` (`path_conflict`) |
 | `workspace.source` | enum | `empty` | no | `empty`, `git`, or `volume` |
@@ -398,10 +398,12 @@ The stages, in order, each one total before the next begins:
    `Input` refuse `display`;
    `Ingress` refuses `expose: public`; `Mesh` refuses `mesh.enabled`
    and `expose: mesh`; `Volumes` refuses `volumes[]` and
-   `workspace.source: volume`; `Resize` refuses a change of
-   `resources.cpu`, `.memory` or `.disk` on update, and a change of
-   `.disk` with it; `autosize` refuses `resources.max` on a resource
-   whose flag is false, at that field; `capabilities.egress` refuses an `egress.mode` it does not
+   `workspace.source: volume`; without `Resize`, a change of
+   `resources.cpu`, `.memory` or `.disk` on update is refused at
+   `spec.resources`, and with it a change of `.disk` still is, at
+   `spec.resources.disk`, until a driver grows a workspace; `autosize`
+   refuses `resources.max` on a resource whose flag is false, at that
+   field; `capabilities.egress` refuses an `egress.mode` it does not
    list, and an empty list is a warning that `EgressEnforced` will be
    false; an environment whose `spec.scheduling.mode` is `direct`
    refuses every `scheduling` field. Refusals
