@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"io"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -74,6 +75,37 @@ type sized struct {
 
 func sizedSandbox(t *testing.T, max v1.ResourceMax) *sized {
 	t.Helper()
+	return sizedSandboxOn(t, max, nil)
+}
+
+// policyClock is the time the controller's policy reads, which a test moves:
+// the backoffs are minutes, and no test waits one out.
+type policyClock struct {
+	mu sync.Mutex
+	at time.Time
+}
+
+func (c *policyClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.at
+}
+
+// Ticker never ticks: a test asks for each reading itself.
+func (c *policyClock) Ticker(time.Duration) (<-chan time.Time, func()) {
+	return make(chan time.Time), func() {}
+}
+
+func (c *policyClock) advance(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.at = c.at.Add(d)
+}
+
+// sizedSandboxOn is sizedSandbox with the controller reading the clock given,
+// the wall clock for none.
+func sizedSandboxOn(t *testing.T, max v1.ResourceMax, clock controller.Clock) *sized {
+	t.Helper()
 	h := sizing(t)
 	s := &sized{harness: h, t: t, events: &records{}, meter: &fakeMeter{at: time.Date(2026, 10, 11, 9, 0, 0, 0, time.UTC)}}
 	h.meter = s.meter
@@ -93,7 +125,7 @@ func sizedSandbox(t *testing.T, max v1.ResourceMax) *sized {
 		return nil
 	}
 	control, err := controller.Open(t.Context(), controller.Options{
-		Driver: h.Driver, Environment: "default", DataDir: t.TempDir(), Events: s.events,
+		Driver: h.Driver, Environment: "default", DataDir: t.TempDir(), Events: s.events, Clock: clock,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -612,16 +644,28 @@ func (s *sized) readers() (*watched, func()) {
 // and Starting with reason MemoryRaised, or never saw the second.
 func (w *watched) runningOrStarting(t *testing.T) {
 	t.Helper()
+	w.runningOrStartingAs(t, v1.ReasonMemoryRaised)
+}
+
+// runningOrStartingAs is runningOrStarting for readers that may have seen the
+// sandbox starting for any of the reasons named, each of them at least once.
+func (w *watched) runningOrStartingAs(t *testing.T, reasons ...string) {
+	t.Helper()
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	starting := "Starting " + v1.ReasonMemoryRaised
+	allowed := map[string]bool{driver.Running: true}
+	for _, reason := range reasons {
+		allowed["Starting "+reason] = true
+	}
 	for what, n := range w.seen {
-		if what != driver.Running && what != starting {
+		if !allowed[what] {
 			t.Errorf("readers saw %q %d times; a sandbox the control plane is starting again reads Running or Starting only", what, n)
 		}
 	}
-	if w.seen[starting] == 0 || w.seen[driver.Running] == 0 {
-		t.Fatalf("readers saw %v, want both Running and Starting", w.seen)
+	for what := range allowed {
+		if w.seen[what] == 0 {
+			t.Fatalf("readers saw %v, want %q among it", w.seen, what)
+		}
 	}
 }
 
@@ -712,4 +756,151 @@ func TestAMovedSandboxNeverReadsStopped(t *testing.T) {
 	w.more(t, 50)
 	stop()
 	w.runningOrStarting(t)
+}
+
+// TestAKillWithNoRoomForMoreIsStartedAgainAtItsSize is the cluster with no
+// node for the next size, over the driver and a client double. The move's Pod
+// at the larger size is never scheduled, so the move is undone and the
+// sandbox runs at the size it had, with the MemoryUnplaced condition naming
+// the size that found no room. A kill inside the backoff is then answered at
+// the first reading by a Pod at the size the sandbox holds, on the same
+// claim, and readers see Running and Starting only, with reason
+// MemoryNotRaised for this start, never Failed. Killed again at every start,
+// the sandbox is started SameSizeRestarts times and then left Failed with
+// OOMKilled, no Pod made for it, until a client starts it. Past the backoff,
+// on a cluster that has room by then, the next kill is answered by the raise.
+func TestAKillWithNoRoomForMoreIsStartedAgainAtItsSize(t *testing.T) {
+	clock := &policyClock{at: time.Date(2026, 10, 12, 9, 0, 0, 0, time.UTC)}
+	s := sizedSandboxOn(t, v1.ResourceMax{Memory: "4Gi"}, clock)
+	// No node holds more than 512Mi: a Pod that asks for more stays pending.
+	room := int64(512 << 20)
+	s.status = func(pod *corev1.Pod) {
+		if pod.Spec.Containers[0].Resources.Limits.Memory().Value() > room {
+			pending("Unschedulable", "0/1 nodes are available: 1 Insufficient memory.")(pod)
+			return
+		}
+		running(pod)
+	}
+	s.opts.ReadyTimeout = 300 * time.Millisecond
+	claim := s.claimOf(t, s.id).UID
+	killed := func() {
+		t.Helper()
+		pod := s.podOf(t, s.id)
+		pod.Status.Phase = corev1.PodFailed
+		pod.Status.ContainerStatuses = []corev1.ContainerStatus{{
+			Name: Container, State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
+				ExitCode: 137, Reason: "OOMKilled", FinishedAt: metav1.Now(),
+			}},
+		}}
+		if _, err := s.cs.CoreV1().Pods(namespace).Update(t.Context(), pod, metav1.UpdateOptions{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reads := func() v1.Sandbox {
+		t.Helper()
+		obj, err := s.control.Refresh(t.Context(), s.stored())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return obj
+	}
+	unplaced := func(obj v1.Sandbox) v1.Condition {
+		for _, cond := range obj.Status.Conditions {
+			if cond.Type == v1.ConditionMemoryUnplaced {
+				return cond
+			}
+		}
+		return v1.Condition{}
+	}
+	limit := func() string {
+		t.Helper()
+		return s.podOf(t, s.id).Spec.Containers[0].Resources.Limits.Memory().String()
+	}
+
+	seen, stop := s.readers()
+	stopped := false
+	defer func() {
+		if !stopped {
+			stop()
+		}
+	}()
+	seen.more(t, 50)
+	killed()
+	seen.more(t, 50)
+	s.read()
+	obj := s.await("the move that finds no room to be undone", func(obj v1.Sandbox) bool {
+		return obj.Status.Phase == driver.Running && unplaced(obj).Status == v1.ConditionTrue
+	})
+	if cond := unplaced(obj); cond.Reason != v1.ReasonNoRoom || !strings.Contains(cond.Message, "No node had room for 768Mi of memory") {
+		t.Fatalf("after the undone move the condition is %+v, want MemoryUnplaced True NoRoom naming 768Mi", cond)
+	}
+	if obj.Status.Resources.Memory != "256Mi" || obj.Status.Moves != 0 || limit() != "256Mi" {
+		t.Fatalf("after the undone move the sandbox holds %s with %d moves and a Pod limited to %s, want 256Mi and none", obj.Status.Resources.Memory, obj.Status.Moves, limit())
+	}
+
+	// Killed inside the backoff: one reading, one Pod, at the size it holds.
+	made := s.podsMade()
+	s.holdWithoutAPod(seen)
+	killed()
+	seen.more(t, 50)
+	if got := reads(); got.Status.Phase != "Starting" || got.Status.Reason != v1.ReasonMemoryNotRaised {
+		t.Fatalf("a kill inside the backoff reads %s %q, want Starting MemoryNotRaised", got.Status.Phase, got.Status.Reason)
+	}
+	s.read()
+	obj = s.await("the start at the size it holds", func(obj v1.Sandbox) bool {
+		return obj.Status.Phase == driver.Running && s.podsMade() == made+1
+	})
+	s.hold.Store(nil)
+	seen.more(t, 50)
+	stop()
+	stopped = true
+	seen.runningOrStartingAs(t, v1.ReasonMemoryRaised, v1.ReasonMemoryNotRaised)
+	if obj.Status.Resources.Memory != "256Mi" || obj.Status.Moves != 0 || limit() != "256Mi" || len(s.events.resized()) != 0 {
+		t.Fatalf("after the start at the size it holds: %s, %d moves, a Pod limited to %s, records %+v", obj.Status.Resources.Memory, obj.Status.Moves, limit(), s.events.resized())
+	}
+	if s.claimOf(t, s.id).UID != claim {
+		t.Fatal("the start replaced the workspace claim")
+	}
+
+	// Killed at every start: the bound, and then Failed until a client acts.
+	for i := 2; i <= autosize.SameSizeRestarts; i++ {
+		clock.advance(autosize.SameSizeRestartBackoff)
+		killed()
+		s.read()
+		s.await("another start at the size it holds", func(obj v1.Sandbox) bool {
+			return obj.Status.Phase == driver.Running && s.podsMade() == made+i
+		})
+	}
+	clock.advance(autosize.SameSizeRestartBackoff)
+	killed()
+	s.read()
+	obj = s.await("the control plane to give up", func(obj v1.Sandbox) bool {
+		return unplaced(obj).Reason == v1.ReasonRestartsExhausted
+	})
+	made += autosize.SameSizeRestarts
+	clock.advance(autosize.MoveBackoff)
+	for range 3 {
+		s.read()
+	}
+	time.Sleep(50 * time.Millisecond)
+	if got := reads(); got.Status.Phase != phaseFailed || got.Status.Reason != "OOMKilled" || s.podsMade() != made {
+		t.Fatalf("after %d starts at the same size the sandbox reads %s %q with %d more Pods, want Failed OOMKilled and none",
+			autosize.SameSizeRestarts, got.Status.Phase, got.Status.Reason, s.podsMade()-made)
+	}
+
+	// A client's start brings it back, and with room on the cluster by
+	// then, the next kill is answered by the raise.
+	started, err := s.control.Start(t.Context(), s.id, 0)
+	if err != nil || started.Status.Phase != driver.Running || limit() != "256Mi" {
+		t.Fatalf("a client's start: %s, %v, with a Pod limited to %s, want Running at 256Mi", started.Status.Phase, err, limit())
+	}
+	room = 4 << 30
+	killed()
+	s.read()
+	obj = s.await("the raise once there is room", func(obj v1.Sandbox) bool {
+		return obj.Status.Phase == driver.Running && obj.Status.Moves == 1
+	})
+	if cond := unplaced(obj); obj.Status.Resources.Memory != "768Mi" || limit() != "768Mi" || cond.Status != v1.ConditionFalse || cond.Reason != v1.ReasonMemoryRaised {
+		t.Fatalf("after the raise: %s, a Pod limited to %s, condition %+v, want 768Mi and MemoryUnplaced False MemoryRaised", obj.Status.Resources.Memory, limit(), cond)
+	}
 }
