@@ -39,8 +39,15 @@ paths:
         place yet answers `Queued`. With `wait=1` the answer is held until the
         sandbox has left `Queued`, `Pending` and `Starting`, for at most
         `timeout`. A boundary that needs an egress gateway while none is
-        connected is refused with `egress_gateway_unavailable`. Authorized as
-        `sandbox.create`.
+        connected is refused with `egress_gateway_unavailable`. A manifest may
+        name a ceiling per resource in `spec.resources.max`, as
+        `{"cpu": "2", "memory": "6Gi"}`: the sandbox starts at
+        `spec.resources` and is sized inside the ceiling. A ceiling below the
+        amount it bounds is `invalid_field`, one above the server's own is
+        `ceiling_exceeded`, and one on a resource the environment's
+        `status.capabilities.autosize` does not declare is
+        `capability_unsupported`, each naming `spec.resources.max.cpu`,
+        `.memory` or `.disk`. Authorized as `sandbox.create`.
       parameters:
         - $ref: "#/components/parameters/Wait"
         - $ref: "#/components/parameters/WaitTimeout"
@@ -165,8 +172,11 @@ paths:
         Apply a sandbox by name. A create when the name is free and an update
         when the caller holds it. A body naming another object is refused at
         metadata.name. A create answers 201 as `POST /v1/sandboxes` does, and
-        an update 200; `wait=1` holds either answer the same way. Authorized
-        as `sandbox.create` or `sandbox.update`.
+        an update 200; `wait=1` holds either answer the same way. An update
+        may raise a ceiling of `spec.resources.max`; lowering memory's below
+        the `status.resources.memory` the sandbox holds, or removing it there,
+        is `ceiling_exceeded`. Authorized as `sandbox.create` or
+        `sandbox.update`.
       parameters:
         - $ref: "#/components/parameters/Wait"
         - $ref: "#/components/parameters/WaitTimeout"
@@ -200,7 +210,14 @@ paths:
       operationId: readSandbox
       summary: Read a sandbox
       description: >-
-        Read one sandbox with its status. Authorized as `sandbox.read`.
+        Read one sandbox with its status. A sandbox whose manifest names
+        `spec.resources.max` carries `status.resources`, the size it holds now
+        as `{"cpu": "2", "memory": "768Mi", "disk": "5Gi"}`; `status.usage`,
+        the last reading of its working set as
+        `{"memory": 251658240, "readAt": "2026-09-22T12:00:00Z"}` in bytes;
+        and `status.moves`, how many times raising its memory restarted it on
+        a node with room. A sandbox with no ceiling carries none of the three.
+        Authorized as `sandbox.read`.
       responses:
         "200":
           description: The answer this route serves.
@@ -1433,6 +1450,10 @@ paths:
                         pool: true
                         files: true
                         detach: false
+                        autosize:
+                          cpu: false
+                          memory: false
+                          disk: false
                       version: 1
                       createdAt: "2026-09-22T12:00:00Z"
                       updatedAt: "2026-09-22T12:00:00Z"
