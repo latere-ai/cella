@@ -337,6 +337,7 @@ start of one answers `phase_conflict`, with the reason in the error's
 | `NoCapacity` | the environment had no room for it |
 | `StartDeadline` | it waited in a queue past its start deadline and was never placed |
 | `RecoveryExhausted` | its environment lost it and the control plane could not make it again |
+| `VolumeMissing` | its environment lost it and a volume it had is gone |
 
 A sandbox with a [memory ceiling](#sizing-inside-a-ceiling) and room under
 it does not reach `Failed` when it is killed for memory: the control plane
