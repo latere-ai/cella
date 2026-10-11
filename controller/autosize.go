@@ -568,8 +568,8 @@ const (
 // the next size. Inside MoveBackoff, after a move that found no room, it is
 // started again at the size it holds instead, so a kill there does not leave
 // it down until the backoff ends; that is done SameSizeRestarts times in a
-// row and no more, so a workload killed at every start does not run the
-// control plane in a circle. A sandbox given up on stays so until a client
+// row and no more, so a workload killed at every start is not started again
+// without end. A sandbox given up on stays so until a client
 // acts, which the stored condition holds across the backoff's end and a
 // restart of the control plane.
 func (c *Controller) fate(obj v1.Sandbox, state driver.State, d driver.Driver) int {
