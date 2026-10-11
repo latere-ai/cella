@@ -240,7 +240,7 @@ func TestClusterAKillWithNoRoomForMoreIsStartedAgainAtItsSize(t *testing.T) {
 	time.Sleep(autosize.SameSizeRestartBackoff)
 	kill()
 	failed := c.awaitRead(phaseFailed)
-	obj = c.await("the control plane to say it gave up", func(obj v1.Sandbox) bool {
+	c.await("the control plane to say it gave up", func(obj v1.Sandbox) bool {
 		return unplaced(obj).Reason == v1.ReasonRestartsExhausted
 	})
 	ended = string(c.pod().UID)

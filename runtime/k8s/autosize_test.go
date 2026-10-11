@@ -874,7 +874,7 @@ func TestAKillWithNoRoomForMoreIsStartedAgainAtItsSize(t *testing.T) {
 	clock.advance(autosize.SameSizeRestartBackoff)
 	killed()
 	s.read()
-	obj = s.await("the control plane to give up", func(obj v1.Sandbox) bool {
+	s.await("the control plane to give up", func(obj v1.Sandbox) bool {
 		return unplaced(obj).Reason == v1.ReasonRestartsExhausted
 	})
 	made += autosize.SameSizeRestarts
