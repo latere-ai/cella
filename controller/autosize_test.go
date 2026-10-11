@@ -2000,6 +2000,19 @@ func onlyRunningAndStarting(t *testing.T, seen *phases) {
 	}
 }
 
+// noLifecycleRecord holds the feed to the same promise as a read: a restart
+// for size writes its sandbox.resized and no record that the sandbox failed,
+// stopped or started, beyond the started records there were before it.
+func noLifecycleRecord(t *testing.T, events *recorded, startedBefore int) {
+	t.Helper()
+	if failed, stopped := len(events.of(MutationFailed)), len(events.of(MutationStopped)); failed != 0 || stopped != 0 {
+		t.Errorf("a restart for size recorded %d sandbox.failed and %d sandbox.stopped, want none", failed, stopped)
+	}
+	if started := len(events.of(MutationStarted)); started != startedBefore {
+		t.Errorf("a restart for size recorded %d sandbox.started, want the %d there were before it", started, startedBefore)
+	}
+}
+
 // TestReadersNeverSeeAKilledSandboxFail is the guarantee a client relies on:
 // while a kill that took the container is found, the sandbox is restarted at
 // the next size and comes back, readers that read it continuously see
@@ -2009,6 +2022,7 @@ func onlyRunningAndStarting(t *testing.T, seen *phases) {
 // anything, and inside the restart, where the driver holds no workload.
 func TestReadersNeverSeeAKilledSandboxFail(t *testing.T) {
 	c, d, events, id := sizedController(t, v1.ResourceMax{Memory: "4Gi"})
+	started := len(events.of(MutationStarted))
 	seen, stop := readers(t, c, id)
 	seen.await(t, 50)
 	d.set2(func(d *sizeDriver) {
@@ -2045,6 +2059,7 @@ func TestReadersNeverSeeAKilledSandboxFail(t *testing.T) {
 	if got := events.resized(); len(got) != 1 || !got[0].Moved || got[0].Reason != autosize.ReasonOOM {
 		t.Fatalf("records = %+v", got)
 	}
+	noLifecycleRecord(t, events, started)
 }
 
 // TestReadersNeverSeeAMoveStop: a sandbox moved because its node could not
@@ -2052,7 +2067,8 @@ func TestReadersNeverSeeAKilledSandboxFail(t *testing.T) {
 // read it continuously across the stop, the instant it has no workload and
 // the start see Running and Starting only, never Stopping or Stopped.
 func TestReadersNeverSeeAMoveStop(t *testing.T) {
-	c, d, _, id := sizedController(t, v1.ResourceMax{Memory: "4Gi"})
+	c, d, events, id := sizedController(t, v1.ResourceMax{Memory: "4Gi"})
+	started := len(events.of(MutationStarted))
 	d.set2(func(d *sizeDriver) { d.verdict = driver.ResizeDeferred })
 	seen, stop := readers(t, c, id)
 	d.set2(func(d *sizeDriver) {
@@ -2073,6 +2089,7 @@ func TestReadersNeverSeeAMoveStop(t *testing.T) {
 	if obj := stored(t, c, id); obj.Status.Phase != driver.Running || obj.Status.Moves != 1 || obj.Status.Resources.Memory != "768Mi" {
 		t.Fatalf("after the move: %s at %s with %d moves", obj.Status.Phase, obj.Status.Resources.Memory, obj.Status.Moves)
 	}
+	noLifecycleRecord(t, events, started)
 }
 
 // TestAMoveThatWasUndoneReadsWhatTheDriverReports: a move that found no room
