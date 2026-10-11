@@ -777,3 +777,27 @@ func TestTheMeterReadsTheMetricsAPI(t *testing.T) {
 		t.Fatalf("a Pod with no sample: got %v, want the cluster's not-found", err)
 	}
 }
+
+// TestAContainerThatEndedMidReadIsNotRunning: a kill that takes the container
+// while its count is being read fails the command, and the reading answers
+// that the sandbox is not running, which is what its next read will say,
+// rather than as a reading that failed.
+func TestAContainerThatEndedMidReadIsNotRunning(t *testing.T) {
+	h := sizing(t)
+	const id = "sbx_ended"
+	h.created(t, spec(id))
+	h.exec.handle = func(context.Context, execCall, io.Reader, io.Writer, io.Writer) error {
+		pod := h.podOf(t, id)
+		pod.Status.Phase = corev1.PodFailed
+		pod.Status.ContainerStatuses = []corev1.ContainerStatus{{
+			Name: Container, State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 137, Reason: "OOMKilled"}},
+		}}
+		if _, err := h.cs.CoreV1().Pods(namespace).Update(t.Context(), pod, metav1.UpdateOptions{}); err != nil {
+			t.Error(err)
+		}
+		return errors.New("container not found")
+	}
+	if _, err := h.MemoryKills(t.Context(), id); !errors.Is(err, driver.ErrNotRunning) {
+		t.Fatalf("a container that ended mid-read: got %v, want ErrNotRunning", err)
+	}
+}

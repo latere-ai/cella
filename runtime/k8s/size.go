@@ -454,9 +454,28 @@ func (d *Driver) MemoryKills(ctx context.Context, id string) (driver.MemoryKills
 	if err != nil {
 		return driver.MemoryKills{}, err
 	}
-	e, err := d.start(ctx, pod.Name, execOpts{argv: killCountCommand}, killReadTimeout)
+	count, found, err := d.readKillCount(ctx, pod.Name)
 	if err != nil {
-		return driver.MemoryKills{}, err
+		// A container that ended while it was being read is a sandbox that
+		// is no longer running, which is what its next read will say, and
+		// not a reading that failed.
+		if now, readErr := d.getPod(ctx, id); readErr == nil && (!live(now) || !started(now) || now.UID != pod.UID) {
+			return driver.MemoryKills{}, driver.ErrNotRunning
+		}
+		return driver.MemoryKills{}, fmt.Errorf("kill count: %w", err)
+	}
+	if !found {
+		return driver.MemoryKills{}, fmt.Errorf("%w: the sandbox's cgroup reports no count of kills for memory", driver.ErrUnsupported)
+	}
+	return driver.MemoryKills{Count: count, Instance: string(pod.UID)}, nil
+}
+
+// readKillCount runs the one command that prints the kernel's counters in
+// the workload's container and sums what it printed.
+func (d *Driver) readKillCount(ctx context.Context, pod string) (count int64, found bool, err error) {
+	e, err := d.start(ctx, pod, execOpts{argv: killCountCommand}, killReadTimeout)
+	if err != nil {
+		return 0, false, err
 	}
 	defer func() { _ = e.Close() }()
 	drained := make(chan struct{})
@@ -469,17 +488,14 @@ func (d *Driver) MemoryKills(ctx context.Context, id string) (driver.MemoryKills
 	count, found, readErr := readKills(e.Stdout())
 	<-drained
 	if readErr != nil {
-		return driver.MemoryKills{}, fmt.Errorf("kill count: %w", readErr)
+		return 0, false, readErr
 	}
 	// The exit code is not read: cat exits non-zero for the one file of the
 	// two the node does not have, and what it printed is the answer.
 	if _, err := e.Wait(ctx); err != nil {
-		return driver.MemoryKills{}, fmt.Errorf("kill count: %w", err)
+		return 0, false, err
 	}
-	if !found {
-		return driver.MemoryKills{}, fmt.Errorf("%w: the sandbox's cgroup reports no count of kills for memory", driver.ErrUnsupported)
-	}
-	return driver.MemoryKills{Count: count, Instance: string(pod.UID)}, nil
+	return count, found, nil
 }
 
 // readKills sums the kill counters of the kernel's memory events: oom_kill,

@@ -600,7 +600,7 @@ func (c *Controller) sizeOne(ctx context.Context, id string, observed *driver.St
 	switch {
 	case err == nil:
 		rose = c.readingsOf(id, func(r *autosize.Readings) bool { return r.Kills(kills.Count, kills.Instance) })
-	case !errors.Is(err, driver.ErrNotRunning) && !errors.Is(err, driver.ErrUnsupported):
+	case ctx.Err() == nil && !errors.Is(err, driver.ErrNotRunning) && !errors.Is(err, driver.ErrUnsupported):
 		c.log.WarnContext(ctx, "the count of kills for memory could not be read", "sandbox", id, "err", err)
 	}
 	pressed, used := false, int64(-1)
@@ -613,7 +613,7 @@ func (c *Controller) sizeOne(ctx context.Context, id string, observed *driver.St
 			c.sizeMu.Lock()
 			c.size.usage[id] = v1.Usage{Memory: usage.WorkingSet, ReadAt: usage.ReadAt}
 			c.sizeMu.Unlock()
-		case !errors.Is(err, driver.ErrNotRunning) && !errors.Is(err, driver.ErrUnsupported):
+		case ctx.Err() == nil && !errors.Is(err, driver.ErrNotRunning) && !errors.Is(err, driver.ErrUnsupported):
 			c.log.WarnContext(ctx, "the working set could not be read", "sandbox", id, "err", err)
 		}
 	}
