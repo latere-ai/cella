@@ -26,8 +26,9 @@ func TestDialerIsTheEnvironmentsDriver(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Dialer on a driver that dials: %v", err)
 	}
-	if dialer != o.Driver.(driver.Dialer) {
-		t.Fatalf("Dialer is %T, want the environment's own driver", dialer)
+	// The dial half is the driver's own behind the count of open sessions.
+	if tracked, ok := dialer.(trackedDialer); !ok || tracked.Dialer != o.Driver.(driver.Dialer) {
+		t.Fatalf("Dialer is %T, want the environment's own driver behind the session count", dialer)
 	}
 	c.setDriver(c.environment, noDialer{o.Driver})
 	if _, err = c.Dialer(obj.Status.ID); !errors.Is(err, driver.ErrUnsupported) {

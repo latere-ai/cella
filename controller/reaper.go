@@ -321,7 +321,9 @@ func (c *Controller) deleting(environment string) []string {
 	defer c.mu.Unlock()
 	var ids []string
 	for id, obj := range c.objects {
-		if _, busy := c.realizing[id]; !busy && obj.Status.Phase == PhaseDeleting && obj.Status.Environment == environment {
+		_, busy := c.realizing[id]
+		_, moving := c.moving[id]
+		if !busy && !moving && obj.Status.Phase == PhaseDeleting && obj.Status.Environment == environment {
 			ids = append(ids, id)
 		}
 	}
@@ -335,7 +337,9 @@ func (c *Controller) finishDelete(ctx context.Context, id string) (bool, error) 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	obj, held := c.objects[id]
-	if _, busy := c.realizing[id]; !held || busy || obj.Status.Phase != PhaseDeleting {
+	_, busy := c.realizing[id]
+	_, moving := c.moving[id]
+	if !held || busy || moving || obj.Status.Phase != PhaseDeleting {
 		return false, nil
 	}
 	if err := c.cascade(ctx, id); err != nil {
@@ -362,7 +366,7 @@ func (c *Controller) enforceToken(ctx context.Context, state driver.State, now t
 	// A create the loop has not settled holds the identity it was just
 	// given, and its driver call may be in flight: a re-projection would
 	// cross it.
-	if _, busy := c.realizing[state.ID]; busy || placed(obj) {
+	if c.creating(obj) {
 		return false, nil
 	}
 	if !dueForRotation(obj.Status.TokenState, state.ExpiresAt, now) {
@@ -392,6 +396,12 @@ func (c *Controller) enforce(ctx context.Context, environment, id, rule string, 
 	d, err := c.driverFor(environment)
 	if err != nil {
 		return false, err
+	}
+	// A sandbox being moved to a larger size is stopped for a moment by the
+	// control plane itself. Its deadline rules are asked again at the next
+	// tick, when the move has settled (spec 078).
+	if _, moving := c.moving[id]; moving {
+		return false, nil
 	}
 	state, err := d.Inspect(ctx, id)
 	if errors.Is(err, driver.ErrNotFound) {

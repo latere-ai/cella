@@ -72,7 +72,9 @@ func (c *Controller) victims(environment string, head v1.Sandbox) ([]v1.Sandbox,
 			obj.Status.Preemptions >= c.maxPreemptions {
 			continue
 		}
-		request, err := requestOf(obj.Spec.Resources)
+		// Stopping a victim frees what it holds now, which for one raised
+		// inside its ceiling is more memory than it started at.
+		request, err := requestOf(heldResources(obj))
 		if err != nil {
 			return nil, fmt.Errorf("the resources of %s: %w", obj.Status.ID, err)
 		}

@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"latere.ai/x/cella/autosize"
 	"latere.ai/x/cella/egress"
 	"latere.ai/x/cella/manifest"
 	v1 "latere.ai/x/cella/manifest/v1"
@@ -158,6 +159,10 @@ type Options struct {
 	// with nothing answering before it is Offline. Zero takes the default;
 	// CELLA_ENVIRONMENT_OFFLINE sets it.
 	EnvironmentOffline time.Duration
+	// AutosizeInterval is how often a running sandbox with a ceiling is read
+	// for what it uses (spec 078). Zero takes autosize.DefaultInterval;
+	// CELLA_AUTOSIZE_INTERVAL sets it.
+	AutosizeInterval time.Duration
 }
 type Controller struct {
 	mu          sync.Mutex
@@ -254,6 +259,24 @@ type Controller struct {
 	// that holds a create's answer waits on the write that moves it rather
 	// than reading it on a timer.
 	changed chan struct{}
+	// The sizing of spec 078. moving is every sandbox being restarted at a
+	// larger size with the controller's lock released, which a start, a
+	// stop and the deadline rules leave alone until the move settles; it is
+	// guarded by the controller's lock. size is what is remembered between
+	// readings, under its own lock. sizeWake carries the sandboxes a failed
+	// command or a start asked the loop to read, and sizeCtx and sizeWork
+	// bound the work a reading leaves running behind it.
+	autosizeInterval time.Duration
+	// settleWait and settlePoll are resizeSettle and resizePoll, held here
+	// so a test waits a few milliseconds for a verdict rather than seconds.
+	settleWait, settlePoll time.Duration
+	moving                 map[string]struct{}
+	sizeMu                 sync.Mutex
+	size                   sizer
+	sizeWake               chan string
+	sizeCtx                context.Context
+	sizeStop               context.CancelFunc
+	sizeWork               sync.WaitGroup
 }
 
 // Open restores desired state from an operator-supplied store, or the provisional
@@ -311,6 +334,16 @@ func Open(ctx context.Context, o Options) (*Controller, error) {
 		newDriver: o.NewDriver, releaseDriver: o.ReleaseDriver, registrations: o.Registrations,
 		offline: o.EnvironmentOffline, answered: map[string]time.Time{},
 		realizing: map[string]struct{}{}, changed: make(chan struct{}), origins: map[string]context.Context{},
+		autosizeInterval: cmp.Or(o.AutosizeInterval, autosize.DefaultInterval),
+		settleWait:       resizeSettle, settlePoll: resizePoll,
+		moving: map[string]struct{}{}, size: newSizer(), sizeWake: make(chan string, sizeWakes),
+	}
+	// The work a reading leaves behind it, a wait for a verdict or a move,
+	// runs on a context of the controller's own: it outlives the request or
+	// the tick that began it and ends when the controller closes.
+	c.sizeCtx, c.sizeStop = context.WithCancel(context.WithoutCancel(ctx))
+	for _, obj := range objects {
+		c.watch(obj)
 	}
 	// A store of design 010 takes one conditional write per object and
 	// carries the journal; one that is also durable is what lets the lost
@@ -374,6 +407,7 @@ func Open(ctx context.Context, o Options) (*Controller, error) {
 		c.environmentStore = e
 	}
 	if err := c.openEnvironments(ctx, o); err != nil {
+		c.sizeStop()
 		_ = store.Close()
 		return nil, err
 	}
@@ -381,6 +415,7 @@ func Open(ctx context.Context, o Options) (*Controller, error) {
 	// never accelerate a create and never say why, so it is refused here
 	// rather than logged once a tick.
 	if c.pool.Size > 0 && !o.Driver.Capabilities().Pool {
+		c.sizeStop()
 		_ = store.Close()
 		return nil, fmt.Errorf("the %s driver declares no Pool capability, so this environment keeps no prewarmed entries", o.Driver.Name())
 	}
@@ -392,8 +427,17 @@ func Open(ctx context.Context, o Options) (*Controller, error) {
 // desired state, or the grace and then a delete. The start-up log says it, and
 // design 001's State section is why it is said out loud.
 func (c *Controller) Recovers() bool      { return c.recovers }
-func (c *Controller) Close() error        { c.mu.Lock(); defer c.mu.Unlock(); return c.store.Close() }
 func (c *Controller) Environment() string { return c.environment }
+
+// Close ends the work sizing left running, waits for it, and closes the
+// store. The wait comes before the lock, because that work takes the lock to
+// write what it found.
+func (c *Controller) Close() error {
+	c.stopSizing()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.store.Close()
+}
 
 // persist records one object and the mutation that produced it: one
 // conditional write and one journal row where the store is a Durable, the
@@ -425,6 +469,13 @@ func (c *Controller) persist(ctx context.Context, obj v1.Sandbox, mutation strin
 	}
 	if held && releases(previous, &obj) {
 		c.wakeScheduler()
+	}
+	c.watch(obj)
+	// A sandbox that just started is a new workload instance. Its count of
+	// kills for memory is read now, so a kill in its first interval is a
+	// rise over a baseline and not the baseline itself (spec 078).
+	if (mutation == MutationStarted || mutation == MutationRecovered) && obj.Spec.Resources.Max.Memory != "" {
+		c.wakeSizing(id)
 	}
 	c.notify()
 	return nil
@@ -463,6 +514,7 @@ func (c *Controller) forget(ctx context.Context, id, mutation string) error {
 		return err
 	}
 	delete(c.origins, id)
+	c.unwatch(id)
 	if c.durable == nil {
 		c.emit(ctx, mutation, previous)
 	}
@@ -956,6 +1008,15 @@ func (c *Controller) settleCreate(ctx context.Context, id string, d driver.Drive
 		return errors.Join(created, c.failCreate(ctx, cur, parent, token, previous))
 	}
 	cur.Status.Conditions = setCondition(cur.Status.Conditions, scheduledCondition(false, c.clock.Now()))
+	// A sandbox with a ceiling reports the size it holds from its first
+	// read: what the manifest asked for, and what the driver says it gave
+	// where the driver reports that (spec 078).
+	if sized(cur) && cur.Status.Resources == (v1.Size{}) {
+		cur.Status.Resources = sizeAsked(cur)
+		if read == nil {
+			cur.Status.Resources = sizeHeld(cur.Status.Resources, out.state.Resources)
+		}
+	}
 	switch {
 	case read == nil:
 		cur = observe(cur, out.state)
@@ -1012,7 +1073,7 @@ func specOf(obj v1.Sandbox, lifecycle driver.Lifecycle, boundary driver.Egress, 
 		ID: obj.Status.ID, Name: obj.Metadata.Name, Owner: obj.Status.Owner, Image: obj.Spec.Image,
 		Command: obj.Spec.Command, Args: obj.Spec.Args, Env: withSecretEnv(obj.Spec.Env, secrets),
 		Workdir: obj.Spec.Workdir, Labels: obj.Metadata.Labels, User: obj.Spec.User,
-		Resources: driver.Resources{CPU: string(obj.Spec.Resources.CPU), Memory: string(obj.Spec.Resources.Memory), Disk: string(obj.Spec.Resources.Disk)},
+		Resources: sizeFor(obj),
 		Workspace: driver.Workspace{Path: obj.Spec.Workspace.Path},
 		Lifecycle: lifecycle,
 		Egress:    boundary,
@@ -1064,7 +1125,7 @@ func (c *Controller) Get(ctx context.Context, key, owner string) (v1.Sandbox, er
 	if !ok {
 		return v1.Sandbox{}, ErrNotFound
 	}
-	return c.positioned(export(obj)), nil
+	return c.withUsage(c.positioned(export(obj))), nil
 }
 
 // List returns desired records. Runtime refresh is deferred until after API authorization.
@@ -1076,7 +1137,7 @@ func (c *Controller) List() []v1.Sandbox {
 	defer c.mu.Unlock()
 	out := make([]v1.Sandbox, 0, len(c.objects))
 	for _, obj := range c.objects {
-		out = append(out, c.positioned(export(obj)))
+		out = append(out, c.withUsage(c.positioned(export(obj))))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Status.ID < out[j].Status.ID })
 	return out
@@ -1234,7 +1295,11 @@ func (c *Controller) Start(ctx context.Context, id string, max int) (v1.Sandbox,
 // create's settle removes what it made. It runs under the controller's lock.
 func (c *Controller) creating(obj v1.Sandbox) bool {
 	_, busy := c.realizing[obj.Status.ID]
-	return busy || placed(obj)
+	// A sandbox being moved to a larger size is between a stop and a start
+	// the control plane made itself, with the lock released, and is left
+	// alone for the same reason (spec 078).
+	_, moving := c.moving[obj.Status.ID]
+	return busy || moving || placed(obj)
 }
 
 // Act stops or deletes one sandbox; a delete that fails keeps the desired
@@ -1343,12 +1408,20 @@ func (c *Controller) cascade(ctx context.Context, id string) error {
 	return nil
 }
 
+// Exec runs one command in a sandbox. The command is counted as a session
+// open in it until it ends, which is what a move to a larger size waits out,
+// and a command that ends badly in a sandbox with a memory ceiling has the
+// sandbox read before its exit is reported (spec 078).
 func (c *Controller) Exec(ctx context.Context, id string, req driver.ExecRequest) (driver.Exec, error) {
 	d, err := c.driverOf(id)
 	if err != nil {
 		return nil, err
 	}
-	return d.Exec(ctx, id, req)
+	running, err := d.Exec(ctx, id, req)
+	if err != nil {
+		return nil, err
+	}
+	return &trackedExec{Exec: running, c: c, id: id, closed: c.session(id)}, nil
 }
 
 // export is the object as a caller reads it: everything clone carries, less
@@ -1395,6 +1468,10 @@ func clone(obj v1.Sandbox) v1.Sandbox {
 	if obj.Status.ExitCode != nil {
 		code := *obj.Status.ExitCode
 		obj.Status.ExitCode = &code
+	}
+	if obj.Status.Usage != nil {
+		usage := *obj.Status.Usage
+		obj.Status.Usage = &usage
 	}
 	return obj
 }
@@ -1468,8 +1545,73 @@ func (c *Controller) Update(ctx context.Context, obj v1.Sandbox) (v1.Sandbox, er
 	}
 	obj.Status.Secrets = boundary.Secrets
 	obj.Status.Conditions = setCondition(obj.Status.Conditions, c.egressCondition(obj.Status.Environment, boundary.Map, boundary.Held, time.Now().UTC()))
+	if err := c.resize(ctx, held, &obj); err != nil {
+		return v1.Sandbox{}, err
+	}
 	if err := c.persist(ctx, obj, MutationUpdated); err != nil {
 		return v1.Sandbox{}, err
 	}
+	// What the driver made of a new size is read at once and not at the
+	// next interval, so status.resources follows the update.
+	if sized(obj) {
+		c.wakeSizing(obj.Status.ID)
+	}
 	return export(obj), nil
+}
+
+// resize carries an update's change of size to the driver: a CPU ceiling
+// that moved, and an amount the manifest now names, which sets the size
+// explicitly and replaces whatever the sandbox had been raised to. The
+// driver gives a running sandbox the size in place where it can and records
+// it for the next start otherwise; what the sandbox then holds is written by
+// the next reading, with its record. An update that changes no size calls no
+// driver, as before. obj is the update, with the status it will be stored
+// with; it runs under the controller's lock.
+func (c *Controller) resize(ctx context.Context, held v1.Sandbox, obj *v1.Sandbox) error {
+	if !sized(*obj) {
+		// A sandbox with no ceiling left reports no size of its own.
+		obj.Status.Resources, obj.Status.Usage = v1.Size{}, nil
+		obj.Status.Conditions = slices.DeleteFunc(obj.Status.Conditions, func(cond v1.Condition) bool {
+			return cond.Type == v1.ConditionMemoryAtCeiling
+		})
+	}
+	explicit := held.Spec.Resources.Memory != obj.Spec.Resources.Memory
+	if explicit {
+		// The amount is the size from now on: the memory the sandbox had
+		// been raised to is forgotten.
+		obj.Status.Resources.Memory = ""
+	}
+	before, want := sizeFor(held), sizeFor(*obj)
+	if sized(*obj) && obj.Status.Resources == (v1.Size{}) {
+		obj.Status.Resources = sizeAsked(*obj)
+	}
+	if explicit {
+		obj.Status.Resources.Memory = held.Status.Resources.Memory
+	}
+	if before == want {
+		return nil
+	}
+	d, err := c.driverFor(obj.Status.Environment)
+	if err != nil {
+		return err
+	}
+	want.Disk = ""
+	if explicit {
+		c.sizeMu.Lock()
+		c.size.reasons[obj.Status.ID] = autosize.ReasonUpdate
+		c.sizeMu.Unlock()
+	}
+	switch held.Status.Phase {
+	case PhaseQueued, PhaseLost, PhaseRecovering, PhaseDeleting:
+		// No driver holds the sandbox now. The size reaches it with the
+		// create or the start that brings it back, which reads sizeFor.
+		return nil
+	}
+	if placed(held) {
+		return nil
+	}
+	if err := d.Update(ctx, obj.Status.ID, driver.Change{Resources: &want}); err != nil && !errors.Is(err, driver.ErrNotFound) {
+		return fmt.Errorf("changing the size of %s: %w", obj.Status.ID, err)
+	}
+	return nil
 }

@@ -51,7 +51,7 @@ func requestOf(r v1.Resources) (usage, error) {
 // request, less the disk of a sandbox the loop preempted, which it has held
 // all the while it waited and must not be asked for twice.
 func askOf(obj v1.Sandbox) (usage, error) {
-	request, err := requestOf(obj.Spec.Resources)
+	request, err := requestOf(heldResources(obj))
 	if err != nil {
 		return usage{}, err
 	}
@@ -100,7 +100,9 @@ func (c *Controller) usageOn(environment string) (usage, error) {
 		if obj.Status.Environment != environment {
 			continue
 		}
-		request, err := requestOf(obj.Spec.Resources)
+		// A sandbox raised inside its ceiling holds the memory it has now,
+		// not the amount it started at (spec 078).
+		request, err := requestOf(heldResources(obj))
 		if err != nil {
 			return usage{}, fmt.Errorf("the resources of %s: %w", obj.Status.ID, err)
 		}
