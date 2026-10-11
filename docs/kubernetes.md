@@ -21,7 +21,8 @@ the Pod and keeps the claim, so the files survive a stop and a start.
 | Desktop, screenshots and input | only when the control plane is given a display image; without one, a manifest that asks for a desktop is refused when it is resolved |
 | Interactive terminal (`attach`, `cella exec -i` and `-t`) | yes, with the window's size carried through and the shell's exit code returned |
 | Egress boundaries: `none`, `allowlist`, `open` | yes, once the control plane is told which Pods are the egress gateway; without that, a boundary is recorded and not enforced |
-| Resize, volumes, snapshots | no |
+| Sizing inside a ceiling (`spec.resources.max`) | CPU always; memory on a cluster that [serves what it needs](#sizing-a-sandbox); the workspace not yet |
+| Changing `spec.resources` after create, volumes, snapshots | no |
 
 A capability the environment does not provide is refused before anything
 runs: the route answers `422` with `capability_unsupported`, and a manifest
@@ -153,6 +154,68 @@ member's connections to the other members of its mesh.
 A sandbox created before the gateway was named takes the new policy at its
 next start.
 
+## Sizing a sandbox
+
+A manifest that names [`spec.resources.max`](manifest.md#sizing-inside-a-ceiling)
+starts at `spec.resources` and is sized inside that ceiling.
+
+CPU needs nothing of the cluster. The Pod's CPU limit is `max.cpu` and its
+request is the usual fraction (`CELLA_K8S_CPU_REQUEST_RATIO`) of
+`resources.cpu`, so the scheduler reserves for the sandbox what it reserved
+before and the workload bursts into whatever the node has idle.
+
+Memory needs two things of the cluster, and the control plane checks both
+when it starts:
+
+| Needs | Why | Where it comes from |
+|---|---|---|
+| the Pod `resize` subresource | raising a running container's memory without restarting it | Kubernetes 1.33 or newer |
+| the metrics API (`metrics.k8s.io`) | reading how much memory the workload uses | a metrics-server in the cluster |
+
+The Role has to allow `patch` on `pods/resize` and `get` on the metrics
+API's `pods`; the [deploy manifests](../deploy/README.md#the-role) do. With
+any of the four missing, the control plane starts as before, logs which one
+it lacks, and declares no memory autosize: the environment's
+`status.capabilities.autosize.memory` is `false`, and a manifest that names
+`max.memory` is refused with `capability_unsupported` at that field rather
+than created with a ceiling nothing grows toward.
+
+How a raise reaches the sandbox depends on the node:
+
+- Where the node has room, the kubelet raises the limit in place and every
+  process keeps running. The memory request rises with the limit
+  (`CELLA_K8S_MEMORY_REQUEST_RATIO`), so the room has to be unreserved on
+  that node.
+- Where the kubelet answers that the resize is deferred or infeasible, the
+  control plane deletes the Pod once no session is open in the sandbox and
+  creates it again at the larger size, and the scheduler places it on a node
+  with room. A cluster autoscaler adds a node where none has it, within
+  `CELLA_K8S_READY_TIMEOUT`. The workspace follows the Pod only where its
+  storage attaches on another node; a storage class that binds a volume to
+  one node keeps the sandbox on that node.
+- Where no node takes the larger size in time, the sandbox is put back at
+  its previous size and started there, and is left alone for 10 minutes
+  before more memory is asked for again.
+
+What an out-of-memory kill does depends on the node's kubelet:
+
+| The node | A process over the limit | What the control plane does |
+|---|---|---|
+| kills the container's whole cgroup together, the kubelet's default on cgroup v2 | every process of the sandbox is killed, the Pod ends `Failed` with reason `OOMKilled`, and a client's command ends with 137 or a broken stream | starts the sandbox again at the next size, at once. At its ceiling it stays `Failed`, as a sandbox with no ceiling does |
+| kills one process (cgroup v1, or a kubelet with `singleProcessOOMKill: true`) | that process is killed and the rest of the sandbox keeps running; a client's command ends with 137 | reads the kernel's count of kills in the sandbox's cgroup and raises the limit in place |
+
+The count is read by running `cat` on the kernel's own `memory.events` in
+the sandbox's container, as the sandbox's user, so the sandbox's image has
+to carry `cat`. Nothing of the workload's is read, and a reading is not
+activity: it never keeps an idle sandbox from its auto-stop.
+
+A failed command is the fastest signal. When a command ends with 137 or
+its stream breaks, the sandbox is read before the exit is returned, so the
+raise is already asked for when the client sees the exit. Measured on a
+single-node cluster: with one process killed, the larger limit was applied
+about one second after the kill; with the whole container killed, the
+sandbox was running again at the larger size about four seconds after.
+
 ## What the cluster has to allow
 
 The control plane's ServiceAccount needs one Role in the sandbox namespace,
@@ -174,7 +237,10 @@ each made with `create` and replaced or removed with `delete` on
 
 `cellad serve` checks every access in the Role when it starts and does not
 start without all of them, naming the ones it is missing; `cellad check`
-answers the same question at any time. An installation whose Role was
+answers the same question at any time. The two accesses of
+[sizing](#sizing-a-sandbox), `patch` on `pods/resize` and `get` on the
+metrics API's `pods`, are the exception: without them it starts and sizes
+no sandbox's memory. An installation whose Role was
 written for a release before v0.4.0 adds `get` on `pods/exec` and the
 `pods/portforward` rule before it moves to a later one. A worker that runs
 this runtime checks the same list when it starts.

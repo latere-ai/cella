@@ -102,7 +102,7 @@ value, a secret's value or a token. These are the types:
 
 | Object | Types |
 |---|---|
-| Sandbox | `sandbox.created`, `sandbox.updated`, `sandbox.started`, `sandbox.stopped`, `sandbox.failed`, `sandbox.lost`, `sandbox.recovering`, `sandbox.recovered`, `sandbox.deleted`, and `sandbox.spawned`, on the parent, when it creates a child |
+| Sandbox | `sandbox.created`, `sandbox.updated`, `sandbox.started`, `sandbox.stopped`, `sandbox.failed`, `sandbox.lost`, `sandbox.recovering`, `sandbox.recovered`, `sandbox.deleted`, `sandbox.resized` and `sandbox.at_ceiling` for a sandbox [sized inside a ceiling](manifest.md#sizing-inside-a-ceiling), and `sandbox.spawned`, on the parent, when it creates a child |
 | An operation on a sandbox | `sandbox.exec`, `sandbox.files`, `sandbox.dial`, `sandbox.screenshot`, `sandbox.input`, `sandbox.screen` |
 | Secret | `secret.created`, `secret.updated`, `secret.deleted` |
 | Environment | `environment.created`, `environment.updated`, `environment.registered`, `environment.offline`, `environment.keyed`, `environment.key_revoked`, `environment.deleted` |
@@ -111,6 +111,19 @@ value, a secret's value or a token. These are the types:
 `sandbox.deleted` carry a `reason`, such as `Request`, `AutoStop`,
 `CreateFailed`, `NoCapacity` or `Preempted`. A gateway substituting a
 secret's value moves its `status.lastUsedAt` and writes no record.
+
+The two records of a sandbox sized inside a ceiling carry their own `data`:
+
+| Type | When | `data` |
+|---|---|---|
+| `sandbox.resized` | the sandbox's memory changed | `{"resource": "memory", "from": "256Mi", "to": "768Mi", "reason": "oom", "moved": false}`. `reason` is `usage` when its workload was using nearly all it had, `oom` when the kernel killed a process for memory, and `update` when a manifest set the size. `moved` is `true` when the change restarted the sandbox on a node with room |
+| `sandbox.at_ceiling` | its memory is at `spec.resources.max.memory` and its workload uses 95% or more of it, or lost a process to the limit | `{"resource": "memory", "used": 1030792151, "max": "1Gi"}`, with `used` in bytes. Recorded once each time this begins, not once a reading |
+
+A meter that charges for the size a sandbox holds reads `sandbox.resized`,
+which says what the size was and what it became, and `status.resources`. A
+client whose command ended with exit code 137 reads `sandbox.resized` with
+`reason` `oom` to learn that the command was killed for memory and that
+the sandbox has since been given more.
 
 ## When a feed ends
 

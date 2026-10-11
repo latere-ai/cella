@@ -116,6 +116,20 @@ answers with the object, a list of warnings for the caller, or a refusal.
 What it returns is validated again, so an endpoint that writes a field the
 schema does not have is a refusal and not a surprise three steps later.
 
+It is also where a plan becomes a size. Instead of giving every sandbox a
+fixed size, set a small `spec.resources` and a ceiling in
+`spec.resources.max`, and the sandbox takes more only when its work needs
+it ([sizing inside a ceiling](manifest.md#sizing-inside-a-ceiling)). Read
+`environment.capabilities.autosize` in the request before you set one: a
+ceiling on a resource whose flag is `false` refuses the apply with
+`capability_unsupported` at `spec.resources.max.<resource>`, so an endpoint
+that sets `max.memory` without looking refuses every create on an
+environment that sizes no memory. Where the flag is `false`, give that
+resource the fixed size you gave it before. The ceiling you return is
+held to `spec.resources` and to the server's own ceilings like any other,
+and your meter reads `sandbox.resized` and `status.resources` for the size
+a sandbox held and when.
+
 ### What happened
 
 `CELLA_EVENTS_URL` points at your sink, which receives one signed record per

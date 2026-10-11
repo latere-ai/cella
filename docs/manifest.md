@@ -75,6 +75,7 @@ The same three fields on every kind.
 | `spec.resources.cpu` | no limit; `CELLA_K8S_DEFAULT_CPU` on Kubernetes | a cpu limit, such as `500m` or `2` |
 | `spec.resources.memory` | no limit; `CELLA_K8S_DEFAULT_MEMORY` on Kubernetes | a memory limit, such as `4Gi` |
 | `spec.resources.disk` | no limit; `CELLA_K8S_DEFAULT_DISK` on Kubernetes | the workspace's size, which is the claim's size on Kubernetes. Recorded and not enforced on Podman |
+| `spec.resources.max.cpu`, `.memory`, `.disk` | none: the sandbox keeps the size above | a ceiling for that resource. The sandbox starts at the amount above and is [sized inside the ceiling](#sizing-inside-a-ceiling) |
 | `spec.workspace.path` | `/workspace` | where the workspace is mounted, a clean absolute path not under `/run/cella`. The native runtime keeps it at `/workspace` |
 | `spec.workspace.source` | `empty` | what the workspace starts with. This release fills it from `empty` only |
 
@@ -172,6 +173,73 @@ what waits.
 With a display the sandbox gets `DISPLAY=:0`, and the screenshot, screen,
 and input routes answer for it.
 
+### Sizing inside a ceiling
+
+A sandbox normally keeps the size it was created with. Name a ceiling and
+it starts small and takes more only when its work needs it:
+
+```json
+"resources": {
+  "cpu": "500m", "memory": "1Gi",
+  "max": {"cpu": "2", "memory": "6Gi"}
+}
+```
+
+Each ceiling is optional and stands for its own resource. A resource with
+no ceiling keeps its size, and a manifest with no `max` behaves exactly as
+it did before.
+
+- **CPU.** The sandbox may use up to `max.cpu` whenever the node has it
+  idle, and is guaranteed only the share of `cpu` it would have had
+  anyway. Nothing is reserved for the burst, so a package install or a
+  build runs at the ceiling while it lasts and costs nothing after.
+- **Memory.** The sandbox starts with `memory`. It is given more, one step
+  at a time and never past `max.memory`, when its workload has been using
+  85% or more of what it has at 2 readings in a row, or when the kernel
+  kills one of its processes for memory. A step takes it to 1.5 times
+  what it has, or to 512Mi more where that is larger, rounded up to a
+  multiple of 256Mi. Memory is never taken back while the sandbox runs,
+  and a sandbox that is stopped and started again starts with what it had
+  reached.
+- **Disk.** No environment grows a workspace yet, so `max.disk` is
+  refused.
+
+A raise normally happens in place, with every process still running. Where
+the node has no room for the larger size, the sandbox is restarted on a
+node that has it: the workspace is kept and the processes start again.
+That restart waits until no command, terminal, port connection or file
+transfer is open, so it never cuts one of yours. The exception is a kill
+that ended the whole sandbox, where there is nothing left to wait for.
+
+If a command of yours ends with exit code 137, the kernel may have killed
+it for memory. The sandbox is checked before that exit reaches you, and
+given more where that is why, so the same command can be run again. The
+[events](events.md) of the sandbox say what happened: `sandbox.resized`
+with `reason` `oom`.
+
+| Refusal | When |
+|---|---|
+| `invalid_field` at `spec.resources.max.<resource>` | the ceiling is below the amount it bounds, or is not a quantity |
+| `ceiling_exceeded` at `spec.resources.max.<resource>` | the ceiling is above what this server allows, or an update puts memory's ceiling below what the sandbox already holds |
+| `capability_unsupported` at `spec.resources.max.<resource>` | the sandbox's environment does not size that resource. `GET /v1/environments` shows what each one sizes, as `status.capabilities.autosize` |
+
+Which environments size what: Kubernetes sizes CPU always, and memory on a
+cluster that [serves what it needs](kubernetes.md#sizing-a-sandbox). No
+other runtime sizes anything yet.
+
+A sandbox with a ceiling reports what it holds:
+
+| Field | Meaning |
+|---|---|
+| `status.resources` | the size it has now: its CPU limit, its memory limit, and its workspace's size |
+| `status.usage` | the last reading of what its workload uses: `memory` in bytes and `readAt`. Readings are taken every `CELLA_AUTOSIZE_INTERVAL` |
+| `status.moves` | how many times raising its memory restarted it on another node |
+| the `MemoryAtCeiling` condition | `True` while its memory is at `max.memory` and its workload uses 95% or more of it, or lost a process to the limit. `sandbox.at_ceiling` is recorded once each time that begins |
+
+A spawned child's ceilings may not exceed its parent's. An environment's
+warm pool keeps sandboxes of one fixed size, so a manifest with a ceiling
+is created fresh and takes no pool entry.
+
 ### Status
 
 The server writes `status`; it is ignored on the way in.
@@ -190,6 +258,7 @@ The server writes `status`; it is ignored on the way in.
 | `createdAt`, `startedAt`, `stoppedAt`, `lastActivityAt`, `expiresAt` | when each happened, and when the time to live ends |
 | `exitCode` | the main process's exit code once it has ended |
 | `preemptions` | how often it was stopped to make room |
+| `resources`, `usage`, `moves` | for a sandbox with `spec.resources.max`, the size it holds now, the last reading of what it uses, and how often a raise restarted it; see [sizing inside a ceiling](#sizing-inside-a-ceiling). Absent otherwise |
 | `warnings` | what the environment recorded and does not enforce |
 
 ## Secret

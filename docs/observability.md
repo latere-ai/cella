@@ -101,7 +101,7 @@ database.
 | `cella_events_delivered_total` | `outcome` (`acknowledged`, `deferred`, `dropped`) |
 | `cella_event_delivery_duration_seconds` | none |
 | `cella_store_query_duration_seconds` | `op` |
-| `cella_lease_held` | `name` (`writer`, `reaper`, `journal`, `pool`, `environments`, `scheduler`) |
+| `cella_lease_held` | `name` (`writer`, `reaper`, `journal`, `pool`, `environments`, `scheduler`, `autosize`) |
 | `cella_forwarded_requests_total` | `outcome` (`forwarded`, `no_writer`, `failed`) |
 
 `cella_lease_held` is `1` on the replica that holds the named lease and `0`

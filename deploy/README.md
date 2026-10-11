@@ -89,6 +89,8 @@ else, all in the one namespace:
 | `pods/portforward` | `get`, `create` | the dial socket, the port proxy and `cella port-forward` |
 | `secrets` | `create`, `get`, `update`, `delete` | the workload token of each sandbox, never a secret value, which stays sealed in the store under `CELLA_SECRET_KEY` |
 | `services`, `networkpolicies` | `create`, `delete` | one headless Service and one policy per mesh, and one policy per sandbox, replaced by a delete and a create |
+| `pods/resize` | `patch` | raising a running sandbox's memory inside the ceiling its manifest names. Optional: see below |
+| `pods` in `metrics.k8s.io` | `get` | reading how much memory a sandbox's workload uses, which decides a raise. Optional: see below |
 
 `pods/exec` and `pods/portforward` each need both verbs. The driver opens
 each session over a WebSocket and falls back to the older SPDY upgrade
@@ -101,6 +103,16 @@ The driver proves each access at start with a `SelfSubjectAccessReview`,
 and `cellad serve` does not start without all of them, so a rule you
 narrow by hand is named in the start-up log, and by `cellad check`, rather
 than found at the first create or the first dial.
+
+The last two rows are the exception. They are what raising a sandbox's
+memory inside the ceiling of its manifest (`spec.resources.max.memory`)
+needs, together with a cluster that serves both: Kubernetes 1.33 or newer
+for `pods/resize`, and a metrics-server for the metrics API. `cellad serve`
+starts without any of them, logs which is missing, and then sizes no
+sandbox's memory: a manifest that names a memory ceiling is refused at
+that field. A Role you wrote for an earlier release needs the two rules
+added before memory sizing turns on; nothing else about it changes. See
+[Sandboxes on Kubernetes](../docs/kubernetes.md#sizing-a-sandbox).
 
 It grants no `watch` (the driver lists and gets) and nothing cluster-wide.
 Reaching a port inside a sandbox needs no NetworkPolicy rule: the kubelet
