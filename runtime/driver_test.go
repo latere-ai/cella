@@ -161,3 +161,32 @@ func TestFilterSelectsTheTree(t *testing.T) {
 		}
 	}
 }
+
+// TestAChangeOfSize: a size that names nothing is the zero size, a change
+// that carries a size is refused by FixedSize with ErrUnsupported and one
+// that carries none is not, and an adoption is exclusive of a size as it is
+// of every other field.
+func TestAChangeOfSize(t *testing.T) {
+	if !(runtime.Resources{}).IsZero() {
+		t.Error("a size that names nothing is not zero")
+	}
+	for _, r := range []runtime.Resources{{CPU: "1"}, {Memory: "1Gi"}, {Disk: "5Gi"}, {CPULimit: "2"}} {
+		if r.IsZero() {
+			t.Errorf("%+v is read as no size", r)
+		}
+	}
+	if err := (runtime.Change{}).FixedSize(); err != nil {
+		t.Errorf("a change that carries no size was refused: %v", err)
+	}
+	labels := map[string]string{"team": "a"}
+	if err := (runtime.Change{Labels: &labels}).FixedSize(); err != nil {
+		t.Errorf("a change of the labels was refused as a change of size: %v", err)
+	}
+	size := runtime.Resources{CPU: "1", Memory: "2Gi"}
+	if err := (runtime.Change{Resources: &size}).FixedSize(); !errors.Is(err, runtime.ErrUnsupported) {
+		t.Errorf("a change of size: got %v, want ErrUnsupported", err)
+	}
+	if _, err := (runtime.Change{Adopt: &runtime.Adoption{Owner: "alice"}, Resources: &size}).Adoption(); !errors.Is(err, runtime.ErrInvalid) {
+		t.Errorf("an adoption that also carries a size: got %v, want ErrInvalid", err)
+	}
+}
