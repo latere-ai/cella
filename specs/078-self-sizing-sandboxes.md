@@ -1,6 +1,6 @@
 ---
 title: "Self-sizing sandboxes: a ceiling in place of a fixed size, a workspace that grows before it fills, memory raised in place or at a move, CPU bounded by the ceiling, and the status and events that record each change"
-status: validated
+status: dispatched
 track: core
 depends_on:
   - specs/003-manifest-contract.md
