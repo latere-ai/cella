@@ -27,6 +27,16 @@
 # to each other. A sandbox's policy is replaced by a delete and a create,
 # so neither needs a verb beyond those two.
 #
+# The last two rules are the only ones the driver starts without. Sizing a
+# sandbox inside the ceiling its manifest names (spec.resources.max) raises a
+# running container's memory through the Pod's resize subresource and decides
+# to from the working set the metrics API serves. The driver reviews both at
+# start: with either missing it declares no memory autosize, every sandbox
+# keeps the size it was created at, and a manifest that names a memory
+# ceiling is refused at that field. The metrics API is served by a
+# metrics-server the cluster runs; this Role only reads Pod samples in its
+# own namespace.
+#
 # A namespace is not named here. The overlay sets one for every object,
 # and the Deployment reads its own from the downward API, so the driver
 # writes where this Role grants and not in the driver's default namespace.
@@ -65,6 +75,12 @@ rules:
   - apiGroups: ["networking.k8s.io"]
     resources: ["networkpolicies"]
     verbs: ["create", "delete"]
+  - apiGroups: [""]
+    resources: ["pods/resize"]
+    verbs: ["patch"]
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods"]
+    verbs: ["get"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

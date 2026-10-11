@@ -231,18 +231,28 @@ func TestBaseIsConfined(t *testing.T) {
 // is written from. The driver proves each one with an access review at
 // start, so a Role that grants less is a start-up failure and a Role that
 // grants more is access nothing uses.
+//
+// The key is the API group and the resource, because two groups serve a
+// resource named pods: the core one, and the metrics API whose samples the
+// driver reads.
 var driverVerbs = map[string][]string{
-	"pods":                   {"get", "list", "create", "delete", "patch"},
-	"pods/exec":              {"create", "get"},
-	"pods/log":               {"get"},
-	"pods/portforward":       {"get", "create"},
-	"persistentvolumeclaims": {"get", "list", "create", "delete", "patch"},
+	"/pods":                   {"get", "list", "create", "delete", "patch"},
+	"/pods/exec":              {"create", "get"},
+	"/pods/log":               {"get"},
+	"/pods/portforward":       {"get", "create"},
+	"/persistentvolumeclaims": {"get", "list", "create", "delete", "patch"},
 	// The mesh of spec 022: one headless Service and one NetworkPolicy per
 	// mesh, made with its first member and removed with its last; and the
 	// NetworkPolicy of each sandbox, replaced by a delete and a create.
-	"services":        {"create", "delete"},
-	"networkpolicies": {"create", "delete"},
-	"secrets":         {"create", "get", "update", "delete"},
+	"/services":                         {"create", "delete"},
+	"networking.k8s.io/networkpolicies": {"create", "delete"},
+	"/secrets":                          {"create", "get", "update", "delete"},
+	// Sizing a sandbox inside a ceiling (spec 078): the resize subresource
+	// a running container's memory is raised through, and the metrics API's
+	// sample of a Pod. The driver starts without either and then declares
+	// no memory autosize, so the base grants both.
+	"/pods/resize":        {"patch"},
+	"metrics.k8s.io/pods": {"get"},
 }
 
 // TestRoleMatchesTheDriversVerbs holds the Role to that table exactly, in
@@ -260,8 +270,10 @@ func TestRoleMatchesTheDriversVerbs(t *testing.T) {
 		for _, v := range list(dig(rule, "verbs")) {
 			verbs = append(verbs, str(v))
 		}
-		for _, r := range list(dig(rule, "resources")) {
-			granted[str(r)] = verbs
+		for _, group := range list(dig(rule, "apiGroups")) {
+			for _, r := range list(dig(rule, "resources")) {
+				granted[str(group)+"/"+str(r)] = verbs
+			}
 		}
 	}
 	if !reflect.DeepEqual(granted, driverVerbs) {
