@@ -214,7 +214,7 @@ its stream breaks, the sandbox is read before the exit is returned, so the
 raise is already asked for when the client sees the exit. Measured on a
 single-node cluster: with one process killed, the larger limit was applied
 about one second after the kill; with the whole container killed, the
-sandbox was running again at the larger size about four seconds after.
+sandbox was running again at the larger size three to four seconds after.
 
 ## What the cluster has to allow
 
