@@ -69,6 +69,14 @@ type fake struct {
 	// string answers what a sandbox behind a gateway prints.
 	egressProbe    string
 	noEgressRecord bool
+	// ceiling makes the fake answer a manifest's ceiling, or declare its
+	// autosize flags, wrongly in one named way, so a test reads every
+	// assertion case078Ceiling makes. The empty string sizes cpu alone and
+	// says so.
+	ceiling string
+	// ceilingAfter is how many creates the fake answers rightly before
+	// ceiling takes effect.
+	ceilingAfter int
 	// declared, when set, is the capability set the fake honors: a gated
 	// route of any other capability answers capability_unsupported before
 	// it is routed, as the server's own gate does. desktopOnly answers the
@@ -336,7 +344,15 @@ func (f *fake) create(w http.ResponseWriter, r *http.Request) {
 		f.refuse(w, "boundary_exceeded", widened...)
 		return
 	}
-	if code, path := ceilingRefusal(body); code != "" {
+	if code, path := f.ceilingRefusal(body); code != "" {
+		f.mu.Lock()
+		rightly := f.ceilingAfter > 0
+		f.ceilingAfter--
+		f.mu.Unlock()
+		if f.ceiling == "no path" && !rightly {
+			f.refuse(w, code)
+			return
+		}
 		f.refuse(w, code, path)
 		return
 	}
@@ -372,7 +388,7 @@ func amount(q string) float64 {
 
 // ceilingRefusal is the two refusals of a ceiling: one below the amount it
 // bounds, and one on a resource this fake's environment does not size.
-func ceilingRefusal(body map[string]any) (code, path string) {
+func (f *fake) ceilingRefusal(body map[string]any) (code, path string) {
 	spec, _ := body["spec"].(map[string]any)
 	resources, _ := spec["resources"].(map[string]any)
 	ceiling, _ := resources["max"].(map[string]any)
@@ -382,10 +398,10 @@ func ceilingRefusal(body map[string]any) (code, path string) {
 			continue
 		}
 		path = "spec.resources.max." + resource
-		if floor, _ := resources[resource].(string); floor != "" && amount(limit) < amount(floor) {
+		if floor, _ := resources[resource].(string); floor != "" && amount(limit) < amount(floor) && f.ceiling != "takes any" {
 			return "invalid_field", path
 		}
-		if sizes, _ := fakeAutosize[resource].(bool); !sizes {
+		if sizes, _ := fakeAutosize[resource].(bool); !sizes && f.ceiling != "sizes all" && f.ceiling != "takes any" {
 			return "capability_unsupported", path
 		}
 	}
@@ -453,7 +469,16 @@ func (f *fake) store(body map[string]any, name string) map[string]any {
 			if cpu, named := ceiling["cpu"]; named && !f.wrongValues {
 				held["cpu"] = cpu
 			}
-			body["status"].(map[string]any)["resources"] = held
+			switch f.ceiling {
+			case "no size":
+			case "no ceiling":
+				delete(resources, "max")
+				body["status"].(map[string]any)["resources"] = held
+			case "no id":
+				body["status"].(map[string]any)["id"] = ""
+			default:
+				body["status"].(map[string]any)["resources"] = held
+			}
 		}
 	}
 	if f.wrongValues {
@@ -1280,14 +1305,39 @@ func (f *fake) store4(kind string) map[string]map[string]any {
 // environments answers the one environment this fake drives, with the
 // capabilities it declares.
 func (f *fake) environments(w http.ResponseWriter, _ *http.Request) {
-	f.write(w, http.StatusOK, map[string]any{"items": []any{map[string]any{
-		"apiVersion": APIVersion, "kind": "Environment",
-		"metadata": map[string]any{"name": "default"},
-		"status": map[string]any{"id": "env_fake", "capabilities": map[string]any{
+	environment := func(name string, capabilities any) map[string]any {
+		return map[string]any{
+			"apiVersion": APIVersion, "kind": "Environment",
+			"metadata": map[string]any{"name": name},
+			"status":   map[string]any{"id": "env_fake", "capabilities": capabilities},
+		}
+	}
+	declare := func(autosize any) map[string]any {
+		return map[string]any{
 			"files": true, "attach": true, "display": true, "input": true, "dial": true,
-			"autosize": fakeAutosize,
-		}},
-	}}, "next": ""})
+			"autosize": autosize,
+		}
+	}
+	items := []any{environment("default", declare(fakeAutosize))}
+	switch f.ceiling {
+	case "declares memory":
+		items = []any{environment("default", declare(map[string]any{"cpu": true, "memory": true, "disk": false}))}
+	case "declares two flags":
+		items = []any{environment("default", declare(map[string]any{"cpu": true, "memory": false}))}
+	case "declares no object":
+		items = []any{environment("default", "every one of them")}
+	case "sizes all":
+		items = []any{environment("default", declare(map[string]any{"cpu": true, "memory": true, "disk": true}))}
+	case "other environments":
+		items = []any{environment("one", declare(fakeAutosize)), environment("two", declare(fakeAutosize))}
+	case "no environments list":
+		f.refuse(w, "forbidden")
+		return
+	case "no list":
+		f.write(w, http.StatusOK, "not a list")
+		return
+	}
+	f.write(w, http.StatusOK, map[string]any{"items": items, "next": ""})
 }
 
 // mint is the issuer route a tier takes every subject's token from.

@@ -462,3 +462,102 @@ func TestTheBrowserCaseWaitsForTheDesktop(t *testing.T) {
 		t.Fatalf("the browser case did not pass against a desktop that came up late: %+v", report.Failed)
 	}
 }
+
+// TestTheCeilingCaseReadsEveryAnswer: case078Ceiling against a server that
+// answers one thing wrongly at a time fails naming that thing, and against
+// servers that size nothing more, or everything, or cannot be asked what
+// they declare, it passes. This is what proves the case reads the path of a
+// refusal, the ceiling and the size a created sandbox reports, and the flags
+// an environment declares, and not only a status code.
+func TestTheCeilingCaseReadsEveryAnswer(t *testing.T) {
+	run := func(t *testing.T, mode string, admin bool, mutate ...func(*fake)) error {
+		t.Helper()
+		f := newFake(t)
+		f.ceiling = mode
+		for _, m := range mutate {
+			m(f)
+		}
+		cfg := f.config()
+		if admin {
+			cfg.Admin = "fake-token"
+		}
+		e, err := newEnv(t.Context(), cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { e.cleanup(context.WithoutCancel(t.Context())) })
+		return case078Ceiling(t.Context(), e)
+	}
+	for _, mode := range []string{"", "sizes all", "other environments"} {
+		for _, admin := range []bool{false, true} {
+			if err := run(t, mode, admin); err != nil {
+				t.Errorf("the case failed a server that answers it (%q, administrator %v): %v", mode, admin, err)
+			}
+		}
+	}
+	for _, tc := range []struct {
+		mode   string
+		mutate func(*fake)
+		wants  string
+	}{
+		{mode: "no path", wants: "the refusal of a ceiling below its amount at spec.resources.max.memory"},
+		{mode: "takes any", wants: "code invalid_field"},
+		{mode: "no id", wants: "status.id on a created object"},
+		{mode: "no ceiling", wants: "spec.resources.max.cpu 200m as the manifest wrote it"},
+		{mode: "no size", wants: "status.resources.cpu on a sandbox sized inside a ceiling"},
+		{mode: "", mutate: func(f *fake) { f.wrongValues = true }, wants: "status.resources.cpu 200m, the cpu ceiling"},
+		{mode: "declares memory", wants: "capabilities.autosize.memory false, which is what the server did"},
+		{mode: "declares two flags", wants: "capabilities.autosize with the flags cpu, memory and disk"},
+		{mode: "no environments list", wants: "status 200"},
+		{mode: "no list", wants: "a list of environments"},
+	} {
+		t.Run(cmpOr(tc.mode, "wrong values"), func(t *testing.T) {
+			var mutate []func(*fake)
+			if tc.mutate != nil {
+				mutate = append(mutate, tc.mutate)
+			}
+			err := run(t, tc.mode, true, mutate...)
+			if err == nil || !strings.Contains(err.Error(), tc.wants) {
+				t.Fatalf("the case answered %v, want a failure naming %q", err, tc.wants)
+			}
+		})
+	}
+	// A refusal of an unsized ceiling with no path is read as well, on a
+	// server that takes the ceiling below its amount check.
+	t.Run("an unsized ceiling refused with no path", func(t *testing.T) {
+		f := newFake(t)
+		e, err := newEnv(t.Context(), f.config())
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { e.cleanup(context.WithoutCancel(t.Context())) })
+		// The first call is the floor's refusal, answered rightly; the
+		// later ones lose their path.
+		f.ceilingAfter, f.ceiling = 1, "no path"
+		if err := case078Ceiling(t.Context(), e); err == nil || !strings.Contains(err.Error(), "the refusal of a ceiling the environment does not size at") {
+			t.Fatalf("the case answered %v", err)
+		}
+	})
+}
+
+// TestTheEnvironmentsCaseReadsTheAutosizeFlags: an environment whose
+// capabilities are no object, or carry fewer than the three autosize flags,
+// fails the environments case.
+func TestTheEnvironmentsCaseReadsTheAutosizeFlags(t *testing.T) {
+	for mode, wants := range map[string]string{
+		"declares two flags": "capabilities.autosize.disk on default",
+		"declares no object": "the capabilities of default as an object",
+	} {
+		f := newFake(t)
+		f.ceiling = mode
+		cfg := f.config()
+		cfg.Admin = "fake-token"
+		e, err := newEnv(t.Context(), cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := case021EnvironmentRead(t.Context(), e); err == nil || !strings.Contains(err.Error(), wants) {
+			t.Errorf("%s: the case answered %v, want a failure naming %q", mode, err, wants)
+		}
+	}
+}
