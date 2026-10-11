@@ -68,6 +68,7 @@ stateDiagram-v2
   Starting --> Deleting: Delete (API), parent deleted (cascade)
   Failed --> Deleting: Delete (API), expired (reaper), parent deleted (cascade)
   Running --> Starting: killed for memory with room under resources.max.memory, or moved to a node with room, reason MemoryRaised (autosize)
+  Failed --> Starting: Update raises resources.max.memory of a sandbox killed for memory at it, reason MemoryRaised (API, autosize)
   Recovering --> Deleting: Delete (API), parent deleted (cascade)
   Running --> Lost: object gone (watch)
   Stopped --> Lost: object gone (watch)
@@ -81,8 +82,10 @@ stateDiagram-v2
 Every edge names its trigger and its owner. `Delete` is accepted in
 every phase and moves the sandbox to `Deleting` at once, which is
 what [[008-api]] returns. `Start` on `Failed` is `phase_conflict`.
-`Failed` is terminal: nothing leaves it but a delete, and a client that
-reads it knows no act of the control plane will change it.
+`Failed` is terminal until a client acts: a delete leaves it, and so
+does an update that raises the memory ceiling of a sandbox killed for
+memory at it, and nothing the control plane does on its own. A client
+that reads `Failed` knows the sandbox will not come back by itself.
 
 A sandbox the control plane is starting again at a larger memory size
 is therefore never `Failed`, and never `Stopped`
@@ -93,8 +96,9 @@ read becomes a sandbox's status: the read behind every API answer, the
 status it stores, and the observed index. The presentation is computed
 from the read itself by the rule the sizing loop restarts by, so it
 holds from the kill on, before the loop has read the sandbox, and until
-it runs again. A sandbox killed for memory with no room left, at its
-ceiling or without one, is `Failed` with reason `OOMKilled`.
+it runs again, through the wait after a move that found no room
+included. A sandbox killed for memory with no room left under its
+ceiling, or with no ceiling, is `Failed` with reason `OOMKilled`.
 `Stop` keeps the managed workspace and every attached volume; nothing
 is lost until `Delete`. `Queued` and `Recovering` are the
 controller's; a driver never reports them. Every terminal transition

@@ -331,13 +331,16 @@ that moment, in one function, `present`. That function gives `Starting`
 no other:
 
 1. The driver reports `Failed` with `OOMKilled`, the manifest names a
-   memory ceiling above the size the sandbox holds, the driver sizes
-   memory, and the sandbox is not inside `autosize.MoveBackoff`. This
-   is one predicate, `raises`, and the loop restarts a sandbox by the
-   same call of it, so a sandbox reads as starting exactly when the
-   loop will start it. It is computed from the read alone: it holds in
-   the instants before the loop has read the sandbox, and a read that
-   finds the kill first asks the loop for its reading at once.
+   memory ceiling above the size the sandbox holds, and the driver
+   sizes memory. This is one predicate, `raises`, and the loop restarts
+   a sandbox by the same call of it, so a sandbox reads as starting
+   exactly when the loop is going to start it. It is computed from the
+   read alone: it holds in the instants before the loop has read the
+   sandbox, and a read that finds the kill first asks the loop for its
+   reading at once. `autosize.MoveBackoff` is no part of it: after a
+   move that found no room the loop starts the sandbox when the backoff
+   has passed, which changes when and not whether, so the sandbox reads
+   as starting all the way there.
 2. A move of the sandbox is in flight and the driver does not report it
    `Running`. The mark is set, and `Starting` `MemoryRaised` written to
    the store, before the workload is touched, and cleared after what
@@ -368,16 +371,26 @@ and a command on a sandbox that reads `Starting` are `phase_conflict`.
 The driver's own `State` still says `Failed` `OOMKilled`: it is the
 signal the restart acts on, and no reader is given a driver's state but
 through the controller. The decision that a sandbox is being started
-again is the controller's, since it rests on the ceiling, the
-capability and the backoff, none of which a driver holds, and stating
-it there holds it for every driver that comes to size memory.
+again is the controller's, since it rests on the manifest's ceiling,
+which a driver does not hold, and stating it there holds it for every
+driver that comes to size memory.
 
 A kill inside `autosize.MoveBackoff`, after a move that found no room,
-is `Failed`: the control plane is not going to start that sandbox, and
-saying it was would leave a client waiting on nothing. A move that was
-undone twice over, no room at the larger size and a start at the
-previous one that also failed, leaves the sandbox `Stopped`, which a
-client's start brings back with its workspace.
+is the same sandbox: under its ceiling, and one the control plane is
+going to start. It reads `Starting` `MemoryRaised` for what is left of
+the backoff, and the first reading past it, the interval's or the one a
+read asks for, starts it at the next size; if that finds no room again
+it is started at the size it had. It does not read `Failed` in between,
+because a `Failed` that the control plane later starts is the one a
+client replaces for nothing. The cost is a sandbox that is down for up
+to the backoff after its second kill on a cluster with no room for it.
+Open: whether such a sandbox should be started again at once at the
+size it holds, which gives it back in seconds and needs a bound for a
+workload that is killed as it starts; and what tells a client that the
+raise found no room, which today only the control plane's log says. A
+move that was undone twice over, no room at the larger size and a start
+at the previous one that also failed, leaves the sandbox `Stopped`,
+which a client's start brings back with its workspace.
 
 After a whole-container kill every process of the sandbox is gone, not
 only the command that was killed, and so is every file outside the
@@ -488,7 +501,7 @@ The cause is on the feed, as `sandbox.resized` with `reason: oom`.
 | An expansion the storage refuses sets `WorkspaceResized` false and is retried | `TestRefusedExpansionRetries` | not built |
 | A working set past `MemoryGrowAt` at two readings raises memory in place, the process still running | `k8s.TestMemoryGrowsInPlace`, `TestClusterMemoryGrowsInPlace` on kind, `TestMemoryIsRaisedAfterReadingsInARow` | built: over the client double, and against a real kubelet on a kind cluster, where a process holding 112Mi of 128Mi was raised to 768Mi in place with the same Pod, no container restart, the process still running and the container's cgroup at the new limit |
 | A resize the node cannot hold moves the sandbox once no session is open, keeps the workspace, and records `moved: true` | `k8s.TestDeferredResizeMoves`, `TestADeferredRaiseMovesOnceNoSessionIsOpen`, `TestEverySessionKindHoldsAMove` | built over the client double, with the kubelet's deferred and infeasible verdicts written by the test. Not run against a real kubelet: on one node a resize the node defers is a Pod the scheduler cannot place either, and a move across nodes needs storage that attaches on a second node, which the kind cluster's node-bound storage class is not |
-| A sandbox being started again at a larger size reads `Starting` with reason `MemoryRaised` from the kill, or from a move's stop, until it runs again, and never `Failed`, `Stopped` or not found, to readers that read it continuously; at its ceiling, inside the backoff, or with no ceiling it reads `Failed` | `TestReadersNeverSeeAKilledSandboxFail`, `TestReadersNeverSeeAMoveStop`, `TestAKilledSandboxWithRoomReadsStarting`, `k8s.TestAKilledSandboxNeverReadsFailed`, `k8s.TestAMovedSandboxNeverReadsStopped`, `TestAKilledSandboxUnderACeilingNeverAnswersFailed` over HTTP, `TestClusterAKilledSandboxNeverReadsFailed` on kind | built: at the controller with the windows held open while readers cross them, over the Kubernetes driver and a client double, through the API's read and list, and on a cluster whose node kills the whole container; each of the first six fails with the presentation removed |
+| A sandbox being started again at a larger size reads `Starting` with reason `MemoryRaised` from the kill, or from a move's stop, until it runs again, and never `Failed`, `Stopped` or not found, to readers that read it continuously, a kill inside the backoff of a move that found no room included; at its ceiling or with no ceiling it reads `Failed` | `TestReadersNeverSeeAKilledSandboxFail`, `TestReadersNeverSeeAMoveStop`, `TestAKilledSandboxWithRoomReadsStarting`, `k8s.TestAKilledSandboxNeverReadsFailed`, `k8s.TestAMovedSandboxNeverReadsStopped`, `TestAKilledSandboxUnderACeilingNeverAnswersFailed` over HTTP, `TestClusterAKilledSandboxNeverReadsFailed` on kind | built: at the controller with the windows held open while readers cross them, over the Kubernetes driver and a client double, through the API's read and list, and on a cluster whose node kills the whole container; each of the first six fails with the presentation removed |
 | No failed record is written for a workload killed before its first read; the observed index holds no rising sandbox as failed; a move cut short by a restart of the control plane is finished; a move that was undone reads what the driver reports | `TestAKillBeforeTheFirstReadIsNoFailedRecord`, `TestTheObservedIndexHoldsNoRisingSandboxAsFailed`, `TestAMoveCutShortIsFinished`, `TestAMoveThatWasUndoneReadsWhatTheDriverReports` | built |
 | Raising `max.memory` on a sandbox killed at its ceiling starts it again with its workspace; a start of a `Failed` sandbox is `phase_conflict` | `TestRaisingTheCeilingStartsAKilledSandboxAgain`, `TestAKilledSandboxUnderACeilingNeverAnswersFailed` | built |
 | After an `OOMKilled`, the sandbox moves at once to the larger size | `k8s.TestOOMKillGrowsMemory`, `TestClusterOOMKillGrowsMemory` on kind, `TestAKillThatTookTheContainerMovesAtOnce` | built: over the client double, and on a kind cluster, where a main process that needs 200Mi under 128Mi was killed, the Pod ended `OOMKilled`, and the sandbox ran again at 768Mi with the file its first start wrote. At its ceiling it stays `Failed` and nothing restarts it |
