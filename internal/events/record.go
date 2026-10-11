@@ -86,6 +86,11 @@ const (
 	TypeLost       Type = "sandbox.lost"
 	TypeRecovering Type = "sandbox.recovering"
 	TypeRecovered  Type = "sandbox.recovered"
+	// TypeResized is a change of a sandbox's size applied, and TypeAtCeiling
+	// a sandbox whose workload is at its ceiling with no room left to give
+	// (spec 078). Each carries the controller's own payload.
+	TypeResized    Type = "sandbox.resized"
+	TypeAtCeiling  Type = "sandbox.at_ceiling"
 	TypeSpawned    Type = "sandbox.spawned"
 	TypeExec       Type = "sandbox.exec"
 	TypeFiles      Type = "sandbox.files"
@@ -99,7 +104,7 @@ const (
 // lists them. A test walks it.
 var Types = []Type{
 	TypeCreated, TypeUpdated, TypeStarted, TypeStopped, TypeDeleted,
-	TypeFailed, TypeLost, TypeRecovering, TypeRecovered, TypeSpawned,
+	TypeFailed, TypeLost, TypeRecovering, TypeRecovered, TypeResized, TypeAtCeiling, TypeSpawned,
 	TypeExec, TypeDial, TypeFiles, TypeScreenshot, TypeInput, TypeScreen,
 	TypeSecretCreated, TypeSecretUpdated, TypeSecretDeleted,
 	TypeEnvironmentCreated, TypeEnvironmentUpdated, TypeEnvironmentRegistered,

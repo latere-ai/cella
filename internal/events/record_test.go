@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"latere.ai/x/cella/autosize"
+	"latere.ai/x/cella/controller"
 	v1 "latere.ai/x/cella/manifest/v1"
 )
 
@@ -112,6 +114,48 @@ func TestRecordShapes(t *testing.T) {
 				"object":{"kind":"Sandbox","id":"sbx_01k5pqz5","name":"build",
 					"owner":"https://issuer.example|alice","labels":{"tenant":"acme","tier":"gold"}},
 				"subject":"controller","requestId":"","reason":"Lost","data":{"phase":"Lost"}}`,
+		},
+		{
+			name: "resized carries what changed and why",
+			make: func() (Record, error) {
+				return Mutation(TypeResized, "", OfSandbox(obj), controller.ResizedData{
+					Resource: autosize.ResourceMemory, From: "256Mi", To: "768Mi", Reason: autosize.ReasonOOM, Moved: true,
+				}, Actor{}, at)
+			},
+			want: `{
+				"id":"evt_fixed","seq":0,"type":"sandbox.resized","time":"2026-09-19T12:00:00Z",
+				"object":{"kind":"Sandbox","id":"sbx_01k5pqz5","name":"build",
+					"owner":"https://issuer.example|alice","labels":{"tenant":"acme","tier":"gold"}},
+				"subject":"controller","requestId":"",
+				"data":{"resource":"memory","from":"256Mi","to":"768Mi","reason":"oom","moved":true}}`,
+		},
+		{
+			name: "a resize in place says so",
+			make: func() (Record, error) {
+				return Mutation(TypeResized, "", OfSandbox(obj), controller.ResizedData{
+					Resource: autosize.ResourceMemory, From: "768Mi", To: "1Gi", Reason: autosize.ReasonUsage,
+				}, Actor{}, at)
+			},
+			want: `{
+				"id":"evt_fixed","seq":0,"type":"sandbox.resized","time":"2026-09-19T12:00:00Z",
+				"object":{"kind":"Sandbox","id":"sbx_01k5pqz5","name":"build",
+					"owner":"https://issuer.example|alice","labels":{"tenant":"acme","tier":"gold"}},
+				"subject":"controller","requestId":"",
+				"data":{"resource":"memory","from":"768Mi","to":"1Gi","reason":"usage","moved":false}}`,
+		},
+		{
+			name: "at_ceiling carries what is in use and the ceiling",
+			make: func() (Record, error) {
+				return Mutation(TypeAtCeiling, "", OfSandbox(obj), controller.AtCeilingData{
+					Resource: autosize.ResourceMemory, Used: 1030792151, Max: "1Gi",
+				}, Actor{}, at)
+			},
+			want: `{
+				"id":"evt_fixed","seq":0,"type":"sandbox.at_ceiling","time":"2026-09-19T12:00:00Z",
+				"object":{"kind":"Sandbox","id":"sbx_01k5pqz5","name":"build",
+					"owner":"https://issuer.example|alice","labels":{"tenant":"acme","tier":"gold"}},
+				"subject":"controller","requestId":"",
+				"data":{"resource":"memory","used":1030792151,"max":"1Gi"}}`,
 		},
 		{
 			name: "exec names no command",

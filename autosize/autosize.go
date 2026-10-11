@@ -145,3 +145,17 @@ func (r *Readings) Kills(count int64, instance string) bool {
 // Raised forgets the readings a raise answered, so the next one is decided
 // by readings taken at the new limit.
 func (r *Readings) Raised() { r.pressed = 0 }
+
+// The words a record of a change of size carries: which resource changed,
+// and why. They are the vocabulary of the sandbox.resized and
+// sandbox.at_ceiling records, declared beside the policy that writes them.
+const (
+	ResourceMemory = "memory"
+	ResourceDisk   = "disk"
+	// ReasonUsage is a raise the working set asked for, ReasonOOM one a
+	// kill for memory asked for, and ReasonUpdate a size an update of the
+	// manifest set.
+	ReasonUsage  = "usage"
+	ReasonOOM    = "oom"
+	ReasonUpdate = "update"
+)
