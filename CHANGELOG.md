@@ -46,6 +46,19 @@ refused before it is pushed.
   kills one process rather than the whole container, the kill is found
   from the kernel's own count in the sandbox's cgroup, read with `cat`
   through the exec path, and memory is raised in place.
+- Changed: a sandbox the control plane is starting again at a larger
+  memory size never reads `Failed`, `Stopped` or not found. From the kill
+  that took its workload, or from the stop of a move to a node with room,
+  until it runs again, every read of it, by id or in a list, answers
+  phase `Starting` with reason `MemoryRaised`; no `sandbox.failed`,
+  `sandbox.stopped` or `sandbox.started` is recorded for it; and a start,
+  a stop or a command in that time is `phase_conflict`. A client that
+  replaces a sandbox when it reads `Failed` therefore keeps a sandbox
+  that is only being given more memory, and its workspace with it. A
+  sandbox killed at its ceiling is `Failed` with reason `OOMKilled`, as
+  before; raising `spec.resources.max.memory` on it starts it again with
+  its workspace. A start of a `Failed` sandbox stays `phase_conflict`.
+  See `docs/manifest.md`, "What a client can rely on".
 - Added: `CELLA_AUTOSIZE_INTERVAL`, default `1m`, how often a sandbox
   with a ceiling is read. The loop runs on the writer under the
   `autosize` lease, which `cella_lease_held` now reports.
