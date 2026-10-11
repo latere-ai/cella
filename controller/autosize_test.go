@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1796,8 +1797,8 @@ func readNow(t *testing.T, c *Controller, id string) v1.Sandbox {
 // MemoryRaised from the first read after the kill, before the loop has read
 // it at all, and that read asks the loop for its reading once however many
 // readers find it. A sandbox killed at its ceiling, with no memory ceiling,
-// on a driver that sizes no memory, inside the backoff of a move that found
-// no room, or that failed for another reason reads Failed, as it did.
+// on a driver that sizes no memory, or that failed for another reason reads
+// Failed, as it did.
 func TestAKilledSandboxWithRoomReadsStarting(t *testing.T) {
 	c, d, _, id := sizedController(t, v1.ResourceMax{Memory: "768Mi"})
 	for len(c.sizeWake) > 0 {
@@ -1858,12 +1859,6 @@ func TestAKilledSandboxWithRoomReadsStarting(t *testing.T) {
 				obj.Spec.Resources.Max.Memory = "4Gi"
 				c.objects[id] = obj
 				c.mu.Unlock()
-			}},
-		{name: "inside the backoff of a move that found no room", max: v1.ResourceMax{Memory: "4Gi"}, flags: v1.Autosize{CPU: true, Memory: true},
-			mutate: func(c *Controller, _ *sizeDriver, id string) {
-				c.sizeMu.Lock()
-				c.size.hold[id] = c.clock.Now().Add(autosize.MoveBackoff)
-				c.sizeMu.Unlock()
 			}},
 		{name: "failed for another reason", max: v1.ResourceMax{Memory: "4Gi"}, flags: v1.Autosize{CPU: true, Memory: true},
 			mutate: func(_ *Controller, d *sizeDriver, id string) {
@@ -2094,8 +2089,12 @@ func TestReadersNeverSeeAMoveStop(t *testing.T) {
 
 // TestAMoveThatWasUndoneReadsWhatTheDriverReports: a move that found no room
 // leaves no trace of having been starting: the stored status and every read
-// say the sandbox runs at the size it had, and a kill inside the backoff is
-// terminal, because the control plane is not going to start it again.
+// say the sandbox runs at the size it had. A kill inside the backoff that
+// follows is still a sandbox the control plane is going to start, once the
+// backoff has passed, so it reads Starting all the way there and never
+// Failed: a reader that met Failed would replace a sandbox that comes back.
+// The loop starts nothing before the backoff ends, a read asks it for
+// nothing until then, and the first reading past it starts the sandbox.
 func TestAMoveThatWasUndoneReadsWhatTheDriverReports(t *testing.T) {
 	c, d, _, id := sizedController(t, v1.ResourceMax{Memory: "4Gi"})
 	d.set2(func(d *sizeDriver) { d.noRoom = 512 * mi })
@@ -2104,28 +2103,50 @@ func TestAMoveThatWasUndoneReadsWhatTheDriverReports(t *testing.T) {
 	seen.await(t, 100)
 	readSizes(t, c)
 	seen.await(t, 50)
-	stop()
-	onlyRunningAndStarting(t, seen)
 	c.mu.Lock()
 	recorded := c.objects[id].Status
 	c.mu.Unlock()
 	if recorded.Phase != driver.Running || recorded.Reason != "" || recorded.Resources.Memory != "256Mi" || recorded.Moves != 0 {
 		t.Fatalf("after an undone move the stored status is %s %q at %s with %d moves", recorded.Phase, recorded.Reason, recorded.Resources.Memory, recorded.Moves)
 	}
-	d.kill(id)
-	if got := readNow(t, c, id); got.Status.Phase != PhaseFailed || got.Status.Reason != reasonOOMKilled {
-		t.Fatalf("a kill inside the backoff reads %s %q, want Failed OOMKilled", got.Status.Phase, got.Status.Reason)
+
+	// Killed again inside the backoff.
+	var starts atomic.Int64
+	d.set2(func(d *sizeDriver) { d.onStart = func(string) { starts.Add(1) } })
+	for len(c.sizeWake) > 0 {
+		c.woken(<-c.sizeWake)
 	}
-	// Past the backoff, with room now, the same sandbox reads as starting
-	// again and is started.
-	c.clock.(*fakeClock).Advance(autosize.MoveBackoff)
-	d.set2(func(d *sizeDriver) { d.noRoom = 0 })
+	d.kill(id)
+	seen.await(t, 100)
 	if got := readNow(t, c, id); got.Status.Phase != PhaseStarting || got.Status.Reason != v1.ReasonMemoryRaised {
-		t.Fatalf("past the backoff the killed sandbox reads %s %q", got.Status.Phase, got.Status.Reason)
+		t.Fatalf("a kill inside the backoff reads %s %q, want Starting MemoryRaised", got.Status.Phase, got.Status.Reason)
+	}
+	if n := len(c.sizeWake); n != 0 {
+		t.Fatalf("reads inside the backoff asked the loop for %d readings, want none: it has nothing to do yet", n)
 	}
 	readSizes(t, c)
-	if got := readNow(t, c, id); got.Status.Phase != driver.Running || got.Status.Resources.Memory != "768Mi" {
-		t.Fatalf("past the backoff the sandbox is %s at %s", got.Status.Phase, got.Status.Resources.Memory)
+	if n := starts.Load(); n != 0 {
+		t.Fatalf("the loop started the sandbox %d times inside the backoff", n)
+	}
+	if _, err := c.Start(t.Context(), id, 0); !errors.Is(err, ErrPhase) {
+		t.Fatalf("a client's start inside the backoff: %v, want ErrPhase", err)
+	}
+	seen.await(t, 50)
+
+	// Past the backoff, with room now, a read asks for the reading and the
+	// reading starts the sandbox at the next size.
+	c.clock.(*fakeClock).Advance(autosize.MoveBackoff)
+	d.set2(func(d *sizeDriver) { d.noRoom = 0 })
+	seen.await(t, 50)
+	if n := len(c.sizeWake); n != 1 {
+		t.Fatalf("reads past the backoff asked the loop for %d readings, want 1", n)
+	}
+	readSizes(t, c)
+	seen.await(t, 50)
+	stop()
+	onlyRunningAndStarting(t, seen)
+	if got := readNow(t, c, id); got.Status.Phase != driver.Running || got.Status.Resources.Memory != "768Mi" || starts.Load() != 1 {
+		t.Fatalf("past the backoff the sandbox is %s at %s after %d starts", got.Status.Phase, got.Status.Resources.Memory, starts.Load())
 	}
 }
 

@@ -357,8 +357,11 @@ func (c *Controller) persistWith(ctx context.Context, obj v1.Sandbox, mutation s
 }
 
 // RunAutosize reads every sandbox with a ceiling once per interval until ctx
-// ends, and in between reads the ones a failed command or a start asked
-// about. Each tick runs only while the autosize lease is held.
+// ends, and in between reads the ones a failed command, a start or a read
+// asked about. Each tick runs only while the autosize lease is held. A
+// control plane over a driver that sizes memory has to run it: a read
+// answers that a sandbox killed for memory under its ceiling is starting on
+// the strength of this loop starting it.
 func (c *Controller) RunAutosize(ctx context.Context) {
 	ticks, stop := c.clock.Ticker(c.autosizeInterval)
 	defer stop()
@@ -502,38 +505,39 @@ func (c *Controller) isMoving(id string) bool {
 
 // raises reports whether the control plane is going to start a sandbox again
 // at a larger memory size: the driver reports its workload killed for
-// memory, its manifest names a memory ceiling above what it holds, its
-// driver sizes memory, and it is not being left alone after a move that
-// found no room. It is the one rule, read by the loop that restarts the
+// memory, its manifest names a memory ceiling above what it holds, and its
+// driver sizes memory. It is the one rule, read by the loop that restarts the
 // sandbox and by every read that presents it, so a sandbox reads as starting
-// exactly when the loop will start it.
+// exactly when the loop is going to start it. The loop starts it at once, or
+// once MoveBackoff has passed where a move of it just found no room: the
+// wait changes when, not whether, so it is no part of the rule, and a
+// sandbox waiting it out does not read as failed in between.
 func (c *Controller) raises(obj v1.Sandbox, state driver.State, d driver.Driver) bool {
 	if state.Phase != PhaseFailed || state.Reason != reasonOOMKilled || state.Resources.IsZero() {
 		return false
 	}
 	ceiling := bytesOf(string(obj.Spec.Resources.Max.Memory))
-	if ceiling == 0 || bytesOf(state.Resources.Memory) >= ceiling || !d.Capabilities().Autosize.Memory {
-		return false
-	}
-	return !c.onHold(obj.Status.ID)
+	return ceiling != 0 && bytesOf(state.Resources.Memory) < ceiling && d.Capabilities().Autosize.Memory
 }
 
 // rising reports whether a read of a sandbox answers that it is starting
-// where its driver says otherwise, and whether the loop has yet to act on
-// what the read found. A sandbox being moved reads so until it runs. One
-// whose workload was killed for memory reads so from the kill, because the
-// loop is about to start it again. One whose move was cut short reads so
-// while the workload the move stopped is ending and once it is gone, because
-// the loop is about to finish the start. A sandbox killed at its ceiling, or
-// with no ceiling, is none of these: it is Failed, as it was, until a client
-// acts.
+// where its driver says otherwise, and whether the loop could act now on
+// what the read found and has not yet. A sandbox being moved reads so until
+// it runs. One whose workload was killed for memory reads so from the kill,
+// because the loop is going to start it again. One whose move was cut short
+// reads so while the workload the move stopped is ending and once it is
+// gone, because the loop is about to finish the start. A sandbox killed at
+// its ceiling, or with no ceiling, is none of these: it is Failed, as it
+// was, until a client acts.
 func (c *Controller) rising(obj v1.Sandbox, state driver.State, d driver.Driver) (rising, unnoticed bool) {
 	id := obj.Status.ID
 	if c.isMoving(id) {
 		return state.Phase != driver.Running, false
 	}
 	if c.raises(obj, state, d) {
-		return true, true
+		// Inside the backoff the loop has nothing to do for this sandbox
+		// yet, so a read of it asks for no reading.
+		return true, !c.onHold(id)
 	}
 	if !marked(obj) || c.onHold(id) {
 		return false, false
@@ -729,7 +733,12 @@ func (c *Controller) sizeOne(ctx context.Context, id string, observed *driver.St
 		switch {
 		case c.raises(s.obj, *state, s.driver):
 			// The rule every read presents this sandbox by: it reads as
-			// starting from the kill on, and this is the start.
+			// starting from the kill on, and this is the start. After a
+			// move that found no room the start waits for the backoff,
+			// and the first reading past it makes it.
+			if c.onHold(id) {
+				return nil
+			}
 			handed = true
 			c.follow(id, func(ctx context.Context) error {
 				return c.move(ctx, s, *state, autosize.NextMemory(held, s.max), autosize.ReasonOOM)
