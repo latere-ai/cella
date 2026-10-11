@@ -196,7 +196,10 @@ How a raise reaches the sandbox depends on the node:
   one node keeps the sandbox on that node.
 - Where no node takes the larger size in time, the sandbox is put back at
   its previous size and started there, and is left alone for 10 minutes
-  before more memory is asked for again.
+  before more memory is asked for again. A sandbox whose workload is killed
+  for memory in that time is started again at the larger size when it ends,
+  and reads `Starting` with reason `MemoryRaised` until then, never
+  `Failed`.
 
 What an out-of-memory kill does depends on the node's kubelet:
 

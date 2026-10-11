@@ -232,7 +232,11 @@ and create another.
 A sandbox on its way back never reads `Failed`, `Stopped` or not found, at
 any moment between the kill and running again: not by a read of the
 sandbox, not in a list, and not in its events, which carry no
-`sandbox.failed` for it. `Starting` with reason `MemoryRaised` is a phase
+`sandbox.failed` for it. The wait is a few seconds on a cluster with room.
+Where no node had room for the larger size a moment ago, the sandbox was
+started again at the size it had, and a kill that follows waits, reading
+`Starting`, until the control plane asks for more memory again
+([Sandboxes on Kubernetes](kubernetes.md#sizing-a-sandbox)). `Starting` with reason `MemoryRaised` is a phase
 the control plane is already acting on, so a start or a stop of the sandbox
 in that time is refused with `phase_conflict`, and so is a command, which
 needs a running sandbox.
