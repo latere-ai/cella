@@ -111,6 +111,11 @@ refused before it is pushed.
   package, `Options.AutosizeInterval` and `Controller.RunAutosize` are
   the reading loop, and `Controller.Dialer` returns the driver's dialer
   behind a count of open connections.
+- Fixed: on Kubernetes, a connection `Dial` opened to a port takes a
+  deadline that is set after the port forwarding session has ended, as a
+  socket whose peer has closed does. The session to a port nothing listens
+  on ends at once, and a caller that then set a read deadline was told of
+  a closed pipe in place of reading the kubelet's reason.
 
 ### Security
 
