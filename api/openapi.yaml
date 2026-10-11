@@ -222,8 +222,9 @@ paths:
         room, answers phase `Starting` with reason `MemoryRaised` from the
         kill until it runs again, and never `Failed` or `Stopped` in between:
         its workspace is kept and it needs no act of the caller. Killed at its
-        ceiling, it answers `Failed` with reason `OOMKilled`. Authorized as
-        `sandbox.read`.
+        ceiling, or with no ceiling, it answers `Failed` with reason
+        `OOMKilled`, and a start brings it back with its workspace.
+        Authorized as `sandbox.read`.
       responses:
         "200":
           description: The answer this route serves.
@@ -274,14 +275,23 @@ paths:
       operationId: startSandbox
       summary: Start a sandbox
       description: >-
-        Start a stopped sandbox. Authorized as `sandbox.update`. A start that
-        would take the owner past the count ceiling on that allow,
-        `limits.max_sandboxes`, which counts the sandboxes that run, is
-        refused with `quota_exceeded`. A sandbox in any phase but `Stopped`
-        is refused with `phase_conflict`: a `Failed` one is not started by
-        this route, and one that reads `Starting` is already on its way up,
-        with reason `MemoryRaised` where the control plane is starting it
-        again at a larger memory size.
+        Start a stopped sandbox, or a failed one whose workload ran and
+        ended: its main process exited non-zero, or was killed, and
+        `status.reason` is the runtime's word for it, such as `Exited`,
+        `Error` or `OOMKilled`. The workload runs again on the same
+        workspace, every file of it kept; processes, and files outside the
+        workspace, are gone as after a stop and a start. It is one start: a
+        workload that ends again leaves the sandbox `Failed` again.
+        Authorized as `sandbox.update`. A start that would take the owner
+        past the count ceiling on that allow, `limits.max_sandboxes`, which
+        counts the sandboxes that run, is refused with `quota_exceeded`. A
+        start is refused with `phase_conflict` in every other phase, and for
+        a `Failed` sandbox that has no workspace to start on: one whose
+        `status.reason` is `CreateFailed`, `NoCapacity`, `StartDeadline` or
+        `RecoveryExhausted`, with the reason in `details.detail`. A sandbox
+        that reads `Starting` is already on its way up, with reason
+        `MemoryRaised` where the control plane is starting it again at a
+        larger memory size.
       responses:
         "200":
           description: The answer this route serves.
