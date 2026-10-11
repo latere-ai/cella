@@ -1319,11 +1319,13 @@ func (c *Controller) Start(ctx context.Context, id string, max int) (v1.Sandbox,
 
 // unstartedFailures are the reasons this control plane fails a sandbox with
 // itself: a create that made nothing or was undone, a queue that never placed
-// the sandbox, and a recovery that gave up on one its driver lost. Each
-// leaves nothing to start, and the identity and the boundary a create minted
-// are ended with it, so a start is refused whatever a driver may still hold
-// under the id.
-var unstartedFailures = []string{ReasonCreateFailed, ReasonNoCapacity, ReasonStartDeadline, ReasonRecoveryExhausted}
+// the sandbox, and a recovery that gave up on one its driver lost or found a
+// volume of it gone. Each leaves nothing to start, and the identity and the
+// boundary a create minted are ended with it, so a start is refused whatever
+// a driver may still hold under the id.
+var unstartedFailures = []string{
+	ReasonCreateFailed, ReasonNoCapacity, ReasonStartDeadline, ReasonRecoveryExhausted, ReasonVolumeMissing,
+}
 
 // restartable reports why a failed sandbox cannot be started, or nil where it
 // can. A failure is one of two kinds, told apart by who reported it. A

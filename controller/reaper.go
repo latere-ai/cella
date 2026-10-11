@@ -25,6 +25,9 @@ const (
 	// the cascade of design 022.
 	ReasonParent            = "Parent"
 	ReasonRecoveryExhausted = "RecoveryExhausted"
+	// ReasonVolumeMissing is a recovery that found a volume of the sandbox
+	// gone, which design 005 fails the sandbox with.
+	ReasonVolumeMissing = "VolumeMissing"
 )
 
 // ruleToken names design 005's fifth rule in a log line. It writes no reason
