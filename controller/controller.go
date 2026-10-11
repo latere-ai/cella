@@ -632,9 +632,9 @@ func refused(err error) bool {
 // holdsSlot reports whether a sandbox in this phase takes a slot of its
 // owner's count ceiling: every phase that runs, or that reaches running with
 // no start anyone asks for, which is the scheduler placing a queued sandbox
-// and the reaper recovering a lost one (spec 080). A stopped sandbox runs
-// nothing and goes back to running only through Start, which counts it then;
-// a failed one never runs again; a deleting one is on its way out. A phase
+// and the reaper recovering a lost one (spec 080). A stopped sandbox and a
+// failed one run nothing and go back to running only through Start, which
+// counts them then; a deleting one is on its way out. A phase
 // this list does not name takes a slot, so a driver's phase the controller
 // does not know errs toward refusing. It is not holdsCompute, which asks what
 // the environment's resources hold now.
@@ -1149,6 +1149,15 @@ func (c *Controller) List() []v1.Sandbox {
 	return out
 }
 func (c *Controller) refresh(ctx context.Context, obj v1.Sandbox) (v1.Sandbox, error) {
+	out, _, err := c.read(ctx, obj)
+	return out, err
+}
+
+// read is the sandbox as a reader is given it, the stored object with its
+// driver's state read over it, and whether the driver holds the sandbox: its
+// read found the workspace, and whatever became of the workload. A sandbox
+// no driver is asked about, and one its driver does not know, are not held.
+func (c *Controller) read(ctx context.Context, obj v1.Sandbox) (out v1.Sandbox, held bool, err error) {
 	// Deleting is this control plane's own act in flight, and no driver
 	// holds a Queued sandbox: asking one would read its absence as a loss.
 	// A placed sandbox's create is the loop's until its own read is written,
@@ -1156,23 +1165,23 @@ func (c *Controller) refresh(ctx context.Context, obj v1.Sandbox) (v1.Sandbox, e
 	// it: a read that said Running there would invite a stop, a dial or a
 	// screenshot the sandbox cannot take yet.
 	if obj.Status.Phase == PhaseDeleting || obj.Status.Phase == PhaseQueued || placed(obj) {
-		return obj, nil
+		return obj, false, nil
 	}
 	d, err := c.driverFor(obj.Status.Environment)
 	if err != nil {
-		return obj, err
+		return obj, false, err
 	}
 	state, err := d.Inspect(ctx, obj.Status.ID)
 	if errors.Is(err, driver.ErrNotFound) {
 		if obj.Status.Phase != driver.Pending && obj.Status.Phase != "Failed" {
 			obj.Status.Phase = "Lost"
 		}
-		return obj, nil
+		return obj, false, nil
 	}
 	if err != nil {
-		return obj, err
+		return obj, false, err
 	}
-	return c.present(obj, state, d), nil
+	return c.present(obj, state, d), true, nil
 }
 
 // observe writes one driver read onto the sandbox: the phase and its reason,
@@ -1239,11 +1248,13 @@ func lifecycleOf(l v1.Lifecycle) (driver.Lifecycle, error) {
 	return out, nil
 }
 
-// Start starts a stopped sandbox under its owner's count ceiling, max, zero
-// being no ceiling: the ceiling a create is held to holds the start that
-// brings a stopped sandbox back to running (spec 080). The count, the
-// driver's start and the record of it are one act under the controller's
-// lock, so two starts racing for the last slot start one.
+// Start starts a stopped sandbox, or a failed one whose workload ran and
+// ended, under its owner's count ceiling, max, zero being no ceiling: the
+// ceiling a create is held to holds the start that brings a sandbox back to
+// running (spec 080). The count, the driver's start and the record of it are
+// one act under the controller's lock, so two starts racing for the last slot
+// start one. It is one start: a workload that ends again leaves the sandbox
+// as its driver then reports it, and nothing starts it a second time.
 func (c *Controller) Start(ctx context.Context, id string, max int) (v1.Sandbox, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -1258,11 +1269,18 @@ func (c *Controller) Start(ctx context.Context, id string, max int) (v1.Sandbox,
 	if c.creating(obj) {
 		return obj, ErrPhase
 	}
-	obj, err = c.refresh(ctx, obj)
+	recorded := obj.Status
+	obj, held, err := c.read(ctx, obj)
 	if err != nil {
 		return obj, err
 	}
-	if obj.Status.Phase != driver.Stopped {
+	switch obj.Status.Phase {
+	case driver.Stopped:
+	case PhaseFailed:
+		if err := restartable(recorded, held); err != nil {
+			return obj, err
+		}
+	default:
 		return obj, ErrPhase
 	}
 	owner := obj.Status.Owner
@@ -1275,24 +1293,54 @@ func (c *Controller) Start(ctx context.Context, id string, max int) (v1.Sandbox,
 	// The record is what the next count reads, so it must hold the slot
 	// whatever the read after the start says. A read that fails, or a runtime
 	// whose read does not yet show a start it took, is written Starting, the
-	// phase design 005 gives a start.
+	// phase design 005 gives a start. A read that says Failed after a start
+	// the driver took is either that or a workload that ended again at
+	// once, and the two are not told apart here: the record holds the slot,
+	// and the next read of the sandbox says which.
 	read, rerr := c.refresh(ctx, obj)
 	if rerr != nil {
 		c.log.WarnContext(ctx, "a started sandbox could not be read after its start", "sandbox", id, "err", rerr)
 		read = obj
 	}
-	if rerr != nil || read.Status.Phase == driver.Stopped {
-		read.Status.Phase, read.Status.Reason = PhaseStarting, ""
+	if rerr != nil || read.Status.Phase == driver.Stopped || read.Status.Phase == PhaseFailed {
+		read.Status.Phase, read.Status.Reason, read.Status.ExitCode = PhaseStarting, "", nil
 	}
 	if err := c.persist(ctx, read, MutationStarted); err != nil {
-		// The record still says Stopped, which takes no slot, so the
-		// sandbox is stopped again: none runs that the count does not hold.
+		// The record still says Stopped or Failed, which take no slot, so
+		// the sandbox is stopped again: none runs that the count does not
+		// hold.
 		if serr := d.Stop(ctx, id); serr != nil {
 			return obj, errors.Join(err, fmt.Errorf("stopping %s after its start could not be recorded: %w", id, serr))
 		}
 		return obj, err
 	}
 	return export(read), nil
+}
+
+// unstartedFailures are the reasons this control plane fails a sandbox with
+// itself: a create that made nothing or was undone, a queue that never placed
+// the sandbox, and a recovery that gave up on one its driver lost. Each
+// leaves nothing to start, and the identity and the boundary a create minted
+// are ended with it, so a start is refused whatever a driver may still hold
+// under the id.
+var unstartedFailures = []string{ReasonCreateFailed, ReasonNoCapacity, ReasonStartDeadline, ReasonRecoveryExhausted}
+
+// restartable reports why a failed sandbox cannot be started, or nil where it
+// can. A failure is one of two kinds, told apart by who reported it. A
+// workload that ran and ended, with a non-zero exit, a kill for memory or
+// whatever else its driver names, is reported by the driver, which still
+// holds the workspace: a start runs the workload again on it. A failure the
+// control plane recorded itself left nothing behind. recorded is the status
+// as stored before this read, and held whether the driver's read found the
+// sandbox.
+func restartable(recorded v1.SandboxStatus, held bool) error {
+	if recorded.Phase == PhaseFailed && slices.Contains(unstartedFailures, recorded.Reason) {
+		return fmt.Errorf("%w: the sandbox failed with reason %s, which leaves nothing to start", ErrPhase, recorded.Reason)
+	}
+	if !held {
+		return fmt.Errorf("%w: the environment holds nothing of this failed sandbox to start", ErrPhase)
+	}
+	return nil
 }
 
 // creating reports whether a sandbox's create is still the scheduler loop's:

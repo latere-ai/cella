@@ -26,7 +26,9 @@ func (d *fakeDriver) Start(_ context.Context, id string) error {
 	if !ok {
 		return driver.ErrNotFound
 	}
+	// A start runs the workload anew: what the last one ended with is gone.
 	s.Phase, s.StartedAt, s.StoppedAt = driver.Running, d.clock.Now(), time.Time{}
+	s.Reason, s.ExitCode = "", nil
 	d.states[id] = s
 	d.starts = append(d.starts, id)
 	return nil

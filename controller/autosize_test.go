@@ -1809,7 +1809,7 @@ func readNow(t *testing.T, c *Controller, id string) v1.Sandbox {
 // it at all, and that read asks the loop for its reading once however many
 // readers find it. A sandbox killed at its ceiling, with no memory ceiling,
 // on a driver that sizes no memory, or that failed for another reason reads
-// Failed, as it did.
+// Failed, as it did, and is a client's to start.
 func TestAKilledSandboxWithRoomReadsStarting(t *testing.T) {
 	c, d, _, id := sizedController(t, v1.ResourceMax{Memory: "768Mi"})
 	for len(c.sizeWake) > 0 {
@@ -1846,13 +1846,12 @@ func TestAKilledSandboxWithRoomReadsStarting(t *testing.T) {
 	}
 
 	// At its ceiling the same kill is terminal: Failed, with the driver's
-	// reason and the exit code, until a client acts.
+	// reason and the exit code, until a client acts. Nothing the loop does
+	// changes it.
 	d.kill(id)
+	readSizes(t, c)
 	if got := readNow(t, c, id); got.Status.Phase != PhaseFailed || got.Status.Reason != reasonOOMKilled || got.Status.ExitCode == nil {
 		t.Fatalf("a sandbox killed at its ceiling reads %s %q, want Failed OOMKilled", got.Status.Phase, got.Status.Reason)
-	}
-	if _, err := c.Start(t.Context(), id, 0); !errors.Is(err, ErrPhase) {
-		t.Fatalf("a start of a failed sandbox: %v, want ErrPhase", err)
 	}
 
 	for _, tc := range []struct {
