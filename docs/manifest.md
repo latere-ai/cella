@@ -217,6 +217,48 @@ given more where that is why, so the same command can be run again. The
 [events](events.md) of the sandbox say what happened: `sandbox.resized`
 with `reason` `oom`.
 
+#### What a client can rely on
+
+After a command is killed for memory in a sandbox with room left under
+`max.memory`, read the sandbox. It is in one of two states, and in both
+you wait and run the command again. You never need to delete the sandbox
+and create another.
+
+| The sandbox reads | What happened | What to do |
+|---|---|---|
+| `Running` | one process was killed and the rest of the sandbox went on. Its memory is being raised in place | run the command again |
+| `Starting` with reason `MemoryRaised` | the kill took the whole sandbox, or the node had no room for the raise, and the control plane is starting it again at the larger size | read again until it is `Running`, then run the command again |
+
+A sandbox on its way back never reads `Failed`, `Stopped` or not found, at
+any moment between the kill and running again: not by a read of the
+sandbox, not in a list, and not in its events, which carry no
+`sandbox.failed` for it. `Starting` with reason `MemoryRaised` is a phase
+the control plane is already acting on, so a start or a stop of the sandbox
+in that time is refused with `phase_conflict`, and so is a command, which
+needs a running sandbox.
+
+What a restart costs is what any restart costs:
+
+- The workspace is kept, every file of it.
+- Every process is gone, not only the command that was killed: a server or
+  a watcher your client started in the background has to be started again.
+- Files outside the workspace are gone, such as `/tmp` and anything written
+  into the image's own directories, as after a stop and a start.
+
+`Failed` means what it always meant: nothing will start the sandbox again
+until you act. A sandbox killed for memory **at** its ceiling reads
+`Failed` with reason `OOMKilled`, carries the `MemoryAtCeiling` condition,
+and has `sandbox.at_ceiling` in its events. Its workspace is still there.
+A start of a failed sandbox is refused with `phase_conflict`, so the acts
+open to you are these:
+
+- Raise `spec.resources.max.memory` with an update. The sandbox has room
+  again, reads `Starting` with reason `MemoryRaised` from that update on,
+  and is started at the next size with its workspace.
+- Copy what you need out of the workspace, which the file and archive
+  routes serve for a sandbox that is not running where its environment
+  declares `files`, and then delete the sandbox.
+
 | Refusal | When |
 |---|---|
 | `invalid_field` at `spec.resources.max.<resource>` | the ceiling is below the amount it bounds, or is not a quantity |
@@ -249,8 +291,8 @@ The server writes `status`; it is ignored on the way in.
 | `id` | the sandbox's identifier, which never changes and addresses it in every route |
 | `owner` | the subject that created it, `<issuer>|<sub>` |
 | `environment`, `driver`, `isolation` | where it runs and the boundary that runtime provides: `container`, `process`, or `none` |
-| `phase` | `Pending`, `Queued`, `Running`, `Stopped`, `Failed`, `Lost`, `Recovering`, or `Deleting` |
-| `reason` | why it is in that phase, such as `NoCapacity`, `StartDeadline`, `Preempted`, or the lifecycle rule that stopped it |
+| `phase` | `Pending`, `Queued`, `Starting`, `Running`, `Stopping`, `Stopped`, `Failed`, `Lost`, `Recovering`, or `Deleting`. `Pending`, `Queued`, `Starting` and `Recovering` are on the way to `Running` without any act of yours; `Failed` stays until you act |
+| `reason` | why it is in that phase, such as `NoCapacity`, `StartDeadline`, `Preempted`, the lifecycle rule that stopped it, `OOMKilled` on a sandbox that failed for memory, or `MemoryRaised` on one that is `Starting` because it is being [started again at a larger memory size](#what-a-client-can-rely-on) |
 | `conditions` | statements with a type, a status, a reason, and a time: `Scheduled`, `EgressEnforced`, `DisplayReady`, and others. A row of a list page whose environment did not answer carries `Observed` `False`: its status is the one last recorded, not a fresh read |
 | `parent`, `root`, `mesh`, `spawn` | where it sits in a spawn tree, its mesh, and its budget with how much is used |
 | `ports` | each declared port, `listening` or `closed` |

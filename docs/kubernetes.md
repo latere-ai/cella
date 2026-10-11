@@ -189,7 +189,8 @@ How a raise reaches the sandbox depends on the node:
 - Where the kubelet answers that the resize is deferred or infeasible, the
   control plane deletes the Pod once no session is open in the sandbox and
   creates it again at the larger size, and the scheduler places it on a node
-  with room. A cluster autoscaler adds a node where none has it, within
+  with room. The sandbox reads `Starting` with reason `MemoryRaised` while
+  it has no Pod, never `Stopped`. A cluster autoscaler adds a node where none has it, within
   `CELLA_K8S_READY_TIMEOUT`. The workspace follows the Pod only where its
   storage attaches on another node; a storage class that binds a volume to
   one node keeps the sandbox on that node.
@@ -201,7 +202,7 @@ What an out-of-memory kill does depends on the node's kubelet:
 
 | The node | A process over the limit | What the control plane does |
 |---|---|---|
-| kills the container's whole cgroup together, the kubelet's default on cgroup v2 | every process of the sandbox is killed, the Pod ends `Failed` with reason `OOMKilled`, and a client's command ends with 137 or a broken stream | starts the sandbox again at the next size, at once. At its ceiling it stays `Failed`, as a sandbox with no ceiling does |
+| kills the container's whole cgroup together, the kubelet's default on cgroup v2 | every process of the sandbox is killed, the Pod ends with reason `OOMKilled`, and a client's command ends with 137 or a broken stream | starts the sandbox again at the next size, at once. The sandbox reads `Starting` with reason `MemoryRaised` from the kill until it runs again, never `Failed`. At its ceiling it is `Failed`, as a sandbox with no ceiling is |
 | kills one process (cgroup v1, or a kubelet with `singleProcessOOMKill: true`) | that process is killed and the rest of the sandbox keeps running; a client's command ends with 137 | reads the kernel's count of kills in the sandbox's cgroup and raises the limit in place |
 
 The count is read by running `cat` on the kernel's own `memory.events` in

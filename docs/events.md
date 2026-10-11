@@ -119,6 +119,13 @@ The two records of a sandbox sized inside a ceiling carry their own `data`:
 | `sandbox.resized` | the sandbox's memory changed | `{"resource": "memory", "from": "256Mi", "to": "768Mi", "reason": "oom", "moved": false}`. `reason` is `usage` when its workload was using nearly all it had, `oom` when the kernel killed a process for memory, and `update` when a manifest set the size. `moved` is `true` when the change restarted the sandbox on a node with room |
 | `sandbox.at_ceiling` | its memory is at `spec.resources.max.memory` and its workload uses 95% or more of it, or lost a process to the limit | `{"resource": "memory", "used": 1030792151, "max": "1Gi"}`, with `used` in bytes. Recorded once each time this begins, not once a reading |
 
+A sandbox restarted at a larger size, after a kill that took all of it or
+for a node with room, has `sandbox.resized` with `moved` `true` and no
+`sandbox.failed`, `sandbox.stopped` or `sandbox.started` around it: the
+restart is the control plane's and the sandbox never left the caller's
+hands. A meter that counts running time from `sandbox.started` and
+`sandbox.stopped` counts such a sandbox as running across it.
+
 A meter that charges for the size a sandbox holds reads `sandbox.resized`,
 which says what the size was and what it became, and `status.resources`. A
 client whose command ended with exit code 137 reads `sandbox.resized` with
