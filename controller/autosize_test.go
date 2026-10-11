@@ -71,6 +71,10 @@ type sizeDriver struct {
 	// killedAtCreate ends every created workload at once, killed for
 	// memory, as a main process that needs more than it was given ends.
 	killedAtCreate bool
+	// needs ends every workload a start gives less memory than this at
+	// once, killed for memory, as a main process that needs that much ends
+	// at every size below it.
+	needs int64
 }
 
 func (d *sizeDriver) Inspect(ctx context.Context, id string) (driver.State, error) {
@@ -195,9 +199,16 @@ func (d *sizeDriver) Start(ctx context.Context, id string) error {
 	if err := d.fakeDriver.Start(ctx, id); err != nil {
 		return err
 	}
+	d.smu.Lock()
+	killed := d.needs > 0 && bytesOf(asked.Memory) < d.needs
+	d.smu.Unlock()
 	d.set(func(f *fakeDriver) {
 		state := f.states[id]
 		state.Resources, state.Resize, state.Reason, state.ExitCode = asked, nil, "", nil
+		if killed {
+			code := killedExit
+			state.Phase, state.Reason, state.ExitCode = PhaseFailed, reasonOOMKilled, &code
+		}
 		f.states[id] = state
 	})
 	return nil
@@ -2147,6 +2158,69 @@ func TestAMoveThatWasUndoneReadsWhatTheDriverReports(t *testing.T) {
 	onlyRunningAndStarting(t, seen)
 	if got := readNow(t, c, id); got.Status.Phase != driver.Running || got.Status.Resources.Memory != "768Mi" || starts.Load() != 1 {
 		t.Fatalf("past the backoff the sandbox is %s at %s after %d starts", got.Status.Phase, got.Status.Resources.Memory, starts.Load())
+	}
+}
+
+// TestAWorkloadKilledAgainAsAMoveStartsItIsRecordedAsStarting: a main process
+// that needs more than the next size is killed again as the move starts it,
+// and the move's own last read finds it so. What the move writes is that the
+// sandbox is starting, with the size it reached and the move counted: the
+// stored status is what a read answers with when the driver cannot be
+// reached, and it never says Failed for a sandbox the next reading moves
+// again. The same holds for a move that found no room and put the workload
+// back at a size it is killed at. At the ceiling the same read is recorded
+// as the failure it is.
+func TestAWorkloadKilledAgainAsAMoveStartsItIsRecordedAsStarting(t *testing.T) {
+	kept := func(c *Controller, id string) v1.SandboxStatus {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		return c.objects[id].Status
+	}
+	c, d, events, id := sizedController(t, v1.ResourceMax{Memory: "4Gi"})
+	d.set2(func(d *sizeDriver) { d.needs = gi })
+	d.kill(id)
+	readSizes(t, c)
+	if got := kept(c, id); got.Phase != PhaseStarting || got.Reason != v1.ReasonMemoryRaised || got.Resources.Memory != "768Mi" || got.Moves != 1 {
+		t.Fatalf("after a move whose workload was killed again the stored status is %s %q at %s with %d moves, want Starting MemoryRaised at 768Mi with one",
+			got.Phase, got.Reason, got.Resources.Memory, got.Moves)
+	}
+	if got := readNow(t, c, id); got.Status.Phase != PhaseStarting || got.Status.Reason != v1.ReasonMemoryRaised {
+		t.Fatalf("it reads %s %q, want Starting MemoryRaised", got.Status.Phase, got.Status.Reason)
+	}
+	readSizes(t, c)
+	if got := readNow(t, c, id); got.Status.Phase != driver.Running || got.Status.Resources.Memory != "1280Mi" || got.Status.Moves != 2 {
+		t.Fatalf("after the second move: %s at %s with %d moves, want Running at 1280Mi with two", got.Status.Phase, got.Status.Resources.Memory, got.Status.Moves)
+	}
+	if failed := events.of(MutationFailed); len(failed) != 0 {
+		t.Fatalf("a sandbox that came back recorded %d sandbox.failed", len(failed))
+	}
+
+	// No room at the larger size, and the size it is put back at is one it
+	// is killed at: starting still, through the backoff.
+	c, d, events, id = sizedController(t, v1.ResourceMax{Memory: "4Gi"})
+	d.set2(func(d *sizeDriver) { d.needs, d.noRoom = gi, 512*mi })
+	d.kill(id)
+	readSizes(t, c)
+	if got := kept(c, id); got.Phase != PhaseStarting || got.Reason != v1.ReasonMemoryRaised || got.Resources.Memory != "256Mi" || got.Moves != 0 {
+		t.Fatalf("after an undone move whose workload was killed again the stored status is %s %q at %s with %d moves, want Starting MemoryRaised at 256Mi with none",
+			got.Phase, got.Reason, got.Resources.Memory, got.Moves)
+	}
+	if got := readNow(t, c, id); got.Status.Phase != PhaseStarting || len(events.of(MutationFailed)) != 0 {
+		t.Fatalf("it reads %s with %d sandbox.failed, want Starting and none", got.Status.Phase, len(events.of(MutationFailed)))
+	}
+
+	// The move reached the ceiling and the workload was killed there: that
+	// is the failure, and is recorded as one.
+	c, d, _, id = sizedController(t, v1.ResourceMax{Memory: "768Mi"})
+	d.set2(func(d *sizeDriver) { d.needs = gi })
+	d.kill(id)
+	readSizes(t, c)
+	if got := kept(c, id); got.Phase != PhaseFailed || got.Reason != reasonOOMKilled || got.Resources.Memory != "768Mi" || got.Moves != 1 {
+		t.Fatalf("after a move to the ceiling whose workload was killed there the stored status is %s %q at %s with %d moves, want Failed OOMKilled at 768Mi with one",
+			got.Phase, got.Reason, got.Resources.Memory, got.Moves)
+	}
+	if got := readNow(t, c, id); got.Status.Phase != PhaseFailed || got.Status.Reason != reasonOOMKilled {
+		t.Fatalf("it reads %s %q, want Failed OOMKilled", got.Status.Phase, got.Status.Reason)
 	}
 }
 

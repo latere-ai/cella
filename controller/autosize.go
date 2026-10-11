@@ -600,8 +600,15 @@ func (c *Controller) presentState(state driver.State, d driver.Driver) driver.St
 		return state
 	}
 	if rising, _ := c.rising(obj, state, d); rising {
-		state.Phase, state.Reason, state.ExitCode = PhaseStarting, v1.ReasonMemoryRaised, nil
+		return risen(state)
 	}
+	return state
+}
+
+// risen is a driver's state with the phase and the reason a sandbox on its
+// way back reads as.
+func risen(state driver.State) driver.State {
+	state.Phase, state.Reason, state.ExitCode, state.StoppedAt = PhaseStarting, v1.ReasonMemoryRaised, nil, time.Time{}
 	return state
 }
 
@@ -1105,6 +1112,14 @@ func (c *Controller) afterMove(ctx context.Context, id string, d driver.Driver, 
 			return err
 		}
 		return nil
+	}
+	// A workload killed for memory again before this read, with room still
+	// under its ceiling, is one the loop starts once more. It is recorded
+	// as every read of it answers, as starting, so the stored status, which
+	// is what a read answers with when the driver cannot be reached, never
+	// says that a sandbox on its way back failed.
+	if c.raises(cur, state, d) {
+		state = risen(state)
 	}
 	if moved {
 		return c.recordSize(ctx, id, state, true)
