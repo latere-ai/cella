@@ -48,7 +48,7 @@ the API ([What a sandbox can reach](kubernetes.md#what-a-sandbox-can-reach)).
 apply    -f <file> [-w|--wait]                   apply a Sandbox or a Secret manifest
 get      <kind> [<ref>] [-o json|yaml|wide|name] read one object or list a kind
 delete   <kind> <ref>                            delete one object
-start    <ref>                                   start a stopped sandbox
+start    <ref>                                   start a stopped or a failed sandbox
 stop     <ref>                                   stop a running sandbox
 exec     <ref> [-i] [-t] -- <command>            run a command inside a sandbox
 attach   <ref> [-- <command>]                    open a terminal inside a sandbox
@@ -162,6 +162,11 @@ cella start dev
 cella delete sandbox dev
 cella version        # this client, and the server when it answers
 ```
+
+`cella start` also brings back a sandbox that reads `Failed` because its
+process ended, on the workspace it had. Deleting such a sandbox is what
+discards its files
+([recovering a failed sandbox](manifest.md#recovering-a-failed-sandbox)).
 
 A stopped sandbox keeps its files and runs nothing. `cella delete` is
 accepted in every phase.

@@ -176,7 +176,9 @@ func (c *Client) Delete(ctx context.Context, kind Kind, ref string) ([]byte, err
 	return c.send(ctx, http.MethodDelete, kind.item(ref), nil, nil, "")
 }
 
-// StartSandbox starts a stopped sandbox and answers it as it stands after.
+// StartSandbox starts a stopped sandbox, or a failed one whose workload ran
+// and ended, on the workspace it had, and answers it as it stands after. A
+// failed sandbox that never ran is refused with phase_conflict.
 func (c *Client) StartSandbox(ctx context.Context, ref string) (v1.Sandbox, []byte, error) {
 	return c.act(ctx, ref, "start")
 }

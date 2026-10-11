@@ -6,7 +6,7 @@ Commands:
   apply    -f <file> [-w|--wait]                   apply a Sandbox or a Secret manifest
   get      <kind> [<ref>] [-o json|yaml|wide|name] read one object or list a kind
   delete   <kind> <ref>                            delete one object
-  start    <ref>                                   start a stopped sandbox
+  start    <ref>                                   start a stopped or a failed sandbox
   stop     <ref>                                   stop a running sandbox
   exec     <ref> [-i] [-t] -- <command>            run a command inside a sandbox
   attach   <ref> [-- <command>]                    open a terminal inside a sandbox
