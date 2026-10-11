@@ -445,6 +445,49 @@ func TestPortForwardReportsTheKubeletsReason(t *testing.T) {
 	}
 }
 
+// TestADeadlineAfterTheSessionEndedIsTaken: the kubelet refuses a port
+// nothing listens on at once, so the session may be over before the caller
+// has set the deadline it reads under. The deadline is taken all the same and
+// the Read under it returns the kubelet's reason; a deadline on a connection
+// the caller closed is refused.
+func TestADeadlineAfterTheSessionEndedIsTaken(t *testing.T) {
+	server := newFakeAPIServer(t)
+	h := server.driver(t)
+	const id = "sbx_ended"
+	h.created(t, withPorts(id))
+	conn, err := h.Dial(t.Context(), id, closedPort)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+	// The pipe itself refuses a deadline from the moment the inside's end
+	// has closed, which is how the test knows the session is over.
+	pipe := conn.(*forwarded).Conn
+	deadline := time.Now().Add(10 * time.Second)
+	for pipe.SetReadDeadline(time.Time{}) == nil {
+		if time.Now().After(deadline) {
+			t.Fatal("the session to a closed port never ended")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	for name, set := range map[string]func(time.Time) error{
+		"SetDeadline": conn.SetDeadline, "SetReadDeadline": conn.SetReadDeadline, "SetWriteDeadline": conn.SetWriteDeadline,
+	} {
+		if err := set(time.Now().Add(5 * time.Second)); err != nil {
+			t.Fatalf("%s after the session ended: %v, want it taken", name, err)
+		}
+	}
+	if _, err := io.ReadAll(conn); err == nil || !strings.Contains(err.Error(), "connection refused") {
+		t.Fatalf("reading after the deadline was set: %v, want the kubelet's reason", err)
+	}
+	if err := conn.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.SetReadDeadline(time.Now().Add(time.Second)); !errors.Is(err, io.ErrClosedPipe) {
+		t.Fatalf("a deadline on a connection the caller closed: %v, want it refused", err)
+	}
+}
+
 // TestPortForwardRefused: an API server that refuses both transports, as one
 // facing a Role with neither verb does, is an error from Dial and no
 // connection.

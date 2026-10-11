@@ -244,6 +244,8 @@ type forwarded struct {
 
 	mu     sync.Mutex
 	reason error
+	// closed says the caller closed its own end.
+	closed bool
 }
 
 // newForwarded starts the two pumps. When the inside's end finishes, the
@@ -319,10 +321,45 @@ func (c *forwarded) Read(p []byte) (int, error) {
 	return n, err
 }
 
+// SetDeadline, SetReadDeadline and SetWriteDeadline are the pipe's, with one
+// difference. The pipe refuses a deadline once either of its ends is closed,
+// and the inside's end closes as soon as the kubelet has given its reason,
+// which for a port nothing listens on is at once. A caller that sets a
+// deadline before its first Read would then be told of a closed pipe and
+// never read the reason. A deadline on a connection whose inside has ended
+// is taken, as it is on a socket whose peer has closed; one on a connection
+// the caller closed itself is refused, as on any closed connection.
+func (c *forwarded) SetDeadline(t time.Time) error {
+	return c.deadline(c.Conn.SetDeadline(t))
+}
+
+func (c *forwarded) SetReadDeadline(t time.Time) error {
+	return c.deadline(c.Conn.SetReadDeadline(t))
+}
+
+func (c *forwarded) SetWriteDeadline(t time.Time) error {
+	return c.deadline(c.Conn.SetWriteDeadline(t))
+}
+
+func (c *forwarded) deadline(err error) error {
+	if !errors.Is(err, io.ErrClosedPipe) {
+		return err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return err
+	}
+	return nil
+}
+
 // Close ends the caller's end at once and the session once the caller's last
 // bytes are on the stream, as closing a socket sends what was written before
 // it, or after flushBound at the latest.
 func (c *forwarded) Close() error {
+	c.mu.Lock()
+	c.closed = true
+	c.mu.Unlock()
 	err := c.Conn.Close()
 	c.once.Do(func() {
 		go func() {
