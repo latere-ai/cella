@@ -419,3 +419,73 @@ func TestBridgeWritesARecordWithItsOwnData(t *testing.T) {
 		t.Fatal("a record about no object was journaled")
 	}
 }
+
+// TestBridgeWritesASizeWithItsRecord: a change of a sandbox's size is one
+// write: the status with the new size and the record that says what changed,
+// with the payload the controller gave it, and a write that loses the row
+// writes neither. What the controller reads back is the size, the reading
+// and the moves it wrote.
+func TestBridgeWritesASizeWithItsRecord(t *testing.T) {
+	c, s := bound(t)
+	ctx := t.Context()
+	obj := sandbox("sbx_sized", "work", driver.Running)
+	obj.Spec.Resources = v1.Resources{CPU: "500m", Memory: "256Mi", Disk: "5Gi", Max: v1.ResourceMax{CPU: "2", Memory: "4Gi"}}
+	obj.Status.Resources = v1.Size{CPU: "2", Memory: "256Mi", Disk: "5Gi"}
+	if err := c.Write(ctx, obj, controller.MutationCreated); err != nil {
+		t.Fatal(err)
+	}
+	read := time.Date(2026, 10, 11, 9, 30, 0, 0, time.UTC)
+	obj.Status.Resources.Memory = "768Mi"
+	obj.Status.Usage = &v1.Usage{Memory: 240 << 20, ReadAt: read}
+	obj.Status.Moves = 1
+	data := controller.ResizedData{Resource: "memory", From: "256Mi", To: "768Mi", Reason: "oom", Moved: true}
+	if err := c.WriteData(ctx, obj, controller.MutationResized, data); err != nil {
+		t.Fatalf("writing the size with its record: %v", err)
+	}
+	objects, err := c.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := objects["sbx_sized"]
+	if got.Spec.Resources != obj.Spec.Resources || got.Status.Resources != obj.Status.Resources || got.Status.Moves != 1 {
+		t.Fatalf("read back %+v with status %+v and %d moves", got.Spec.Resources, got.Status.Resources, got.Status.Moves)
+	}
+	if got.Status.Usage == nil || got.Status.Usage.Memory != 240<<20 || !got.Status.Usage.ReadAt.Equal(read) {
+		t.Fatalf("read back the usage %+v", got.Status.Usage)
+	}
+	events, err := c.Events(ctx, "sbx_sized", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 2 || events[0].Type != controller.MutationResized {
+		t.Fatalf("the journal holds %d records, newest %q, want the create and then the resize", len(events), events[0].Type)
+	}
+	for _, member := range []string{`"resource":"memory"`, `"from":"256Mi"`, `"to":"768Mi"`, `"reason":"oom"`, `"moved":true`} {
+		if !bytes.Contains(events[0].Payload, []byte(member)) {
+			t.Errorf("the resize record carries %s, without %s", events[0].Payload, member)
+		}
+	}
+	// A replica that never read the row writes neither the size nor a
+	// record of it.
+	stale := store.ForController(s, "default", store.Delivered)
+	obj.Status.Resources.Memory = "1280Mi"
+	if err := stale.WriteData(ctx, obj, controller.MutationResized, data); !errors.Is(err, store.ErrVersionConflict) {
+		t.Fatalf("a write of a row the replica never read: %v", err)
+	}
+	if after, _ := c.Events(ctx, "sbx_sized", 10); len(after) != 2 {
+		t.Fatalf("a refused write left %d records, want the 2 there were", len(after))
+	}
+	// The at-ceiling record carries its own payload the same way.
+	ceiling := controller.AtCeilingData{Resource: "memory", Used: 4000 << 20, Max: "4Gi"}
+	obj.Status.Resources.Memory = "4Gi"
+	if err := c.WriteData(ctx, obj, controller.MutationAtCeiling, ceiling); err != nil {
+		t.Fatal(err)
+	}
+	events, err = c.Events(ctx, "sbx_sized", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if events[0].Type != controller.MutationAtCeiling || !bytes.Contains(events[0].Payload, []byte(`"used":4194304000`)) || !bytes.Contains(events[0].Payload, []byte(`"max":"4Gi"`)) {
+		t.Fatalf("the at-ceiling record is %q carrying %s", events[0].Type, events[0].Payload)
+	}
+}

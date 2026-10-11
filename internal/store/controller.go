@@ -165,6 +165,16 @@ func (c *Controlled) Save(objects map[string]v1.Sandbox) error {
 // one journal row, so a journal that misses a write is not reachable from
 // here.
 func (c *Controlled) Write(ctx context.Context, obj v1.Sandbox, mutation string) error {
+	return c.WriteData(ctx, obj, mutation, nil)
+}
+
+// WriteData is Write for an act whose record carries a payload of its own,
+// one no field of the object holds: the object and the record that explains
+// the change commit in one transaction, as every other mutation's do. A nil
+// payload takes the per-type data of design 009's table, which is Write. A
+// change of a sandbox's size is its caller (spec 078): the status takes the
+// new size and the record says what it was and why it changed.
+func (c *Controlled) WriteData(ctx context.Context, obj v1.Sandbox, mutation string, data any) error {
 	defer c.observe(OpWrite, time.Now())
 	row, err := encode(obj)
 	if err != nil {
@@ -176,7 +186,7 @@ func (c *Controlled) Write(ctx context.Context, obj v1.Sandbox, mutation string)
 	c.mu.Lock()
 	version := c.versions[row.ID]
 	c.mu.Unlock()
-	event, err := c.record(ctx, mutation, obj)
+	event, err := c.record(ctx, mutation, obj, data)
 	if err != nil {
 		return err
 	}
@@ -219,7 +229,7 @@ func (c *Controlled) WriteSpawn(ctx context.Context, obj v1.Sandbox, mutation, p
 	c.mu.Lock()
 	version := c.versions[row.ID]
 	c.mu.Unlock()
-	event, err := c.record(ctx, mutation, obj)
+	event, err := c.record(ctx, mutation, obj, nil)
 	if err != nil {
 		return err
 	}
@@ -312,7 +322,7 @@ func (c *Controlled) Remove(ctx context.Context, id, mutation string) error {
 		} else if !errors.Is(err, ErrNotFound) {
 			return err
 		}
-		event, err := c.record(ctx, mutation, obj)
+		event, err := c.record(ctx, mutation, obj, nil)
 		if err != nil {
 			return err
 		}
@@ -334,11 +344,16 @@ func (c *Controlled) Remove(ctx context.Context, id, mutation string) error {
 // record is the journal row for one mutation: design 009's record, built from
 // the object being written, the act's name, and the actor the context
 // carries. It is built here rather than in the controller so the row and the
-// state it explains commit in one transaction.
-func (c *Controlled) record(ctx context.Context, mutation string, obj v1.Sandbox) (Event, error) {
+// state it explains commit in one transaction. The data is the act's own
+// where it supplies one, and the per-type data of design 009's table where
+// it supplies none.
+func (c *Controlled) record(ctx context.Context, mutation string, obj v1.Sandbox, data any) (Event, error) {
 	kind := events.Type(mutation)
+	if data == nil {
+		data = events.MutationData(kind, obj)
+	}
 	rec, err := events.Mutation(kind, events.ReasonOf(obj.Status.Reason, kind),
-		events.OfSandbox(obj), events.MutationData(kind, obj), events.ActorFrom(ctx), time.Now().UTC())
+		events.OfSandbox(obj), data, events.ActorFrom(ctx), time.Now().UTC())
 	if err != nil {
 		return Event{}, err
 	}

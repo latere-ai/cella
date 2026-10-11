@@ -56,6 +56,7 @@ var cases = []struct {
 	{"Count", count},
 	{"Lists", lists},
 	{"Status", status},
+	{"Sizes", sizes},
 	{"Transactions", transactions},
 	{"Observed", observed},
 	{"Journal", journal},
@@ -287,6 +288,58 @@ func status(t TB, open Opener) {
 		sameJSON(t, applied, []byte(`{"image":"one"}`), "the last applied state after a write of the object")
 		return nil
 	})
+}
+
+// sizes: a sandbox sized inside a ceiling is desired state like any other. The
+// ceiling in its manifest, the size it holds, the last reading and the count
+// of moves in its status, and the record of a change of size with its payload
+// are read back as they were written, and a change of size commits with its
+// record or not at all (spec 078).
+func sizes(t TB, open Opener) {
+	s := opened(t, open, Key)
+	ctx := context.Background()
+	obj := object("sbx_sized", "alice", "sized")
+	obj.Data = []byte(`{"spec":{"resources":{"cpu":"500m","memory":"256Mi","disk":"5Gi","max":{"cpu":"2","memory":"4Gi"}}}}`)
+	version := put(t, s, obj, 0)
+	held := []byte(`{"phase":"Running","resources":{"cpu":"2","memory":"768Mi","disk":"5Gi"},` +
+		`"usage":{"memory":251658240,"readAt":"2026-10-11T09:30:00Z"},"moves":1,` +
+		`"conditions":[{"type":"MemoryAtCeiling","status":"False","reason":"BelowCeiling"}]}`)
+	record := []byte(`{"data":{"resource":"memory","from":"256Mi","to":"768Mi","reason":"oom","moved":true}}`)
+	with(t, s, func(tx store.Tx) error {
+		if err := tx.Desired().PutStatus(ctx, store.KindSandbox, "sbx_sized", held); err != nil {
+			return err
+		}
+		_, err := tx.Journal().Append(ctx, store.Event{ObjectID: "sbx_sized", Type: "sandbox.resized", Payload: record})
+		return err
+	})
+	got := get(t, s, "sbx_sized")
+	sameJSON(t, got.Data, obj.Data, "the manifest with its ceiling")
+	sameJSON(t, got.Status, held, "the status with the size, the reading and the moves")
+	if got.Version != version {
+		t.Errorf("a change of size moved the version from %d to %d", version, got.Version)
+	}
+	with(t, s, func(tx store.Tx) error {
+		rows, _, err := tx.Journal().ByObject(ctx, "sbx_sized", store.Page{})
+		if err != nil {
+			return err
+		}
+		if len(rows) != 1 || rows[0].Type != "sandbox.resized" {
+			t.Errorf("the journal of the sandbox holds %d rows, want the one resize", len(rows))
+			return nil
+		}
+		sameJSON(t, rows[0].Payload, record, "the record of the change of size")
+		return nil
+	})
+	// A change whose record cannot be appended writes no size either.
+	larger := []byte(`{"phase":"Running","resources":{"cpu":"2","memory":"1280Mi","disk":"5Gi"},"moves":1}`)
+	failure := errors.New("the record was not appended")
+	fails(t, s, failure, "a change of size whose record failed", func(tx store.Tx) error {
+		if err := tx.Desired().PutStatus(ctx, store.KindSandbox, "sbx_sized", larger); err != nil {
+			return err
+		}
+		return failure
+	})
+	sameJSON(t, get(t, s, "sbx_sized").Status, held, "the status after a change of size that did not commit")
 }
 
 // transactions: everything inside one commits together or not at all.
