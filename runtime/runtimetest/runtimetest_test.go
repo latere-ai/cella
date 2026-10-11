@@ -223,6 +223,25 @@ func (d staleTokenLiar) Update(ctx context.Context, id string, c runtime.Change)
 	return d.Driver.Update(ctx, id, c)
 }
 
+// sizeLiar declares that it sizes a sandbox's memory inside a ceiling over a
+// driver that changes no size at all.
+type sizeLiar struct{ *native.Driver }
+
+func (sizeLiar) Capabilities() runtime.Capabilities {
+	c := runtime.Capabilities{Files: true}
+	c.Autosize.Memory = true
+	return c
+}
+
+// sizeDropper declares no way to change a size and accepts one all the same,
+// dropping it: the sandbox goes on at the size it had and nothing says so.
+type sizeDropper struct{ *native.Driver }
+
+func (d sizeDropper) Update(ctx context.Context, id string, c runtime.Change) error {
+	c.Resources = nil
+	return d.Driver.Update(ctx, id, c)
+}
+
 // isolationLiar reports a class outside the four the contract defines.
 type isolationLiar struct{ *native.Driver }
 
@@ -290,6 +309,18 @@ func TestConformanceCatchesAFalseCapability(t *testing.T) {
 			kase:  "FilesWriteBound",
 			wrap:  func(d *native.Driver) runtime.Driver { return unstagedWriter{d} },
 			wants: "a refused write left",
+		},
+		{
+			name:  "ASizeDeclaredAndRefused",
+			kase:  "SizeChangeIsHonoredOrRefused",
+			wrap:  func(d *native.Driver) runtime.Driver { return sizeLiar{d} },
+			wants: "Update with a size the driver declares it changes",
+		},
+		{
+			name:  "ASizeAcceptedAndDropped",
+			kase:  "SizeChangeIsHonoredOrRefused",
+			wrap:  func(d *native.Driver) runtime.Driver { return sizeDropper{d} },
+			wants: "a change of size on a driver that declares none",
 		},
 		{
 			name:  "IsolationOutsideTheFourClasses",

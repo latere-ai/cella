@@ -125,11 +125,14 @@ func (d *Driver) Capabilities() runtime.Capabilities {
 }
 
 // carried is a worker's capabilities less the ones whose operation has no
-// frame on the worker stream: a dial and the desktop's screen and input. A
-// worker whose own driver serves them declares them, and declaring them here
-// would pass a gate for a request this driver has no way to send.
+// frame on the worker stream: a dial, the desktop's screen and input, and
+// the readings and the change of size that sizing a sandbox inside a ceiling
+// is made of. A worker whose own driver serves them declares them, and
+// declaring them here would pass a gate for a request this driver has no way
+// to send.
 func carried(c runtime.Capabilities) runtime.Capabilities {
 	c.Dial, c.Display, c.Input = false, false, false
+	c.Autosize = runtime.Capabilities{}.Autosize
 	return c
 }
 
@@ -205,6 +208,12 @@ func (d *Driver) Touch(ctx context.Context, id string) error {
 
 func (d *Driver) Update(ctx context.Context, id string, change runtime.Change) error {
 	if _, err := change.Adoption(); err != nil {
+		return err
+	}
+	// No frame of the worker stream reports the size a sandbox holds, so a
+	// change of size is refused here rather than sent where its result
+	// could not be read back.
+	if err := change.FixedSize(); err != nil {
 		return err
 	}
 	_, err := d.call(ctx, OpUpdate, Request{ID: id, Change: &change})

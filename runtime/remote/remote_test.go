@@ -347,3 +347,15 @@ func TestObservedStateAnswersWithoutTheWorker(t *testing.T) {
 	}
 	t.Fatalf("the worker never reported the sandbox it created")
 }
+
+// TestTheEnvironmentSizesWhatEveryWorkerSizes: the autosize flags of an
+// environment are the ones every worker on it declares, like every other
+// capability, so the day a frame carries a size no flag is read from one
+// worker and sent to another.
+func TestTheEnvironmentSizesWhatEveryWorkerSizes(t *testing.T) {
+	a := driver.Capabilities{Files: true, Autosize: v1.Autosize{CPU: true, Memory: true}}
+	b := driver.Capabilities{Files: true, Autosize: v1.Autosize{CPU: true, Disk: true}}
+	if got := remote.Intersect(a, b).Autosize; got != (v1.Autosize{CPU: true}) {
+		t.Fatalf("the intersection sizes %+v, want cpu alone", got)
+	}
+}

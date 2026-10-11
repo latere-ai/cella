@@ -817,6 +817,7 @@ func intersect(a, b runtime.Capabilities) runtime.Capabilities {
 		Display: a.Display && b.Display, Input: a.Input && b.Input,
 		Resize: a.Resize && b.Resize, Pool: a.Pool && b.Pool,
 		Files: a.Files && b.Files, Detach: a.Detach && b.Detach,
+		Autosize: a.Autosize.And(b.Autosize),
 	}
 	for _, mode := range a.Egress {
 		if slices.Contains(b.Egress, mode) {

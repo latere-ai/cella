@@ -11,6 +11,7 @@ import (
 	"sync"
 	"testing"
 
+	v1 "latere.ai/x/cella/manifest/v1"
 	driver "latere.ai/x/cella/runtime"
 	"latere.ai/x/cella/runtime/remote"
 )
@@ -357,7 +358,8 @@ type runtimeNop struct{ driver.Driver }
 func TestTheSeamDeclaresWhatItCarries(t *testing.T) {
 	transport := &stubTransport{registered: true, registration: remote.Registration{
 		Driver: "native", Isolation: driver.IsolationNone,
-		Capabilities: driver.Capabilities{Files: true, Attach: true, Dial: true, Display: true, Input: true, Pool: true},
+		Capabilities: driver.Capabilities{Files: true, Attach: true, Dial: true, Display: true, Input: true, Pool: true,
+			Autosize: v1.Autosize{CPU: true, Memory: true, Disk: true}},
 	}}
 	d, err := remote.New(remote.Options{Environment: "env_a", Transport: transport})
 	if err != nil {
@@ -367,7 +369,16 @@ func TestTheSeamDeclaresWhatItCarries(t *testing.T) {
 	if got.Dial || got.Display || got.Input {
 		t.Fatalf("the remote driver declares %+v, which no frame carries", got)
 	}
+	if got.Autosize != (v1.Autosize{}) {
+		t.Fatalf("the remote driver declares the autosize flags %+v, and no frame carries a reading or a size", got.Autosize)
+	}
 	if !got.Files || !got.Attach || !got.Pool {
 		t.Fatalf("the remote driver dropped what it carries: %+v", got)
+	}
+	// A change of size is refused before it is sent, since what the worker
+	// made of it could not be read back.
+	err = d.Update(t.Context(), "sbx_a", driver.Change{Resources: &driver.Resources{Memory: "2Gi"}})
+	if !errors.Is(err, driver.ErrUnsupported) {
+		t.Fatalf("a change of size across the seam: got %v, want ErrUnsupported", err)
 	}
 }

@@ -71,6 +71,7 @@ var cases = []caseDef{
 	{"CreateInspectDelete", createInspectDelete},
 	{"StopStartKeepsTheWorkspace", stopStartKeepsTheWorkspace},
 	{"UpdateEveryMutableField", updateEveryMutableField},
+	{"SizeChangeIsHonoredOrRefused", sizeChangeIsHonoredOrRefused},
 	{"ListReadsIdentityBack", listReadsIdentityBack},
 	{"FilterSelectsOnLabels", filterSelectsOnLabels},
 	{"ExecStreamsAndExits", execStreamsAndExits},
@@ -133,7 +134,11 @@ func declaredWithoutCase(c runtime.Capabilities) []string {
 	for _, f := range []struct {
 		name string
 		on   bool
-	}{{"Egress", len(c.Egress) > 0}, {"Mesh", c.Mesh}, {"Ingress", c.Ingress}, {"Volumes", c.Volumes}, {"Snapshots", c.Snapshots}, {"Resize", c.Resize}} {
+	}{{"Egress", len(c.Egress) > 0}, {"Mesh", c.Mesh}, {"Ingress", c.Ingress}, {"Volumes", c.Volumes}, {"Snapshots", c.Snapshots}, {"Resize", c.Resize},
+		// A change of size has its case; what grows a sandbox toward its
+		// ceiling is the controller's reading of the driver, which no call
+		// of this interface makes on its own.
+		{"Autosize", c.Autosize != (runtime.Capabilities{}).Autosize}} {
 		if f.on {
 			out = append(out, f.name)
 		}

@@ -67,6 +67,64 @@ type Resources struct {
 	CPU    string `json:"cpu,omitempty"`
 	Memory string `json:"memory,omitempty"`
 	Disk   string `json:"disk,omitempty"`
+	// CPULimit is the most CPU the sandbox may use, where that is more than
+	// the CPU it is granted: the workload is guaranteed CPU and runs up to
+	// CPULimit when the substrate has it idle (spec 078). Empty is CPU, a
+	// sandbox whose limit is what it was granted.
+	CPULimit string `json:"cpuLimit,omitempty"`
+}
+
+// IsZero reports a size that names nothing, which is what a driver that
+// reports no size leaves in a State.
+func (r Resources) IsZero() bool { return r == Resources{} }
+
+// The reasons a size asked for is not the size held, as State.Resize carries
+// them. InProgress is a change the substrate has taken and not yet applied;
+// Deferred is one it cannot apply now and may later; Infeasible is one it
+// can never apply where the sandbox runs; AtRestart is one only a restart
+// of the sandbox applies, because the substrate changes no running sandbox
+// or refused to change this one.
+const (
+	ResizeInProgress = "InProgress"
+	ResizeDeferred   = "Deferred"
+	ResizeInfeasible = "Infeasible"
+	ResizeAtRestart  = "Restart"
+)
+
+// Resize is a size a sandbox was asked to hold and does not hold yet: the
+// sizes, why not, and the substrate's own sentence about it.
+type Resize struct {
+	Resources Resources `json:"resources"`
+	Reason    string    `json:"reason"`
+	Message   string    `json:"message,omitempty"`
+}
+
+// MemoryUsage is one sample of what a sandbox's workload holds in memory:
+// the working set in bytes and the instant the substrate took the sample.
+// Two reads that return one ReadAt returned one sample.
+type MemoryUsage struct {
+	WorkingSet int64
+	ReadAt     time.Time
+}
+
+// MemoryKills is how many processes of a sandbox's workload the kernel has
+// killed for memory since that workload instance started. Instance names the
+// instance the count belongs to, and changes when the workload is started
+// again, so a caller never compares the counts of two instances.
+type MemoryKills struct {
+	Count    int64
+	Instance string
+}
+
+// MemoryReader is the reading half of memory autosize, implemented by a
+// driver that can declare Capabilities.Autosize.Memory (spec 078). Neither
+// method stamps activity: a reading is the control plane's own and must not
+// hold an idle sandbox open. Both answer ErrNotRunning for a sandbox with
+// no running workload and ErrUnsupported where the substrate serves no
+// such reading.
+type MemoryReader interface {
+	MemoryUsage(ctx context.Context, id string) (MemoryUsage, error)
+	MemoryKills(ctx context.Context, id string) (MemoryKills, error)
 }
 
 // Workspace is where the sandbox's own files live inside it.
@@ -226,6 +284,11 @@ type State struct {
 	// that spawned it, both as the driver stamped them at create (spec 022).
 	MeshID string `json:"meshID,omitempty"`
 	Parent string `json:"parent,omitempty"`
+	// Resources is the size the sandbox holds now, as the substrate reports
+	// it, and Resize a size it was asked to hold and does not yet (spec
+	// 078). A driver that reports no size leaves both empty.
+	Resources Resources `json:"resources,omitzero"`
+	Resize    *Resize   `json:"resize,omitempty"`
 }
 type Filter struct {
 	Owner, Phase string
@@ -247,6 +310,14 @@ type Change struct {
 	// expires, without restarting the workload. Empty leaves the projection
 	// as it is.
 	Token []byte
+	// Resources is the size the sandbox is to hold: its CPU, its CPU limit
+	// and its memory, all three as they are to stand after the change. A
+	// driver applies it in place where its substrate changes a running
+	// sandbox and records it for the next start otherwise, and reports what
+	// is held and what is still outstanding in State. The workspace is not
+	// resized by it: a Disk that differs from the sandbox's own is
+	// ErrUnsupported, and so is the field on a driver that changes no size.
+	Resources *Resources
 	// Adopt turns a prewarmed entry into the caller's sandbox in one
 	// exclusive act. It is exclusive of every other field of this type:
 	// adoption writes the whole record and one call is one act.
@@ -276,10 +347,20 @@ func (c Change) Adoption() (*Adoption, error) {
 	if c.Adopt == nil {
 		return nil, nil
 	}
-	if c.Labels != nil || c.Env != nil || c.Lifecycle != nil || len(c.Token) > 0 {
+	if c.Labels != nil || c.Env != nil || c.Lifecycle != nil || len(c.Token) > 0 || c.Resources != nil {
 		return nil, fmt.Errorf("%w: Adopt is exclusive of every other change", ErrInvalid)
 	}
 	return c.Adopt, nil
+}
+
+// FixedSize refuses a change of size, with the sentence every driver that
+// changes none answers. Such a driver calls it first, so a size is never
+// accepted and dropped.
+func (c Change) FixedSize() error {
+	if c.Resources != nil {
+		return fmt.Errorf("%w: this driver changes no sandbox's size after create", ErrUnsupported)
+	}
+	return nil
 }
 
 // Selects reports whether one state passes the filter. Every driver narrows

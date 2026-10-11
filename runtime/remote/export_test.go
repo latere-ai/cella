@@ -60,3 +60,6 @@ func (h *Hub) links(environmentID string) []*Link {
 	}
 	return links
 }
+
+// Intersect is what two workers' declarations both provide.
+var Intersect = intersect

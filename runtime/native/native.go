@@ -380,6 +380,9 @@ func (d *Driver) Update(ctx context.Context, id string, c driver.Change) error {
 	if adoption != nil {
 		return d.adopt(ctx, id, *adoption)
 	}
+	if err := c.FixedSize(); err != nil {
+		return err
+	}
 	if c.Lifecycle != nil && (c.Lifecycle.TTL < 0 || c.Lifecycle.AutoStop < 0 || c.Lifecycle.AutoDelete < 0) {
 		return driver.ErrInvalid
 	}
