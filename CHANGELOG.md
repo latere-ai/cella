@@ -19,8 +19,8 @@ refused before it is pushed.
   are gone as after a stop and a start. It is one start: a process that
   ends again leaves the sandbox `Failed` again. A `Failed` sandbox that
   never ran is still refused with `phase_conflict`, now with the reason
-  in `details.detail`: `CreateFailed`, `NoCapacity`, `StartDeadline` and
-  `RecoveryExhausted`. **A client that relied on `phase_conflict` to tell
+  in `details.detail`: `CreateFailed`, `NoCapacity`, `StartDeadline`,
+  `RecoveryExhausted` and `VolumeMissing`. **A client that relied on `phase_conflict` to tell
   that a failed sandbox was beyond recovery, and deleted it, should start
   it instead**; deleting is what loses the files. The lifecycle rules are
   as they were: `ttl` deletes a failed sandbox, and `autoDelete` and
