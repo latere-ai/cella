@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -56,6 +57,11 @@ type harness struct {
 	// status is the kubelet's part, applied to every Pod the fake accepts. A
 	// test that wants a Pod that never starts replaces it.
 	status func(*corev1.Pod)
+	// hold, when set, runs each time the driver reads its clock, outside
+	// every lock of the client double. A start reads the clock after the
+	// previous Pod is gone and before the next is made, so a test that sets
+	// it holds that instant open.
+	hold atomic.Pointer[func()]
 }
 
 // newHarness builds a driver whose Pods come up ready, whose access reviews
@@ -85,7 +91,13 @@ func newHarnessWith(t *testing.T, configure func(*Options), objects ...kruntime.
 		h.status(pod)
 		return false, pod, nil
 	})
-	opts := Options{Namespace: namespace, Client: cs, Now: h.clock.now, ReadyTimeout: time.Second}
+	now := func() time.Time {
+		if hold := h.hold.Load(); hold != nil {
+			(*hold)()
+		}
+		return h.clock.now()
+	}
+	opts := Options{Namespace: namespace, Client: cs, Now: now, ReadyTimeout: time.Second}
 	if configure != nil {
 		configure(&opts)
 	}

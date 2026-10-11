@@ -7,6 +7,7 @@ import (
 	"cmp"
 	"context"
 	"io"
+	"maps"
 	"os"
 	"slices"
 	"strings"
@@ -331,5 +332,109 @@ func TestClusterAChildKilledForMemoryGrowsTheSandbox(t *testing.T) {
 	}
 	if got := c.stored().Status.Resources.Memory; got != "768Mi" {
 		t.Fatalf("a command that fits raised memory again, to %s", got)
+	}
+}
+
+// TestClusterAKilledSandboxNeverReadsFailed: a client's command allocates
+// past the limit of a sandbox with room under its ceiling while other
+// clients read the sandbox continuously, the stored object and the driver's
+// state over it as the API's read does. Whatever the node does with the
+// kill, no read answers Failed, Stopped or not found. Where the node kills
+// the whole container, the readers see Running, then Starting with reason
+// MemoryRaised, then Running, the workspace keeps its file, and what a
+// restart always costs is gone: the process the client left in the
+// background and the file it wrote outside the workspace. Where the node
+// kills one process, the sandbox reads Running throughout and loses nothing.
+func TestClusterAKilledSandboxNeverReadsFailed(t *testing.T) {
+	c := onCluster(t, "never-failed", "128Mi", v1.ResourceMax{Memory: "1Gi"}, nil)
+	if out, code, err := c.run("echo kept > /workspace/marker && echo scratch > /tmp/scratch && (tail -f /dev/null >/dev/null 2>&1 &) && sleep 1 && pidof tail"); err != nil || code != 0 || out == "" {
+		t.Fatalf("preparing the sandbox: %q, %d, %v", out, code, err)
+	}
+	group, _, err := c.run("cat /sys/fs/cgroup/memory.oom.group 2>/dev/null || echo 0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(3 * clusterReading)
+
+	seen := &watched{seen: map[string]int{}}
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			obj, err := c.control.Get(context.Background(), c.id, "alice")
+			if err != nil {
+				seen.saw("not found")
+				continue
+			}
+			fresh, err := c.control.Refresh(context.Background(), obj)
+			if err != nil {
+				seen.saw("unread: " + err.Error())
+				continue
+			}
+			what := fresh.Status.Phase
+			if fresh.Status.Reason == v1.ReasonMemoryRaised {
+				what += " " + fresh.Status.Reason
+			}
+			seen.saw(what)
+			time.Sleep(10 * time.Millisecond)
+		}
+	}()
+	seen.more(t, 20)
+	started := time.Now()
+	_, code, runErr := c.run("dd if=/dev/zero of=/dev/null bs=200M count=1")
+	if runErr == nil && code == 0 {
+		t.Fatal("a command that allocates past the limit succeeded; the limit is not enforced on this node")
+	}
+	obj := c.await("memory raised after the kill", func(obj v1.Sandbox) bool {
+		return obj.Status.Resources.Memory == "768Mi" && obj.Status.Phase == driver.Running
+	})
+	back := time.Since(started)
+	seen.more(t, 20)
+	close(stop)
+	<-done
+	seen.mu.Lock()
+	saw := map[string]int{}
+	maps.Copy(saw, seen.seen)
+	seen.mu.Unlock()
+	t.Logf("memory.oom.group=%s; the command ended %d, %v; running again at 768Mi %s after it started; readers saw %v",
+		group, code, runErr, back.Round(time.Millisecond), saw)
+	starting := "Starting " + v1.ReasonMemoryRaised
+	for what, n := range saw {
+		if what != driver.Running && what != starting {
+			t.Errorf("readers saw %q %d times; a sandbox being given more memory reads Running or Starting only", what, n)
+		}
+	}
+	// The workspace is kept either way.
+	if out, code, err := c.run("cat /workspace/marker"); err != nil || code != 0 || out != "kept" {
+		t.Fatalf("the workspace after the kill holds %q (%d, %v), want the file written before it", out, code, err)
+	}
+	scratch, _, err := c.run("cat /tmp/scratch 2>/dev/null || echo gone")
+	if err != nil {
+		t.Fatal(err)
+	}
+	background, _, err := c.run("pidof tail || echo gone")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if group == "1" {
+		if obj.Status.Moves != 1 || saw[starting] == 0 {
+			t.Fatalf("on a node that kills the whole container: %d moves, readers saw %v, want one restart read as Starting", obj.Status.Moves, saw)
+		}
+		if scratch != "gone" || background != "gone" {
+			t.Errorf("after the restart the file outside the workspace is %q and the background process %q, want both gone", scratch, background)
+		}
+		return
+	}
+	if obj.Status.Moves != 0 || saw[starting] != 0 {
+		t.Fatalf("on a node that kills one process: %d moves, readers saw %v, want the sandbox Running throughout", obj.Status.Moves, saw)
+	}
+	if scratch != "scratch" || background == "gone" {
+		t.Errorf("after a raise in place the file outside the workspace is %q and the background process %q, want both still there", scratch, background)
 	}
 }

@@ -536,3 +536,180 @@ func TestAStartAndARecoveryTakeTheSizeHeld(t *testing.T) {
 		t.Fatalf("status.resources.memory after the start is %s", got)
 	}
 }
+
+// watched is what readers of one sandbox saw while a test ran: each phase,
+// with its reason, counted.
+type watched struct {
+	mu   sync.Mutex
+	seen map[string]int
+	n    int
+}
+
+func (w *watched) saw(what string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.seen[what]++
+	w.n++
+}
+
+func (w *watched) reads() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.n
+}
+
+// more blocks until the readers have read this many more times, which is how
+// a test holds a window open until every reader has crossed it.
+func (w *watched) more(t *testing.T, n int) {
+	t.Helper()
+	target := w.reads() + n
+	deadline := time.Now().Add(20 * time.Second)
+	for w.reads() < target {
+		if time.Now().After(deadline) {
+			t.Fatal("the readers stopped reading")
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// readers reads the sandbox the way the API's GET does, the stored object
+// and then the driver's state over it, from several goroutines until the
+// returned stop is called.
+func (s *sized) readers() (*watched, func()) {
+	w := &watched{seen: map[string]int{}}
+	stop := make(chan struct{})
+	var group sync.WaitGroup
+	for range 4 {
+		group.Go(func() {
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				obj, err := s.control.Get(context.Background(), s.id, "alice")
+				if err != nil {
+					w.saw("not found")
+					continue
+				}
+				fresh, err := s.control.Refresh(context.Background(), obj)
+				if err != nil {
+					w.saw("unread: " + err.Error())
+					continue
+				}
+				what := fresh.Status.Phase
+				if fresh.Status.Reason != "" {
+					what += " " + fresh.Status.Reason
+				}
+				w.saw(what)
+			}
+		})
+	}
+	return w, func() { close(stop); group.Wait() }
+}
+
+// runningOrStarting fails the test where a reader saw anything but Running
+// and Starting with reason MemoryRaised, or never saw the second.
+func (w *watched) runningOrStarting(t *testing.T) {
+	t.Helper()
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	starting := "Starting " + v1.ReasonMemoryRaised
+	for what, n := range w.seen {
+		if what != driver.Running && what != starting {
+			t.Errorf("readers saw %q %d times; a sandbox the control plane is starting again reads Running or Starting only", what, n)
+		}
+	}
+	if w.seen[starting] == 0 || w.seen[driver.Running] == 0 {
+		t.Fatalf("readers saw %v, want both Running and Starting", w.seen)
+	}
+}
+
+// holdWithoutAPod makes the driver wait, each time it reads its clock while
+// the cluster holds no Pod of the sandbox, until the readers have read the
+// sandbox many more times. A stop stamps its instant after the Pod is gone
+// and a start reads its own before the next Pod is made, so this is the time
+// between the old Pod's removal and the new one, held open.
+func (s *sized) holdWithoutAPod(w *watched) {
+	hold := func() {
+		if _, err := s.cs.Tracker().Get(corev1.SchemeGroupVersion.WithResource("pods"), namespace, objectName(s.id)); err == nil {
+			return
+		}
+		w.more(s.t, 200)
+	}
+	s.hold.Store(&hold)
+}
+
+// TestAKilledSandboxNeverReadsFailed: a kill that takes the container ends
+// the Pod Failed with OOMKilled, which is what the driver reports, and a
+// sandbox with room under its ceiling is nonetheless never read as Failed.
+// Readers that read it continuously, from the kill, through the time nothing
+// has read it for its size, through the removal of the ended Pod and the
+// time the cluster holds no Pod of it, to the new Pod's readiness, see
+// Running and Starting with reason MemoryRaised and nothing else. The driver
+// itself still reports the kill, which is the signal the restart acts on.
+func TestAKilledSandboxNeverReadsFailed(t *testing.T) {
+	s := sizedSandbox(t, v1.ResourceMax{Memory: "768Mi"})
+	w, stop := s.readers()
+	w.more(t, 50)
+	pod := s.podOf(t, s.id)
+	pod.Status.Phase = corev1.PodFailed
+	pod.Status.ContainerStatuses = []corev1.ContainerStatus{{
+		Name: Container, State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
+			ExitCode: 137, Reason: "OOMKilled", FinishedAt: metav1.Now(),
+		}},
+	}}
+	if _, err := s.cs.CoreV1().Pods(namespace).Update(t.Context(), pod, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	// The driver's own account is the kill; no reader is given it.
+	if state, err := s.Inspect(t.Context(), s.id); err != nil || state.Phase != phaseFailed || state.Reason != "OOMKilled" {
+		t.Fatalf("the driver reports %+v, %v, want the kill", state, err)
+	}
+	w.more(t, 200)
+	s.holdWithoutAPod(w)
+	s.read()
+	s.await("the restart", func(obj v1.Sandbox) bool { return obj.Status.Moves == 1 && obj.Status.Phase == driver.Running })
+	w.more(t, 50)
+	stop()
+	w.runningOrStarting(t)
+	if got := s.podOf(t, s.id).Spec.Containers[0].Resources.Limits.Memory().String(); got != "768Mi" {
+		t.Fatalf("the restarted Pod's memory limit is %s", got)
+	}
+
+	// At its ceiling the kill is terminal, and readers are told so.
+	killed := s.podOf(t, s.id)
+	killed.Status.Phase = corev1.PodFailed
+	killed.Status.ContainerStatuses = pod.Status.ContainerStatuses
+	if _, err := s.cs.CoreV1().Pods(namespace).Update(t.Context(), killed, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	obj, err := s.control.Refresh(t.Context(), s.stored())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if obj.Status.Phase != phaseFailed || obj.Status.Reason != "OOMKilled" {
+		t.Fatalf("at its ceiling the killed sandbox reads %s %q, want Failed OOMKilled", obj.Status.Phase, obj.Status.Reason)
+	}
+}
+
+// TestAMovedSandboxNeverReadsStopped: a sandbox moved because the kubelet
+// deferred a raise has its Pod deleted and made again by the control plane,
+// and readers that read it continuously across the deletion, the time the
+// cluster holds no Pod of it and the new Pod's start see Running and
+// Starting with reason MemoryRaised, never Stopping or Stopped.
+func TestAMovedSandboxNeverReadsStopped(t *testing.T) {
+	s := sizedSandbox(t, v1.ResourceMax{Memory: "4Gi"})
+	s.kubeletDefers(corev1.PodReasonDeferred, "Node didn't have enough capacity: memory")
+	w, stop := s.readers()
+	w.more(t, 50)
+	s.holdWithoutAPod(w)
+	s.sample(240 << 20)
+	s.read()
+	s.sample(245 << 20)
+	s.read()
+	s.await("the move", func(obj v1.Sandbox) bool { return obj.Status.Moves == 1 && obj.Status.Phase == driver.Running })
+	w.more(t, 50)
+	stop()
+	w.runningOrStarting(t)
+}
