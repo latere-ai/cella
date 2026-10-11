@@ -60,9 +60,9 @@ func EgressModeRank(m EgressMode) int {
 
 // The condition types a Sandbox's status carries. The driver owns Ready,
 // WorkspaceReady, EgressEnforced, VolumesAttached and DisplayReady, and the
-// controller owns Scheduled and MemoryAtCeiling; each says what the
-// environment actually does, never what the manifest asked for. Observed is
-// the list's, written on one answer and never stored.
+// controller owns Scheduled, MemoryAtCeiling and MemoryUnplaced; each says
+// what the environment actually does, never what the manifest asked for.
+// Observed is the list's, written on one answer and never stored.
 const (
 	ConditionReady           = "Ready"
 	ConditionWorkspaceReady  = "WorkspaceReady"
@@ -76,6 +76,13 @@ const (
 	// is the controller's, written when a reading crosses the line either
 	// way, and absent for a sandbox with no memory ceiling (spec 078).
 	ConditionMemoryAtCeiling = "MemoryAtCeiling"
+	// ConditionMemoryUnplaced True says the sandbox needed more memory,
+	// inside its ceiling, and no node could hold the larger size, which its
+	// message names. The sandbox goes on at the size it holds. It is the
+	// controller's, written when a move to the larger size is undone and
+	// set False when a later raise is given, and absent for a sandbox no
+	// raise ever failed for (spec 078).
+	ConditionMemoryUnplaced = "MemoryUnplaced"
 	// ConditionObserved False on a row of a list page says the environment's
 	// driver did not answer the read that page made of this sandbox, so the
 	// phase, the conditions and the instants are the ones the control plane
@@ -127,4 +134,18 @@ const (
 	// Its workspace is kept and it reads Running again without any act of a
 	// client, so a client that finds it waits (spec 078).
 	ReasonMemoryRaised = "MemoryRaised"
+	// ReasonMemoryNotRaised is status.reason of a sandbox that reads
+	// Starting because the control plane is starting it again at the size
+	// it holds: its workload was killed for memory and no node had room for
+	// a larger size a moment ago. Its workspace is kept and it reads
+	// Running again without any act of a client (spec 078).
+	ReasonMemoryNotRaised = "MemoryNotRaised"
+	// ReasonNoRoom and ReasonRestartsExhausted are MemoryUnplaced true. No
+	// node had room for the size asked, and the sandbox is kept running at
+	// the size it holds; or it was then killed for memory as often as it
+	// is started again there, and is left Failed until a client starts or
+	// deletes it. MemoryUnplaced false carries ReasonMemoryRaised: a later
+	// raise was given.
+	ReasonNoRoom            = "NoRoom"
+	ReasonRestartsExhausted = "RestartsExhausted"
 )
