@@ -252,16 +252,14 @@ What a restart costs is what any restart costs:
 `Failed` means what it always meant: nothing will start the sandbox again
 until you act. A sandbox killed for memory **at** its ceiling reads
 `Failed` with reason `OOMKilled`, carries the `MemoryAtCeiling` condition,
-and has `sandbox.at_ceiling` in its events. Its workspace is still there.
-A start of a failed sandbox is refused with `phase_conflict`, so the acts
-open to you are these:
+and has `sandbox.at_ceiling` in its events. Its workspace is still there,
+and either of two acts brings it back with every file:
 
+- [Start it](#recovering-a-failed-sandbox). It runs again at the size it
+  holds, which is its ceiling.
 - Raise `spec.resources.max.memory` with an update. The sandbox has room
   again, reads `Starting` with reason `MemoryRaised` from that update on,
-  and is started at the next size with its workspace.
-- Copy what you need out of the workspace, which the file and archive
-  routes serve for a sandbox that is not running where its environment
-  declares `files`, and then delete the sandbox.
+  and is started at the next size.
 
 | Refusal | When |
 |---|---|
@@ -286,6 +284,70 @@ A spawned child's ceilings may not exceed its parent's. An environment's
 warm pool keeps sandboxes of one fixed size, so a manifest with a ceiling
 is created fresh and takes no pool entry.
 
+### Recovering a failed sandbox
+
+A sandbox is `Failed` when its main process ended in failure: it exited
+with a non-zero code, the kernel killed it for memory, or the runtime ended
+it. `status.reason` is the runtime's word for it, `Exited` on the native
+runtime, `Error` or `OOMKilled` on Kubernetes, and `status.exitCode` is the
+code where there is one. **The workspace of such a sandbox is intact.**
+Nothing was lost when the process ended, and nothing is lost while the
+sandbox stays `Failed`.
+
+Start it:
+
+```sh
+curl -s -X POST -H "Authorization: Bearer $TOKEN" "$CELLA/v1/sandboxes/$SANDBOX/start"
+```
+
+or `cella start <name>`, or `StartSandbox` of the [Go client](client.md).
+
+The start runs the sandbox's own command again, from the specification it
+was created with, on the same workspace, and answers the sandbox as
+`Running` or `Starting`. What a start keeps and what it does not:
+
+| | After the start |
+|---|---|
+| the workspace | kept, every file of it |
+| processes | gone, all of them: the main process runs anew, and a server or a watcher your client had started has to be started again |
+| files outside the workspace, such as `/tmp` and anything written into the image's own directories | gone on Kubernetes, where the container is made anew; do not rely on them anywhere |
+| the sandbox's id, name, labels, secrets, boundary and size | unchanged |
+
+**Deleting a failed sandbox is what loses its files.** A client that
+replaces a sandbox when it reads `Failed` discards a workspace that a start
+would have given back. Delete a failed sandbox only when you mean to
+discard it.
+
+A start is one start. If the process ends again, the sandbox is `Failed`
+again and stays so until the next start: nothing restarts it in a loop. A
+process that fails every time it runs, because its command is wrong or
+because it needs more memory than the sandbox has, fails again after each
+start; read `status.exitCode` and the sandbox's logs before starting it a
+third time. A start counts
+against your sandbox limit as any start does, and answers `quota_exceeded`
+at it.
+
+Some failed sandboxes have nothing to start, because they never ran. A
+start of one answers `phase_conflict`, with the reason in the error's
+`details.detail`, and a new sandbox is the way forward:
+
+| `status.reason` | What happened |
+|---|---|
+| `CreateFailed` | the create could not be finished, and what it had made was removed |
+| `NoCapacity` | the environment had no room for it |
+| `StartDeadline` | it waited in a queue past its start deadline and was never placed |
+| `RecoveryExhausted` | its environment lost it and the control plane could not make it again |
+
+A sandbox with a [memory ceiling](#sizing-inside-a-ceiling) and room under
+it does not reach `Failed` when it is killed for memory: the control plane
+starts it again itself at a larger size, and it reads `Starting`
+meanwhile. A start of it then answers `phase_conflict`, because the start
+is already being made.
+
+A failed sandbox is kept until you start or delete it. Its
+`spec.lifecycle.ttl` still deletes it when it runs out; `autoDelete`,
+which counts from a stop, and `autoStop` do not apply to it.
+
 ### Status
 
 The server writes `status`; it is ignored on the way in.
@@ -295,8 +357,8 @@ The server writes `status`; it is ignored on the way in.
 | `id` | the sandbox's identifier, which never changes and addresses it in every route |
 | `owner` | the subject that created it, `<issuer>|<sub>` |
 | `environment`, `driver`, `isolation` | where it runs and the boundary that runtime provides: `container`, `process`, or `none` |
-| `phase` | `Pending`, `Queued`, `Starting`, `Running`, `Stopping`, `Stopped`, `Failed`, `Lost`, `Recovering`, or `Deleting`. `Pending`, `Queued`, `Starting` and `Recovering` are on the way to `Running` without any act of yours; `Failed` stays until you act |
-| `reason` | why it is in that phase, such as `NoCapacity`, `StartDeadline`, `Preempted`, the lifecycle rule that stopped it, `OOMKilled` on a sandbox that failed for memory, or `MemoryRaised` on one that is `Starting` because it is being [started again at a larger memory size](#what-a-client-can-rely-on) |
+| `phase` | `Pending`, `Queued`, `Starting`, `Running`, `Stopping`, `Stopped`, `Failed`, `Lost`, `Recovering`, or `Deleting`. `Pending`, `Queued`, `Starting` and `Recovering` are on the way to `Running` without any act of yours; `Failed` stays until you act, and a start [brings back](#recovering-a-failed-sandbox) one whose process ended |
+| `reason` | why it is in that phase, such as `NoCapacity`, `StartDeadline`, `Preempted`, the lifecycle rule that stopped it, the runtime's word for how a failed sandbox's process ended (`Exited`, `Error`, `OOMKilled`), or `MemoryRaised` on one that is `Starting` because it is being [started again at a larger memory size](#what-a-client-can-rely-on) |
 | `conditions` | statements with a type, a status, a reason, and a time: `Scheduled`, `EgressEnforced`, `DisplayReady`, and others. A row of a list page whose environment did not answer carries `Observed` `False`: its status is the one last recorded, not a fresh read |
 | `parent`, `root`, `mesh`, `spawn` | where it sits in a spawn tree, its mesh, and its budget with how much is used |
 | `ports` | each declared port, `listening` or `closed` |

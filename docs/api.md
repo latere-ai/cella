@@ -156,7 +156,7 @@ code in the `X-Cella-Error` trailer.
 | `PUT /v1/sandboxes/{name}` | `sandbox.create` or `sandbox.update` | apply by name: create when the name is free, update when you hold it |
 | `GET /v1/sandboxes/{id}` | `sandbox.read` | read one sandbox with its status |
 | `DELETE /v1/sandboxes/{id}` | `sandbox.delete` | delete it, and every sandbox it created, in any phase |
-| `POST /v1/sandboxes/{id}/start` | `sandbox.update` | start a stopped sandbox, unless you already run as many as your sandbox limit allows. Any phase but `Stopped` answers `phase_conflict`, a `Failed` sandbox among them |
+| `POST /v1/sandboxes/{id}/start` | `sandbox.update` | start a stopped sandbox, or a failed one whose process ended, on the workspace it had, unless you already run as many as your sandbox limit allows. Any other phase answers `phase_conflict`, and so does a failed sandbox that never ran ([recovering a failed sandbox](manifest.md#recovering-a-failed-sandbox)) |
 | `POST /v1/sandboxes/{id}/stop` | `sandbox.update` | stop a running sandbox and keep its workspace |
 
 A create also asks `environment.use` on the environment it runs on, and

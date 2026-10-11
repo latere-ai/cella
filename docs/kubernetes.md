@@ -205,7 +205,7 @@ What an out-of-memory kill does depends on the node's kubelet:
 
 | The node | A process over the limit | What the control plane does |
 |---|---|---|
-| kills the container's whole cgroup together, the kubelet's default on cgroup v2 | every process of the sandbox is killed, the Pod ends with reason `OOMKilled`, and a client's command ends with 137 or a broken stream | starts the sandbox again at the next size, at once. The sandbox reads `Starting` with reason `MemoryRaised` from the kill until it runs again, never `Failed`. At its ceiling it is `Failed`, as a sandbox with no ceiling is |
+| kills the container's whole cgroup together, the kubelet's default on cgroup v2 | every process of the sandbox is killed, the Pod ends with reason `OOMKilled`, and a client's command ends with 137 or a broken stream | starts the sandbox again at the next size, at once. The sandbox reads `Starting` with reason `MemoryRaised` from the kill until it runs again, never `Failed`. At its ceiling it is `Failed`, as a sandbox with no ceiling is, and a start brings it back on the same claim |
 | kills one process (cgroup v1, or a kubelet with `singleProcessOOMKill: true`) | that process is killed and the rest of the sandbox keeps running; a client's command ends with 137 | reads the kernel's count of kills in the sandbox's cgroup and raises the limit in place |
 
 The count is read by running `cat` on the kernel's own `memory.events` in

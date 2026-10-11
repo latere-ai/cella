@@ -110,7 +110,9 @@ value, a secret's value or a token. These are the types:
 `sandbox.started`, `sandbox.stopped`, `sandbox.failed`, `sandbox.lost` and
 `sandbox.deleted` carry a `reason`, such as `Request`, `AutoStop`,
 `CreateFailed`, `NoCapacity` or `Preempted`. A gateway substituting a
-secret's value moves its `status.lastUsedAt` and writes no record.
+secret's value moves its `status.lastUsedAt` and writes no record. A start
+of a [failed sandbox](manifest.md#recovering-a-failed-sandbox) records
+`sandbox.started`, as a start of a stopped one does.
 
 The two records of a sandbox sized inside a ceiling carry their own `data`:
 

@@ -120,7 +120,7 @@ sandbox, raw, err := c.GetSandbox(ctx, "agent-7")
 | `GetSandbox`, `GetSecret`, `GetEnvironment` | Read one object by name or id. |
 | `ListSandboxes`, `ListSecrets`, `ListEnvironments` | List with `ListOptions`: labels (`team=core`), phase, owner, environment, and a total `Limit`. The sandbox list honors every selector and the secret list labels and owner. A server before v0.7.0 ignores both on the secret list, so a program that acts on the answer, such as one that deletes a person's secrets, compares `Status.Owner` as well. The client follows the pages for you. |
 | `GetAs`, `ListAs` | The same reads in a syntax you name with an `Accept` value, such as `application/yaml`, returned as the server wrote it. |
-| `StartSandbox`, `StopSandbox` | Start a stopped sandbox or stop a running one. |
+| `StartSandbox`, `StopSandbox` | Start a stopped sandbox, or a failed one whose process ended, on the workspace it had; or stop a running one. A sandbox that reads `Failed` is [brought back by a start](manifest.md#recovering-a-failed-sandbox), and deleting it is what discards its files. |
 | `Delete(ctx, kind, ref)` | Delete an object of `client.KindSandbox`, `KindSecret` or `KindEnvironment`. |
 | `Exec(ctx, ref, req)` | Run a command and wait for it: exit code, stdout, stderr. Each output is capped at 1 MiB. |
 | `ExecSession`, `AttachSession` | A live session. Read its output and write its input; `Resize` sets the terminal window, and `Wait` returns the exit code. |
