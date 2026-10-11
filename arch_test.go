@@ -26,14 +26,15 @@ import (
 const module = "latere.ai/x/cella"
 
 // shared is what any role package may reach: the contract types, the driver
-// interface, the boundary compiler, the host-pattern grammar the contract's
-// host rule names (spec 003), and the YAML parser its decoder reads a body
-// with, each of which the manifest carries into everything that imports it.
+// interface, the boundary compiler, the sizing policy, the host-pattern
+// grammar the contract's host rule names (spec 003), and the YAML parser its
+// decoder reads a body with, each of which the manifest carries into
+// everything that imports it.
 // Every entry is itself held to this rule: a parser and a pattern matcher
 // compute over bytes, so importing one opens no connection.
 var shared = []string{
 	module + "/manifest", module + "/manifest/v1", module + "/runtime",
-	module + "/runtime/display", module + "/egress",
+	module + "/runtime/display", module + "/egress", module + "/autosize",
 	"latere.ai/x/pkg/hostmatch", "latere.ai/x/pkg/egress/placeholder",
 	"go.yaml.in/yaml/v3",
 }
@@ -54,6 +55,7 @@ var engines = map[string][]string{
 	"./runtime/podman": {module + "/runtime/internal/fileshell"},
 	"./controller":     nil,
 	"./egress":         nil, // the boundary compiler computes over the contract types
+	"./autosize":       nil, // the sizing policy computes over numbers: the standard library alone
 	// The remote driver and the worker role are the two halves of the seam
 	// of spec 021. Neither opens a connection of its own: the driver holds a
 	// transport its caller supplies, and the worker's own socket is the
