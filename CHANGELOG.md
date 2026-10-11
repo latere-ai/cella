@@ -6,6 +6,73 @@ refused before it is pushed.
 
 ## Unreleased
 
+- Added: a manifest may name a ceiling per resource in
+  `spec.resources.max`, as `{"cpu": "2", "memory": "6Gi"}`. The sandbox
+  starts at `spec.resources` and is sized inside the ceiling: its CPU
+  limit is `max.cpu` while its request stays the fraction of
+  `resources.cpu` it was, so it bursts into idle CPU and reserves nothing
+  more; its memory is raised one step at a time, never past `max.memory`,
+  when its workload uses 85% or more of what it has at 2 readings in a
+  row or the kernel kills one of its processes for memory. A raise is
+  applied in place where the node has room, and otherwise by restarting
+  the sandbox on a node that has it once no command, terminal, port
+  connection or file transfer is open in it; the workspace is kept. A
+  manifest with no `max` resolves, renders and runs as it did. See
+  `docs/manifest.md`, "Sizing inside a ceiling".
+- Added: `capabilities.autosize`, an object of three flags, `cpu`,
+  `memory` and `disk`, on every environment's `status.capabilities` and in
+  the environment an admission request carries. A ceiling on a resource
+  whose flag is `false` is refused with `capability_unsupported` at
+  `spec.resources.max.<resource>`; one below the amount it bounds is
+  `invalid_field`, and one above the server's own ceiling is
+  `ceiling_exceeded`. An admission endpoint may set a ceiling, and reads
+  the flags first: the Kubernetes runtime declares `cpu` always, `memory`
+  on a cluster that serves `pods/resize` (Kubernetes 1.33 or newer) and
+  the metrics API, and `disk` not yet; no other runtime declares any.
+- Added: a sandbox with a ceiling carries `status.resources`, the size it
+  holds now; `status.usage`, the last reading of its working set,
+  `{"memory": <bytes>, "readAt": ...}`; `status.moves`, how often a raise
+  restarted it; and the `MemoryAtCeiling` condition. Two event types
+  record it: `sandbox.resized` with `{resource, from, to, reason, moved}`,
+  where `reason` is `usage`, `oom` or `update`, and `sandbox.at_ceiling`
+  with `{resource, used, max}`, written once each time a sandbox at its
+  memory ceiling reaches 95% of it or loses a process to the limit.
+- Added: on Kubernetes, a sandbox that ends `Failed` with `OOMKilled` and
+  has room under `max.memory` is started again at the next size instead
+  of staying failed. A command that ends with exit code 137, or whose
+  stream breaks, has its sandbox read before the exit is returned, so the
+  raise is already asked for when the client sees the exit, and
+  `sandbox.resized` with `reason: oom` says why. On a node whose kubelet
+  kills one process rather than the whole container, the kill is found
+  from the kernel's own count in the sandbox's cgroup, read with `cat`
+  through the exec path, and memory is raised in place.
+- Added: `CELLA_AUTOSIZE_INTERVAL`, default `1m`, how often a sandbox
+  with a ceiling is read. The loop runs on the writer under the
+  `autosize` lease, which `cella_lease_held` now reports.
+- Changed: the base Role in `deploy/base/rbac.yaml` grants `patch` on
+  `pods/resize` and `get` on `pods` of `metrics.k8s.io`. Both are
+  optional: `cellad serve` starts without them, logs which is missing,
+  and sizes no sandbox's memory. Add the two rules to a Role you wrote
+  yourself, and run a metrics-server, to turn memory sizing on.
+- Changed: an environment's declared memory capacity counts a sandbox at
+  the memory it holds now, which for one raised inside its ceiling is
+  more than `spec.resources.memory`. A pool takes no ceiling:
+  `spec.pool.resources.max` on an environment is `invalid_field`, and a
+  manifest with a ceiling is created fresh rather than adopted from the
+  pool.
+- Changed: in the `runtime` package, `Change` gains `Resources`, the size
+  a sandbox is to hold; `Resources` gains `CPULimit`; `State` gains
+  `Resources` and `Resize`, the size held and a size asked for and not
+  yet held; and `MemoryReader` is the optional interface a driver that
+  sizes memory implements. A driver that changes no size refuses
+  `Change.Resources` with `ErrUnsupported`, which `Change.FixedSize`
+  answers for it, and the driver suite holds the field to the
+  declaration both ways. In `manifest/v1`, `Capabilities` gains
+  `Autosize` and `Capabilities.Equal` compares it. In the `controller`
+  package, `Options.AutosizeInterval` and `Controller.RunAutosize` are
+  the reading loop, and `Controller.Dialer` returns the driver's dialer
+  behind a count of open connections.
+
 ### Security
 
 - Built with Go 1.27.2 and golang.org/x/net v0.60.0, which fix GO-2026-6611, GO-2026-6612, GO-2026-6613 and GO-2026-6617.
