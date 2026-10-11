@@ -16,6 +16,7 @@ func lifecycleCases() []Case {
 		{"lifecycle", "case005CreateReachesRunning", case005CreateReachesRunning},
 		{"lifecycle", "case005StopAndStart", case005StopAndStart},
 		{"lifecycle", "case005PhaseConflict", case005PhaseConflict},
+		{"lifecycle", "case005StartAfterFailure", case005StartAfterFailure},
 		{"lifecycle", "case005DeleteInEveryPhase", case005DeleteInEveryPhase},
 		{"lifecycle", "case008CreateWait", case008CreateWait},
 	}
@@ -92,6 +93,69 @@ func case005PhaseConflict(ctx context.Context, e *Env) error {
 	}
 	if after.Status.Phase != "Stopped" {
 		return fmt.Errorf("the refused verb left the sandbox %s, want Stopped", after.Status.Phase)
+	}
+	return nil
+}
+
+// failsOnceCommand is a main process that waits for a file named go in the
+// workspace and then ends with exit code 3, the first time it runs there. It
+// leaves a file behind, and every later run in that workspace stays up. A
+// sandbox that runs after a start therefore ran its workload again on the
+// files of the first run.
+var failsOnceCommand = []any{"/bin/sh", "-c", "if [ -f again ]; then exec sleep 300; fi; while [ ! -f go ]; do sleep 0.1; done; : > again; exit 3"}
+
+// keptFile is the file a client writes before the main process fails, and
+// its content.
+const keptFile, keptContent = "kept.txt", "conformance"
+
+// case005StartAfterFailure: a sandbox whose main process ended in failure is
+// Failed with its workspace intact, and a start runs the workload again on
+// that workspace. The case writes a file, lets the main process fail, starts
+// the sandbox and reads the file back. A server that refuses the start
+// leaves a client one act on such a sandbox, the delete that discards the
+// workspace, and fails here; so does one that starts it on an empty
+// workspace, or answers the start and runs nothing.
+func case005StartAfterFailure(ctx context.Context, e *Env) error {
+	obj, err := e.sandbox(ctx, e.caller, func(body map[string]any) {
+		spec, _ := body["spec"].(map[string]any)
+		spec["command"] = failsOnceCommand
+	})
+	if err != nil {
+		return err
+	}
+	id := obj.Status.ID
+	wrote, x, err := e.exec(ctx, e.caller, id, "/bin/sh", "-c", "printf "+keptContent+" > "+keptFile+" && : > go")
+	if err != nil {
+		return err
+	}
+	if err := x.status(http.StatusOK); err != nil {
+		return err
+	}
+	if wrote.ExitCode != 0 {
+		return x.disagree("exit code 0 from the command that writes the file", fmt.Sprintf("exit code %d: %s", wrote.ExitCode, wrote.Stderr))
+	}
+	if _, err = e.await(ctx, e.caller, id, "Failed"); err != nil {
+		return fmt.Errorf("a sandbox whose main process exits with code 3: %w", err)
+	}
+	x, err = e.caller.post(ctx, "/v1/sandboxes/"+id+"/start", nil)
+	if err != nil {
+		return err
+	}
+	if err := x.status(http.StatusOK); err != nil {
+		return fmt.Errorf("a start of a sandbox whose main process failed: %w", err)
+	}
+	if _, err = e.await(ctx, e.caller, id, "Running"); err != nil {
+		return fmt.Errorf("a started sandbox runs its workload again on the workspace of the first run: %w", err)
+	}
+	read, x, err := e.exec(ctx, e.caller, id, "/bin/sh", "-c", "cat "+keptFile)
+	if err != nil {
+		return err
+	}
+	if err := x.status(http.StatusOK); err != nil {
+		return err
+	}
+	if read.ExitCode != 0 || read.Stdout != keptContent {
+		return x.disagree("the file written before the failure, "+keptContent, fmt.Sprintf("exit code %d and %q", read.ExitCode, read.Stdout))
 	}
 	return nil
 }

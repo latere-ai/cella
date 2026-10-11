@@ -190,6 +190,7 @@ func TestAServerThatAnswersTheWrongValueIsReportedFailed(t *testing.T) {
 		"case018SecretWriteOnly", "case018CanarySecret", "case009ObjectFeed",
 		"case009DeliveredInOrder", "case023BrowserReady", "case008PublicDocuments",
 		"case022SpawnBoundary", "case018EgressEnforced", "case078Ceiling",
+		"case005StartAfterFailure",
 	} {
 		if !slices.Contains(report.Failed, name) {
 			t.Errorf("%s did not fail against a server that answers the wrong value", name)
@@ -538,6 +539,55 @@ func TestTheCeilingCaseReadsEveryAnswer(t *testing.T) {
 			t.Fatalf("the case answered %v", err)
 		}
 	})
+}
+
+// TestTheStartAfterFailureCaseReadsEveryAnswer: the case passes a server
+// that fails a sandbox when its main process ends and starts it again on its
+// workspace, and fails each server that does not: one whose command cannot
+// write the file, one whose sandbox never fails, one that refuses the start
+// as final, one that answers the start and runs nothing, one that starts the
+// sandbox on an empty workspace, and one that answers another command's
+// output for the file.
+func TestTheStartAfterFailureCaseReadsEveryAnswer(t *testing.T) {
+	run := func(t *testing.T, mutate func(*fake)) error {
+		t.Helper()
+		f := newFake(t)
+		if mutate != nil {
+			mutate(f)
+		}
+		e, err := newEnv(t.Context(), f.config())
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { e.cleanup(context.WithoutCancel(t.Context())) })
+		// A sandbox that never fails is waited for until the case's own
+		// deadline, which a test keeps short.
+		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+		defer cancel()
+		return case005StartAfterFailure(ctx, e)
+	}
+	if err := run(t, nil); err != nil {
+		t.Fatalf("the case failed a server that starts a failed sandbox on its workspace: %v", err)
+	}
+	for _, tc := range []struct {
+		name   string
+		mutate func(*fake)
+		wants  string
+	}{
+		{"no write", func(f *fake) { f.restart = "no write" }, "exit code 0 from the command that writes the file"},
+		{"never fails", func(f *fake) { f.restart = "never fails" }, "a sandbox whose main process exits with code 3"},
+		{"refuses", func(f *fake) { f.restart = "refuses" }, "a start of a sandbox whose main process failed"},
+		{"runs nothing", func(f *fake) { f.restart = "runs nothing" }, "a started sandbox runs its workload again"},
+		{"empties", func(f *fake) { f.restart = "empties" }, "the file written before the failure"},
+		{"wrong values", func(f *fake) { f.wrongValues = true }, "the file written before the failure"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := run(t, tc.mutate)
+			if err == nil || !strings.Contains(err.Error(), tc.wants) {
+				t.Fatalf("the case answered %v, want a failure naming %q", err, tc.wants)
+			}
+		})
+	}
 }
 
 // TestTheEnvironmentsCaseReadsTheAutosizeFlags: an environment whose

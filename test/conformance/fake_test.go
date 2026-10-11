@@ -77,6 +77,16 @@ type fake struct {
 	// ceilingAfter is how many creates the fake answers rightly before
 	// ceiling takes effect.
 	ceilingAfter int
+	// restart is how the fake answers a sandbox whose main process fails and
+	// the start of it, so a test reads every assertion
+	// case005StartAfterFailure makes. The empty string fails the sandbox
+	// when its main process is told to end and starts it again on its
+	// workspace. "never fails" leaves it Running; "refuses" answers the
+	// start as a server to which a failure is final does; "runs nothing"
+	// answers the start and leaves the sandbox Failed; "empties" starts it
+	// on a workspace made anew, where the file written before is gone;
+	// "no write" fails the command that writes the file.
+	restart string
 	// declared, when set, is the capability set the fake honors: a gated
 	// route of any other capability answers capability_unsupported before
 	// it is routed, as the server's own gate does. desktopOnly answers the
@@ -590,12 +600,21 @@ func (f *fake) verb(w http.ResponseWriter, r *http.Request) {
 	phase, _ := status(obj)["phase"].(string)
 	switch r.PathValue("verb") {
 	case "start":
-		if phase != "Stopped" {
+		// A stopped sandbox starts, and so does one whose main process
+		// ended in failure: its workspace is still there.
+		if phase != "Stopped" && (phase != "Failed" || f.restart == "refuses") {
 			f.mu.Unlock()
 			f.refuse(w, "phase_conflict")
 			return
 		}
+		if phase == "Failed" && f.restart == "runs nothing" {
+			f.mu.Unlock()
+			f.write(w, http.StatusOK, obj)
+			return
+		}
 		status(obj)["phase"] = "Running"
+		delete(status(obj), "exitCode")
+		delete(status(obj), "reason")
 		f.record(idOf(obj), "sandbox.started")
 		f.mu.Unlock()
 		f.write(w, http.StatusOK, obj)
@@ -644,6 +663,25 @@ func (f *fake) exec(w http.ResponseWriter, r *http.Request) {
 		}
 	case strings.Contains(command, "CELLA_TOKEN_FILE"):
 		stdout = workloadToken
+	case strings.Contains(command, ": > go"):
+		// The file a main process of case005StartAfterFailure waits for:
+		// the process ends with exit code 3 and the sandbox is Failed.
+		f.mu.Lock()
+		restart := f.restart
+		if obj, ok := f.lookup(r.PathValue("id")); ok && restart != "never fails" && restart != "no write" {
+			status(obj)["phase"], status(obj)["reason"], status(obj)["exitCode"] = "Failed", "Exited", 3
+		}
+		f.mu.Unlock()
+		if restart == "no write" {
+			stderr, code = "read-only file system", 1
+		}
+	case strings.Contains(command, "cat "+keptFile):
+		stdout = keptContent
+		f.mu.Lock()
+		if f.restart == "empties" {
+			stdout, stderr, code = "", "cat: "+keptFile+": No such file or directory", 1
+		}
+		f.mu.Unlock()
 	case req.Timeout != "":
 		code = 124
 	case strings.Contains(command, "exit 7"):
