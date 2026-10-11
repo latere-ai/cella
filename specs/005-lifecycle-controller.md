@@ -32,7 +32,7 @@ since it imports nothing under `internal/` ([[001-architecture]]).
 
 ## Current state
 
-[[026-direct-control-plane]] implements synchronous native create, inspect, list, start, stop, and delete with durable intent. [[037-lifecycle-enforcement]] implements the reaper's deadline rules, the `Lease` and `Clock` seams, and `Touch`. [[043-postgres-store]] implements the `lost` rule, `Recovering`, the recreation from desired state and the grace without a durable store, over the store and the observed index of [[010-state]]; recovery reattaches no volume. [[045-workload-tokens]] implements the `token` rule over the `Tokens` seam, the mint at step 5 of the create order with its undo, the re-mint at recovery with the previous `jti` revoked, and the revocation a delete writes. [[058-preemption]] implements the preemption edges: the scheduler stops a victim through its driver and writes `Running` to `Queued` with `Scheduled Preempted` in one write, since the driver's stop is synchronous and a crash between a `Stopped` and a `Queued` write would leave the victim outside every queue; a preempted sandbox leaves `Queued` by a `Start` of the object its driver kept rather than through `Pending` and a create, and while it waits the `autoDelete` rule is not asked of it. [[072-create-answers-at-once]] answers a create once step 2 has written it, `Pending`, and finishes steps 3 onward in the scheduler loop of [[020-scheduling-and-sets]], with the driver's create and the first read outside the controller's lock, a status write carrying the boundary and the identity before the driver call, `ErrAlreadyExists` taken as this sandbox's own object, and a placed sandbox a restart left realized by the loop's first pass; a pool adoption stays on the request. [[078-self-sizing-sandboxes]] adds the sizing loop under the `autosize` lease, which reads every running sandbox with a ceiling once per `CELLA_AUTOSIZE_INTERVAL`, raises its memory through `Driver.Update` with `Change.Resources`, restarts it at the larger size with the controller's lock released where the node cannot hold the raise, presents it as `Starting` with reason `MemoryRaised` on every read from the kill or the move's stop until it runs again, and gives an update's changed CPU ceiling to the driver, which is the first field an update carries to a driver. Reconciliation of the other fields of an update and the cascade remain to build.
+[[026-direct-control-plane]] implements synchronous native create, inspect, list, start, stop, and delete with durable intent. [[037-lifecycle-enforcement]] implements the reaper's deadline rules, the `Lease` and `Clock` seams, and `Touch`. [[043-postgres-store]] implements the `lost` rule, `Recovering`, the recreation from desired state and the grace without a durable store, over the store and the observed index of [[010-state]]; recovery reattaches no volume. [[045-workload-tokens]] implements the `token` rule over the `Tokens` seam, the mint at step 5 of the create order with its undo, the re-mint at recovery with the previous `jti` revoked, and the revocation a delete writes. [[058-preemption]] implements the preemption edges: the scheduler stops a victim through its driver and writes `Running` to `Queued` with `Scheduled Preempted` in one write, since the driver's stop is synchronous and a crash between a `Stopped` and a `Queued` write would leave the victim outside every queue; a preempted sandbox leaves `Queued` by a `Start` of the object its driver kept rather than through `Pending` and a create, and while it waits the `autoDelete` rule is not asked of it. [[072-create-answers-at-once]] answers a create once step 2 has written it, `Pending`, and finishes steps 3 onward in the scheduler loop of [[020-scheduling-and-sets]], with the driver's create and the first read outside the controller's lock, a status write carrying the boundary and the identity before the driver call, `ErrAlreadyExists` taken as this sandbox's own object, and a placed sandbox a restart left realized by the loop's first pass; a pool adoption stays on the request. [[078-self-sizing-sandboxes]] adds the sizing loop under the `autosize` lease, which reads every running sandbox with a ceiling once per `CELLA_AUTOSIZE_INTERVAL`, raises its memory through `Driver.Update` with `Change.Resources`, restarts it at the larger size with the controller's lock released where the node cannot hold the raise, presents it as `Starting` with reason `MemoryRaised` on every read from the kill or the move's stop until it runs again, and gives an update's changed CPU ceiling to the driver, which is the first field an update carries to a driver. A start is taken from `Stopped` and from `Failed` where the runtime holds the workspace, under the count ceiling of [[080-running-sandbox-count]], and refused for a sandbox the control plane failed itself. Reconciliation of the other fields of an update and the cascade remain to build.
 
 Design provenance: The reaper's rules come from the hosted platform, where
 they have run for months; the phase machine, the ordered create with
@@ -68,6 +68,7 @@ stateDiagram-v2
   Starting --> Deleting: Delete (API), parent deleted (cascade)
   Failed --> Deleting: Delete (API), expired (reaper), parent deleted (cascade)
   Running --> Starting: killed for memory with room under resources.max.memory, or moved to a node with room, reason MemoryRaised (autosize)
+  Failed --> Starting: Start, where the runtime holds the workspace (API)
   Failed --> Starting: Update raises resources.max.memory of a sandbox killed for memory at it, reason MemoryRaised (API, autosize)
   Recovering --> Deleting: Delete (API), parent deleted (cascade)
   Running --> Lost: object gone (watch)
@@ -81,15 +82,63 @@ stateDiagram-v2
 
 Every edge names its trigger and its owner. `Delete` is accepted in
 every phase and moves the sandbox to `Deleting` at once, which is
-what [[008-api]] returns. `Start` on `Failed` is `phase_conflict`.
-`Failed` is terminal until a client acts: a delete leaves it, and so
-does an update that raises the memory ceiling of a sandbox killed for
-memory at it, and nothing the control plane does on its own. A client
-that reads `Failed` knows the sandbox will not come back by itself.
+what [[008-api]] returns.
+
+`Failed` is terminal until a client acts: nothing the control plane
+does on its own leaves it, and a client that reads `Failed` knows the
+sandbox will not come back by itself. Three acts leave it. A delete
+removes the sandbox and its workspace. A start runs the workload again
+on the workspace, where there is one. An update that raises the memory
+ceiling of a sandbox killed for memory at it gives it room, and the
+control plane starts it at the next size
+([[078-self-sizing-sandboxes]]).
+
+A failure is one of two kinds, and which it is decides whether a start
+is taken. They are told apart by who reported the failure:
+
+| The failure | Reason | The workspace | `Start` |
+|---|---|---|---|
+| the workload ran and ended: its main process exited non-zero | `Exited` from the native runtime, `Error` from Kubernetes, none from Podman, each with `status.exitCode` | held by the runtime | taken |
+| the workload was killed for memory, with no memory ceiling or at it | `OOMKilled` | held by the runtime | taken |
+| the runtime ended the workload for a reason of its own, such as a node that evicted the Pod | the runtime's own word, such as `Evicted` | held by the runtime | taken |
+| the create made nothing, or was undone | `CreateFailed` | none: the create's undo removed what it made, and ended the identity and the boundary it had minted | `phase_conflict` |
+| a direct environment had no room | `NoCapacity` | none: no runtime was asked | `phase_conflict` |
+| a queued sandbox was never placed | `StartDeadline` | none: no runtime was asked | `phase_conflict` |
+| the runtime lost the sandbox and recovery gave up | `RecoveryExhausted` | none the runtime reports | `phase_conflict` |
+
+The rule in the controller is the general one, of which the table is
+the cases: a start of a `Failed` sandbox is taken when the runtime's
+own read finds the sandbox, which is what holding its workspace means,
+and the stored status is not one of the four the control plane writes
+itself. The reason a runtime gives is not consulted, so a reason this
+table does not list, from a runtime that holds the sandbox, starts.
+The stored reason is consulted for the four because the undo of a
+create ends the sandbox's identity and its boundary, and no object a
+runtime happened to keep under the id is a sandbox to run without
+them. `VolumeMissing`, which the diagram gives a recovery that finds a
+volume gone, is written by no code yet; it joins the four when it is.
+The refusal is `phase_conflict` with the reason in the developer
+detail.
+
+A start of a `Failed` sandbox is the start of a `Stopped` one in
+everything else. It is held to the owner's count ceiling, since a
+failed sandbox takes no slot and a running one does
+([[080-running-sandbox-count]]). The runtime builds the workload from
+the specification it recorded at the create, at the size the sandbox
+last held, on the same workspace: on Kubernetes the Pod that ended is
+removed and a new one made on the same claim. The workspace is kept,
+every file of it; every process is gone, and so is every file outside
+the workspace, as after a stop and a start. It is one start: a
+workload that ends again leaves the sandbox `Failed` again, and
+nothing starts it a second time but another call. The driver suite
+holds every runtime to this in `StartAfterFailureKeepsTheWorkspace`
+([[004-runtime-contract]]).
 
 A sandbox the control plane is starting again at a larger memory size
-is therefore never `Failed`, and never `Stopped`
-([[078-self-sizing-sandboxes]]). Its driver reports the workload killed
+is never `Failed`, and never `Stopped`
+([[078-self-sizing-sandboxes]]): a client that met `Failed` there would
+act on a sandbox that is already coming back, and a start of it is
+`phase_conflict` because the start is being made. Its driver reports the workload killed
 for memory, or absent while a move replaces it, and the controller
 presents it as `Starting` with reason `MemoryRaised` wherever a driver's
 read becomes a sandbox's status: the read behind every API answer, the
@@ -98,7 +147,8 @@ from the read itself by the rule the sizing loop restarts by, so it
 holds from the kill on, before the loop has read the sandbox, and until
 it runs again, through the wait after a move that found no room
 included. A sandbox killed for memory with no room left under its
-ceiling, or with no ceiling, is `Failed` with reason `OOMKilled`.
+ceiling, or with no ceiling, is `Failed` with reason `OOMKilled`, and a
+client's start brings it back at the size it holds.
 `Stop` keeps the managed workspace and every attached volume; nothing
 is lost until `Delete`. `Queued` and `Recovering` are the
 controller's; a driver never reports them. Every terminal transition
@@ -229,6 +279,13 @@ a value of `never` disables its rule.
 | lost | `Lost` | when desired state is durable, `Recovering`; otherwise, after `LostGrace`, `Deleting` with reason `Lost` |
 | token | a live sandbox whose token has passed two thirds of its lifetime | `Tokens.Mint`, `Driver.Update` with `Change.Token`, `Tokens.Revoke` of the previous `jti`, in one act ([[006-identity]]) |
 
+A `Failed` sandbox is kept as these rules always kept it, so that it
+is there for the start that brings it back: `expired` deletes it when
+its `ttl` has passed, as it deletes a sandbox in any phase; `autoDelete`
+counts from a stop and is not asked of a failed sandbox; and `autoStop`
+is asked of a running one alone. A failed sandbox nobody starts is
+therefore removed by its `ttl` and by nothing else but a delete.
+
 A pool entry is asked of no rule at all. It carries no owner and no
 deadline, so none of them could fire on it, and its lifecycle belongs to the
 refill loop that made it ([[020-scheduling-and-sets]],
@@ -292,26 +349,6 @@ so no transition is missed for longer than one relist.
 
 ## Not in this spec
 
-A start of a `Failed` sandbox. It stays `phase_conflict`. Where the
-driver still holds the sandbox, a start would run its workload again and
-keep its workspace, which is what a client wants after a kill at the
-memory ceiling; the Kubernetes driver's start already replaces a Pod
-that ended. Three things stand between that and a rule this spec can
-state. A failure is one of two kinds, a workload that ran and ended,
-which a start could run again, and a sandbox no driver holds
-(`CreateFailed`, `NoCapacity`, `StartDeadline`, `RecoveryExhausted`),
-which only a create could, and the rule has to tell them apart from the
-driver's read and not the stored reason. The driver contract
-([[004-runtime-contract]]) says nothing of a start of a workload that
-ended in failure, and the driver suite has no case for it, so what each
-driver does there is held to no one rule. And the count ceiling's rule
-that a failed sandbox holds no slot rests on a failed one never running
-again ([[080-running-sandbox-count]]). Until those are settled a client
-recovers a sandbox killed at its ceiling by raising
-`spec.resources.max.memory`, which gives it room and starts it again
-with its workspace ([[078-self-sizing-sandboxes]]), or copies its files
-out and deletes it.
-
 The HTTP handlers that call `Reconcile` and `Touch` ([[008-api]]); the
 store behind `Store` ([[010-state]]); the token's shape
 ([[006-identity]]); placement, pools, queues, preemption, and sets
@@ -329,6 +366,10 @@ store behind `Store` ([[010-state]]); the token's shape
 | A spawn debits the budget in the same transaction as the desired write; two concurrent spawns against a budget of one yield one child and one `spawn_budget_exhausted` | `TestSpawnDebitIsAtomic` | built ([[040-mesh-and-spawn]]): the debit, the child's row and its record commit together, a refused spawn leaves no object and takes no name, and `status.spawn.used` tracks the ledger |
 | A narrowing update and an owner's widening update each keep the effective boundary within both manifests at every instant, observed through fake gateway and driver | `TestUpdateNeverWidensMidChange` | not built |
 | `Change.Volumes` is sent only while `Stopped`; a secret update re-pushes; a secret delete re-pushes and writes `notInjectable` | `TestUpdatePaths` | not built |
+| A start of a `Failed` sandbox whose runtime holds its workspace runs the workload again on it, whatever reason the runtime gave, and the started sandbox carries nothing of the failure; a start of one the control plane failed itself, or that its runtime no longer holds, is `phase_conflict` naming why, and reaches no runtime | `TestAFailedSandboxStartsAgain`, `TestAFailureTheControlPlaneRecordedIsNotStarted`, `TestAFailedSandboxIsStartedAgainWithItsWorkspace` and `TestAStartOfASandboxThatNeverRanIsRefused` over HTTP, `k8s.TestAFailedSandboxIsStartedOnItsClaim` and `k8s.TestAStartOfAFailedCreateOnTheClusterIsRefused` on a client double, `TestClusterAFailedSandboxIsStartedWithItsWorkspace` on kind | built |
+| A server that refuses the start of a sandbox whose main process failed, starts it on an empty workspace, or answers the start and runs nothing fails the suite | conformance case `case005StartAfterFailure`, `TestTheStartAfterFailureCaseReadsEveryAnswer` | built |
+| A start of a failed sandbox is held to the owner's count ceiling, is one start however the workload then ends, and is refused while the control plane is starting the sandbox at a larger size itself | `TestAStartOfAFailedSandboxIsHeldToTheCountCeiling`, `TestAStartOfAFailedSandboxIsOneStart`, `TestAKillAtOrUnderAMemoryCeilingAndAStart` | built |
+| A failed sandbox is deleted by its `ttl` and is asked of neither `autoDelete` nor `autoStop` | `TestReaperRules` | built |
 | Each reaper rule fires at its second and not one before under a fake clock; `never` disables it; a sandbox matching two rules gets the first | `TestReaperRules`, one case per rule and one per tie | built for expired, autoDelete and autoStop ([[037-lifecycle-enforcement]]), and end to end over the native driver as `TestReaperEndToEndOverNative`, which reads the `AutoStop` stop and the `AutoDelete` delete from the act record rather than polling for a state that lasts one `autoDelete` ([[068-reaper-end-to-end-observation]]), for lost ([[043-postgres-store]]) and for token ([[045-workload-tokens]]), whose rule is asked only of a sandbox no deadline rule claimed; a pool entry is asked of none of them, with `TestReaperLeavesPoolEntries` driving one that carries a deadline ([[038-environment-pools]]) |
 | The reaper does not run on a replica without the lease | `TestReaperNeedsTheLease` | built ([[037-lifecycle-enforcement]]) |
 | For an environment that is `Offline`, nothing is rebuilt, no rule runs, and `Lost` does not count the grace; when it returns, lost sandboxes recover | `TestTheReaperHoldsOnAnEnvironmentBelowReady` | built for the first half as `TestTheReaperHoldsOnAnEnvironmentBelowReady`, over a reaper that now passes per environment ([[054-environments-desired-state]]); the `Lost` grace and the recovery on return are not built |

@@ -203,7 +203,17 @@ the label half only.
 
 Every driver reports one of `Pending`, `Starting`, `Running`,
 `Stopping`, `Stopped`, `Deleting`, `Failed`, `Lost`, derived from the
-substrate. The mapping per driver is a table in its package
+substrate. `Failed` is a workload that ran and ended in failure, with
+`Reason` the substrate's word for it and `ExitCode` where there is
+one. The driver still holds such a sandbox and its workspace, and
+`Start` on it is `Start` on a stopped one: the workload is run again
+from the recorded specification on the same workspace, once. A driver
+does not start a failed workload on its own; whether a client may is
+the controller's rule ([[005-lifecycle-controller]]). The substrates
+do it in their own ways: Kubernetes removes the Pod that ended and
+makes one on the same claim, Podman starts the container that exited,
+the native driver runs the main command again in the sandbox's
+directory, and a worker's driver is asked through the remote one. The mapping per driver is a table in its package
 documentation and a case in the conformance suite. `Queued` and
 `Recovering` are the controller's, never a driver's. `Scheduled` is
 the controller's condition; the five conditions in `State` are the
@@ -405,6 +415,7 @@ is skipped and reported:
 | `ListReadsIdentityBack` | three sandboxes created, a fresh driver lists three with labels and annotations as written |
 | `FilterSelectsOnLabels` | each `Filter` field narrows the list |
 | `StopStartKeepsTheWorkspace` | the managed workspace and every attached volume survive stop and start |
+| `StartAfterFailureKeepsTheWorkspace` | a workload that ran and ended with a non-zero exit leaves the sandbox `Failed` with the exit code; `Start` runs the workload again on the same workspace, with the exit code, the reason and `StoppedAt` cleared and `StartedAt` advanced; a second failure and a second `Start` do the same. Skipped for a driver that runs no main command |
 | `UpdateEveryMutableField` | each `Change` field lands and is read back |
 | `SizeChangeIsHonoredOrRefused` | `Change.Resources` is refused with `ErrUnsupported` by a driver that declares no `Resize` and no `Autosize` flag for CPU or memory, and taken by one that does: a start after a stop holds the size last asked for, `State.Resources` reports it, and a `Disk` other than the sandbox's own is refused ([[078-self-sizing-sandboxes]]) |
 | `ExecStreamsAndExits` | exit codes 0 and 3; the first stdout byte arrives before the command writes its last (the command writes, sleeps, writes); 64 MiB of output completes with the driver process's resident set growing by less than 16 MiB |
