@@ -39,6 +39,7 @@ func (d *Driver) Inspect(ctx context.Context, id string) (driver.State, error) {
 		return driver.State{}, err
 	}
 	s := state(pvc, pod)
+	d.size(&s, pvc, pod)
 	// The port probe is a command inside the sandbox, so it runs at Inspect
 	// and never at List: a sweep of every sandbox is the reaper's path, and a
 	// command per sandbox per tick is a cost it must not carry.
@@ -106,6 +107,7 @@ func (d *Driver) List(ctx context.Context, f driver.Filter) ([]driver.State, err
 			continue
 		}
 		if s := state(pvc, byID[id]); f.Selects(s) {
+			d.size(&s, pvc, byID[id])
 			out = append(out, s)
 		}
 	}

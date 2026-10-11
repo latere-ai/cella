@@ -28,9 +28,9 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"time"
 
-	authv1 "k8s.io/api/authorization/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -188,6 +188,13 @@ type Driver struct {
 	cs      kubernetes.Interface
 	stream  streamer
 	forward forwarder
+	// meter reads the metrics API, with a cluster connection behind it like
+	// the two seams above. inPlace and memory are what Preflight found the
+	// cluster to serve and the service account to hold: the resize
+	// subresource, and that with the metrics API (spec 078).
+	meter   meter
+	inPlace atomic.Bool
+	memory  atomic.Bool
 }
 
 var _ driver.Driver = (*Driver)(nil)
@@ -230,6 +237,7 @@ func New(opts Options) (*Driver, error) {
 			return nil, err
 		}
 		d.forward = forward
+		d.meter = &restMeter{client: cs.CoreV1().RESTClient(), namespace: opts.Namespace}
 	}
 	return d, nil
 }
@@ -293,14 +301,20 @@ func (d *Driver) Isolation() string { return "container" }
 // the field, to create, where it names nothing. Egress follows the gateway:
 // with its Pods named, every sandbox runs under a NetworkPolicy that leaves
 // the gateway as the only way out, which is the one rule all three modes
-// need; with none, nothing confines egress and no mode is declared. Resize,
-// volumes and snapshots each land with the slice that builds them.
+// need; with none, nothing confines egress and no mode is declared. Autosize
+// of CPU always, because a limit above the request is a field of every Pod;
+// of memory once Preflight has found the resize subresource and the metrics
+// API served and granted, because raising a limit needs the first and
+// deciding to needs the second; of the workspace not yet. Resize, volumes and
+// snapshots each land with the slice that builds them.
 func (d *Driver) Capabilities() driver.Capabilities {
 	desktop := d.opts.DisplayImage != ""
 	caps := driver.Capabilities{Files: true, Pool: true, Mesh: true, Attach: true, Dial: true, Display: desktop, Input: desktop}
 	if d.confines() {
 		caps.Egress = slices.Clone(egressModes)
 	}
+	caps.Autosize.CPU = true
+	caps.Autosize.Memory = d.memory.Load()
 	return caps
 }
 
@@ -345,16 +359,11 @@ func (d *Driver) Preflight(ctx context.Context) error {
 	}
 	var missing []string
 	for _, v := range verbs {
-		review, err := d.cs.AuthorizationV1().SelfSubjectAccessReviews().Create(ctx, &authv1.SelfSubjectAccessReview{
-			Spec: authv1.SelfSubjectAccessReviewSpec{ResourceAttributes: &authv1.ResourceAttributes{
-				Namespace: d.opts.Namespace, Group: v.group, Resource: v.resource,
-				Subresource: v.subresource, Verb: v.verb,
-			}},
-		}, metav1.CreateOptions{})
+		allowed, err := d.may(ctx, v)
 		if err != nil {
-			return fmt.Errorf("access review for %s %s: %w", v.verb, resourceName(v.resource, v.subresource), err)
+			return err
 		}
-		if !review.Status.Allowed {
+		if !allowed {
 			missing = append(missing, v.verb+" "+resourceName(v.resource, v.subresource))
 		}
 	}
@@ -366,6 +375,9 @@ func (d *Driver) Preflight(ctx context.Context) error {
 			return fmt.Errorf("storage class %s: %w", class, err)
 		}
 	}
+	// What the driver can size is read last and fails nothing: a cluster
+	// or a Role without it runs every sandbox at a fixed size, as before.
+	d.detectSizing(ctx)
 	return nil
 }
 

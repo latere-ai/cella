@@ -261,6 +261,13 @@ func (d *Driver) Update(ctx context.Context, id string, c driver.Change) error {
 	if c.Lifecycle != nil && (c.Lifecycle.TTL < 0 || c.Lifecycle.AutoStop < 0 || c.Lifecycle.AutoDelete < 0) {
 		return fmt.Errorf("%w: a negative lifecycle duration", driver.ErrInvalid)
 	}
+	// A size the cluster would refuse to render is refused before anything
+	// is written, so the record never holds a size no Pod can start at.
+	if c.Resources != nil {
+		if err := d.checkSize(ctx, id, c.Resources); err != nil {
+			return err
+		}
+	}
 	// The token is written into the Secret the Pod already projects, not
 	// into the claim's record: the kubelet re-syncs the file and the
 	// workload keeps running. A sandbox that carried none takes one here
@@ -282,7 +289,7 @@ func (d *Driver) Update(ctx context.Context, id string, c driver.Change) error {
 			return err
 		}
 	}
-	return d.apply(ctx, id, func(pvc *corev1.PersistentVolumeClaim) (change, error) {
+	err = d.apply(ctx, id, func(pvc *corev1.PersistentVolumeClaim) (change, error) {
 		spec, err := specOf(pvc)
 		if err != nil {
 			return change{}, err
@@ -292,6 +299,14 @@ func (d *Driver) Update(ctx context.Context, id string, c driver.Change) error {
 		}
 		if c.Env != nil {
 			spec.Env = maps.Clone(*c.Env)
+		}
+		// The size is recorded where a start reads it, so the next Pod is
+		// rendered at the size the sandbox was last asked to hold whether
+		// or not the running one could take it in place (spec 078).
+		if c.Resources != nil {
+			spec.Resources.CPU = c.Resources.CPU
+			spec.Resources.CPULimit = c.Resources.CPULimit
+			spec.Resources.Memory = c.Resources.Memory
 		}
 		out := change{spec: &spec}
 		// The claim records that a token is projected, so a start renders
@@ -317,6 +332,10 @@ func (d *Driver) Update(ctx context.Context, id string, c driver.Change) error {
 		}
 		return out, nil
 	})
+	if err != nil || c.Resources == nil {
+		return err
+	}
+	return d.resizeInPlace(ctx, id)
 }
 
 // Touch stamps the activity the reaper's idle rule reads. It is not a

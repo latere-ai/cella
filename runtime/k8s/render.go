@@ -183,7 +183,10 @@ func runAs(user string) (uid, gid int64, err error) {
 }
 
 // resources renders the container's requests and limits. Limits are the spec's
-// as written; requests are the configured fraction of them.
+// as written; requests are the configured fraction of them. A spec that names
+// a CPU limit above its CPU runs with that limit and with the request still a
+// fraction of the CPU it was granted, so the workload is guaranteed what it
+// asked for and uses up to the limit when the node has it idle (spec 078).
 func (d *Driver) resources(r driver.Resources) (corev1.ResourceRequirements, error) {
 	cpu, err := quantity(r.CPU, d.opts.DefaultCPU, "cpu")
 	if err != nil {
@@ -193,11 +196,20 @@ func (d *Driver) resources(r driver.Resources) (corev1.ResourceRequirements, err
 	if err != nil {
 		return corev1.ResourceRequirements{}, err
 	}
+	cpuLimit := cpu
+	if r.CPULimit != "" {
+		if cpuLimit, err = quantity(r.CPULimit, "", "cpu limit"); err != nil {
+			return corev1.ResourceRequirements{}, err
+		}
+		if cpuLimit.Cmp(cpu) < 0 {
+			return corev1.ResourceRequirements{}, fmt.Errorf("%w: the cpu limit %q is below the cpu %q", driver.ErrInvalid, r.CPULimit, cpu.String())
+		}
+	}
 	cpuReq := resource.NewMilliQuantity(scale(cpu.MilliValue(), d.opts.CPURequestRatio), resource.DecimalSI)
 	memReq := resource.NewQuantity(scale(mem.Value(), d.opts.MemoryRequestRatio), resource.BinarySI)
 	return corev1.ResourceRequirements{
 		Requests: corev1.ResourceList{corev1.ResourceCPU: *cpuReq, corev1.ResourceMemory: *memReq},
-		Limits:   corev1.ResourceList{corev1.ResourceCPU: cpu, corev1.ResourceMemory: mem},
+		Limits:   corev1.ResourceList{corev1.ResourceCPU: cpuLimit, corev1.ResourceMemory: mem},
 	}, nil
 }
 

@@ -35,8 +35,10 @@ func TestDeclarations(t *testing.T) {
 		t.Fatalf("Isolation = %q", h.Isolation())
 	}
 	got := h.Capabilities()
-	if !reflect.DeepEqual(got, driver.Capabilities{Files: true, Pool: true, Mesh: true, Attach: true, Dial: true}) {
-		t.Fatalf("Capabilities = %+v, want Files, Pool, Mesh, Attach and Dial", got)
+	want := driver.Capabilities{Files: true, Pool: true, Mesh: true, Attach: true, Dial: true}
+	want.Autosize.CPU = true
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Capabilities = %+v, want Files, Pool, Mesh, Attach, Dial and the autosize of cpu", got)
 	}
 	// Attach and Dial are declared with their interfaces behind them.
 	var d driver.Driver = h.Driver
