@@ -1610,8 +1610,17 @@ func (c *Controller) resize(ctx context.Context, held v1.Sandbox, obj *v1.Sandbo
 	if placed(held) {
 		return nil
 	}
-	if err := d.Update(ctx, obj.Status.ID, driver.Change{Resources: &want}); err != nil && !errors.Is(err, driver.ErrNotFound) {
-		return fmt.Errorf("changing the size of %s: %w", obj.Status.ID, err)
+	err = d.Update(ctx, obj.Status.ID, driver.Change{Resources: &want})
+	if err == nil || errors.Is(err, driver.ErrNotFound) {
+		return nil
 	}
-	return nil
+	// A driver that recorded the size and could not give it to the running
+	// sandbox in place has taken the update: the sandbox holds the size at
+	// its next start, and its state says so until then. Only a size the
+	// driver did not record refuses the update.
+	if state, readErr := d.Inspect(ctx, obj.Status.ID); readErr == nil && asksFor(state, want) {
+		c.log.WarnContext(ctx, "a change of size was recorded and not taken in place", "sandbox", obj.Status.ID, "err", err)
+		return nil
+	}
+	return fmt.Errorf("changing the size of %s: %w", obj.Status.ID, err)
 }

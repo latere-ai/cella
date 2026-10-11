@@ -60,6 +60,21 @@ type sizeDriver struct {
 	// fails with.
 	exit    int
 	execErr error
+	// inspects counts the reads of one sandbox's state.
+	inspects int
+}
+
+func (d *sizeDriver) Inspect(ctx context.Context, id string) (driver.State, error) {
+	d.smu.Lock()
+	d.inspects++
+	d.smu.Unlock()
+	return d.fakeDriver.Inspect(ctx, id)
+}
+
+func (d *sizeDriver) inspected() int {
+	d.smu.Lock()
+	defer d.smu.Unlock()
+	return d.inspects
 }
 
 func newSizeDriver(clock *fakeClock, flags v1.Autosize) *sizeDriver {
@@ -557,6 +572,20 @@ func TestAFailedCommandIsReadBeforeItsExitIsReported(t *testing.T) {
 	// the interval's.
 	if got := d.readings(); got[len(got)-1] != "kills" || slices.Contains(got[before:], "usage") {
 		t.Fatalf("a command reading read %v", got[before:])
+	}
+
+	// A command a signal ended for another reason costs the one reading of
+	// the count and nothing else: the sandbox's state is not read.
+	before = len(d.readings())
+	inspected := d.inspected()
+	if code, err := run(killedExit, nil); code != killedExit || err != nil {
+		t.Fatalf("exit = %d, %v", code, err)
+	}
+	if got := d.readings()[before:]; len(got) != 1 || got[0] != "kills" || d.inspected() != inspected {
+		t.Fatalf("a command killed for another reason read %v and the state %d times", got, d.inspected()-inspected)
+	}
+	if n := len(d.changed()); n != 1 {
+		t.Fatalf("a command killed for another reason raised memory: %d changes", n)
 	}
 
 	// A broken stream is read the same way.
@@ -1094,6 +1123,21 @@ func TestAnUpdateOfTheCPUCeilingReachesTheDriver(t *testing.T) {
 	if got := d.changed(); got[len(got)-1].CPULimit != "500m" {
 		t.Fatalf("removing the cpu ceiling asked for %+v", got[len(got)-1])
 	}
+	// A driver that recorded the size and could not give it in place has
+	// taken the update: the sandbox holds it at its next start.
+	d.set2(func(d *sizeDriver) { d.refuse = errors.New("the cluster refused the resize") })
+	next.Spec.Resources.Max.CPU = "3"
+	if _, err := c.Update(t.Context(), next); err != nil {
+		t.Fatalf("an update whose size the driver recorded was refused: %v", err)
+	}
+	if got := d.state(id).Resize; got == nil || got.Resources.CPULimit != "3" || got.Reason != driver.ResizeAtRestart {
+		t.Fatalf("outstanding after the update = %+v, want the cpu limit waiting for a restart", got)
+	}
+	if got := stored(t, c, id).Spec.Resources.Max.CPU; got != "3" {
+		t.Fatalf("the update stored the cpu ceiling %q", got)
+	}
+	d.set2(func(d *sizeDriver) { d.refuse = nil })
+	next = stored(t, c, id)
 	// A driver that refuses the change refuses the update, and nothing is
 	// stored.
 	d.set2(func(d *sizeDriver) { d.drop = errors.New("the record could not be written") })
@@ -1101,7 +1145,7 @@ func TestAnUpdateOfTheCPUCeilingReachesTheDriver(t *testing.T) {
 	if _, err := c.Update(t.Context(), next); err == nil {
 		t.Fatal("an update whose size the driver refused was accepted")
 	}
-	if got := stored(t, c, id).Spec.Resources.Max.CPU; got != "" {
+	if got := stored(t, c, id).Spec.Resources.Max.CPU; got != "3" {
 		t.Fatalf("a refused update stored the cpu ceiling %q", got)
 	}
 }
@@ -1273,11 +1317,11 @@ func TestSizingLeavesOtherSandboxesAndPhasesAlone(t *testing.T) {
 	// A sandbox the driver no longer has, and a driver that cannot be
 	// read, end the reading without a change.
 	d.set(func(f *fakeDriver) { delete(f.states, id) })
-	if err := c.sizeOne(t.Context(), id, nil, readCommand); err != nil {
+	if err := c.sizeOne(t.Context(), id, nil, readWake); err != nil {
 		t.Fatalf("a sandbox the driver lost: %v", err)
 	}
 	d.set(func(f *fakeDriver) { f.inspectErr = errors.New("the cluster did not answer") })
-	if err := c.sizeOne(t.Context(), id, nil, readCommand); err == nil {
+	if err := c.sizeOne(t.Context(), id, nil, readWake); err == nil {
 		t.Fatal("a driver that did not answer was read as fine")
 	}
 	d.set(func(f *fakeDriver) { f.inspectErr, f.listErr = nil, errors.New("the cluster did not answer") })

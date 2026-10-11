@@ -51,13 +51,23 @@ const (
 // that does not fit is dropped: the next interval reads the sandbox anyway.
 const sizeWakes = 256
 
-// What asked for one reading of one sandbox. The interval reads everything;
-// a command that ended badly and a sandbox that just started are read for
-// the kill count alone, which is what they can have changed.
+// What asked for one reading of one sandbox. The interval reads everything,
+// the working set included. A wake, from a command that failed, a sandbox
+// that started or an update that changed a size, reads the sandbox's state
+// and its kill count, which is what those can have changed. A command a
+// signal ended is read for the kill count first and for anything else only
+// where the count rose or could not be read, so a client whose command was
+// killed for another reason waits for one command and no more.
 const (
 	readInterval = iota
-	readCommand
+	readWake
+	readKilled
 )
+
+// leaseFresh is how long the loop takes the autosize lease as held after it
+// last acquired it, so a wake between two ticks does not ask the store. It
+// is a third of the lease's term, which is when a holder renews.
+const leaseFresh = LeaseTTL / 3
 
 // ResizedData is design 009's payload for sandbox.resized: which resource
 // changed, from what to what in quantity syntax, why, and whether the change
@@ -129,16 +139,7 @@ func sized(obj v1.Sandbox) bool { return obj.Spec.Resources.Max != (v1.ResourceM
 
 // bytesOf is a quantity as a number of bytes, and zero for one that is empty
 // or cannot be read.
-func bytesOf(q string) int64 {
-	if q == "" {
-		return 0
-	}
-	milli, err := manifest.ParseQuantity(v1.Quantity(q))
-	if err != nil {
-		return 0
-	}
-	return milli / 1000
-}
+func bytesOf(q string) int64 { return milliOf(q) / 1000 }
 
 // sizeFor is the size a sandbox is to be run at: the CPU it was granted, the
 // CPU ceiling as its limit, and the memory it holds now, which is the amount
@@ -350,18 +351,42 @@ func (c *Controller) RunAutosize(ctx context.Context) {
 	// The first pass runs at once, as the reaper's does: a process that
 	// starts with sandboxes running takes the baseline of each kill count
 	// before the first interval ends.
-	c.autosizeTick(ctx)
+	// acquired is when this loop last took the lease, which a wake inside
+	// leaseFresh of it does not take again.
+	var acquired time.Time
+	held := func() bool {
+		if !acquired.IsZero() && time.Since(acquired) < leaseFresh {
+			return true
+		}
+		if !c.autosizeLeaseHeld(ctx) {
+			acquired = time.Time{}
+			return false
+		}
+		acquired = time.Now()
+		return true
+	}
+	tick := func() {
+		acquired = time.Time{}
+		if !held() {
+			return
+		}
+		if read, err := c.Autosize(ctx); err != nil {
+			c.log.WarnContext(ctx, "autosize pass incomplete", "read", read, "err", err)
+		}
+	}
+	tick()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticks:
-			c.autosizeTick(ctx)
+			tick()
 		case id := <-c.sizeWake:
-			if c.autosizeLeaseHeld(ctx) {
-				if err := c.sizeOne(ctx, id, nil, readCommand); err != nil {
-					c.log.WarnContext(ctx, "a sandbox could not be read for its size", "sandbox", id, "err", err)
-				}
+			if !held() {
+				continue
+			}
+			if err := c.sizeOne(ctx, id, nil, readWake); err != nil {
+				c.log.WarnContext(ctx, "a sandbox could not be read for its size", "sandbox", id, "err", err)
 			}
 		}
 	}
@@ -375,15 +400,6 @@ func (c *Controller) autosizeLeaseHeld(ctx context.Context) bool {
 		return false
 	}
 	return held
-}
-
-func (c *Controller) autosizeTick(ctx context.Context) {
-	if !c.autosizeLeaseHeld(ctx) {
-		return
-	}
-	if acted, err := c.Autosize(ctx); err != nil {
-		c.log.WarnContext(ctx, "autosize pass incomplete", "read", acted, "err", err)
-	}
 }
 
 // Autosize reads every sandbox with a ceiling on every placeable environment
@@ -537,6 +553,18 @@ func (c *Controller) sizeOne(ctx context.Context, id string, observed *driver.St
 			c.release(id)
 		}
 	}()
+	reader, reads := s.driver.(driver.MemoryReader)
+	reads = reads && s.memory
+	// counted says the kill count of this reading is already taken, and
+	// rose what it said.
+	rose, counted := false, false
+	if why == readKilled && reads {
+		if rose, counted = c.countKills(ctx, id, reader); counted && !rose {
+			// The command was not killed for memory. Nothing else of the
+			// sandbox is read on its account.
+			return nil
+		}
+	}
 	state := observed
 	if state == nil {
 		read, err := s.driver.Inspect(ctx, id)
@@ -591,17 +619,11 @@ func (c *Controller) sizeOne(ctx context.Context, id string, observed *driver.St
 	if err := c.recordSize(ctx, id, *state, false); err != nil {
 		return err
 	}
-	reader, reads := s.driver.(driver.MemoryReader)
-	if !s.memory || !reads {
+	if !reads {
 		return nil
 	}
-	rose := false
-	kills, err := reader.MemoryKills(ctx, id)
-	switch {
-	case err == nil:
-		rose = c.readingsOf(id, func(r *autosize.Readings) bool { return r.Kills(kills.Count, kills.Instance) })
-	case ctx.Err() == nil && !errors.Is(err, driver.ErrNotRunning) && !errors.Is(err, driver.ErrUnsupported):
-		c.log.WarnContext(ctx, "the count of kills for memory could not be read", "sandbox", id, "err", err)
+	if !counted {
+		rose, _ = c.countKills(ctx, id, reader)
 	}
 	pressed, used := false, int64(-1)
 	if why == readInterval {
@@ -652,6 +674,23 @@ func (c *Controller) sizeOne(ctx context.Context, id string, observed *driver.St
 	return nil
 }
 
+// countKills reads the kernel's count of kills for memory in one sandbox and
+// reports whether it rose since the last reading of the same workload
+// instance, and whether it could be read at all. A sandbox that is not
+// running and a substrate that serves no count are no signal and no
+// failure; any other error is logged, because it is a reading the operator
+// expects and is not getting.
+func (c *Controller) countKills(ctx context.Context, id string, reader driver.MemoryReader) (rose, counted bool) {
+	kills, err := reader.MemoryKills(ctx, id)
+	switch {
+	case err == nil:
+		return c.readingsOf(id, func(r *autosize.Readings) bool { return r.Kills(kills.Count, kills.Instance) }), true
+	case ctx.Err() == nil && !errors.Is(err, driver.ErrNotRunning) && !errors.Is(err, driver.ErrUnsupported):
+		c.log.WarnContext(ctx, "the count of kills for memory could not be read", "sandbox", id, "err", err)
+	}
+	return false, false
+}
+
 // outstanding acts on a size a sandbox was asked to hold and does not hold
 // yet, and reports whether the sandbox is to be moved for it. A raise the
 // substrate is still applying is left alone; one it was never given in place
@@ -663,9 +702,7 @@ func (c *Controller) outstanding(ctx context.Context, s sizing, state driver.Sta
 	if reader, reads := s.driver.(driver.MemoryReader); reads && s.memory {
 		// The baseline is kept current while the raise is outstanding, so
 		// a kill the raise already answers does not ask for a second one.
-		if kills, err := reader.MemoryKills(ctx, id); err == nil {
-			c.readingsOf(id, func(r *autosize.Readings) bool { return r.Kills(kills.Count, kills.Instance) })
-		}
+		c.countKills(ctx, id, reader)
 	}
 	asked := bytesOf(state.Resize.Resources.Memory)
 	if !s.memory || asked <= bytesOf(state.Resources.Memory) {
@@ -769,7 +806,7 @@ func (c *Controller) move(ctx context.Context, s sizing, state driver.State, tar
 		if errors.Is(readErr, driver.ErrNotFound) {
 			return nil
 		}
-		if readErr != nil || !asksFor(recorded, target) {
+		if readErr != nil || !asksFor(recorded, next) {
 			return errors.Join(fmt.Errorf("recording %s of memory for %s: %w", next.Memory, id, err), readErr)
 		}
 	}
@@ -796,13 +833,35 @@ func (c *Controller) move(ctx context.Context, s sizing, state driver.State, tar
 	return c.afterMove(ctx, id, d, true)
 }
 
-// asksFor reports whether a sandbox holds, or was asked to hold, this much
-// memory.
-func asksFor(state driver.State, memory int64) bool {
-	if bytesOf(state.Resources.Memory) == memory {
-		return true
+// asksFor reports whether a sandbox holds, or was asked to hold, a size: the
+// memory and the CPU limit of it, each compared by value.
+func asksFor(state driver.State, want driver.Resources) bool {
+	same := func(r driver.Resources) bool {
+		return bytesOf(r.Memory) == bytesOf(want.Memory) && milliOf(cpuLimit(r)) == milliOf(cpuLimit(want))
 	}
-	return state.Resize != nil && bytesOf(state.Resize.Resources.Memory) == memory
+	return same(state.Resources) || (state.Resize != nil && same(state.Resize.Resources))
+}
+
+// cpuLimit is the most CPU a size allows: its limit, or the CPU it grants
+// where it names none.
+func cpuLimit(r driver.Resources) string {
+	if r.CPULimit != "" {
+		return r.CPULimit
+	}
+	return r.CPU
+}
+
+// milliOf is a quantity in thousandths, and zero for one that is empty or
+// cannot be read.
+func milliOf(q string) int64 {
+	if q == "" {
+		return 0
+	}
+	milli, err := manifest.ParseQuantity(v1.Quantity(q))
+	if err != nil {
+		return 0
+	}
+	return milli
 }
 
 // afterMove writes what a move left: the phase and the instants the driver
@@ -970,7 +1029,7 @@ func (t *trackedExec) Wait(ctx context.Context) (int, error) {
 		return code, err
 	}
 	if err != nil || code == killedExit {
-		if readErr := t.c.sizeOne(ctx, t.id, nil, readCommand); readErr != nil {
+		if readErr := t.c.sizeOne(ctx, t.id, nil, readKilled); readErr != nil {
 			t.c.log.WarnContext(ctx, "a sandbox could not be read after a command was killed", "sandbox", t.id, "err", readErr)
 		}
 		return code, err
