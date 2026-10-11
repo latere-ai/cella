@@ -287,8 +287,9 @@ paths:
         counts the sandboxes that run, is refused with `quota_exceeded`. A
         start is refused with `phase_conflict` in every other phase, and for
         a `Failed` sandbox that has no workspace to start on: one whose
-        `status.reason` is `CreateFailed`, `NoCapacity`, `StartDeadline` or
-        `RecoveryExhausted`, with the reason in `details.detail`. A sandbox
+        `status.reason` is `CreateFailed`, `NoCapacity`, `StartDeadline`,
+        `RecoveryExhausted` or `VolumeMissing`, with the reason in
+        `details.detail`. A sandbox
         that reads `Starting` is already on its way up, with reason
         `MemoryRaised` where the control plane is starting it again at a
         larger memory size.
