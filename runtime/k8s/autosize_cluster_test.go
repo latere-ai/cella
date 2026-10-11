@@ -391,6 +391,7 @@ func TestClusterAKilledSandboxNeverReadsFailed(t *testing.T) {
 	if runErr == nil && code == 0 {
 		t.Fatal("a command that allocates past the limit succeeded; the limit is not enforced on this node")
 	}
+	ended := time.Since(started)
 	obj := c.await("memory raised after the kill", func(obj v1.Sandbox) bool {
 		return obj.Status.Resources.Memory == "768Mi" && obj.Status.Phase == driver.Running
 	})
@@ -402,8 +403,8 @@ func TestClusterAKilledSandboxNeverReadsFailed(t *testing.T) {
 	saw := map[string]int{}
 	maps.Copy(saw, seen.seen)
 	seen.mu.Unlock()
-	t.Logf("memory.oom.group=%s; the command ended %d, %v; running again at 768Mi %s after it started; readers saw %v",
-		group, code, runErr, back.Round(time.Millisecond), saw)
+	t.Logf("memory.oom.group=%s; the command ended %d, %v after %s; running again at 768Mi %s after it started; readers saw %v",
+		group, code, runErr, ended.Round(time.Millisecond), back.Round(time.Millisecond), saw)
 	starting := "Starting " + v1.ReasonMemoryRaised
 	for what, n := range saw {
 		if what != driver.Running && what != starting {
