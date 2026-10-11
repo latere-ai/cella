@@ -217,7 +217,13 @@ paths:
         `{"memory": 251658240, "readAt": "2026-09-22T12:00:00Z"}` in bytes;
         and `status.moves`, how many times raising its memory restarted it on
         a node with room. A sandbox with no ceiling carries none of the three.
-        Authorized as `sandbox.read`.
+        A sandbox whose workload was killed for memory with room left under
+        `spec.resources.max.memory`, or that is being restarted on a node with
+        room, answers phase `Starting` with reason `MemoryRaised` from the
+        kill until it runs again, and never `Failed` or `Stopped` in between:
+        its workspace is kept and it needs no act of the caller. Killed at its
+        ceiling, it answers `Failed` with reason `OOMKilled`. Authorized as
+        `sandbox.read`.
       responses:
         "200":
           description: The answer this route serves.
@@ -267,7 +273,15 @@ paths:
     post:
       operationId: startSandbox
       summary: Start a sandbox
-      description: Start a stopped sandbox. Authorized as `sandbox.update`. A start that would take the owner past the count ceiling on that allow, `limits.max_sandboxes`, which counts the sandboxes that run, is refused with `quota_exceeded`.
+      description: >-
+        Start a stopped sandbox. Authorized as `sandbox.update`. A start that
+        would take the owner past the count ceiling on that allow,
+        `limits.max_sandboxes`, which counts the sandboxes that run, is
+        refused with `quota_exceeded`. A sandbox in any phase but `Stopped`
+        is refused with `phase_conflict`: a `Failed` one is not started by
+        this route, and one that reads `Starting` is already on its way up,
+        with reason `MemoryRaised` where the control plane is starting it
+        again at a larger memory size.
       responses:
         "200":
           description: The answer this route serves.
