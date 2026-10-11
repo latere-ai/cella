@@ -153,8 +153,7 @@ func phaseOf(t *testing.T, body []byte) (phase, reason string) {
 // MemoryRaised: never Failed, never Stopped, never not found. A start or a
 // stop of it in between is phase_conflict, because the control plane is
 // starting it. At its ceiling the same kill answers Failed with OOMKilled,
-// and a start of that sandbox is phase_conflict as a start of any failed
-// sandbox is.
+// and a start of that sandbox brings it back at the size it holds.
 func TestAKilledSandboxUnderACeilingNeverAnswersFailed(t *testing.T) {
 	var d *sizingDriver
 	f := setupDriver(t, nil, func(native runtime.Driver) runtime.Driver {
@@ -309,7 +308,8 @@ func TestAKilledSandboxUnderACeilingNeverAnswersFailed(t *testing.T) {
 	}
 
 	// Now at its ceiling, the same kill is terminal: Failed with the
-	// reason, until a client acts, and a start of it is refused.
+	// reason, until a client acts. A start is such an act: it brings the
+	// sandbox back at the size it holds.
 	d.kill(obj.Status.ID)
 	if _, err := f.c.Autosize(context.Background()); err != nil {
 		t.Fatal(err)
@@ -317,12 +317,24 @@ func TestAKilledSandboxUnderACeilingNeverAnswersFailed(t *testing.T) {
 	if phase, reason := phaseOf(t, f.request("GET", base, f.alice, "", http.StatusOK)); phase != "Failed" || reason != "OOMKilled" {
 		t.Fatalf("at its ceiling the killed sandbox answers %s %q, want Failed OOMKilled", phase, reason)
 	}
-	refused := f.request("POST", base+"/start", f.alice, "", http.StatusConflict)
-	if !strings.Contains(string(refused), `"phase_conflict"`) {
-		t.Fatalf("a start of a failed sandbox answered %s", refused)
+	var started v1.Sandbox
+	if err := json.Unmarshal(f.request("POST", base+"/start", f.alice, "", http.StatusOK), &started); err != nil {
+		t.Fatal(err)
 	}
-	// Raising the ceiling is an act that keeps its files: it has room
-	// again and answers Starting from that update on.
+	if started.Status.Phase != runtime.Running || started.Status.Resources.Memory != "768Mi" || started.Status.Moves != 1 {
+		t.Fatalf("a start of a sandbox killed at its ceiling answered %s at %s with %d moves, want Running at 768Mi",
+			started.Status.Phase, started.Status.Resources.Memory, started.Status.Moves)
+	}
+	// Killed there again, raising the ceiling is the other act that keeps
+	// its files: it has room again and answers Starting from that update
+	// on.
+	d.kill(obj.Status.ID)
+	if _, err := f.c.Autosize(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if phase, reason := phaseOf(t, f.request("GET", base, f.alice, "", http.StatusOK)); phase != "Failed" || reason != "OOMKilled" {
+		t.Fatalf("killed at its ceiling again the sandbox answers %s %q, want Failed OOMKilled", phase, reason)
+	}
 	raised := `{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox","metadata":{"name":"sized"},
 		"spec":{"resources":{"cpu":"500m","memory":"256Mi","max":{"memory":"2Gi"}}}}`
 	f.request("PUT", "/v1/sandboxes/sized", f.alice, raised, http.StatusOK)
