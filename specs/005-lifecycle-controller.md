@@ -32,7 +32,7 @@ since it imports nothing under `internal/` ([[001-architecture]]).
 
 ## Current state
 
-[[026-direct-control-plane]] implements synchronous native create, inspect, list, start, stop, and delete with durable intent. [[037-lifecycle-enforcement]] implements the reaper's deadline rules, the `Lease` and `Clock` seams, and `Touch`. [[043-postgres-store]] implements the `lost` rule, `Recovering`, the recreation from desired state and the grace without a durable store, over the store and the observed index of [[010-state]]; recovery reattaches no volume. [[045-workload-tokens]] implements the `token` rule over the `Tokens` seam, the mint at step 5 of the create order with its undo, the re-mint at recovery with the previous `jti` revoked, and the revocation a delete writes. [[058-preemption]] implements the preemption edges: the scheduler stops a victim through its driver and writes `Running` to `Queued` with `Scheduled Preempted` in one write, since the driver's stop is synchronous and a crash between a `Stopped` and a `Queued` write would leave the victim outside every queue; a preempted sandbox leaves `Queued` by a `Start` of the object its driver kept rather than through `Pending` and a create, and while it waits the `autoDelete` rule is not asked of it. [[072-create-answers-at-once]] answers a create once step 2 has written it, `Pending`, and finishes steps 3 onward in the scheduler loop of [[020-scheduling-and-sets]], with the driver's create and the first read outside the controller's lock, a status write carrying the boundary and the identity before the driver call, `ErrAlreadyExists` taken as this sandbox's own object, and a placed sandbox a restart left realized by the loop's first pass; a pool adoption stays on the request. [[078-self-sizing-sandboxes]] adds the sizing loop under the `autosize` lease, which reads every running sandbox with a ceiling once per `CELLA_AUTOSIZE_INTERVAL`, raises its memory through `Driver.Update` with `Change.Resources`, restarts it at the larger size with the controller's lock released where the node cannot hold the raise, and gives an update's changed CPU ceiling to the driver, which is the first field an update carries to a driver. Reconciliation of the other fields of an update and the cascade remain to build.
+[[026-direct-control-plane]] implements synchronous native create, inspect, list, start, stop, and delete with durable intent. [[037-lifecycle-enforcement]] implements the reaper's deadline rules, the `Lease` and `Clock` seams, and `Touch`. [[043-postgres-store]] implements the `lost` rule, `Recovering`, the recreation from desired state and the grace without a durable store, over the store and the observed index of [[010-state]]; recovery reattaches no volume. [[045-workload-tokens]] implements the `token` rule over the `Tokens` seam, the mint at step 5 of the create order with its undo, the re-mint at recovery with the previous `jti` revoked, and the revocation a delete writes. [[058-preemption]] implements the preemption edges: the scheduler stops a victim through its driver and writes `Running` to `Queued` with `Scheduled Preempted` in one write, since the driver's stop is synchronous and a crash between a `Stopped` and a `Queued` write would leave the victim outside every queue; a preempted sandbox leaves `Queued` by a `Start` of the object its driver kept rather than through `Pending` and a create, and while it waits the `autoDelete` rule is not asked of it. [[072-create-answers-at-once]] answers a create once step 2 has written it, `Pending`, and finishes steps 3 onward in the scheduler loop of [[020-scheduling-and-sets]], with the driver's create and the first read outside the controller's lock, a status write carrying the boundary and the identity before the driver call, `ErrAlreadyExists` taken as this sandbox's own object, and a placed sandbox a restart left realized by the loop's first pass; a pool adoption stays on the request. [[078-self-sizing-sandboxes]] adds the sizing loop under the `autosize` lease, which reads every running sandbox with a ceiling once per `CELLA_AUTOSIZE_INTERVAL`, raises its memory through `Driver.Update` with `Change.Resources`, restarts it at the larger size with the controller's lock released where the node cannot hold the raise, presents it as `Starting` with reason `MemoryRaised` on every read from the kill or the move's stop until it runs again, and gives an update's changed CPU ceiling to the driver, which is the first field an update carries to a driver. Reconciliation of the other fields of an update and the cascade remain to build.
 
 Design provenance: The reaper's rules come from the hosted platform, where
 they have run for months; the phase machine, the ordered create with
@@ -67,7 +67,7 @@ stateDiagram-v2
   Queued --> Deleting: Delete (API), parent deleted (cascade)
   Starting --> Deleting: Delete (API), parent deleted (cascade)
   Failed --> Deleting: Delete (API), expired (reaper), parent deleted (cascade)
-  Failed --> Starting: killed for memory below resources.max.memory, started again at the next size (autosize)
+  Running --> Starting: killed for memory with room under resources.max.memory, or moved to a node with room, reason MemoryRaised (autosize)
   Recovering --> Deleting: Delete (API), parent deleted (cascade)
   Running --> Lost: object gone (watch)
   Stopped --> Lost: object gone (watch)
@@ -80,11 +80,21 @@ stateDiagram-v2
 
 Every edge names its trigger and its owner. `Delete` is accepted in
 every phase and moves the sandbox to `Deleting` at once, which is
-what [[008-api]] returns. `Start` on `Failed` is `phase_conflict`. The
-one way out of `Failed` but a delete is the control plane's own: a
-sandbox that ended `Failed` with `OOMKilled` and has room under its
-memory ceiling is started again at the next size by the sizing loop
-([[078-self-sizing-sandboxes]]).
+what [[008-api]] returns. `Start` on `Failed` is `phase_conflict`.
+`Failed` is terminal: nothing leaves it but a delete, and a client that
+reads it knows no act of the control plane will change it.
+
+A sandbox the control plane is starting again at a larger memory size
+is therefore never `Failed`, and never `Stopped`
+([[078-self-sizing-sandboxes]]). Its driver reports the workload killed
+for memory, or absent while a move replaces it, and the controller
+presents it as `Starting` with reason `MemoryRaised` wherever a driver's
+read becomes a sandbox's status: the read behind every API answer, the
+status it stores, and the observed index. The presentation is computed
+from the read itself by the rule the sizing loop restarts by, so it
+holds from the kill on, before the loop has read the sandbox, and until
+it runs again. A sandbox killed for memory with no room left, at its
+ceiling or without one, is `Failed` with reason `OOMKilled`.
 `Stop` keeps the managed workspace and every attached volume; nothing
 is lost until `Delete`. `Queued` and `Recovering` are the
 controller's; a driver never reports them. Every terminal transition
@@ -277,6 +287,26 @@ sandbox the controller did not delete, marks it `Lost`; `lost` marks
 so no transition is missed for longer than one relist.
 
 ## Not in this spec
+
+A start of a `Failed` sandbox. It stays `phase_conflict`. Where the
+driver still holds the sandbox, a start would run its workload again and
+keep its workspace, which is what a client wants after a kill at the
+memory ceiling; the Kubernetes driver's start already replaces a Pod
+that ended. Three things stand between that and a rule this spec can
+state. A failure is one of two kinds, a workload that ran and ended,
+which a start could run again, and a sandbox no driver holds
+(`CreateFailed`, `NoCapacity`, `StartDeadline`, `RecoveryExhausted`),
+which only a create could, and the rule has to tell them apart from the
+driver's read and not the stored reason. The driver contract
+([[004-runtime-contract]]) says nothing of a start of a workload that
+ended in failure, and the driver suite has no case for it, so what each
+driver does there is held to no one rule. And the count ceiling's rule
+that a failed sandbox holds no slot rests on a failed one never running
+again ([[080-running-sandbox-count]]). Until those are settled a client
+recovers a sandbox killed at its ceiling by raising
+`spec.resources.max.memory`, which gives it room and starts it again
+with its workspace ([[078-self-sizing-sandboxes]]), or copies its files
+out and deletes it.
 
 The HTTP handlers that call `Reconcile` and `Touch` ([[008-api]]); the
 store behind `Store` ([[010-state]]); the token's shape
