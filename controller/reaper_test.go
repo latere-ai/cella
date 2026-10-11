@@ -335,6 +335,10 @@ func TestReaperRules(t *testing.T) {
 	now := epoch.Add(time.Hour)
 	running := driver.State{ID: "sbx", Phase: driver.Running, CreatedAt: epoch, LastActivityAt: now}
 	stopped := driver.State{ID: "sbx", Phase: driver.Stopped, CreatedAt: epoch, StoppedAt: now}
+	// A failed sandbox is one a client may still start, so it is kept as
+	// it always was: its ttl ends it, and autoDelete, which counts from a
+	// stop, does not.
+	failed := driver.State{ID: "sbx", Phase: PhaseFailed, Reason: "Exited", CreatedAt: epoch, StoppedAt: now}
 	with := func(s driver.State, fn func(*driver.State)) driver.State {
 		fn(&s)
 		return s
@@ -365,6 +369,9 @@ func TestReaperRules(t *testing.T) {
 			s.CreatedAt, s.LastActivityAt, s.AutoStop = now.Add(-10*time.Minute), time.Time{}, 10*time.Minute
 		}), ReasonAutoStop},
 		{"autoStopOnlyWhenRunning", with(stopped, func(s *driver.State) { s.LastActivityAt, s.AutoStop = now.Add(-time.Hour), time.Minute }), ""},
+		{"expiredWhileFailed", with(failed, func(s *driver.State) { s.ExpiresAt = now }), ReasonExpired},
+		{"autoDeleteNotWhenFailed", with(failed, func(s *driver.State) { s.StoppedAt, s.AutoDelete = now.Add(-time.Hour), time.Minute }), ""},
+		{"autoStopNotWhenFailed", with(failed, func(s *driver.State) { s.LastActivityAt, s.AutoStop = now.Add(-time.Hour), time.Minute }), ""},
 		{"expiredBeatsAutoStop", with(running, func(s *driver.State) {
 			s.ExpiresAt, s.LastActivityAt, s.AutoStop = now, now.Add(-time.Hour), time.Minute
 		}), ReasonExpired},
