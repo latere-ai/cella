@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"latere.ai/x/cella/autosize"
 	"latere.ai/x/cella/internal/store"
 	"latere.ai/x/cella/runtime/k8s"
 )
@@ -100,6 +101,9 @@ type Config struct {
 	// driver, both from spec 005.
 	ReapInterval  time.Duration
 	TouchInterval time.Duration
+	// AutosizeInterval is how often a running sandbox whose manifest names
+	// a ceiling is read for what it uses (spec 078).
+	AutosizeInterval time.Duration
 	// LostGrace is how long a sandbox the data plane lost is held before it
 	// is deleted, where the store cannot recover it (spec 005).
 	LostGrace time.Duration
@@ -166,6 +170,7 @@ func Load(getenv Getenv) (Config, error) {
 	c.MaxUploadBytes = byteLimit(getenv, "CELLA_MAX_UPLOAD_BYTES", 1<<30, &problems)
 	c.ReapInterval = interval(getenv, "CELLA_REAP_INTERVAL", DefaultReapInterval, &problems)
 	c.TouchInterval = interval(getenv, "CELLA_TOUCH_INTERVAL", DefaultTouchInterval, &problems)
+	c.AutosizeInterval = interval(getenv, "CELLA_AUTOSIZE_INTERVAL", autosize.DefaultInterval, &problems)
 	c.LostGrace = interval(getenv, "CELLA_LOST_GRACE", DefaultLostGrace, &problems)
 	c.DBURL = databaseURL(getenv("CELLA_DB_URL"), "CELLA_DB_URL", &problems)
 	c.DBPoolURL = databaseURL(getenv("CELLA_DB_POOL_URL"), "CELLA_DB_POOL_URL", &problems)

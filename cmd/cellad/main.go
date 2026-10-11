@@ -517,6 +517,7 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 			Capacity: cfg.Scheduling.Capacity.Sandboxes, CapacityQuantities: cfg.Scheduling.Capacity,
 			SchedulingMode: cfg.Scheduling.Mode, ScheduleInterval: cfg.Scheduling.ScheduleInterval, MaxPreemptions: cfg.Scheduling.MaxPreemptions,
 			EnvironmentOffline: cfg.EnvironmentOffline,
+			AutosizeInterval:   cfg.AutosizeInterval,
 			// The driver of an environment a worker serves is the remote
 			// driver over the stream that worker opened. The controller
 			// holds no transport of its own, which is what keeps it from
@@ -563,6 +564,10 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 			loops.Go(func() { control.RunPool(loopCtx) })
 			loops.Go(func() { control.RunEnvironments(loopCtx) })
 			loops.Go(func() { control.RunScheduler(loopCtx) })
+			// The reading loop of spec 078: what each sandbox with a
+			// ceiling uses, once an interval, and its size raised inside
+			// the ceiling when the workload needs it.
+			loops.Go(func() { control.RunAutosize(loopCtx) })
 			loops.Wait()
 		}()
 		stop := sync.OnceFunc(func() { cancelLoops(); <-loopsDone })

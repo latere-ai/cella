@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"latere.ai/x/cella/autosize"
 	"latere.ai/x/cella/controller"
 )
 
@@ -53,13 +54,16 @@ func TestReaperIntervals(t *testing.T) {
 	if err != nil || cfg.ReapInterval != DefaultReapInterval || cfg.TouchInterval != DefaultTouchInterval {
 		t.Fatalf("defaults: %v %v %v", cfg.ReapInterval, cfg.TouchInterval, err)
 	}
-	for _, name := range []string{"CELLA_REAP_INTERVAL", "CELLA_TOUCH_INTERVAL"} {
+	if cfg.AutosizeInterval != autosize.DefaultInterval {
+		t.Fatalf("the autosize interval defaults to %v, want the policy's own %v", cfg.AutosizeInterval, autosize.DefaultInterval)
+	}
+	for _, name := range []string{"CELLA_REAP_INTERVAL", "CELLA_TOUCH_INTERVAL", "CELLA_AUTOSIZE_INTERVAL"} {
 		t.Run(name, func(t *testing.T) {
 			cfg, err := Load(env(identity(t, map[string]string{name: "5s"})))
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got := map[string]time.Duration{"CELLA_REAP_INTERVAL": cfg.ReapInterval, "CELLA_TOUCH_INTERVAL": cfg.TouchInterval}[name]; got != 5*time.Second {
+			if got := map[string]time.Duration{"CELLA_REAP_INTERVAL": cfg.ReapInterval, "CELLA_TOUCH_INTERVAL": cfg.TouchInterval, "CELLA_AUTOSIZE_INTERVAL": cfg.AutosizeInterval}[name]; got != 5*time.Second {
 				t.Fatalf("%s is %v", name, got)
 			}
 			for _, raw := range []string{"never", "-5s", "0s", "999ms", "2h"} {

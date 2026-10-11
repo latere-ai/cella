@@ -116,6 +116,7 @@ for each capability, and what the network rule of each sandbox admits.
 |---|---|---|
 | `CELLA_REAP_INTERVAL` | `30s` | how often the lifecycle rules run: auto-stop, time to live, and auto-delete. Between `1s` and `1h` |
 | `CELLA_TOUCH_INTERVAL` | `1m` | how often one sandbox's activity is written to the runtime, so a busy session does not write on every request. Between `1s` and `1h` |
+| `CELLA_AUTOSIZE_INTERVAL` | `1m` | how often a running sandbox whose manifest names `spec.resources.max` is read for the memory it uses, which is what raises its memory inside that ceiling. Between `1s` and `1h`. A shorter interval raises sooner and reads the runtime more often; see [sizing inside a ceiling](manifest.md#sizing-inside-a-ceiling) |
 | `CELLA_LOST_GRACE` | `10m` | without a database, how long a sandbox the runtime lost is reported as `Lost` before it is deleted. With one, a lost sandbox is recreated instead. Between `1s` and `1h` |
 | `CELLA_ENVIRONMENT_OFFLINE` | `2m` | how long an environment goes without a worker's heartbeat, or with its own runtime not ready, before it is `Offline` and takes no new sandbox. Between `1s` and `1h` |
 
