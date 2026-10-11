@@ -57,15 +57,17 @@ Built:
 - `follow=1`, for one object from a cursor or for every readable
   record from now, with retention keeping each object's newest record
   ([[066-events-follow]], v0.4.0).
+- `sandbox.resized` and `sandbox.at_ceiling`, each committed with the
+  status write it explains and carrying the controller's own payload
+  ([[078-self-sizing-sandboxes]]).
 
 Open:
 
 - Types in the table that nothing emits: `sandbox.attach`;
   `sandbox.port` and `sandbox.egress`, whose flags `CELLA_EVENTS_PORTS`
   and `CELLA_EVENTS_EGRESS` are not read; `sandbox.token`, whose route
-  is not served ([[006-identity]]); every `volume.*` and `set.*` type,
-  whose kinds do not exist; and the two types of
-  [[078-self-sizing-sandboxes]].
+  is not served ([[006-identity]]); and every `volume.*` and `set.*` type,
+  whose kinds do not exist.
 - `TestEventTableMatchesTheSpecs`, which holds the table to the
   emission points the specs name.
 
@@ -135,7 +137,7 @@ and that every emission point a spec names is here.
 | `sandbox.started`, `.stopped`, `.deleted`, `.failed`, `.lost` | the transition completed, `started` included where a create's first driver read finds the sandbox running | `{phase}`; `Reason` set | 005 |
 | `sandbox.recovering` | the recreation of a lost sandbox begins | `{phase}` | 005 |
 | `sandbox.recovered` | a lost sandbox recreated | `{workspace: "kept" or "recreated", volumes: []string}` | 005 |
-| `sandbox.resized`, `sandbox.at_ceiling` (added by [[078-self-sizing-sandboxes]]) | a size change applied; usage passed the warning fraction of `resources.max` with no room left | `{resource, from, to, reason, moved}`; `{resource, used, max}` | 078 |
+| `sandbox.resized`, `sandbox.at_ceiling` | a size change applied; usage passed the warning fraction of `resources.max`, or a process was killed for memory, with no room left | `{resource, from, to, reason, moved}`, with `from` and `to` as quantities and `reason` one of `usage`, `oom`, `update`; `{resource, used, max}`, with `used` in bytes | 078 |
 | `sandbox.spawned` | a workload created a child | `{child: sbx_..., budgetLeft}` | 022 |
 | `sandbox.exec` | a command ended | `{exitCode, durationMs}`; never the command, its input or its output | 008 |
 | `sandbox.attach`, `sandbox.dial`, `sandbox.screen` | a session ended | `{durationMs, bytesIn, bytesOut}` | 008, 023 |

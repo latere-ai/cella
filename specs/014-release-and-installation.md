@@ -127,8 +127,10 @@ driver's own verb table, which is `get`, `list`, `create`, `delete` and
 WebSocket is a `GET`, its SPDY fallback a `POST`, [[063-k8s-attach]]),
 `get` on `pods/log`, `get` and `create` on `pods/portforward` (dial and
 the port proxy, [[060-dial-and-port-proxy]]), `create`, `get`, `update`
-and `delete` on Secrets, and `create` and `delete` on Services and
-NetworkPolicies, in the namespace the overlay set and the Deployment
+and `delete` on Secrets, `create` and `delete` on Services and
+NetworkPolicies, and the two the driver starts without, `patch` on
+`pods/resize` and `get` on the metrics API's `pods`
+([[078-self-sizing-sandboxes]]), in the namespace the overlay set and the Deployment
 reads from the downward API, a NetworkPolicy for `cellad` itself, and a
 PodDisruptionBudget of `maxUnavailable: 1`, since `minAvailable: 1` over
 one replica refuses every node drain. The Deployment runs one replica

@@ -32,7 +32,7 @@ since it imports nothing under `internal/` ([[001-architecture]]).
 
 ## Current state
 
-[[026-direct-control-plane]] implements synchronous native create, inspect, list, start, stop, and delete with durable intent. [[037-lifecycle-enforcement]] implements the reaper's deadline rules, the `Lease` and `Clock` seams, and `Touch`. [[043-postgres-store]] implements the `lost` rule, `Recovering`, the recreation from desired state and the grace without a durable store, over the store and the observed index of [[010-state]]; recovery reattaches no volume. [[045-workload-tokens]] implements the `token` rule over the `Tokens` seam, the mint at step 5 of the create order with its undo, the re-mint at recovery with the previous `jti` revoked, and the revocation a delete writes. [[058-preemption]] implements the preemption edges: the scheduler stops a victim through its driver and writes `Running` to `Queued` with `Scheduled Preempted` in one write, since the driver's stop is synchronous and a crash between a `Stopped` and a `Queued` write would leave the victim outside every queue; a preempted sandbox leaves `Queued` by a `Start` of the object its driver kept rather than through `Pending` and a create, and while it waits the `autoDelete` rule is not asked of it. [[072-create-answers-at-once]] answers a create once step 2 has written it, `Pending`, and finishes steps 3 onward in the scheduler loop of [[020-scheduling-and-sets]], with the driver's create and the first read outside the controller's lock, a status write carrying the boundary and the identity before the driver call, `ErrAlreadyExists` taken as this sandbox's own object, and a placed sandbox a restart left realized by the loop's first pass; a pool adoption stays on the request. Reconciliation of an update and the cascade remain to build.
+[[026-direct-control-plane]] implements synchronous native create, inspect, list, start, stop, and delete with durable intent. [[037-lifecycle-enforcement]] implements the reaper's deadline rules, the `Lease` and `Clock` seams, and `Touch`. [[043-postgres-store]] implements the `lost` rule, `Recovering`, the recreation from desired state and the grace without a durable store, over the store and the observed index of [[010-state]]; recovery reattaches no volume. [[045-workload-tokens]] implements the `token` rule over the `Tokens` seam, the mint at step 5 of the create order with its undo, the re-mint at recovery with the previous `jti` revoked, and the revocation a delete writes. [[058-preemption]] implements the preemption edges: the scheduler stops a victim through its driver and writes `Running` to `Queued` with `Scheduled Preempted` in one write, since the driver's stop is synchronous and a crash between a `Stopped` and a `Queued` write would leave the victim outside every queue; a preempted sandbox leaves `Queued` by a `Start` of the object its driver kept rather than through `Pending` and a create, and while it waits the `autoDelete` rule is not asked of it. [[072-create-answers-at-once]] answers a create once step 2 has written it, `Pending`, and finishes steps 3 onward in the scheduler loop of [[020-scheduling-and-sets]], with the driver's create and the first read outside the controller's lock, a status write carrying the boundary and the identity before the driver call, `ErrAlreadyExists` taken as this sandbox's own object, and a placed sandbox a restart left realized by the loop's first pass; a pool adoption stays on the request. [[078-self-sizing-sandboxes]] adds the sizing loop under the `autosize` lease, which reads every running sandbox with a ceiling once per `CELLA_AUTOSIZE_INTERVAL`, raises its memory through `Driver.Update` with `Change.Resources`, restarts it at the larger size with the controller's lock released where the node cannot hold the raise, and gives an update's changed CPU ceiling to the driver, which is the first field an update carries to a driver. Reconciliation of the other fields of an update and the cascade remain to build.
 
 Design provenance: The reaper's rules come from the hosted platform, where
 they have run for months; the phase machine, the ordered create with
@@ -67,6 +67,7 @@ stateDiagram-v2
   Queued --> Deleting: Delete (API), parent deleted (cascade)
   Starting --> Deleting: Delete (API), parent deleted (cascade)
   Failed --> Deleting: Delete (API), expired (reaper), parent deleted (cascade)
+  Failed --> Starting: killed for memory below resources.max.memory, started again at the next size (autosize)
   Recovering --> Deleting: Delete (API), parent deleted (cascade)
   Running --> Lost: object gone (watch)
   Stopped --> Lost: object gone (watch)
@@ -79,7 +80,11 @@ stateDiagram-v2
 
 Every edge names its trigger and its owner. `Delete` is accepted in
 every phase and moves the sandbox to `Deleting` at once, which is
-what [[008-api]] returns. `Start` on `Failed` is `phase_conflict`.
+what [[008-api]] returns. `Start` on `Failed` is `phase_conflict`. The
+one way out of `Failed` but a delete is the control plane's own: a
+sandbox that ended `Failed` with `OOMKilled` and has room under its
+memory ceiling is started again at the next size by the sizing loop
+([[078-self-sizing-sandboxes]]).
 `Stop` keeps the managed workspace and every attached volume; nothing
 is lost until `Delete`. `Queued` and `Recovering` are the
 controller's; a driver never reports them. Every terminal transition

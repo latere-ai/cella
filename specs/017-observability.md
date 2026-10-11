@@ -118,7 +118,7 @@ observation.
 | `cella_events_delivered_total` | counter | `outcome` (`acknowledged`, `deferred`, `dropped`) | | 009 |
 | `cella_event_delivery_duration_seconds` | histogram | none | 5ms to 10s, 12 bounds | 009 |
 | `cella_store_query_duration_seconds` | histogram | `op` | 1ms to 5s, 12 bounds | 010 |
-| `cella_lease_held` | gauge | `name` (`writer`, `reaper`, `journal`, `scheduler`, `environments`, `pool`) | | 010 |
+| `cella_lease_held` | gauge | `name` (`writer`, `reaper`, `journal`, `scheduler`, `environments`, `pool`, `autosize`) | | 010 |
 | `cella_forwarded_requests_total` | counter | `outcome` (`forwarded`, `no_writer`, `failed`) | | 076 |
 | `cella_exec_total` | counter | `exit` (`0`, `nonzero`, `failed`) | | 008 |
 | `cella_egress_connections_total` | counter | `decision`, `door` | | 018 |

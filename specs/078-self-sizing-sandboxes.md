@@ -64,7 +64,24 @@ Kubernetes resizes a running container's CPU and memory in place
 through the Pod's `resize` subresource, on by default since 1.33, and
 expands a bound claim online when its storage class sets
 `allowVolumeExpansion`. Podman updates a running container's memory
-limit in place. Nothing in Cella uses either.
+limit in place.
+
+Built: CPU and memory on the Kubernetes driver, end to end. The manifest
+fields with their refusals, `capabilities.autosize`, the driver's half
+(`Resources.CPULimit`, `Change.Resources`, `State.Resources` and
+`State.Resize`, `MemoryReader`), the `autosize` package with every figure
+of the table below, the controller's reading loop under the `autosize`
+lease with the three memory signals, the raise in place and the move,
+`status.resources`, `.usage` and `.moves`, the `MemoryAtCeiling`
+condition, the two events, `CELLA_AUTOSIZE_INTERVAL`, the two optional
+rules of the base Role, and the conformance case. The cluster tests ran
+against a single-node kind cluster on Kubernetes 1.37 with a
+metrics-server.
+
+Open: the workspace's growth, so `max.disk` is refused everywhere
+because no driver declares `autosize.disk`; the Podman driver, which
+declares none of the three flags; and `Resize`, with the questions under
+Not in this spec.
 
 ## Design
 
@@ -228,13 +245,29 @@ and raises nothing by itself, and one reading that finds the count
 higher raises memory by one step however many kills it counted.
 
 The interval is too slow for a client that retries a killed command
-at once. So a command that ends with a non-zero exit code, or whose
-stream fails, takes one reading of the sandbox's state and its kill
-count before its exit is reported, and a raise that reading decides
-is asked of the driver before the client reads the exit. A command
-that exits zero costs nothing. A kill the client's command does not
-report, a child of a command that goes on, or one in a terminal
-session, is found at the next interval.
+at once, and reading the count more often would cost one command in
+every sandbox every few seconds, each a stream through the API server
+and a process in the container. The end of the client's own command is
+the moment that matters and costs nothing when no command fails. So a
+command that ends with exit code 137, the code of a process a signal
+ended, or whose stream breaks, has the sandbox's state and its kill
+count read before its exit is reported, and a raise that reading
+decides is asked of the driver before the client reads the exit. A
+command that ends with any other non-zero code asks the loop for the
+same reading and its exit does not wait: a parent that reports its
+killed child in its own way is caught a moment later. A command that
+exits zero costs nothing, and neither does one in a sandbox with no
+memory ceiling. A sandbox that has just started is read the same way,
+so its baseline is taken before its first interval ends. A kill no
+command reports, a child of a command that goes on, or one in a
+terminal session, is found at the next interval.
+
+Measured on a single-node cluster, from the start of a command that
+allocates past the limit: where the node kills one process, the command
+ended after 0.4 seconds with the raise already asked for, and the new
+limit was applied and recorded at 1.4 seconds; where the node kills the
+whole container, the command ended after 0.5 seconds and the sandbox
+was running again at the larger size at 4.5 seconds.
 
 On any signal, with the limit below `max.memory`, the next size is the
 greater of the limit times `autosize.MemoryStepFactor` and the limit
@@ -243,10 +276,13 @@ and then held to `max.memory`. From 256Mi under a ceiling of 1Gi that
 is 768Mi and then 1Gi. The request follows as the limit times the
 request ratio.
 
-1. **In place.** The driver patches the Pod's `resize` subresource.
-   Memory's resize policy is `NotRequired`, the default, so the process
-   keeps running. Where the node has the room, the kubelet applies it
-   and the sandbox is resized with nothing lost.
+1. **In place.** The driver records the size and patches the Pod's
+   `resize` subresource. Memory's resize policy is `NotRequired`, the
+   default, so the process keeps running. Where the node has the room,
+   the kubelet applies it and the sandbox is resized with nothing lost.
+   The controller waits a few seconds for the kubelet's verdict, so a
+   raise that lands is recorded at once; one still being applied is
+   read again at the next interval.
 2. **By a move.** Where the kubelet reports the resize deferred or
    infeasible, or the cluster refuses the patch, the node lacks the
    room. The controller moves the sandbox: it stops it and starts it
@@ -261,7 +297,11 @@ request ratio.
    ([[005-lifecycle-controller]]). A move is a restart, recorded as
    `moved: true` on its event, and `status.moves` counts it.
 
-A move whose Pod is not ready within the driver's ready timeout is
+A move runs beside the loop, one sandbox at a time each, with the
+controller's lock released as a create's driver call is: a start, a
+stop and the deadline rules leave a moving sandbox alone, and a delete
+is taken at any time, with what the move made removed when it ends. A
+move whose Pod is not ready within the driver's ready timeout is
 undone: the sandbox is put back at its previous size and started
 there, and its memory is not raised again for `autosize.MoveBackoff`.
 
@@ -353,16 +393,20 @@ The cause is on the feed, as `sandbox.resized` with `reason: oom`.
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| `max` below `resources`, above a ceiling, or on a resource the driver does not autosize is refused with the field's path; lowering `max` below the current size is refused | `TestResolveAutosizeFields` | not built |
-| A `max` an admission step adds is validated and kept | `TestAdmissionSetsTheCeiling` | not built |
-| A sandbox with `max.cpu` runs with its CPU limit at the ceiling and its request at `resources.cpu` times the ratio | `k8s.TestCPUAtTheCeiling` | not built |
+| `max` below `resources`, above a ceiling, or on a resource the driver does not autosize is refused with the field's path; lowering `max` below the current size is refused | `TestResolveAutosizeFields`, `TestCeilingOnUpdate` | built, with the floor read after defaulting as `TestACeilingIsHeldToTheDefaultedAmount`, a child's ceiling inside its parent's as `TestAChildsCeilingIsInsideItsParents`, the pool's refusal as `TestAPoolTakesNoCeiling`, the native environment's as `TestNativeRefusesACeiling`, and over HTTP against any server as conformance case `case078Ceiling` |
+| A manifest with no `max` resolves and renders as before, and its status carries none of the three members | `TestNoCeilingResolvesAsBefore`, `TestCPUAtTheCeiling`, `TestASandboxWithACeilingRunsAtItAndReportsItsSize` | built: the golden corpus of the manifests without a ceiling is unchanged |
+| A `max` an admission step adds is validated and kept | `TestAdmissionSetsTheCeiling`, `TestAdmissionMayAddACeiling` | built, through the admission client and the whole of `Resolve`, with an endpoint that ignores the capability refused as `TestAnEndpointThatIgnoresTheCapabilityIsRefused` |
+| A sandbox with `max.cpu` runs with its CPU limit at the ceiling and its request at `resources.cpu` times the ratio | `k8s.TestCPUAtTheCeiling` | built, and on a cluster as the first assertion of `TestClusterMemoryGrowsInPlace`; an update of `max.cpu` reaches the driver as `TestAnUpdateOfTheCPUCeilingReachesTheDriver` |
 | A workspace filled past `DiskGrowAt` is expanded by the step, never past `max.disk`, the files intact, and `status.resources.disk` reports the new capacity | `k8s.TestWorkspaceGrowsBeforeItFills` on kind with an expandable CSI class | not built |
 | An expansion the storage refuses sets `WorkspaceResized` false and is retried | `TestRefusedExpansionRetries` | not built |
-| A working set past `MemoryGrowAt` at two readings raises memory in place, the process still running | `k8s.TestMemoryGrowsInPlace` on kind | not built |
-| A resize the node cannot hold moves the sandbox once no session is open, keeps the workspace, and records `moved: true` | `k8s.TestDeferredResizeMoves` | not built |
-| After an `OOMKilled`, the sandbox moves at once to the larger size | `k8s.TestOOMKillGrowsMemory` | not built |
-| A child killed for memory in a container that lives on raises memory by one step, in place, and the first count of an instance raises nothing | `TestAChildKilledForMemoryGrowsTheSandbox` | not built |
-| A start after a stop takes `status.resources`; an update of `spec.resources.memory` resets it | `TestStartTakesTheLastSize` | not built |
-| Usage past `CeilingWarnAt` at the ceiling emits one `sandbox.at_ceiling` per crossing | `TestAtCeilingOncePerCrossing` | not built |
-| Podman raises a running container's memory in place and declares no disk autosize | `podman.TestMemoryUpdateInPlace` | not built |
-| The Kubernetes driver declares each autosize flag only when its condition holds | `k8s.TestAutosizeCapabilities` | not built |
+| A working set past `MemoryGrowAt` at two readings raises memory in place, the process still running | `k8s.TestMemoryGrowsInPlace`, `TestClusterMemoryGrowsInPlace` on kind, `TestMemoryIsRaisedAfterReadingsInARow` | built: over the client double, and against a real kubelet on a kind cluster, where a process holding 112Mi of 128Mi was raised to 768Mi in place with the same Pod, no container restart, the process still running and the container's cgroup at the new limit |
+| A resize the node cannot hold moves the sandbox once no session is open, keeps the workspace, and records `moved: true` | `k8s.TestDeferredResizeMoves`, `TestADeferredRaiseMovesOnceNoSessionIsOpen`, `TestEverySessionKindHoldsAMove` | built over the client double, with the kubelet's deferred and infeasible verdicts written by the test. Not run against a real kubelet: on one node a resize the node defers is a Pod the scheduler cannot place either, and a move across nodes needs storage that attaches on a second node, which the kind cluster's node-bound storage class is not |
+| After an `OOMKilled`, the sandbox moves at once to the larger size | `k8s.TestOOMKillGrowsMemory`, `TestClusterOOMKillGrowsMemory` on kind, `TestAKillThatTookTheContainerMovesAtOnce` | built: over the client double, and on a kind cluster, where a main process that needs 200Mi under 128Mi was killed, the Pod ended `OOMKilled`, and the sandbox ran again at 768Mi with the file its first start wrote. At its ceiling it stays `Failed` and nothing restarts it |
+| A child killed for memory in a container that lives on raises memory by one step, in place, and the first count of an instance raises nothing | `TestAChildKilledForMemoryGrowsTheSandbox`, `TestClusterAChildKilledForMemoryGrowsTheSandbox` on kind, `TestAChildKilledForMemoryRaisesOneStep`, `TestAFailedCommandIsReadBeforeItsExitIsReported` | built: over the client double with the exec stream answering the kernel's file, and on a kind cluster in both of the node's modes. With the kubelet set to kill one process, the command ended 137, the shell lived, the limit was raised in place and the same command then succeeded; with the kubelet's default, the kill took the container and the sandbox was restarted at the larger size |
+| A start after a stop takes `status.resources`; an update of `spec.resources.memory` resets it | `TestStartTakesTheLastSize`, `TestAStartAndARecoveryTakeTheSizeHeld`, `TestRecoveryAndCapacityReadTheSizeHeld`, `TestAnUpdateOfTheAmountResetsTheSize` | built at the driver, whose record on the claim a start renders, and at the controller, whose create and recovery ask for the size held. The reset by an update is built at both and reached through the API by no driver yet, because none declares `Resize` |
+| Usage past `CeilingWarnAt` at the ceiling emits one `sandbox.at_ceiling` per crossing | `TestAtCeilingOncePerCrossing` | built, with the condition stored so a restarted control plane does not repeat the event, and a raised ceiling clearing it as `TestRaisingTheCeilingMakesRoomAgain` |
+| A move that finds no room is undone and the sandbox left alone for `MoveBackoff`; a raise the cluster refuses is given again and then moved | `TestAMoveThatFindsNoRoomIsUndone`, `TestARaiseTheClusterRefusesIsGivenAgainAndThenMoved`, `TestADeleteDuringAMoveRemovesWhatTheMoveMade` | built |
+| A change of size and its record commit together in every store, and the two records carry the data the table states | `TestBridgeWritesASizeWithItsRecord`, the `Sizes` case of `TestSuiteHoldsTheMemoryAdapter` and `TestPostgresStore`, `TestAResizeCommitsWithItsRecord`, `TestRecordShapes` | built |
+| Every figure of the constants table is the constant, in the spec and on the pages | `TestTheSpecsTableIsTheConstants`, `TestThePagesStateTheConstants`, `TestNextMemory`, `TestASmallStartReachesItsCeilingInTwoSteps` | built |
+| Podman raises a running container's memory in place and declares no disk autosize | `podman.TestMemoryUpdateInPlace` | not built: the Podman driver declares none of the three flags and refuses a change of size, held by the driver suite's `SizeChangeIsHonoredOrRefused` |
+| The Kubernetes driver declares each autosize flag only when its condition holds | `k8s.TestAutosizeCapabilities` | built for `cpu` and `memory`, with the two accesses optional at `Preflight` and in the base Role, `TestRoleMatchesTheDriversVerbs`; `disk` is never declared |

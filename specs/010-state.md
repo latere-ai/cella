@@ -297,7 +297,7 @@ is null`; `revocations (exp)`; `environment_keys (environment, jti)` and `enviro
 
 `leases` rows are `name`, `holder`, `expires_at` and `address`; `Acquire`
 is a conditional upsert that records the address the holder is reached at.
-Names: `writer`, `reaper`, `journal`, `scheduler`, `environments`, and
+Names: `writer`, `reaper`, `journal`, `scheduler`, `environments`, `autosize` ([[078-self-sizing-sandboxes]]), and
 `pool:<environment>`; every TTL is 15 seconds and the holder renews at a
 third of it. `writer` decides which replica opens the controller at all,
 and a fenced write reads its row `for share` inside the write's own

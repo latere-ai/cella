@@ -172,7 +172,7 @@ caller may narrow, only a non-workload actor may widen); `stopped`
 | `workdir` | string | `workspace.path` | no | absolute path |
 | `user` | string | the image's | no | a uid, `uid:gid`, or a name |
 | `resources.cpu`, `.memory`, `.disk` | quantity | `Defaults.CPU`, `.Memory`, `.Disk` | yes, with `Resize` | Kubernetes quantity syntax, decimal (`500m`, `2`) and binary SI (`2Gi`), parsed by the package's own parser; `disk` sizes the workspace volume |
-| `resources.max.cpu`, `.memory`, `.disk` (added by [[078-self-sizing-sandboxes]]) | quantity | absent: fixed at `resources` | yes, with `Autosize` | the ceiling the driver sizes the sandbox inside; each at least its `resources` value, at most `Ceilings`; a resource with no `max` stays fixed |
+| `resources.max.cpu`, `.memory`, `.disk` ([[078-self-sizing-sandboxes]]) | quantity | absent: fixed at `resources` | yes, with the `Autosize` flag of that resource | the ceiling the sandbox is sized inside; each at least its `resources` value (`invalid_field`), at most `Ceilings` (`ceiling_exceeded`); on an update, memory's and the workspace's not below `status.resources` (`ceiling_exceeded`); a resource with no `max` stays fixed |
 | `workspace.path` | string | `/workspace` | no | absolute; not under `/run/cella`; may not equal or nest with a `volumes[].path` (`path_conflict`) |
 | `workspace.source` | enum | `empty` | no | `empty`, `git`, or `volume` |
 | `workspace.git.url`, `.ref` | string | none; url required for `git` | no | `https://` or `ssh://`; a branch, tag, or commit |
@@ -230,8 +230,8 @@ stored status into every response.
 | `parent`, `root`, `mesh`, `spawn` | the spawn tree position: the parent's id and the root's, or empty and the sandbox's own id for a root; the inherited or minted mesh; the budget and what is used ([[022-mesh-and-spawn]]) |
 | `set` | `{name, index}` for a `SandboxSet` replica ([[020-scheduling-and-sets]]); absent otherwise |
 | `preemptions` | how many times the scheduler stopped the sandbox to place one of higher priority ([[020-scheduling-and-sets]]); absent while zero |
-| `resources`, `usage`, `moves` (added by [[078-self-sizing-sandboxes]]) | the size the sandbox has now `{cpu, memory, disk}`; the last usage reading `{memory, disk, readAt}`; how many times a memory resize moved it; absent without `resources.max` |
-| `conditions` | `Ready`, `WorkspaceReady`, `EgressEnforced`, `VolumesAttached`, `Scheduled`, `DisplayReady`, each with `status`, `reason`, `message`, `since`; and `Observed` `False` on a list row whose driver read failed, written on that answer and never stored ([[075-list-page-resilience]]) |
+| `resources`, `usage`, `moves` ([[078-self-sizing-sandboxes]]) | the size the sandbox has now `{cpu, memory, disk}`; the last usage reading `{memory, readAt}`, with `disk` joining it when the workspace grows; how many times a memory resize moved it; absent without `resources.max` |
+| `conditions` | `Ready`, `WorkspaceReady`, `EgressEnforced`, `VolumesAttached`, `Scheduled`, `DisplayReady`, and `MemoryAtCeiling` on a sandbox with a memory ceiling ([[078-self-sizing-sandboxes]]), each with `status`, `reason`, `message`, `since`; and `Observed` `False` on a list row whose driver read failed, written on that answer and never stored ([[075-list-page-resilience]]) |
 | `secrets.mounted`, `.notInjectable` | which placeholders are in `env`; and which will leave the sandbox as inert strings, so the request goes out unauthenticated, because the secret was deleted or its scope no longer has a host the sandbox may reach |
 | `volumes[]` | `{name, volume, attached}` per mount |
 | `ports[]` | `{name, port, state, url}`; `state` is `listening` or `closed` ([[023-computer-use-operations]]); `url` set for `expose: public` |
@@ -360,8 +360,12 @@ The stages, in order, each one total before the next begins:
    ([[019-volumes]]). The secrets' inject modes fix
    which `<env>_HEADER` and `<env>_QUERY` companions exist, and those
    names are checked against `env` and every other `secrets[].env`.
-5. Semantic validation: ceilings (`ceiling_exceeded` with the field and
-   the ceiling; `scheduling.priority` against `Limits.MaxPriority`);
+5. Semantic validation: each `resources.max` at or above the amount it
+   bounds (`invalid_field`); ceilings (`ceiling_exceeded` with the field and
+   the ceiling, `resources.max` held to them as `resources` is;
+   `scheduling.priority` against `Limits.MaxPriority`); on an update,
+   memory's and the workspace's `max` at or above `Existing.status.resources`
+   (`ceiling_exceeded`);
    immutability against `Existing` (`immutable_field` naming every path
    that changed); narrowing on the `narrow` fields when
    `Actor.Workload` is true (`boundary_widened` naming every path,
@@ -376,7 +380,9 @@ The stages, in order, each one total before the next begins:
    `secrets[]` names only secrets the parent mounts; (4) `volumes[]`
    and `workspace.volume` name only volumes the parent mounts, with no
    read-only attachment of the parent's made read-write; (5)
-   `resources` do not exceed the parent's; (6) `ttl` does not end
+   `resources` and `resources.max` do not exceed the parent's ceiling,
+   which is its `max` for a resource and its `resources` where it has
+   none; (6) `ttl` does not end
    after `Parent.status.expiresAt`; (7) the parent has `depth > 0`,
    `spawn.budget` is at most the parent's `budget - used - 1` and
    `spawn.depth` at most the parent's `depth - 1`, both zero when
@@ -392,8 +398,10 @@ The stages, in order, each one total before the next begins:
    `Input` refuse `display`;
    `Ingress` refuses `expose: public`; `Mesh` refuses `mesh.enabled`
    and `expose: mesh`; `Volumes` refuses `volumes[]` and
-   `workspace.source: volume`; `Resize` refuses a `resources` change on
-   update; `capabilities.egress` refuses an `egress.mode` it does not
+   `workspace.source: volume`; `Resize` refuses a change of
+   `resources.cpu`, `.memory` or `.disk` on update, and a change of
+   `.disk` with it; `autosize` refuses `resources.max` on a resource
+   whose flag is false, at that field; `capabilities.egress` refuses an `egress.mode` it does not
    list, and an empty list is a warning that `EgressEnforced` will be
    false; an environment whose `spec.scheduling.mode` is `direct`
    refuses every `scheduling` field. Refusals
@@ -508,7 +516,7 @@ mapping and user sentences of the errors ([[008-api]]).
 | Every immutable field changed on update is named in one `immutable_field` error; a workload widening each `narrow` field is `boundary_widened`; the owner widening the same is accepted | `TestImmutableFields`, `TestNarrowingIsForWorkloads` | partial: `TestImmutableFields`, `TestNarrowingIsForWorkloads` over the egress fields ([[039-egress-gateway]]), `TestAWorkloadCannotMountASecret` over the mounts ([[046-secret-kind]]), and `TestMeshEnabledIsImmutable` with `TestWorkloadCannotRaiseItsOwnBudget` over the mesh and the two spawn axes ([[040-mesh-and-spawn]]); the four `scheduling` fields as `TestSchedulingIsImmutable` ([[057-scheduling-queue]]) |
 | Each of the nine boundary rules, violated one at a time against a parent, is `boundary_exceeded` naming the path; a conforming child passes; a child's default `ttl` is cut to the parent's remaining life | `TestBoundaryCheck`, table-driven over the nine rules | built by [[040-mesh-and-spawn]] for the eight rules with a field, and the child's default `ttl` with it; rule 4 waits on [[019-volumes]] |
 | Ceilings refuse with the field and the ceiling; a ceiling of zero is no ceiling; `priority` above `Limits.MaxPriority` is `ceiling_exceeded` | `TestCeilings`, `TestSchedulingFields` | built: `TestCeilings` over the resource and ttl ceilings, and `TestSchedulingFields` over `scheduling.priority` against a positive limit and against a limit no manifest meets ([[057-scheduling-queue]]) |
-| Each capability row of stage 7 refuses or warns as stated when the capability is absent and passes when present | `TestImmutableFields`, `TestFieldSyntax` and `TestMeshCapability`, one case per row | partial: the `Resize` row in `TestImmutableFields`, the workspace source rows in `TestFieldSyntax`, and the `Mesh` row in `TestMeshCapability` ([[040-mesh-and-spawn]]); the scheduling row, every field refused on a direct environment and the queue held to the ones a queued environment declares, in `TestSchedulingFields` ([[057-scheduling-queue]]) |
+| Each capability row of stage 7 refuses or warns as stated when the capability is absent and passes when present | `TestImmutableFields`, `TestFieldSyntax` and `TestMeshCapability`, one case per row | partial: the `Resize` row in `TestImmutableFields`, with the ceiling changed apart from the amounts and the workspace's size never, `TestCeilingOnUpdate` and `TestResizeChangesNoWorkspace`, and the `autosize` row per resource in `TestResolveAutosizeFields` ([[078-self-sizing-sandboxes]]), the workspace source rows in `TestFieldSyntax`, and the `Mesh` row in `TestMeshCapability` ([[040-mesh-and-spawn]]); the scheduling row, every field refused on a direct environment and the queue held to the ones a queued environment declares, in `TestSchedulingFields` ([[057-scheduling-queue]]) |
 | `status` on apply is ignored; `Resolve` returns an empty status but warnings | `TestStatusIsIgnoredOnApply` | built |
 | `Resolve` on the same input, options, and lookup answers twice yields byte-identical JSON | `TestResolveIsDeterministic` | built |
 | Every manifest in `testdata/v1/` resolves to its golden output | `TestGoldenCorpus`, `TestCorpusCoversTheSchema` | built ([[056-contract-evidence]]): seven accepted manifests with their resolved goldens, four of them with a YAML form beside the JSON that decodes to the same object ([[055-api-contract-gaps]]), and fifteen refusals with the code and the paths each earns, under one fixed set of options on a queued environment, so every scheduling field is set by an accepted entry and an unknown queue is refused ([[057-scheduling-queue]]); every field of the schema is set by some entry and every code a golden records is one this package emits |

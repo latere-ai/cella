@@ -84,8 +84,9 @@ Open:
   ([[020-scheduling-and-sets]]), and the API's rate limits
   ([[008-api]]).
 - Egress scope by path with confirmation refusals
-  ([[077-egress-scope-and-confirmation]]) and self-sizing sandboxes
-  ([[078-self-sizing-sandboxes]]), both drafted.
+  ([[077-egress-scope-and-confirmation]]), drafted, and of self-sizing
+  sandboxes ([[078-self-sizing-sandboxes]]) the workspace's growth and the
+  Podman driver; CPU and memory on the Kubernetes driver are built.
 - Three criteria of this spec, below: resolve agreement between the API
   and an importer, no connection toward a worker's host across the e2e
   tier, and a lost sandbox returning after a restart with Postgres.

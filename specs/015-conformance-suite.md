@@ -45,7 +45,9 @@ eighteen groups below, the report with its marker, the declared gaps, the
 marker test, and the suite in both pipelines. [[059-conformance-closure]]
 added the drift seam, the literal defaults the defaults case reads, the
 dispatch job that runs the documented command against an address, and the
-agent and spawn cases against this repository's own server. What is open is
+agent and spawn cases against this repository's own server. [[078-self-sizing-sandboxes]]
+added `case078Ceiling` to the resolve group and the three autosize flags to
+what the environments case reads. What is open is
 the kind half of the timing row against the whole capability set the Time
 section names, which the Kubernetes driver does not declare yet.
 
