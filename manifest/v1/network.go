@@ -120,4 +120,11 @@ const (
 	ReasonUsage        = "Usage"
 	ReasonOOM          = "OOM"
 	ReasonBelowCeiling = "BelowCeiling"
+	// ReasonMemoryRaised is status.reason of a sandbox that reads Starting
+	// because the control plane is starting it again at a larger memory
+	// size: its workload was killed for memory with room left under its
+	// ceiling, or the node could not hold a raise and it is being moved.
+	// Its workspace is kept and it reads Running again without any act of a
+	// client, so a client that finds it waits (spec 078).
+	ReasonMemoryRaised = "MemoryRaised"
 )
