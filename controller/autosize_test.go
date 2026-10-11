@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net"
 	"slices"
 	"strconv"
@@ -651,6 +652,94 @@ func TestAFailedCommandIsReadBeforeItsExitIsReported(t *testing.T) {
 	}
 	if n := len(d.readings()); n != before || len(c.sizeWake) != wakes {
 		t.Fatalf("a sandbox with no ceiling was read after a killed command: %d readings, %d wakes", n-before, len(c.sizeWake)-wakes)
+	}
+}
+
+// warnings is a log a test reads: every record the controller wrote, as
+// text, safe to write from the goroutines sizing runs on.
+type warnings struct {
+	mu   sync.Mutex
+	text strings.Builder
+}
+
+func (w *warnings) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.text.Write(p)
+}
+
+// count is how many records carry the text.
+func (w *warnings) count(text string) int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return strings.Count(w.text.String(), text)
+}
+
+// TestAKillCountThatCannotBeReadWarnsAfterReadingsInARow: one reading asks
+// for the kill count once, so a command that ended killed in a container the
+// runtime has not yet reported as ended, which is what a kill of the whole
+// container looks like at that instant, is one count that could not be read
+// and no warning. The warning is for a count that cannot be read reading
+// after reading, is written once, and is written again only after a count
+// was read in between.
+func TestAKillCountThatCannotBeReadWarnsAfterReadingsInARow(t *testing.T) {
+	const warning = "the count of kills for memory cannot be read"
+	clock := newClock()
+	d := newSizeDriver(clock, v1.Autosize{CPU: true, Memory: true})
+	log := &warnings{}
+	c := openController(t, Options{Driver: d, Clock: clock, Log: slog.New(slog.NewTextHandler(log, nil))})
+	obj, err := realized(t.Context(), c, sizedSandbox(v1.ResourceMax{Memory: "4Gi"}), "alice", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := obj.Status.ID
+	readSizes(t, c) // the baseline
+	killed := func() {
+		t.Helper()
+		e, err := c.Exec(t.Context(), id, driver.ExecRequest{Command: []string{"install"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = e.Close() }()
+		if code, err := e.Wait(t.Context()); code != killedExit || err != nil {
+			t.Fatalf("exit = %d, %v", code, err)
+		}
+		c.sizeWork.Wait()
+	}
+	d.set2(func(d *sizeDriver) { d.exit, d.killsErr = killedExit, errors.New("container not found") })
+	before := len(d.readings())
+	killed()
+	if got := d.readings()[before:]; len(got) != 1 || got[0] != "kills" {
+		t.Fatalf("the reading of a killed command read %v, want the kill count once", got)
+	}
+	if n := log.count(warning); n != 0 {
+		t.Fatalf("one reading that could not count kills warned %d times", n)
+	}
+	// The next reading cannot count them either: that is the warning.
+	readSizes(t, c)
+	if n := log.count(warning); n != 1 {
+		t.Fatalf("two readings in a row that could not count kills warned %d times, want once", n)
+	}
+	readSizes(t, c)
+	killed()
+	if n := log.count(warning); n != 1 {
+		t.Fatalf("a count that still cannot be read warned %d times, want once", n)
+	}
+	// A count that was read ends the run of failures, and one failure
+	// after it is one again.
+	d.set2(func(d *sizeDriver) { d.killsErr = nil })
+	readSizes(t, c)
+	d.set2(func(d *sizeDriver) { d.killsErr = errors.New("container not found") })
+	killed()
+	if n := log.count(warning); n != 1 {
+		t.Fatalf("one failure after a count that was read warned: %d warnings", n)
+	}
+	readSizes(t, c)
+	if n := log.count(warning); n != 2 {
+		t.Fatalf("a second run of failures warned %d times in all, want 2", n)
+	}
+	if n := len(d.changed()); n != 0 {
+		t.Fatalf("a count that could not be read raised memory: %d changes", n)
 	}
 }
 

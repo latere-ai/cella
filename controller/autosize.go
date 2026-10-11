@@ -561,10 +561,14 @@ func (c *Controller) sizeOne(ctx context.Context, id string, observed *driver.St
 	}()
 	reader, reads := s.driver.(driver.MemoryReader)
 	reads = reads && s.memory
-	// counted says the kill count of this reading is already taken, and
-	// rose what it said.
-	rose, counted := false, false
+	// asked says this reading already asked for the kill count, and rose
+	// what the count said. A count that could not be read is not asked for
+	// again in the same reading: the answer would be the same, and one
+	// reading is one failure toward the warning.
+	rose, asked := false, false
 	if why == readKilled && reads {
+		asked = true
+		var counted bool
 		if rose, counted = c.countKills(ctx, id, reader); counted && !rose {
 			// The command was not killed for memory. Nothing else of the
 			// sandbox is read on its account.
@@ -628,7 +632,7 @@ func (c *Controller) sizeOne(ctx context.Context, id string, observed *driver.St
 	if !reads {
 		return nil
 	}
-	if !counted {
+	if !asked {
 		rose, _ = c.countKills(ctx, id, reader)
 	}
 	pressed, used := false, int64(-1)
