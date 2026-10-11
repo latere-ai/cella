@@ -72,8 +72,9 @@ fields with their refusals, `capabilities.autosize`, the driver's half
 `State.Resize`, `MemoryReader`), the `autosize` package with every figure
 of the table below, the controller's reading loop under the `autosize`
 lease with the three memory signals, the raise in place and the move,
-`status.resources`, `.usage` and `.moves`, the `MemoryAtCeiling`
-condition, the two events, `CELLA_AUTOSIZE_INTERVAL`, the two optional
+`status.resources`, `.usage` and `.moves`, the `MemoryAtCeiling` and
+`MemoryUnplaced` conditions, the start at the size held where no larger
+one could be placed, the two events, `CELLA_AUTOSIZE_INTERVAL`, the two optional
 rules of the base Role, and the conformance case. The cluster tests ran
 against a single-node kind cluster on Kubernetes 1.37 with a
 metrics-server.
@@ -323,38 +324,46 @@ runs again:
 | a raise in place | `Running` throughout | `Running` throughout |
 | a kill that took the container, with room under `max.memory` | `Failed` `OOMKilled`, then no workload while the ended one is removed, then `Pending` or `Starting`, then `Running` | `Running`, `Starting` `MemoryRaised`, `Running` |
 | a move for a raise the node cannot hold | `Running`, `Stopping`, no workload, `Pending` or `Starting`, `Running` | `Running`, `Starting` `MemoryRaised`, `Running` |
+| a kill inside `autosize.MoveBackoff`, after a move that found no room | `Failed` `OOMKilled`, then no workload, then `Pending` or `Starting`, then `Running` at the size it held | `Running`, `Starting` `MemoryNotRaised`, `Running` |
+| a kill after `autosize.SameSizeRestarts` such starts in a row | `Failed` `OOMKilled` | `Failed` `OOMKilled` |
 | a kill at the ceiling, or with no ceiling | `Failed` `OOMKilled` | `Failed` `OOMKilled` |
 
 What guarantees it is where the phase is made. A sandbox's phase is not
 stored and served: every API answer, a read of one sandbox and each row
 of a list, is the stored object with the driver's state read over it at
-that moment, in one function, `present`. That function gives `Starting`
-`MemoryRaised` in place of what the driver reports in three cases and
-no other:
+that moment, in one function, `present`. That function gives `Starting`,
+with the reason that says at which size the sandbox is being started,
+in place of what the driver reports in three cases and no other:
 
 1. The driver reports `Failed` with `OOMKilled`, the manifest names a
    memory ceiling above the size the sandbox holds, and the driver
-   sizes memory. This is one predicate, `raises`, and the loop restarts
-   a sandbox by the same call of it, so a sandbox reads as starting
-   exactly when the loop is going to start it. It is computed from the
-   read alone: it holds in the instants before the loop has read the
-   sandbox, and a read that finds the kill first asks the loop for its
-   reading at once. `autosize.MoveBackoff` is no part of it: after a
-   move that found no room the loop starts the sandbox when the backoff
-   has passed, which changes when and not whether, so the sandbox reads
-   as starting all the way there.
-2. A move of the sandbox is in flight and the driver does not report it
-   `Running`. The mark is set, and `Starting` `MemoryRaised` written to
-   the store, before the workload is touched, and cleared after what
-   the move left is written, so the removal of the old workload, the
+   sizes memory. What becomes of such a sandbox is one decision,
+   `fate`, made by the loop that acts and by every read that presents
+   the sandbox with the same call, so a sandbox reads as starting
+   exactly when the loop is going to start it and as `Failed` exactly
+   when nothing will. Outside `autosize.MoveBackoff` it is started at
+   the next size and reads `Starting` `MemoryRaised`. Inside it, after
+   a move that found no room, it is started at the size it holds and
+   reads `Starting` `MemoryNotRaised`, unless it has been started so
+   `autosize.SameSizeRestarts` times in a row or the stored
+   `MemoryUnplaced` condition says the control plane gave up, where it
+   reads `Failed`. The decision is computed from the read: it holds in
+   the instants before the loop has read the sandbox, and a read that
+   finds the kill first asks the loop for its reading at once.
+2. A start by the control plane is in flight, a move or a start at the
+   size the sandbox holds, and the driver does not report the sandbox
+   `Running`. The mark is set, and `Starting` with its reason written
+   to the store, before the workload is touched, and cleared after what
+   the start left is written, so the removal of the old workload, the
    time the driver holds none and the start of the new one are all
    inside it.
-3. The stored status says `Starting` `MemoryRaised`, which only a move
-   writes and every end of a move replaces, the driver reports the
-   workload `Stopping` or holds none, and the sandbox is not inside
-   `autosize.MoveBackoff`: a control plane stopped, or handed its lease
-   on, in the middle of a move. The first reading that finds no
-   workload finishes the start. Where the move was cut after its start,
+3. The stored status says `Starting` with `MemoryRaised` or
+   `MemoryNotRaised`, which only such a start writes and every end of
+   one replaces, the driver reports the workload `Stopping` or holds
+   none, and the sandbox is not inside `autosize.MoveBackoff`: a
+   control plane stopped, or handed its lease on, in the middle of the
+   start. The first reading that finds no workload finishes it, counted
+   as a move only where it was one. Where the move was cut after its start,
    the driver's own `Pending`, `Starting` and `Running` are what a
    reader is given, and the first reading that finds the sandbox
    `Running` counts the move and writes what the driver reports, so the
@@ -367,9 +376,11 @@ rebuilt through it; and the sizing code that writes a move's outcome
 writes `Running`, or after a move that was undone what the driver then
 reports, which is the sandbox running or stopped at its previous size.
 Where the workload was killed again before the move's last read, it
-writes `Starting` `MemoryRaised` if there is room under the ceiling
-still, since the loop moves that sandbox again, and the failure if the
-move reached the ceiling. The stored status matters because a read
+writes what `fate` then says: `Starting` `MemoryRaised` after a move
+that held, with room under the ceiling still, since the loop moves
+that sandbox again; `Starting` `MemoryNotRaised` after a move that was
+undone, since the loop starts it at the size it holds; and the failure
+if the move reached the ceiling. The stored status matters because a read
 that cannot reach the driver answers with it. No `sandbox.failed`,
 `sandbox.stopped` or `sandbox.started` is recorded for a restart for
 size. A start, a stop
@@ -383,23 +394,66 @@ which a driver does not hold, and stating it there holds it for every
 driver that comes to size memory.
 
 A kill inside `autosize.MoveBackoff`, after a move that found no room,
-is the same sandbox: under its ceiling, and one the control plane is
-going to start. It reads `Starting` `MemoryRaised` for what is left of
-the backoff, and the first reading past it, the interval's or the one a
-read asks for, starts it at the next size; if that finds no room again
-it is started at the size it had. It does not read `Failed` in between,
-because a `Failed` that the control plane later starts is the one a
-client replaces for nothing. The cost is a sandbox that is down for up
-to the backoff after its second kill on a cluster with no room for it.
-A client's start of it in that time is `phase_conflict`, as a start of
-any sandbox the control plane is starting is. Open: whether a client's
-start should be taken there, which gives the sandbox back in seconds
-at the size it holds while the control plane waits to ask for more;
-and what tells a client that the raise found no room, which today only
-the control plane's log says. A
-move that was undone twice over, no room at the larger size and a start
-at the previous one that also failed, leaves the sandbox `Stopped`,
-which a client's start brings back with its workspace.
+does not leave the sandbox down until the backoff ends. On a small
+cluster no room for the next size is the usual case and not the rare
+one, and a client whose every command fails for the whole backoff is
+no better served than one that reads `Failed`. The control plane starts
+the sandbox again at once at the size it holds, itself, with no act of
+a client: the start a stop and a start make, from the specification
+the driver recorded, on the same workspace. A reader sees `Running`,
+`Starting` with reason `MemoryNotRaised`, and `Running`. The reason is
+its own because the memory is not raised, and `MemoryRaised` would say
+it was. Nothing is recorded as a move, a change of size, a failure, a
+stop or a start. The raise is asked for again after the backoff, by
+the usual signals: a kill past it is answered by a move, and a working
+set past the grow line by a raise in place.
+
+Two figures bound it, so a workload that is killed at every start is
+not started again without end. Two such starts of one
+sandbox are at least `autosize.SameSizeRestartBackoff` apart: a kill
+that comes sooner reads `Starting` `MemoryNotRaised` until the backoff
+has passed, and the first reading after it makes the start. And the
+start is made `autosize.SameSizeRestarts` times in a row: the kill
+after the last of them leaves the sandbox `Failed` with `OOMKilled`,
+which is a client's to decide, by a start that runs it again at that
+size or by a delete ([[005-lifecycle-controller]]). The count begins
+again with every move that finds no room, with a raise that is given,
+with a client's start, and with an update of the amount or the
+ceiling. A start the driver cannot make is counted like one whose
+workload is killed.
+
+A sandbox given up on stays `Failed` until a client acts, past the end
+of the backoff and across a restart of the control plane: what says so
+is the stored condition below, with reason `RestartsExhausted`, and
+`fate` reads it before anything else. The count and the two backoffs
+are the process's own and are not stored. A control plane that
+restarts therefore asks for the raise at the next kill, and counts its
+starts at the same size from none, which costs at most
+`autosize.SameSizeRestarts` more starts and one more move.
+
+What a client sees of a raise that found no room is the condition
+`MemoryUnplaced`, the controller's, stored with the sandbox:
+
+| Status | Reason | When | Message |
+|---|---|---|---|
+| `True` | `NoRoom` | a move to a larger size was undone because no node took it | the size that found no room and the size the sandbox keeps |
+| `True` | `RestartsExhausted` | the sandbox was started at the size it holds `autosize.SameSizeRestarts` times in a row and killed again | the same two sizes, and that a start runs it again |
+| `False` | `MemoryRaised` | a later raise was given, in place or by a move | that the sandbox was given the memory it needed |
+
+It is absent on a sandbox no raise ever failed for, and removed with
+the ceiling. A client's start, or an update of the amount or the
+ceiling, takes `RestartsExhausted` back to `NoRoom`. It is a condition
+and not an event because it is a state a client reads when it meets
+the sandbox, not an instant it must have been listening for, and
+because it adds no type to the feed of [[009-events]]:
+`sandbox.at_ceiling` does not fit, since the sandbox is not at its
+ceiling. A start at the size held is not a move and
+`status.moves` does not count it.
+
+A move that was undone twice over, no room at the larger size and a
+start at the previous one that also failed, leaves the sandbox
+`Stopped`, which a client's start brings back with its workspace; so
+does a start at the size held that left the driver with no workload.
 
 After a whole-container kill every process of the sandbox is gone, not
 only the command that was killed, and so is every file outside the
@@ -517,8 +571,11 @@ The cause is on the feed, as `sandbox.resized` with `reason: oom`.
 | An expansion the storage refuses sets `WorkspaceResized` false and is retried | `TestRefusedExpansionRetries` | not built |
 | A working set past `MemoryGrowAt` at two readings raises memory in place, the process still running | `k8s.TestMemoryGrowsInPlace`, `TestClusterMemoryGrowsInPlace` on kind, `TestMemoryIsRaisedAfterReadingsInARow` | built: over the client double, and against a real kubelet on a kind cluster, where a process holding 112Mi of 128Mi was raised to 768Mi in place with the same Pod, no container restart, the process still running and the container's cgroup at the new limit |
 | A resize the node cannot hold moves the sandbox once no session is open, keeps the workspace, and records `moved: true` | `k8s.TestDeferredResizeMoves`, `TestADeferredRaiseMovesOnceNoSessionIsOpen`, `TestEverySessionKindHoldsAMove` | built over the client double, with the kubelet's deferred and infeasible verdicts written by the test. Not run against a real kubelet: on one node a resize the node defers is a Pod the scheduler cannot place either, and a move across nodes needs storage that attaches on a second node, which the kind cluster's node-bound storage class is not |
-| A sandbox being started again at a larger size reads `Starting` with reason `MemoryRaised` from the kill, or from a move's stop, until it runs again, and never `Failed`, `Stopped` or not found, to readers that read it continuously, a kill inside the backoff of a move that found no room included; at its ceiling or with no ceiling it reads `Failed` | `TestReadersNeverSeeAKilledSandboxFail`, `TestReadersNeverSeeAMoveStop`, `TestAKilledSandboxWithRoomReadsStarting`, `k8s.TestAKilledSandboxNeverReadsFailed`, `k8s.TestAMovedSandboxNeverReadsStopped`, `TestAKilledSandboxUnderACeilingNeverAnswersFailed` over HTTP, `TestClusterAKilledSandboxNeverReadsFailed` on kind | built: at the controller with the windows held open while readers cross them, over the Kubernetes driver and a client double, through the API's read and list, and on a cluster whose node kills the whole container; each of the first six fails with the presentation removed |
-| No failed record is written for a workload killed before its first read, nor a failed status for one killed again as a move starts it; the observed index holds no rising sandbox as failed; a move cut short by a restart of the control plane is finished; a move that was undone reads what the driver reports, and a kill inside the backoff after it reads `Starting` until the backoff ends | `TestAKillBeforeTheFirstReadIsNoFailedRecord`, `TestAWorkloadKilledAgainAsAMoveStartsItIsRecordedAsStarting`, `TestTheObservedIndexHoldsNoRisingSandboxAsFailed`, `TestAMoveCutShortIsFinished`, `TestAMoveThatWasUndoneReadsWhatTheDriverReports` | built |
+| A sandbox being started again at a larger size reads `Starting` with reason `MemoryRaised` from the kill, or from a move's stop, until it runs again, and never `Failed`, `Stopped` or not found, to readers that read it continuously; at its ceiling or with no ceiling it reads `Failed` | `TestReadersNeverSeeAKilledSandboxFail`, `TestReadersNeverSeeAMoveStop`, `TestAKilledSandboxWithRoomReadsStarting`, `k8s.TestAKilledSandboxNeverReadsFailed`, `k8s.TestAMovedSandboxNeverReadsStopped`, `TestAKilledSandboxUnderACeilingNeverAnswersFailed` over HTTP, `TestClusterAKilledSandboxNeverReadsFailed` on kind | built: at the controller with the windows held open while readers cross them, over the Kubernetes driver and a client double, through the API's read and list, and on a cluster whose node kills the whole container; each of the first six fails with the presentation removed |
+| No failed record is written for a workload killed before its first read, nor a failed status for one killed again as a move starts it; the observed index holds no rising sandbox as failed; a move cut short by a restart of the control plane is finished; a move that was undone reads what the driver reports | `TestAKillBeforeTheFirstReadIsNoFailedRecord`, `TestAWorkloadKilledAgainAsAMoveStartsItIsRecordedAsStarting`, `TestTheObservedIndexHoldsNoRisingSandboxAsFailed`, `TestAMoveCutShortIsFinished`, `TestAMoveThatWasUndoneReadsWhatTheDriverReports` | built |
+| A kill inside the backoff of a move that found no room is answered within one reading by a start at the size the sandbox holds: readers see `Running`, `Starting` `MemoryNotRaised`, `Running` and never `Failed`; nothing is recorded as a move, a failure, a stop or a start; and the raise is asked for again past the backoff | `TestAMoveThatWasUndoneReadsWhatTheDriverReports`, `TestAMoveThatFindsNoRoomIsUndone`, `k8s.TestAKillWithNoRoomForMoreIsStartedAgainAtItsSize`, `TestClusterAKillWithNoRoomForMoreIsStartedAgainAtItsSize` on kind | built: at the controller, over the Kubernetes driver and a client double whose cluster leaves a Pod above 512Mi unscheduled, and on a single-node cluster filled until 128Mi fits and 768Mi does not. There the move was undone 25 seconds after the first kill, 20 of them the wait for a Pod nobody scheduled; the second kill had the sandbox running again at 128Mi in 3.5 seconds; a reader every 10 milliseconds saw `Running`, `Starting` `MemoryRaised` and `Starting` `MemoryNotRaised` and nothing else; and the file in the workspace was there after five kills |
+| Starts at the size held are `SameSizeRestartBackoff` apart and made `SameSizeRestarts` times in a row; the kill after the last leaves the sandbox `Failed` `OOMKilled` with `MemoryUnplaced` `RestartsExhausted`, past the backoff and in a control plane that remembers nothing, until a client's start, which is taken and begins the count again; a start the driver cannot make is counted, and one cut short by a restart of the control plane is finished as no move | `TestAWorkloadKilledAtEveryStartIsLeftFailed`, `TestAStartAtTheSameSizeWaitsOutItsBackoff`, `TestAStartAtTheSameSizeThatFails`, `TestAStartAtTheSameSizeCutShortIsFinished`, `k8s.TestAKillWithNoRoomForMoreIsStartedAgainAtItsSize`, `TestClusterAKillWithNoRoomForMoreIsStartedAgainAtItsSize` on kind | built |
+| A move that finds no room leaves `MemoryUnplaced` `True` `NoRoom` naming the size asked, and a raise that is given sets it `False` | `TestAMoveThatWasUndoneReadsWhatTheDriverReports`, `k8s.TestAKillWithNoRoomForMoreIsStartedAgainAtItsSize` | built |
 | A sandbox killed at its ceiling is brought back with its workspace by a start, at the size it holds, and by raising `max.memory`, at the next size; a start of one the control plane is starting at a larger size is `phase_conflict` | `TestAKillAtOrUnderAMemoryCeilingAndAStart`, `TestRaisingTheCeilingStartsAKilledSandboxAgain`, `TestAKilledSandboxUnderACeilingNeverAnswersFailed` | built |
 | After an `OOMKilled`, the sandbox moves at once to the larger size | `k8s.TestOOMKillGrowsMemory`, `TestClusterOOMKillGrowsMemory` on kind, `TestAKillThatTookTheContainerMovesAtOnce` | built: over the client double, and on a kind cluster, where a main process that needs 200Mi under 128Mi was killed, the Pod ended `OOMKilled`, and the sandbox ran again at 768Mi with the file its first start wrote. At its ceiling it stays `Failed` and nothing restarts it |
 | A child killed for memory in a container that lives on raises memory by one step, in place, and the first count of an instance raises nothing | `TestAChildKilledForMemoryGrowsTheSandbox`, `TestClusterAChildKilledForMemoryGrowsTheSandbox` on kind, `TestAChildKilledForMemoryRaisesOneStep`, `TestAFailedCommandIsReadBeforeItsExitIsReported` | built: over the client double with the exec stream answering the kernel's file, and on a kind cluster in both of the node's modes. With the kubelet set to kill one process, the command ended 137, the shell lived, the limit was raised in place and the same command then succeeded; with the kubelet's default, the kill took the container and the sandbox was restarted at the larger size |
