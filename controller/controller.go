@@ -1302,6 +1302,11 @@ func (c *Controller) Start(ctx context.Context, id string, max int) (v1.Sandbox,
 		c.log.WarnContext(ctx, "a started sandbox could not be read after its start", "sandbox", id, "err", rerr)
 		read = obj
 	}
+	// A client's start is a fresh attempt: the starts the control plane
+	// made of the sandbox at this size are counted anew, and one it had
+	// given up on is its to start again (spec 078).
+	c.recount(id)
+	c.reopen(&read)
 	if rerr != nil || read.Status.Phase == driver.Stopped || read.Status.Phase == PhaseFailed {
 		read.Status.Phase, read.Status.Reason, read.Status.ExitCode = PhaseStarting, "", nil
 	}
@@ -1629,8 +1634,14 @@ func (c *Controller) resize(ctx context.Context, held v1.Sandbox, obj *v1.Sandbo
 		// A sandbox with no ceiling left reports no size of its own.
 		obj.Status.Resources, obj.Status.Usage = v1.Size{}, nil
 		obj.Status.Conditions = slices.DeleteFunc(obj.Status.Conditions, func(cond v1.Condition) bool {
-			return cond.Type == v1.ConditionMemoryAtCeiling
+			return cond.Type == v1.ConditionMemoryAtCeiling || cond.Type == v1.ConditionMemoryUnplaced
 		})
+	}
+	if held.Spec.Resources.Memory != obj.Spec.Resources.Memory || held.Spec.Resources.Max.Memory != obj.Spec.Resources.Max.Memory {
+		// A new amount or a new ceiling is a new question to the
+		// environment: what was counted against the old one is over.
+		c.recount(obj.Status.ID)
+		c.reopen(obj)
 	}
 	explicit := held.Spec.Resources.Memory != obj.Spec.Resources.Memory
 	if explicit {
