@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"maps"
 	"net"
 	"slices"
 	"strconv"
@@ -63,6 +64,12 @@ type sizeDriver struct {
 	execErr error
 	// inspects counts the reads of one sandbox's state.
 	inspects int
+	// onStart runs as a start begins, before the sandbox is running again,
+	// which is where a test holds the restart open while readers read.
+	onStart func(id string)
+	// killedAtCreate ends every created workload at once, killed for
+	// memory, as a main process that needs more than it was given ends.
+	killedAtCreate bool
 }
 
 func (d *sizeDriver) Inspect(ctx context.Context, id string) (driver.State, error) {
@@ -106,9 +113,16 @@ func (d *sizeDriver) Create(ctx context.Context, s driver.CreateSpec) (driver.Re
 	d.asked[s.ID] = held(s.Resources)
 	d.instance++
 	d.smu.Unlock()
+	d.smu.Lock()
+	killed := d.killedAtCreate
+	d.smu.Unlock()
 	d.set(func(f *fakeDriver) {
 		state := f.states[s.ID]
 		state.Resources = held(s.Resources)
+		if killed {
+			code := killedExit
+			state.Phase, state.Reason, state.ExitCode = PhaseFailed, reasonOOMKilled, &code
+		}
 		f.states[s.ID] = state
 	})
 	return ref, nil
@@ -156,6 +170,12 @@ func (d *sizeDriver) Update(ctx context.Context, id string, c driver.Change) err
 }
 
 func (d *sizeDriver) Start(ctx context.Context, id string) error {
+	d.smu.Lock()
+	hook := d.onStart
+	d.smu.Unlock()
+	if hook != nil {
+		hook(id)
+	}
 	d.smu.Lock()
 	asked := d.asked[id]
 	if d.noRoom > 0 && bytesOf(asked.Memory) > d.noRoom {
@@ -1424,8 +1444,8 @@ func TestSizingLeavesOtherSandboxesAndPhasesAlone(t *testing.T) {
 // deadline rules leave a moving sandbox alone.
 func TestADeleteDuringAMoveRemovesWhatTheMoveMade(t *testing.T) {
 	c, d, events, id := sizedController(t, v1.ResourceMax{Memory: "4Gi"})
+	setMoving(c, id, true)
 	c.mu.Lock()
-	c.moving[id] = struct{}{}
 	obj := c.objects[id]
 	c.mu.Unlock()
 	if _, err := c.Start(t.Context(), id, 0); !errors.Is(err, ErrPhase) {
@@ -1440,9 +1460,7 @@ func TestADeleteDuringAMoveRemovesWhatTheMoveMade(t *testing.T) {
 	if _, ok := c.claim(id); ok {
 		t.Fatal("a moving sandbox was claimed for a reading")
 	}
-	c.mu.Lock()
-	delete(c.moving, id)
-	c.mu.Unlock()
+	setMoving(c, id, false)
 
 	// The row is gone by the time the move ends: what the driver still
 	// holds is removed and nothing is recorded.
@@ -1478,6 +1496,18 @@ func TestADeleteDuringAMoveRemovesWhatTheMoveMade(t *testing.T) {
 	if len(d.started()) != 0 {
 		t.Fatal("a move to the size already held restarted the sandbox")
 	}
+}
+
+// setMoving marks a sandbox as being restarted at a larger size, or not, as
+// a move does around its stop and its start.
+func setMoving(c *Controller, id string, moving bool) {
+	c.sizeMu.Lock()
+	defer c.sizeMu.Unlock()
+	if moving {
+		c.size.moving[id] = struct{}{}
+		return
+	}
+	delete(c.size.moving, id)
 }
 
 // claimed reports whether a reading or a move holds the sandbox.
@@ -1733,4 +1763,610 @@ func TestARaiseStillBeingAppliedIsRecordedWhenItLands(t *testing.T) {
 	// A controller that is closing leaves no work behind a reading.
 	c.stopSizing()
 	c.follow(id, func(context.Context) error { t.Error("work began after the controller closed"); return nil })
+}
+
+// kill ends a sandbox's workload the way a kill that takes the container
+// does: the driver reports it Failed with OOMKilled and the code of a signal.
+func (d *sizeDriver) kill(id string) {
+	code := killedExit
+	d.set(func(f *fakeDriver) {
+		state := f.states[id]
+		state.Phase, state.Reason, state.ExitCode = PhaseFailed, reasonOOMKilled, &code
+		f.states[id] = state
+	})
+}
+
+// readNow is the API's read of one sandbox: the stored object, and then the
+// driver's state over it.
+func readNow(t *testing.T, c *Controller, id string) v1.Sandbox {
+	t.Helper()
+	obj, err := c.Get(t.Context(), id, "alice")
+	if err != nil {
+		t.Fatalf("the sandbox was not found: %v", err)
+	}
+	fresh, err := c.Refresh(t.Context(), obj)
+	if err != nil {
+		t.Fatalf("the sandbox could not be read: %v", err)
+	}
+	return fresh
+}
+
+// TestAKilledSandboxWithRoomReadsStarting: a sandbox whose workload was
+// killed for memory with room under its ceiling reads Starting with reason
+// MemoryRaised from the first read after the kill, before the loop has read
+// it at all, and that read asks the loop for its reading once however many
+// readers find it. A sandbox killed at its ceiling, with no memory ceiling,
+// on a driver that sizes no memory, inside the backoff of a move that found
+// no room, or that failed for another reason reads Failed, as it did.
+func TestAKilledSandboxWithRoomReadsStarting(t *testing.T) {
+	c, d, _, id := sizedController(t, v1.ResourceMax{Memory: "768Mi"})
+	for len(c.sizeWake) > 0 {
+		c.woken(<-c.sizeWake)
+	}
+	d.kill(id)
+	for range 5 {
+		got := readNow(t, c, id)
+		if got.Status.Phase != PhaseStarting || got.Status.Reason != v1.ReasonMemoryRaised || got.Status.ExitCode != nil {
+			t.Fatalf("a sandbox killed with room reads %s %q with exit %v, want Starting MemoryRaised", got.Status.Phase, got.Status.Reason, got.Status.ExitCode)
+		}
+	}
+	if len(c.sizeWake) != 1 {
+		t.Fatalf("five reads of one kill asked the loop for %d readings, want 1", len(c.sizeWake))
+	}
+	// It is not a sandbox a client starts or stops: the control plane is
+	// starting it.
+	if _, err := c.Start(t.Context(), id, 0); !errors.Is(err, ErrPhase) {
+		t.Fatalf("a start of a sandbox being raised: %v, want ErrPhase", err)
+	}
+	if _, err := c.Act(t.Context(), id, "stop"); !errors.Is(err, ErrPhase) {
+		t.Fatalf("a stop of a sandbox being raised: %v, want ErrPhase", err)
+	}
+	// Nothing was written as failed, and nothing is until the loop moves it.
+	c.mu.Lock()
+	written := c.objects[id].Status.Phase
+	c.mu.Unlock()
+	if written == PhaseFailed {
+		t.Fatal("a read recorded the sandbox as Failed")
+	}
+	readSizes(t, c)
+	if got := readNow(t, c, id); got.Status.Phase != driver.Running || got.Status.Reason != "" || got.Status.Resources.Memory != "768Mi" {
+		t.Fatalf("after the restart the sandbox reads %s %q at %s", got.Status.Phase, got.Status.Reason, got.Status.Resources.Memory)
+	}
+
+	// At its ceiling the same kill is terminal: Failed, with the driver's
+	// reason and the exit code, until a client acts.
+	d.kill(id)
+	if got := readNow(t, c, id); got.Status.Phase != PhaseFailed || got.Status.Reason != reasonOOMKilled || got.Status.ExitCode == nil {
+		t.Fatalf("a sandbox killed at its ceiling reads %s %q, want Failed OOMKilled", got.Status.Phase, got.Status.Reason)
+	}
+	if _, err := c.Start(t.Context(), id, 0); !errors.Is(err, ErrPhase) {
+		t.Fatalf("a start of a failed sandbox: %v, want ErrPhase", err)
+	}
+
+	for _, tc := range []struct {
+		name   string
+		max    v1.ResourceMax
+		flags  v1.Autosize
+		mutate func(c *Controller, d *sizeDriver, id string)
+	}{
+		{name: "no memory ceiling", max: v1.ResourceMax{CPU: "2"}, flags: v1.Autosize{CPU: true, Memory: true}},
+		{name: "a driver that sizes no memory", max: v1.ResourceMax{CPU: "2"}, flags: v1.Autosize{CPU: true},
+			mutate: func(c *Controller, _ *sizeDriver, id string) {
+				// The ceiling was accepted while the driver sized memory.
+				c.mu.Lock()
+				obj := c.objects[id]
+				obj.Spec.Resources.Max.Memory = "4Gi"
+				c.objects[id] = obj
+				c.mu.Unlock()
+			}},
+		{name: "inside the backoff of a move that found no room", max: v1.ResourceMax{Memory: "4Gi"}, flags: v1.Autosize{CPU: true, Memory: true},
+			mutate: func(c *Controller, _ *sizeDriver, id string) {
+				c.sizeMu.Lock()
+				c.size.hold[id] = c.clock.Now().Add(autosize.MoveBackoff)
+				c.sizeMu.Unlock()
+			}},
+		{name: "failed for another reason", max: v1.ResourceMax{Memory: "4Gi"}, flags: v1.Autosize{CPU: true, Memory: true},
+			mutate: func(_ *Controller, d *sizeDriver, id string) {
+				d.set(func(f *fakeDriver) {
+					state := f.states[id]
+					state.Reason = "Error"
+					f.states[id] = state
+				})
+			}},
+		{name: "a driver that reports no size", max: v1.ResourceMax{Memory: "4Gi"}, flags: v1.Autosize{CPU: true, Memory: true},
+			mutate: func(_ *Controller, d *sizeDriver, id string) {
+				d.set(func(f *fakeDriver) {
+					state := f.states[id]
+					state.Resources = driver.Resources{}
+					f.states[id] = state
+				})
+			}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			clock := newClock()
+			d := newSizeDriver(clock, tc.flags)
+			c := openController(t, Options{Driver: d, Clock: clock, Events: &recorded{}})
+			obj, err := realized(t.Context(), c, sizedSandbox(tc.max), "alice", 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			d.kill(obj.Status.ID)
+			if tc.mutate != nil {
+				tc.mutate(c, d, obj.Status.ID)
+			}
+			if got := readNow(t, c, obj.Status.ID); got.Status.Phase != PhaseFailed {
+				t.Fatalf("the sandbox reads %s %q, want Failed", got.Status.Phase, got.Status.Reason)
+			}
+		})
+	}
+}
+
+// phases is every phase a set of readers saw, counted.
+type phases struct {
+	mu   sync.Mutex
+	seen map[string]int
+	n    int
+}
+
+func (p *phases) saw(phase, reason string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.seen == nil {
+		p.seen = map[string]int{}
+	}
+	key := phase
+	if reason != "" {
+		key += " " + reason
+	}
+	p.seen[key]++
+	p.n++
+}
+
+func (p *phases) reads() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.n
+}
+
+func (p *phases) all() map[string]int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := map[string]int{}
+	maps.Copy(out, p.seen)
+	return out
+}
+
+// readers reads one sandbox as the API does, over and over from several
+// goroutines, until the test ends them, and returns what they saw. A read
+// that fails, or that does not find the sandbox, fails the test.
+func readers(t *testing.T, c *Controller, id string) (*phases, func()) {
+	t.Helper()
+	seen := &phases{}
+	stop := make(chan struct{})
+	var group sync.WaitGroup
+	for range 4 {
+		group.Go(func() {
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				obj, err := c.Get(context.Background(), id, "alice")
+				if err != nil {
+					seen.saw("not found", err.Error())
+					continue
+				}
+				fresh, err := c.Refresh(context.Background(), obj)
+				if err != nil {
+					seen.saw("unread", err.Error())
+					continue
+				}
+				seen.saw(fresh.Status.Phase, fresh.Status.Reason)
+			}
+		})
+	}
+	return seen, func() { close(stop); group.Wait() }
+}
+
+// await blocks until the readers have read this many more times, so a test
+// holds a window open for long enough that every reader crosses it.
+func (p *phases) await(t *testing.T, more int) {
+	t.Helper()
+	target := p.reads() + more
+	deadline := time.Now().Add(10 * time.Second)
+	for p.reads() < target {
+		if time.Now().After(deadline) {
+			t.Fatal("the readers stopped reading")
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// onlyRunningAndStarting fails the test where the readers saw any phase but
+// Running and Starting with reason MemoryRaised, and where they never saw
+// the second, which is a window the test did not hold open.
+func onlyRunningAndStarting(t *testing.T, seen *phases) {
+	t.Helper()
+	starting := PhaseStarting + " " + v1.ReasonMemoryRaised
+	saw := seen.all()
+	for phase, n := range saw {
+		if phase != driver.Running && phase != starting {
+			t.Errorf("readers saw %q %d times; a sandbox the control plane is starting again reads Running or Starting only", phase, n)
+		}
+	}
+	if saw[starting] == 0 || saw[driver.Running] == 0 {
+		t.Fatalf("readers saw %v, want both Running and Starting", saw)
+	}
+}
+
+// TestReadersNeverSeeAKilledSandboxFail is the guarantee a client relies on:
+// while a kill that took the container is found, the sandbox is restarted at
+// the next size and comes back, readers that read it continuously see
+// Running, then Starting with reason MemoryRaised, then Running, and never
+// Failed, Stopped, Lost or nothing at all. The windows are held open while
+// every reader crosses them: after the kill and before the loop has read
+// anything, and inside the restart, where the driver holds no workload.
+func TestReadersNeverSeeAKilledSandboxFail(t *testing.T) {
+	c, d, events, id := sizedController(t, v1.ResourceMax{Memory: "4Gi"})
+	seen, stop := readers(t, c, id)
+	seen.await(t, 50)
+	d.set2(func(d *sizeDriver) {
+		d.onStart = func(id string) {
+			// The driver removed the workload that ended and has not made
+			// the next one: what it reports is a sandbox with none.
+			d.set(func(f *fakeDriver) {
+				state := f.states[id]
+				state.Phase, state.Reason, state.ExitCode, state.StoppedAt = driver.Stopped, "", nil, f.clock.Now()
+				f.states[id] = state
+			})
+			seen.await(t, 200)
+			// What is stored while the restart runs is that it is starting.
+			c.mu.Lock()
+			recorded := c.objects[id].Status
+			c.mu.Unlock()
+			if recorded.Phase != PhaseStarting || recorded.Reason != v1.ReasonMemoryRaised {
+				t.Errorf("during the restart the stored status is %s %q, want Starting MemoryRaised", recorded.Phase, recorded.Reason)
+			}
+		}
+	})
+	d.kill(id)
+	// Nobody has read the sandbox for its size yet: the readers alone meet
+	// the kill.
+	seen.await(t, 200)
+	readSizes(t, c)
+	seen.await(t, 50)
+	stop()
+	onlyRunningAndStarting(t, seen)
+	obj := stored(t, c, id)
+	if obj.Status.Phase != driver.Running || obj.Status.Reason != "" || obj.Status.Resources.Memory != "768Mi" || obj.Status.Moves != 1 {
+		t.Fatalf("after the restart: %s %q at %s with %d moves", obj.Status.Phase, obj.Status.Reason, obj.Status.Resources.Memory, obj.Status.Moves)
+	}
+	if got := events.resized(); len(got) != 1 || !got[0].Moved || got[0].Reason != autosize.ReasonOOM {
+		t.Fatalf("records = %+v", got)
+	}
+}
+
+// TestReadersNeverSeeAMoveStop: a sandbox moved because its node could not
+// hold a raise is stopped and started by the control plane, and readers that
+// read it continuously across the stop, the instant it has no workload and
+// the start see Running and Starting only, never Stopping or Stopped.
+func TestReadersNeverSeeAMoveStop(t *testing.T) {
+	c, d, _, id := sizedController(t, v1.ResourceMax{Memory: "4Gi"})
+	d.set2(func(d *sizeDriver) { d.verdict = driver.ResizeDeferred })
+	seen, stop := readers(t, c, id)
+	d.set2(func(d *sizeDriver) {
+		d.onStart = func(string) {
+			if got := d.state(id).Phase; got != driver.Stopped {
+				t.Errorf("the move starts a sandbox its driver reports %s, want it stopped first", got)
+			}
+			seen.await(t, 200)
+		}
+	})
+	d.sample(id, 250*mi)
+	readSizes(t, c)
+	d.sample(id, 250*mi)
+	readSizes(t, c)
+	seen.await(t, 50)
+	stop()
+	onlyRunningAndStarting(t, seen)
+	if obj := stored(t, c, id); obj.Status.Phase != driver.Running || obj.Status.Moves != 1 || obj.Status.Resources.Memory != "768Mi" {
+		t.Fatalf("after the move: %s at %s with %d moves", obj.Status.Phase, obj.Status.Resources.Memory, obj.Status.Moves)
+	}
+}
+
+// TestAMoveThatWasUndoneReadsWhatTheDriverReports: a move that found no room
+// leaves no trace of having been starting: the stored status and every read
+// say the sandbox runs at the size it had, and a kill inside the backoff is
+// terminal, because the control plane is not going to start it again.
+func TestAMoveThatWasUndoneReadsWhatTheDriverReports(t *testing.T) {
+	c, d, _, id := sizedController(t, v1.ResourceMax{Memory: "4Gi"})
+	d.set2(func(d *sizeDriver) { d.noRoom = 512 * mi })
+	seen, stop := readers(t, c, id)
+	d.kill(id)
+	seen.await(t, 100)
+	readSizes(t, c)
+	seen.await(t, 50)
+	stop()
+	onlyRunningAndStarting(t, seen)
+	c.mu.Lock()
+	recorded := c.objects[id].Status
+	c.mu.Unlock()
+	if recorded.Phase != driver.Running || recorded.Reason != "" || recorded.Resources.Memory != "256Mi" || recorded.Moves != 0 {
+		t.Fatalf("after an undone move the stored status is %s %q at %s with %d moves", recorded.Phase, recorded.Reason, recorded.Resources.Memory, recorded.Moves)
+	}
+	d.kill(id)
+	if got := readNow(t, c, id); got.Status.Phase != PhaseFailed || got.Status.Reason != reasonOOMKilled {
+		t.Fatalf("a kill inside the backoff reads %s %q, want Failed OOMKilled", got.Status.Phase, got.Status.Reason)
+	}
+	// Past the backoff, with room now, the same sandbox reads as starting
+	// again and is started.
+	c.clock.(*fakeClock).Advance(autosize.MoveBackoff)
+	d.set2(func(d *sizeDriver) { d.noRoom = 0 })
+	if got := readNow(t, c, id); got.Status.Phase != PhaseStarting || got.Status.Reason != v1.ReasonMemoryRaised {
+		t.Fatalf("past the backoff the killed sandbox reads %s %q", got.Status.Phase, got.Status.Reason)
+	}
+	readSizes(t, c)
+	if got := readNow(t, c, id); got.Status.Phase != driver.Running || got.Status.Resources.Memory != "768Mi" {
+		t.Fatalf("past the backoff the sandbox is %s at %s", got.Status.Phase, got.Status.Resources.Memory)
+	}
+}
+
+// TestRaisingTheCeilingStartsAKilledSandboxAgain: a sandbox killed at its
+// ceiling is Failed until a client acts, and one act that keeps its files is
+// to raise max.memory: the update gives it room, every read from then on says
+// it is starting, and the loop starts it at the next size.
+func TestRaisingTheCeilingStartsAKilledSandboxAgain(t *testing.T) {
+	c, d, events, id := sizedController(t, v1.ResourceMax{Memory: "256Mi"})
+	d.kill(id)
+	readSizes(t, c)
+	if got := readNow(t, c, id); got.Status.Phase != PhaseFailed {
+		t.Fatalf("a sandbox killed at its ceiling reads %s", got.Status.Phase)
+	}
+	if len(d.started()) != 0 || len(events.of(MutationAtCeiling)) != 1 {
+		t.Fatalf("at its ceiling the sandbox was started %d times with %d at_ceiling records", len(d.started()), len(events.of(MutationAtCeiling)))
+	}
+	next := stored(t, c, id)
+	next.Spec.Resources.Max.Memory = "2Gi"
+	if _, err := c.Update(t.Context(), next); err != nil {
+		t.Fatal(err)
+	}
+	if got := readNow(t, c, id); got.Status.Phase != PhaseStarting || got.Status.Reason != v1.ReasonMemoryRaised {
+		t.Fatalf("with room again the killed sandbox reads %s %q", got.Status.Phase, got.Status.Reason)
+	}
+	readSizes(t, c)
+	obj := readNow(t, c, id)
+	if obj.Status.Phase != driver.Running || obj.Status.Resources.Memory != "768Mi" || obj.Status.Moves != 1 {
+		t.Fatalf("after the ceiling was raised: %s at %s with %d moves", obj.Status.Phase, obj.Status.Resources.Memory, obj.Status.Moves)
+	}
+	if got := conditionOf(obj, v1.ConditionMemoryAtCeiling); got.Status != v1.ConditionFalse {
+		t.Fatalf("condition after the restart = %+v", got)
+	}
+}
+
+// TestTheObservedIndexHoldsNoRisingSandboxAsFailed: the index the reaper
+// rebuilds from the driver's list holds a sandbox the control plane is
+// starting again as Starting, as every read answers it, and one killed at
+// its ceiling as the driver reports it.
+func TestTheObservedIndexHoldsNoRisingSandboxAsFailed(t *testing.T) {
+	clock := newClock()
+	d := newSizeDriver(clock, v1.Autosize{CPU: true, Memory: true})
+	store := newDurable(true)
+	c := openController(t, Options{Driver: d, Clock: clock, Store: store})
+	rising, err := realized(t.Context(), c, sizedSandbox(v1.ResourceMax{Memory: "4Gi"}), "alice", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	terminal := sizedSandbox(v1.ResourceMax{Memory: "256Mi"})
+	terminal.Metadata.Name = "at-its-ceiling"
+	atCeiling, err := realized(t.Context(), c, terminal, "alice", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.kill(rising.Status.ID)
+	d.kill(atCeiling.Status.ID)
+	d.put(driver.State{ID: "sbx_untracked", Phase: PhaseFailed, Reason: reasonOOMKilled, CreatedAt: epoch})
+	if _, err := c.Reap(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	rows, _ := store.index(c.environment)
+	got := map[string]string{}
+	for _, row := range rows {
+		got[row.ID] = row.Phase + " " + row.Reason
+	}
+	want := map[string]string{
+		rising.Status.ID:    PhaseStarting + " " + v1.ReasonMemoryRaised,
+		atCeiling.Status.ID: PhaseFailed + " " + reasonOOMKilled,
+		"sbx_untracked":     PhaseFailed + " " + reasonOOMKilled,
+	}
+	for id, phase := range want {
+		if got[id] != phase {
+			t.Errorf("the index holds %s as %q, want %q", id, got[id], phase)
+		}
+	}
+}
+
+// TestAKillBeforeTheFirstReadIsNoFailedRecord: a main process that needs
+// more memory than the sandbox starts with is killed before the create's own
+// first read. With room under the ceiling that read is written as it is
+// answered, Starting with reason MemoryRaised, and no failed record is
+// written for a sandbox that is on its way to running; without room it is
+// the failure it always was.
+func TestAKillBeforeTheFirstReadIsNoFailedRecord(t *testing.T) {
+	create := func(t *testing.T, max v1.ResourceMax) (*Controller, *sizeDriver, *recorded, v1.Sandbox) {
+		t.Helper()
+		clock := newClock()
+		d := newSizeDriver(clock, v1.Autosize{CPU: true, Memory: true})
+		d.killedAtCreate = true
+		events := &recorded{}
+		c := openController(t, Options{Driver: d, Clock: clock, Events: events})
+		obj, err := realized(t.Context(), c, sizedSandbox(max), "alice", 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c, d, events, obj
+	}
+	c, d, events, obj := create(t, v1.ResourceMax{Memory: "4Gi"})
+	if obj.Status.Phase != PhaseStarting || obj.Status.Reason != v1.ReasonMemoryRaised {
+		t.Fatalf("the create's first read is written %s %q, want Starting MemoryRaised", obj.Status.Phase, obj.Status.Reason)
+	}
+	if failed := events.of(MutationFailed); len(failed) != 0 {
+		t.Fatalf("%d failed records were written for a sandbox being started again", len(failed))
+	}
+	d.set2(func(d *sizeDriver) { d.killedAtCreate = false })
+	readSizes(t, c)
+	if got := readNow(t, c, obj.Status.ID); got.Status.Phase != driver.Running || got.Status.Resources.Memory != "768Mi" {
+		t.Fatalf("after the restart the sandbox is %s at %s", got.Status.Phase, got.Status.Resources.Memory)
+	}
+	if failed := events.of(MutationFailed); len(failed) != 0 {
+		t.Fatalf("%d failed records were written across the restart", len(failed))
+	}
+
+	// With no room, the same kill is the failure it was, and is recorded.
+	_, _, events, obj = create(t, v1.ResourceMax{Memory: "256Mi"})
+	if obj.Status.Phase != PhaseFailed || len(events.of(MutationFailed)) != 1 {
+		t.Fatalf("a kill at the ceiling before the first read: %s with %d failed records", obj.Status.Phase, len(events.of(MutationFailed)))
+	}
+}
+
+// TestAMoveCutShortIsFinished: a control plane that stops in the middle of a
+// move, or hands its lease to another replica there, leaves a sandbox whose
+// record says it is being started at a larger size. Wherever the move was
+// cut, the next process reads the sandbox as starting until it runs, never
+// as stopped: with no workload, its first reading finishes the start at the
+// size the driver recorded; with the old workload still ending, it reads as
+// starting and is finished once the workload is gone; with the new workload
+// already running, the reading counts the move and writes what the driver
+// reports. A start that fails leaves it stopped and says so.
+func TestAMoveCutShortIsFinished(t *testing.T) {
+	// cutAt is a sandbox whose move wrote that it is starting and recorded
+	// the size, with the workload left as a case names; then the process
+	// ended and another opened over the same record.
+	cutAt := func(t *testing.T, leave func(d *sizeDriver, id string)) (*Controller, *sizeDriver, *recorded, string) {
+		t.Helper()
+		clock := newClock()
+		d := newSizeDriver(clock, v1.Autosize{CPU: true, Memory: true})
+		events := &recorded{}
+		dir := t.TempDir()
+		c := openController(t, Options{Driver: d, Clock: clock, Events: events, DataDir: dir})
+		obj, err := realized(t.Context(), c, sizedSandbox(v1.ResourceMax{Memory: "4Gi"}), "alice", 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		id := obj.Status.ID
+		c.mu.Lock()
+		marked := clone(c.objects[id])
+		marked.Status.Phase, marked.Status.Reason = PhaseStarting, v1.ReasonMemoryRaised
+		err = c.persist(t.Context(), marked, MutationStatus)
+		c.mu.Unlock()
+		if err != nil {
+			t.Fatal(err)
+		}
+		next := driver.Resources{CPU: "500m", Memory: "768Mi"}
+		if err := d.Stop(t.Context(), id); err != nil {
+			t.Fatal(err)
+		}
+		if err := d.Update(t.Context(), id, driver.Change{Resources: &next}); err != nil {
+			t.Fatal(err)
+		}
+		leave(d, id)
+		if err := c.Close(); err != nil {
+			t.Fatal(err)
+		}
+		return openController(t, Options{Driver: d, Clock: clock, Events: events, DataDir: dir}), d, events, id
+	}
+	// cut is the move cut between its stop and its start.
+	cut := func(t *testing.T) (*Controller, *sizeDriver, *recorded, string) {
+		t.Helper()
+		return cutAt(t, func(*sizeDriver, string) {})
+	}
+	phaseIs := func(d *sizeDriver, id, phase string) {
+		d.set(func(f *fakeDriver) {
+			state := f.states[id]
+			state.Phase = phase
+			f.states[id] = state
+		})
+	}
+	c, d, events, id := cut(t)
+	if got := readNow(t, c, id); got.Status.Phase != PhaseStarting || got.Status.Reason != v1.ReasonMemoryRaised {
+		t.Fatalf("a sandbox whose move was cut short reads %s %q, want Starting MemoryRaised", got.Status.Phase, got.Status.Reason)
+	}
+	if _, err := c.Start(t.Context(), id, 0); !errors.Is(err, ErrPhase) {
+		t.Fatalf("a client's start of it: %v, want ErrPhase while the control plane finishes the move", err)
+	}
+	readSizes(t, c)
+	got := readNow(t, c, id)
+	if got.Status.Phase != driver.Running || got.Status.Resources.Memory != "768Mi" || got.Status.Moves != 1 {
+		t.Fatalf("after the move was finished: %s at %s with %d moves", got.Status.Phase, got.Status.Resources.Memory, got.Status.Moves)
+	}
+	if len(d.started()) != 1 {
+		t.Fatalf("the sandbox was started %d times", len(d.started()))
+	}
+	if records := events.resized(); len(records) != 1 || !records[0].Moved || records[0].To != "768Mi" {
+		t.Fatalf("records = %+v", records)
+	}
+
+	// The start fails: stopped, said so, and left alone for the backoff.
+	c, d, _, id = cut(t)
+	d.set(func(f *fakeDriver) { f.startErr = errors.New("no node has room") })
+	readSizes(t, c)
+	if got := readNow(t, c, id); got.Status.Phase != driver.Stopped {
+		t.Fatalf("after a start that failed the sandbox reads %s %q, want Stopped", got.Status.Phase, got.Status.Reason)
+	}
+	if !c.onHold(id) {
+		t.Fatal("a move that could not be finished did not start the backoff")
+	}
+	// A client may start it now, as it may any stopped sandbox.
+	d.set(func(f *fakeDriver) { f.startErr = nil })
+	if started, err := c.Start(t.Context(), id, 0); err != nil || started.Status.Phase != driver.Running {
+		t.Fatalf("a client's start of the stopped sandbox: %s, %v", started.Status.Phase, err)
+	}
+
+	// Cut while the workload the move stopped was still ending: starting,
+	// through a reading that has nothing to finish yet, and finished by the
+	// first reading after the workload is gone.
+	c, d, _, id = cutAt(t, func(d *sizeDriver, id string) { phaseIs(d, id, PhaseStopping) })
+	for range 2 {
+		if got := readNow(t, c, id); got.Status.Phase != PhaseStarting || got.Status.Reason != v1.ReasonMemoryRaised {
+			t.Fatalf("a sandbox whose move was cut while its workload ended reads %s %q, want Starting MemoryRaised", got.Status.Phase, got.Status.Reason)
+		}
+		readSizes(t, c)
+	}
+	if n := len(d.started()); n != 0 {
+		t.Fatalf("a workload that is still ending was started %d times", n)
+	}
+	phaseIs(d, id, driver.Stopped)
+	readSizes(t, c)
+	if got := readNow(t, c, id); got.Status.Phase != driver.Running || got.Status.Resources.Memory != "768Mi" || got.Status.Moves != 1 {
+		t.Fatalf("after the workload ended and the move was finished: %s at %s with %d moves", got.Status.Phase, got.Status.Resources.Memory, got.Status.Moves)
+	}
+
+	// Cut after the start: the sandbox runs, and the reading that finds it
+	// so counts the move and takes the mark off the record, so a stop a
+	// client asks for later is read as that stop.
+	c, d, events, id = cutAt(t, func(d *sizeDriver, id string) {
+		if err := d.Start(t.Context(), id); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if got := readNow(t, c, id); got.Status.Phase != driver.Running {
+		t.Fatalf("a sandbox whose move was cut after its start reads %s %q, want Running", got.Status.Phase, got.Status.Reason)
+	}
+	readSizes(t, c)
+	kept := stored(t, c, id)
+	if kept.Status.Phase != driver.Running || kept.Status.Reason != "" || kept.Status.Moves != 1 || kept.Status.Resources.Memory != "768Mi" {
+		t.Fatalf("the record after the reading: %s %q at %s with %d moves, want Running at 768Mi with one move",
+			kept.Status.Phase, kept.Status.Reason, kept.Status.Resources.Memory, kept.Status.Moves)
+	}
+	if records := events.resized(); len(records) != 1 || !records[0].Moved || records[0].To != "768Mi" {
+		t.Fatalf("records = %+v, want the one move", records)
+	}
+	readSizes(t, c)
+	if again := stored(t, c, id); again.Status.Moves != 1 || len(events.resized()) != 1 {
+		t.Fatalf("a second reading counted the move again: %d moves, %d records", again.Status.Moves, len(events.resized()))
+	}
+	phaseIs(d, id, PhaseStopping)
+	if got := readNow(t, c, id); got.Status.Phase != PhaseStopping {
+		t.Fatalf("a sandbox a client is stopping reads %s %q, want Stopping", got.Status.Phase, got.Status.Reason)
+	}
 }

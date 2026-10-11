@@ -40,6 +40,9 @@ const (
 	// ready. A driver reports it; the controller writes it after a start
 	// whose read did not yet show the start (spec 080).
 	PhaseStarting = "Starting"
+	// PhaseStopping is a sandbox whose workload the runtime is ending. A
+	// driver reports it.
+	PhaseStopping = "Stopping"
 )
 
 var (
@@ -259,18 +262,17 @@ type Controller struct {
 	// that holds a create's answer waits on the write that moves it rather
 	// than reading it on a timer.
 	changed chan struct{}
-	// The sizing of spec 078. moving is every sandbox being restarted at a
-	// larger size with the controller's lock released, which a start, a
-	// stop and the deadline rules leave alone until the move settles; it is
-	// guarded by the controller's lock. size is what is remembered between
-	// readings, under its own lock. sizeWake carries the sandboxes a failed
-	// command or a start asked the loop to read, and sizeCtx and sizeWork
-	// bound the work a reading leaves running behind it.
+	// The sizing of spec 078. size is what is remembered between readings,
+	// under its own lock: among it the sandboxes being restarted at a larger
+	// size with the controller's lock released, which a start, a stop and
+	// the deadline rules leave alone until the move settles and which every
+	// read presents as starting. sizeWake carries the sandboxes a failed
+	// command, a start or a read asked the loop to read, and sizeCtx and
+	// sizeWork bound the work a reading leaves running behind it.
 	autosizeInterval time.Duration
 	// settleWait and settlePoll are resizeSettle and resizePoll, held here
 	// so a test waits a few milliseconds for a verdict rather than seconds.
 	settleWait, settlePoll time.Duration
-	moving                 map[string]struct{}
 	sizeMu                 sync.Mutex
 	size                   sizer
 	sizeWake               chan string
@@ -336,7 +338,7 @@ func Open(ctx context.Context, o Options) (*Controller, error) {
 		realizing: map[string]struct{}{}, changed: make(chan struct{}), origins: map[string]context.Context{},
 		autosizeInterval: cmp.Or(o.AutosizeInterval, autosize.DefaultInterval),
 		settleWait:       resizeSettle, settlePoll: resizePoll,
-		moving: map[string]struct{}{}, size: newSizer(), sizeWake: make(chan string, sizeWakes),
+		size: newSizer(), sizeWake: make(chan string, sizeWakes),
 	}
 	// The work a reading leaves behind it, a wait for a verdict or a move,
 	// runs on a context of the controller's own: it outlives the request or
@@ -1019,7 +1021,11 @@ func (c *Controller) settleCreate(ctx context.Context, id string, d driver.Drive
 	}
 	switch {
 	case read == nil:
-		cur = observe(cur, out.state)
+		// The first read is written as every read is answered: a workload
+		// killed for memory before it was first read, with room under its
+		// ceiling, is a sandbox being started again and not one that
+		// failed, and no failed record is written for it (spec 078).
+		cur = c.present(cur, out.state, d)
 	case errors.Is(read, driver.ErrNotFound):
 		// The driver took the create and does not report it yet. The
 		// sandbox is written Pending and handed on, and the next read says
@@ -1166,11 +1172,13 @@ func (c *Controller) refresh(ctx context.Context, obj v1.Sandbox) (v1.Sandbox, e
 	if err != nil {
 		return obj, err
 	}
-	return observe(obj, state), nil
+	return c.present(obj, state, d), nil
 }
 
 // observe writes one driver read onto the sandbox: the phase and its reason,
-// the conditions the driver owns, the ports it probed, and its instants.
+// the conditions the driver owns, the ports it probed, and its instants. It
+// is the driver's own account. What a reader of the sandbox is given is
+// present, which is this with the one phase the control plane knows better.
 func observe(obj v1.Sandbox, state driver.State) v1.Sandbox {
 	// A driver names the reason for a transition it made itself and names
 	// none for one it was told to make, so a reason the controller wrote
@@ -1298,8 +1306,7 @@ func (c *Controller) creating(obj v1.Sandbox) bool {
 	// A sandbox being moved to a larger size is between a stop and a start
 	// the control plane made itself, with the lock released, and is left
 	// alone for the same reason (spec 078).
-	_, moving := c.moving[obj.Status.ID]
-	return busy || moving || placed(obj)
+	return busy || c.isMoving(obj.Status.ID) || placed(obj)
 }
 
 // Act stops or deletes one sandbox; a delete that fails keeps the desired

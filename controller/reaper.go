@@ -227,6 +227,12 @@ func (c *Controller) reapEnvironment(ctx context.Context, environment string) (i
 		// The index holds what desired state can be compared against, and a
 		// pool entry has no desired row, so entries are left out of it.
 		observed := slices.DeleteFunc(slices.Clone(states), func(s driver.State) bool { return s.Pool })
+		// A sandbox the control plane is starting again at a larger size is
+		// indexed as starting, as every read of it answers, so no store
+		// holds as failed a sandbox that is on its way back (spec 078).
+		for i := range observed {
+			observed[i] = c.presentState(observed[i], d)
+		}
 		if err := c.durable.Rebuild(ctx, environment, observed); err != nil {
 			rebuilt = false
 			failed = errors.Join(failed, fmt.Errorf("reaper: rebuilding the observed index: %w", err))
@@ -322,8 +328,7 @@ func (c *Controller) deleting(environment string) []string {
 	var ids []string
 	for id, obj := range c.objects {
 		_, busy := c.realizing[id]
-		_, moving := c.moving[id]
-		if !busy && !moving && obj.Status.Phase == PhaseDeleting && obj.Status.Environment == environment {
+		if !busy && !c.isMoving(id) && obj.Status.Phase == PhaseDeleting && obj.Status.Environment == environment {
 			ids = append(ids, id)
 		}
 	}
@@ -338,8 +343,7 @@ func (c *Controller) finishDelete(ctx context.Context, id string) (bool, error) 
 	defer c.mu.Unlock()
 	obj, held := c.objects[id]
 	_, busy := c.realizing[id]
-	_, moving := c.moving[id]
-	if !held || busy || moving || obj.Status.Phase != PhaseDeleting {
+	if !held || busy || c.isMoving(id) || obj.Status.Phase != PhaseDeleting {
 		return false, nil
 	}
 	if err := c.cascade(ctx, id); err != nil {
@@ -400,7 +404,7 @@ func (c *Controller) enforce(ctx context.Context, environment, id, rule string, 
 	// A sandbox being moved to a larger size is stopped for a moment by the
 	// control plane itself. Its deadline rules are asked again at the next
 	// tick, when the move has settled (spec 078).
-	if _, moving := c.moving[id]; moving {
+	if c.isMoving(id) {
 		return false, nil
 	}
 	state, err := d.Inspect(ctx, id)

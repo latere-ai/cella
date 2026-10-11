@@ -120,6 +120,14 @@ type sizer struct {
 	// busy is every sandbox with a reading or a move in flight. A second
 	// one for the same sandbox is dropped rather than run beside it.
 	busy map[string]struct{}
+	// moving is every sandbox being restarted at a larger size, from before
+	// its workload is stopped until what the restart left is written. A
+	// start, a stop and the deadline rules leave such a sandbox alone, and
+	// a read of it answers that it is starting. waking is every sandbox the
+	// loop has been asked to read and has not read yet, so many readers
+	// that find one kill ask for one reading.
+	moving map[string]struct{}
+	waking map[string]struct{}
 	// unread counts the readings of the kill count in a row that failed,
 	// so one that fails while a container is ending is not reported and
 	// one that keeps failing is.
@@ -134,7 +142,7 @@ func newSizer() sizer {
 		sessions: map[string]int{}, watched: map[string]struct{}{},
 		readings: map[string]*autosize.Readings{}, usage: map[string]v1.Usage{},
 		reasons: map[string]string{}, hold: map[string]time.Time{}, busy: map[string]struct{}{},
-		unread: map[string]int{},
+		unread: map[string]int{}, moving: map[string]struct{}{}, waking: map[string]struct{}{},
 	}
 }
 
@@ -388,6 +396,7 @@ func (c *Controller) RunAutosize(ctx context.Context) {
 		case <-ticks:
 			tick()
 		case id := <-c.sizeWake:
+			c.woken(id)
 			if !held() {
 				continue
 			}
@@ -460,12 +469,136 @@ func (c *Controller) sizedOn(environment string) []string {
 }
 
 // wakeSizing asks the loop for one reading of one sandbox before its next
-// tick. It never blocks.
+// tick. It never blocks, and a sandbox already asked about is not asked
+// about twice: a kill many readers find is one reading.
 func (c *Controller) wakeSizing(id string) {
+	c.sizeMu.Lock()
+	defer c.sizeMu.Unlock()
+	if _, asked := c.size.waking[id]; asked {
+		return
+	}
 	select {
 	case c.sizeWake <- id:
+		c.size.waking[id] = struct{}{}
 	default:
 	}
+}
+
+// woken takes one sandbox off the list of those asked about, which the loop
+// does as it begins the reading.
+func (c *Controller) woken(id string) {
+	c.sizeMu.Lock()
+	defer c.sizeMu.Unlock()
+	delete(c.size.waking, id)
+}
+
+// isMoving reports whether a sandbox is being restarted at a larger size.
+func (c *Controller) isMoving(id string) bool {
+	c.sizeMu.Lock()
+	defer c.sizeMu.Unlock()
+	_, moving := c.size.moving[id]
+	return moving
+}
+
+// raises reports whether the control plane is going to start a sandbox again
+// at a larger memory size: the driver reports its workload killed for
+// memory, its manifest names a memory ceiling above what it holds, its
+// driver sizes memory, and it is not being left alone after a move that
+// found no room. It is the one rule, read by the loop that restarts the
+// sandbox and by every read that presents it, so a sandbox reads as starting
+// exactly when the loop will start it.
+func (c *Controller) raises(obj v1.Sandbox, state driver.State, d driver.Driver) bool {
+	if state.Phase != PhaseFailed || state.Reason != reasonOOMKilled || state.Resources.IsZero() {
+		return false
+	}
+	ceiling := bytesOf(string(obj.Spec.Resources.Max.Memory))
+	if ceiling == 0 || bytesOf(state.Resources.Memory) >= ceiling || !d.Capabilities().Autosize.Memory {
+		return false
+	}
+	return !c.onHold(obj.Status.ID)
+}
+
+// rising reports whether a read of a sandbox answers that it is starting
+// where its driver says otherwise, and whether the loop has yet to act on
+// what the read found. A sandbox being moved reads so until it runs. One
+// whose workload was killed for memory reads so from the kill, because the
+// loop is about to start it again. One whose move was cut short reads so
+// while the workload the move stopped is ending and once it is gone, because
+// the loop is about to finish the start. A sandbox killed at its ceiling, or
+// with no ceiling, is none of these: it is Failed, as it was, until a client
+// acts.
+func (c *Controller) rising(obj v1.Sandbox, state driver.State, d driver.Driver) (rising, unnoticed bool) {
+	id := obj.Status.ID
+	if c.isMoving(id) {
+		return state.Phase != driver.Running, false
+	}
+	if c.raises(obj, state, d) {
+		return true, true
+	}
+	if !marked(obj) || c.onHold(id) {
+		return false, false
+	}
+	switch state.Phase {
+	case driver.Stopped:
+		return true, true
+	case PhaseStopping:
+		return true, false
+	}
+	return false, false
+}
+
+// marked reports whether the record says the sandbox is being started at a
+// larger size, which only a move writes and every end of a move replaces.
+func marked(obj v1.Sandbox) bool {
+	return obj.Status.Phase == PhaseStarting && obj.Status.Reason == v1.ReasonMemoryRaised
+}
+
+// interrupted reports a move that was cut short: the record says the sandbox
+// is being started at a larger size and the driver holds no workload for it.
+// The control plane that began the move stopped, or handed its lease to
+// another replica, between the stop and the start. The loop finishes the
+// start, so until then the sandbox reads as it did while the move ran.
+func interrupted(obj v1.Sandbox, state driver.State) bool {
+	return marked(obj) && state.Phase == driver.Stopped
+}
+
+// present is one driver read as a reader of the sandbox is given it: observe,
+// with a sandbox the control plane is starting again at a larger size
+// answered as Starting with reason MemoryRaised whatever its driver reports
+// in between, a workload that ended, no workload at all, or one coming up.
+// The answer is computed from the read itself and not from what the loop has
+// noticed, so there is no instant at which such a sandbox reads as Failed or
+// Stopped: not before the loop's next reading, not while the old workload is
+// removed, not before the new one is ready. A read that finds the kill
+// before the loop has asks the loop for its reading now.
+func (c *Controller) present(obj v1.Sandbox, state driver.State, d driver.Driver) v1.Sandbox {
+	out := observe(obj, state)
+	rising, unnoticed := c.rising(obj, state, d)
+	if !rising {
+		return out
+	}
+	if unnoticed {
+		c.wakeSizing(obj.Status.ID)
+	}
+	out.Status.Phase, out.Status.Reason, out.Status.ExitCode = PhaseStarting, v1.ReasonMemoryRaised, nil
+	out.Status.StoppedAt = time.Time{}
+	return out
+}
+
+// presentState is present for a driver's state on its way to a store: the
+// phase and the reason a read of the sandbox would answer. A state with no
+// desired sandbox behind it is the driver's own and is left as it is.
+func (c *Controller) presentState(state driver.State, d driver.Driver) driver.State {
+	c.mu.Lock()
+	obj, held := c.objects[state.ID]
+	c.mu.Unlock()
+	if !held {
+		return state
+	}
+	if rising, _ := c.rising(obj, state, d); rising {
+		state.Phase, state.Reason, state.ExitCode = PhaseStarting, v1.ReasonMemoryRaised, nil
+	}
+	return state
 }
 
 // sizing is one sandbox as a reading acts on it: the object as desired state
@@ -593,23 +726,26 @@ func (c *Controller) sizeOne(ctx context.Context, id string, observed *driver.St
 	held := bytesOf(state.Resources.Memory)
 	switch state.Phase {
 	case PhaseFailed:
-		if state.Reason != reasonOOMKilled || !s.memory {
-			return nil
-		}
-		if held >= s.max {
+		switch {
+		case c.raises(s.obj, *state, s.driver):
+			// The rule every read presents this sandbox by: it reads as
+			// starting from the kill on, and this is the start.
+			handed = true
+			c.follow(id, func(ctx context.Context) error {
+				return c.move(ctx, s, *state, autosize.NextMemory(held, s.max), autosize.ReasonOOM)
+			})
+		case s.memory && state.Reason == reasonOOMKilled && held >= s.max:
 			// Killed at its ceiling: there is nothing more to give, and
 			// the sandbox stays Failed as one with no ceiling does.
 			return c.ceiling(ctx, s, true, true, -1)
 		}
-		if c.onHold(id) {
-			return nil
-		}
-		handed = true
-		c.follow(id, func(ctx context.Context) error {
-			return c.move(ctx, s, *state, autosize.NextMemory(held, s.max), autosize.ReasonOOM)
-		})
 		return nil
 	case driver.Stopped:
+		if interrupted(s.obj, *state) && !c.onHold(id) {
+			handed = true
+			c.follow(id, func(ctx context.Context) error { return c.finishMove(ctx, s) })
+			return nil
+		}
 		return c.recordSize(ctx, id, *state, false)
 	case driver.Running:
 	default:
@@ -626,7 +762,11 @@ func (c *Controller) sizeOne(ctx context.Context, id string, observed *driver.St
 		})
 		return nil
 	}
-	if err := c.recordSize(ctx, id, *state, false); err != nil {
+	// A sandbox that runs under a record saying it is being started at a
+	// larger size is a move whose last write was lost, with the process
+	// that made it. The move is counted here and the record brought to
+	// what the driver reports.
+	if err := c.recordSize(ctx, id, *state, marked(s.obj)); err != nil {
 		return err
 	}
 	if !reads {
@@ -802,17 +942,30 @@ func (c *Controller) move(ctx context.Context, s sizing, state driver.State, tar
 		return nil
 	}
 	c.mu.Lock()
-	if cur, held := c.objects[id]; !held || cur.Status.Phase == PhaseDeleting || c.creating(cur) {
+	cur, held := c.objects[id]
+	if !held || cur.Status.Phase == PhaseDeleting || c.creating(cur) {
 		c.mu.Unlock()
 		return nil
 	}
-	c.moving[id] = struct{}{}
-	c.mu.Unlock()
+	// From here until what the move left is written, every read of the
+	// sandbox answers that it is starting. The mark comes before the write
+	// and both before the workload is touched, so no reader meets the
+	// stopped or absent workload of a move as a sandbox that stopped.
+	c.sizeMu.Lock()
+	c.size.moving[id] = struct{}{}
+	c.sizeMu.Unlock()
 	defer func() {
-		c.mu.Lock()
-		delete(c.moving, id)
-		c.mu.Unlock()
+		c.sizeMu.Lock()
+		delete(c.size.moving, id)
+		c.sizeMu.Unlock()
 	}()
+	cur = clone(cur)
+	cur.Status.Phase, cur.Status.Reason, cur.Status.ExitCode = PhaseStarting, v1.ReasonMemoryRaised, nil
+	if err := c.persist(ctx, cur, MutationStatus); err != nil {
+		c.mu.Unlock()
+		return fmt.Errorf("recording that %s is being started at a larger size: %w", id, err)
+	}
+	c.mu.Unlock()
 	if reason != "" {
 		c.sizeMu.Lock()
 		c.size.reasons[id] = reason
@@ -858,6 +1011,36 @@ func (c *Controller) move(ctx context.Context, s sizing, state driver.State, tar
 			undone, c.afterMove(ctx, id, d, false))
 	}
 	return c.afterMove(ctx, id, d, true)
+}
+
+// finishMove finishes a move that was cut short between its stop and its start:
+// the sandbox is started at the size its driver recorded, and what that left
+// is written as a move's is. A start that fails leaves it stopped, with the
+// record saying so, and its memory alone for MoveBackoff.
+func (c *Controller) finishMove(ctx context.Context, s sizing) error {
+	id := s.obj.Status.ID
+	c.mu.Lock()
+	cur, held := c.objects[id]
+	if !held || cur.Status.Phase == PhaseDeleting || c.creating(cur) {
+		c.mu.Unlock()
+		return nil
+	}
+	c.sizeMu.Lock()
+	c.size.moving[id] = struct{}{}
+	c.sizeMu.Unlock()
+	c.mu.Unlock()
+	defer func() {
+		c.sizeMu.Lock()
+		delete(c.size.moving, id)
+		c.sizeMu.Unlock()
+	}()
+	if err := s.driver.Start(ctx, id); err != nil {
+		c.sizeMu.Lock()
+		c.size.hold[id] = c.clock.Now().Add(autosize.MoveBackoff)
+		c.sizeMu.Unlock()
+		return errors.Join(fmt.Errorf("finishing the move of %s: %w", id, err), c.afterMove(ctx, id, s.driver, false))
+	}
+	return c.afterMove(ctx, id, s.driver, true)
 }
 
 // asksFor reports whether a sandbox holds, or was asked to hold, a size: the
@@ -914,7 +1097,20 @@ func (c *Controller) afterMove(ctx context.Context, id string, d driver.Driver, 
 		}
 		return nil
 	}
-	return c.recordSize(ctx, id, state, moved)
+	if moved {
+		return c.recordSize(ctx, id, state, true)
+	}
+	// The move was undone. The record said the sandbox was starting at a
+	// larger size, and now says what its driver reports of it: running or
+	// stopped at the size it had, which is the driver's own account and
+	// the end of the control plane's part in it.
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	cur, held = c.objects[id]
+	if !held || cur.Status.Phase == PhaseDeleting {
+		return nil
+	}
+	return c.persist(ctx, observe(clone(cur), state), MutationStatus)
 }
 
 // recordSize brings status.resources to what the driver reports the sandbox
