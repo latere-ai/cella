@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.13.0 - 2026-10-12
+
 - Changed: a start of a `Failed` sandbox whose main process ran and ended
   is taken, and keeps the workspace. `POST /v1/sandboxes/{id}/start`,
   `cella start` and `StartSandbox` answered `phase_conflict` for every
