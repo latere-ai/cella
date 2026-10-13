@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.13.1 - 2026-10-13
+
 ### Fixed
 
 - **A running command keeps its sandbox from stopping.** A command marked
