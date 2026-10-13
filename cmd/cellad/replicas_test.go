@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -22,6 +23,7 @@ import (
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 
+	"latere.ai/x/ci-gate/reap"
 	"latere.ai/x/pkg/authkit/issuertest"
 
 	"latere.ai/x/cella/internal/store"
@@ -29,32 +31,50 @@ import (
 	v1 "latere.ai/x/cella/manifest/v1"
 )
 
+// sweepContainers and startPostgres reach the container engine; variables so
+// a test can stand in for it.
+var (
+	sweepContainers = reap.Sweep
+	startPostgres   = tcpostgres.Run
+)
+
 // replicaDatabase starts one Postgres for the replica test and returns its
 // URL, or skips the test where no container runtime answers, as the store's
 // own Postgres suite does.
+//
+// The container is terminated when the test ends. One whose test binary was
+// killed first carries the labels of latere.ai/x/ci-gate/reap, naming the
+// process that owns it, and the next start removes it once that process has
+// exited.
 func replicaDatabase(t *testing.T) string {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	containerSocket(ctx)
-	ctr, err := tcpostgres.Run(ctx, "postgres:17-alpine",
+	_, _ = sweepContainers(ctx)
+	ctr, err := startPostgres(ctx, "postgres:17-alpine",
 		tcpostgres.WithDatabase("cella"),
 		tcpostgres.WithUsername("cella"),
 		tcpostgres.WithPassword("cella"),
+		testcontainers.WithLabels(reap.Labels()),
 		testcontainers.WithWaitStrategy(
 			wait.ForLog("database system is ready to accept connections").
 				WithOccurrence(2).WithStartupTimeout(2*time.Minute)),
 	)
+	// A container that started and then failed its wait comes back with the
+	// error, so the cleanup is registered before the skip.
+	if ctr != nil {
+		t.Cleanup(func() {
+			stop, cancel := context.WithTimeout(context.Background(), time.Minute)
+			defer cancel()
+			if err := ctr.Terminate(stop); err != nil {
+				t.Logf("terminating the database: %v", err)
+			}
+		})
+	}
 	if err != nil {
 		t.Skipf("no container runtime answered, so the replica test did not run: %v", err)
 	}
-	t.Cleanup(func() {
-		stop, cancel := context.WithTimeout(context.Background(), time.Minute)
-		defer cancel()
-		if err := ctr.Terminate(stop); err != nil {
-			t.Logf("terminating the database: %v", err)
-		}
-	})
 	url, err := ctr.ConnectionString(ctx, "sslmode=disable")
 	if err != nil {
 		t.Fatal(err)
@@ -93,6 +113,74 @@ func containerSocket(ctx context.Context) {
 	}
 	_ = os.Setenv("DOCKER_HOST", "unix://"+path)
 	_ = os.Setenv("TESTCONTAINERS_RYUK_DISABLED", "true")
+}
+
+// stoppable records Terminate. It embeds the interface, left nil, so it
+// satisfies testcontainers.Container with only Terminate implemented.
+type stoppable struct {
+	testcontainers.Container
+	terminated int
+}
+
+func (s *stoppable) Terminate(context.Context, ...testcontainers.TerminateOption) error {
+	s.terminated++
+	return nil
+}
+
+// replicaEngine stands in for the container engine for one test: the sweep
+// and the start are recorded, and the start answers with ctr and runErr.
+func replicaEngine(t *testing.T, ctr *tcpostgres.PostgresContainer, runErr error) *[]string {
+	t.Helper()
+	// A DOCKER_HOST that is not Podman keeps containerSocket from asking the
+	// machine for its socket or setting anything.
+	t.Setenv("DOCKER_HOST", "unix:///nonexistent/docker.sock")
+	prevSweep, prevStart := sweepContainers, startPostgres
+	t.Cleanup(func() { sweepContainers, startPostgres = prevSweep, prevStart })
+	var calls []string
+	sweepContainers = func(context.Context) (int, error) {
+		calls = append(calls, "sweep")
+		return 0, nil
+	}
+	startPostgres = func(_ context.Context, _ string, opts ...testcontainers.ContainerCustomizer) (*tcpostgres.PostgresContainer, error) {
+		req := testcontainers.GenericContainerRequest{}
+		for _, o := range opts {
+			if err := o.Customize(&req); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for k, v := range reap.Labels() {
+			if req.Labels[k] != v {
+				t.Errorf("the container's label %s = %q, want %q", k, req.Labels[k], v)
+			}
+		}
+		calls = append(calls, "run")
+		return ctr, runErr
+	}
+	return &calls
+}
+
+// TestAReplicaDatabaseThatFailedToStartIsStopped: a container that started
+// and then failed its wait comes back with the error. The skip that follows
+// ends the test, so a cleanup registered after it never ran and the container
+// was left running.
+func TestAReplicaDatabaseThatFailedToStartIsStopped(t *testing.T) {
+	fake := &stoppable{}
+	replicaEngine(t, &tcpostgres.PostgresContainer{Container: fake}, errors.New("wait until ready: deadline exceeded"))
+	t.Run("start", func(t *testing.T) { replicaDatabase(t) })
+	if fake.terminated != 1 {
+		t.Fatalf("the failed container was terminated %d times, want once", fake.terminated)
+	}
+}
+
+// TestAReplicaDatabaseSweepsThenLabels: every start removes what exited test
+// binaries left, then labels its own container with its owner, so the next
+// sweep can tell whether the process that started it is still running.
+func TestAReplicaDatabaseSweepsThenLabels(t *testing.T) {
+	calls := replicaEngine(t, nil, errors.New("stop after the request"))
+	t.Run("start", func(t *testing.T) { replicaDatabase(t) })
+	if got := strings.Join(*calls, ","); got != "sweep,run" {
+		t.Fatalf("calls = %s, want a sweep before the start", got)
+	}
 }
 
 // replica is one `cellad serve` of the replica set: its two listeners, and the
