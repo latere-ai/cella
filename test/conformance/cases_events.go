@@ -597,11 +597,19 @@ func case018EgressEnforced(ctx context.Context, e *Env) error {
 
 // awaitRecord polls a sandbox's connection records until one names the host
 // with the decision. The gateway reports on its own stream, so a record
-// arrives a moment after the connection it describes.
+// arrives a moment after the connection it describes. A deadline that ends
+// a poll in flight is the record's absence, not a failure of the request:
+// a server that never records is polled until the deadline, which then
+// lands inside a request as often as between two.
 func (e *Env) awaitRecord(ctx context.Context, id, host, decision string) error {
+	want := "a record of the connection to " + host + " as " + decision
+	path := "/v1/sandboxes/" + id + "/egress?limit=50"
 	for {
-		x, err := e.caller.get(ctx, "/v1/sandboxes/"+id+"/egress?limit=50")
+		x, err := e.caller.get(ctx, path)
 		if err != nil {
+			if ctx.Err() != nil {
+				return &Disagreement{Method: http.MethodGet, Path: path, Want: want, Got: "no such record before the deadline"}
+			}
 			return err
 		}
 		if err := x.status(http.StatusOK); err != nil {
@@ -623,7 +631,7 @@ func (e *Env) awaitRecord(ctx context.Context, id, host, decision string) error 
 		}
 		select {
 		case <-ctx.Done():
-			return x.disagree("a record of the connection to "+host+" as "+decision, "the records "+string(x.Body))
+			return x.disagree(want, "the records "+string(x.Body))
 		case <-time.After(pollInterval):
 		}
 	}
