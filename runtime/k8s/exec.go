@@ -132,7 +132,11 @@ func (d *Driver) Exec(ctx context.Context, id string, req driver.ExecRequest) (d
 	if len(req.Command) == 0 || req.Timeout < 0 {
 		return nil, fmt.Errorf("%w: a command is required", driver.ErrInvalid)
 	}
-	spec, err := d.runningSpec(ctx, id)
+	pvc, err := d.runningClaim(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	spec, err := d.fullSpec(ctx, id, pvc)
 	if err != nil {
 		return nil, err
 	}
@@ -158,27 +162,29 @@ func wrapped(spec driver.CreateSpec, argv []string, env map[string]string, workd
 	return wrapArgv(argv, environment, workdir)
 }
 
-// runningSpec is the read every execution path shares: the sandbox exists, it
-// has a Pod, and the Pod is running.
-func (d *Driver) runningSpec(ctx context.Context, id string) (driver.CreateSpec, error) {
+// runningClaim is the read every execution path shares: the sandbox exists,
+// it has a Pod, and the Pod is running. A command reads the sandbox's
+// environment through fullSpec over the claim it returns; the desktop reads
+// the record alone.
+func (d *Driver) runningClaim(ctx context.Context, id string) (*corev1.PersistentVolumeClaim, error) {
 	pvc, err := d.getClaim(ctx, id)
 	if err != nil {
-		return driver.CreateSpec{}, err
+		return nil, err
 	}
 	pod, err := d.getPod(ctx, id)
 	if err != nil {
-		return driver.CreateSpec{}, err
+		return nil, err
 	}
 	if pod == nil || pod.DeletionTimestamp != nil {
-		return driver.CreateSpec{}, driver.ErrNotRunning
+		return nil, driver.ErrNotRunning
 	}
 	if _, _, ended := terminated(pod); ended {
-		return driver.CreateSpec{}, driver.ErrNotRunning
+		return nil, driver.ErrNotRunning
 	}
 	if !started(pod) {
-		return driver.CreateSpec{}, startingErr(pod)
+		return nil, startingErr(pod)
 	}
-	return specOf(pvc)
+	return pvc, nil
 }
 
 // startingErr is the answer for a sandbox whose Pod exists and whose workload

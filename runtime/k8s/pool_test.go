@@ -139,8 +139,16 @@ func TestAdoptionRewritesTheClaim(t *testing.T) {
 		t.Errorf("the adopted claim's name label is %q", pvc.Labels[labelName])
 	}
 	// The stored spec is what a later Start renders the Pod from, so the
-	// adoption must leave nothing of the pool in it.
-	spec, err := specOf(pvc)
+	// adoption must leave nothing of the pool in it. The claim's record
+	// carries no credential; the Secret beside it carries both.
+	stored, err := specOf(pvc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored.Env) > 0 || stored.Egress.Credential != "" {
+		t.Errorf("the claim's record carries credentials after adoption: %+v", stored)
+	}
+	spec, err := h.fullSpec(t.Context(), "sbx_pool", pvc)
 	if err != nil {
 		t.Fatal(err)
 	}

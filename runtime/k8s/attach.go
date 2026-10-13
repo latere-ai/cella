@@ -50,7 +50,11 @@ func (d *Driver) Attach(ctx context.Context, id string, req driver.AttachRequest
 	if strings.TrimSpace(command[0]) == "" {
 		return nil, fmt.Errorf("%w: the command's first word is blank", driver.ErrInvalid)
 	}
-	spec, err := d.runningSpec(ctx, id)
+	pvc, err := d.runningClaim(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	spec, err := d.fullSpec(ctx, id, pvc)
 	if err != nil {
 		return nil, err
 	}

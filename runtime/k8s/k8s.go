@@ -343,7 +343,10 @@ var verbs = []struct{ group, resource, subresource, verb string }{
 	{networkGroup, "networkpolicies", "", "create"}, {networkGroup, "networkpolicies", "", "delete"},
 	// The workload token of spec 006: one Secret per sandbox, projected on
 	// /run/cella, replaced in place on a rotation and removed with the
-	// sandbox. It holds the identity and never a secret value.
+	// sandbox. It holds the identity, the trust file, and the values of the
+	// sandbox's environment and its gateway credential, which the claim's
+	// record leaves out. A mounted secret's value is never in it: that stays
+	// sealed in the store and the sandbox holds a placeholder for it.
 	{"", "secrets", "", "create"}, {"", "secrets", "", "get"},
 	{"", "secrets", "", "update"}, {"", "secrets", "", "delete"},
 }

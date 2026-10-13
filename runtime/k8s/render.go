@@ -56,7 +56,11 @@ const (
 	annAutoStop   = prefix + "auto-stop"
 	annAutoDelete = prefix + "auto-delete"
 	annImage      = prefix + "image"
-	annSpec       = prefix + "spec"
+	// annSpec is the claim's record: the CreateSpec as JSON without its
+	// credentials. The values of the environment and the gateway credential
+	// are kept in the sandbox's Secret (credentials.go), because every
+	// account that may read the namespace's claims reads their annotations.
+	annSpec = prefix + "spec"
 	// annToken records that a workload token was projected into this
 	// sandbox. The token itself is never written here: the claim's record
 	// is the shape of the sandbox, and a credential is not part of it. It
@@ -253,7 +257,7 @@ func (d *Driver) identity(s driver.CreateSpec, createdAt time.Time) (labels, ann
 	if labelValue.MatchString(s.Parent) {
 		labels[labelParent] = s.Parent
 	}
-	encoded, err := json.Marshal(s)
+	encoded, err := encodeRecord(s)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -262,7 +266,7 @@ func (d *Driver) identity(s driver.CreateSpec, createdAt time.Time) (labels, ann
 		annImage:      s.Image,
 		annCreatedAt:  createdAt.Format(stamp),
 		annActivityAt: createdAt.Format(stamp),
-		annSpec:       string(encoded),
+		annSpec:       encoded,
 	}
 	maps.Copy(annotations, lifecycleAnnotations(s.Lifecycle, createdAt))
 	return labels, annotations, nil
@@ -513,9 +517,10 @@ func pullSecrets(names []string) []corev1.LocalObjectReference {
 
 func ptr[T any](v T) *T { return &v }
 
-// specOf reads the CreateSpec back from the claim. It is the rendering input
-// of Start, the environment and workdir of Exec, and the user's labels of
-// Inspect.
+// specOf reads the CreateSpec back from the claim, without the credentials
+// the record leaves out. It is the user's labels of Inspect, the size, the
+// ports and the workdir; fullSpec puts the credentials back for the Pod a
+// Start renders and the command an Exec runs.
 func specOf(pvc *corev1.PersistentVolumeClaim) (driver.CreateSpec, error) {
 	raw, ok := pvc.Annotations[annSpec]
 	if !ok {

@@ -61,7 +61,7 @@ func (d *Driver) adopt(ctx context.Context, id string, a driver.Adoption) error 
 		Patch(ctx, pvc.Name, types.JSONPatchType, patch, metav1.PatchOptions{}); err != nil {
 		return d.classifyClaim(ctx, id, err)
 	}
-	if err := d.projectAdopted(ctx, id, adopted, a); err != nil {
+	if err := d.projectAdopted(ctx, id, pvc, adopted, a); err != nil {
 		return errors.Join(err, d.discard(ctx, id))
 	}
 	return nil
@@ -108,7 +108,7 @@ func adoptedSpec(held driver.CreateSpec, a driver.Adoption) driver.CreateSpec {
 // after the caller's own annotations for the same reason the create's are: the
 // control plane's record of when a sandbox began is not a caller's to set.
 func adoptionPatch(pvc *corev1.PersistentVolumeClaim, adopted driver.CreateSpec, now time.Time) ([]byte, error) {
-	encoded, err := json.Marshal(adopted)
+	encoded, err := encodeRecord(adopted)
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +120,7 @@ func adoptionPatch(pvc *corev1.PersistentVolumeClaim, adopted driver.CreateSpec,
 		ops = append(ops, patchOp{Op: "test", Path: annPath(annSpec), Value: current})
 	}
 	set := map[string]string{
-		annSpec:      string(encoded),
+		annSpec:      encoded,
 		annOwner:     adopted.Owner,
 		annToken:     "true",
 		annCreatedAt: now.Format(stamp),
@@ -173,16 +173,23 @@ func labelPath(key string) string { return "/metadata/labels/" + jsonPointer(key
 // cannot change, so the adopted workload runs confined by the entry's rule
 // and is not pointed at the gateway until its next start, whose Pod is
 // rendered from the adopted record and carries them.
-func (d *Driver) projectAdopted(ctx context.Context, id string, adopted driver.CreateSpec, a driver.Adoption) error {
-	data := map[string][]byte{}
+//
+// The adopter's credentials are written into the same Secret, which is where
+// a command reads the environment from and where the next start renders it
+// from. Both keys are written whatever they hold, so nothing the entry's
+// Secret carried before is read as the caller's.
+func (d *Driver) projectAdopted(ctx context.Context, id string, owner *corev1.PersistentVolumeClaim, adopted driver.CreateSpec, a driver.Adoption) error {
+	_, held := strip(adopted)
+	data, err := held.data()
+	if err != nil {
+		return fmt.Errorf("adopting %s: %w", id, err)
+	}
 	if len(a.Token) > 0 {
 		data[tokenKey] = a.Token
 	}
 	d.putTrust(data, a.Egress.CAPEM)
-	if len(data) > 0 {
-		if err := d.putSecret(ctx, id, data); err != nil {
-			return fmt.Errorf("adopting %s: %w", id, err)
-		}
+	if err := d.putSecret(ctx, id, owner, data); err != nil {
+		return fmt.Errorf("adopting %s: %w", id, err)
 	}
 	labels := map[string]any{labelPool: nil}
 	if labelValue.MatchString(adopted.Name) {

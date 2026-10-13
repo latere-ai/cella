@@ -19,7 +19,9 @@ import (
 // The projection of spec 006's identity and spec 018's trust file on a
 // cluster: one Secret per sandbox, mounted read-only on the directory the
 // control plane reserves, with the token as one key and the trust file, the
-// public roots and the gateway's certificate authority, as another.
+// public roots and the gateway's certificate authority, as another. The same
+// Secret keeps the sandbox's credentials under the keys of credentials.go,
+// which the projection does not list and so never mounts.
 const (
 	// tokenVolume is the name of the projected volume inside the Pod.
 	tokenVolume = "cella-token"
@@ -92,7 +94,12 @@ func (d *Driver) putTrust(data map[string][]byte, authority string) {
 // one there and leaves every other key as it is. A token rotation is such a
 // write, of the token and the trust file: the kubelet re-syncs the projected
 // files within its sync window and the workload keeps running.
-func (d *Driver) putSecret(ctx context.Context, id string, data map[string][]byte) error {
+//
+// owner is the sandbox's claim as the cluster last answered it. The Secret
+// names it as its owner, so a claim removed by anything other than this
+// driver takes the Secret, and the credentials in it, with it. A claim with no
+// uid, which only a client double answers, is named by no reference.
+func (d *Driver) putSecret(ctx context.Context, id string, owner *corev1.PersistentVolumeClaim, data map[string][]byte) error {
 	secrets := d.cs.CoreV1().Secrets(d.opts.Namespace)
 	secret := &corev1.Secret{
 		Name: tokenSecretName(id), Namespace: d.opts.Namespace,
@@ -100,6 +107,7 @@ func (d *Driver) putSecret(ctx context.Context, id string, data map[string][]byt
 		Type:   corev1.SecretTypeOpaque,
 		Data:   maps.Clone(data),
 	}
+	secret.OwnerReferences = ownedBy(nil, owner)
 	_, err := secrets.Create(ctx, secret, metav1.CreateOptions{})
 	if !apierrors.IsAlreadyExists(err) {
 		return mapErr(err, "token secret create")
@@ -112,8 +120,27 @@ func (d *Driver) putSecret(ctx context.Context, id string, data map[string][]byt
 		current.Data = map[string][]byte{}
 	}
 	maps.Copy(current.Data, data)
+	current.OwnerReferences = ownedBy(current.OwnerReferences, owner)
 	_, err = secrets.Update(ctx, current, metav1.UpdateOptions{})
 	return mapErr(err, "token secret update")
+}
+
+// ownedBy adds the claim to a Secret's owner references when it is not there
+// yet. The reference does not block the claim's deletion: blocking needs a
+// grant on the claim's finalizers the Role does not hold, and this driver
+// deletes the Secret itself before the claim on every path it removes one.
+func ownedBy(refs []metav1.OwnerReference, owner *corev1.PersistentVolumeClaim) []metav1.OwnerReference {
+	if owner == nil || owner.UID == "" {
+		return refs
+	}
+	for _, ref := range refs {
+		if ref.UID == owner.UID {
+			return refs
+		}
+	}
+	return append(refs, metav1.OwnerReference{
+		APIVersion: "v1", Kind: "PersistentVolumeClaim", Name: owner.Name, UID: owner.UID,
+	})
 }
 
 // deleteToken removes the sandbox's Secret. A Secret that is already gone is

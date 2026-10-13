@@ -55,7 +55,8 @@ func (d *Driver) Create(ctx context.Context, s driver.CreateSpec) (driver.Ref, e
 	if token {
 		pvc.Annotations[annToken] = "true"
 	}
-	if _, err := d.cs.CoreV1().PersistentVolumeClaims(d.opts.Namespace).Create(ctx, pvc, metav1.CreateOptions{}); err != nil {
+	created, err := d.cs.CoreV1().PersistentVolumeClaims(d.opts.Namespace).Create(ctx, pvc, metav1.CreateOptions{})
+	if err != nil {
 		return driver.Ref{}, mapErr(err, "claim create")
 	}
 	// Every rollback runs after the call has already failed, often because
@@ -83,14 +84,22 @@ func (d *Driver) Create(ctx context.Context, s driver.CreateSpec) (driver.Ref, e
 	// first request verifies the door it is pointed at and every host that
 	// door tunnels, rather than an empty directory the kubelet fills a moment
 	// later (specs 006 and 018). A prewarmed entry's Secret carries an empty
-	// token, which an adoption replaces.
+	// token, which an adoption replaces. The sandbox's credentials are
+	// written beside them, since the claim's record leaves them out and a
+	// later Start renders its Pod from the two together.
 	data := map[string][]byte{}
+	if _, held := strip(s); !held.empty() {
+		if data, err = held.data(); err != nil {
+			rollback()
+			return driver.Ref{}, err
+		}
+	}
 	if token {
 		data[tokenKey] = s.Token
 	}
 	d.putTrust(data, s.Egress.CAPEM)
 	if len(data) > 0 {
-		if err := d.putSecret(ctx, s.ID, data); err != nil {
+		if err := d.putSecret(ctx, s.ID, created, data); err != nil {
 			rollback()
 			return driver.Ref{}, err
 		}
@@ -127,7 +136,7 @@ func (d *Driver) Start(ctx context.Context, id string) error {
 			return err
 		}
 	}
-	spec, err := specOf(pvc)
+	spec, err := d.fullSpec(ctx, id, pvc)
 	if err != nil {
 		return err
 	}
@@ -143,7 +152,7 @@ func (d *Driver) Start(ctx context.Context, id string) error {
 	trust := map[string][]byte{}
 	d.putTrust(trust, spec.Egress.CAPEM)
 	if len(trust) > 0 {
-		if err := d.putSecret(ctx, id, trust); err != nil {
+		if err := d.putSecret(ctx, id, pvc, trust); err != nil {
 			return err
 		}
 	}
@@ -249,7 +258,9 @@ func (d *Driver) deleteOptions() *metav1.DeleteOptions {
 }
 
 // Update rewrites the mutable half of the record: the user's labels, the
-// environment the next Exec carries, and the deadlines the reaper reads.
+// environment the next Exec carries, and the deadlines the reaper reads. The
+// environment is written into the sandbox's Secret, which is where the record
+// keeps its values.
 func (d *Driver) Update(ctx context.Context, id string, c driver.Change) error {
 	adoption, err := c.Adoption()
 	if err != nil {
@@ -285,7 +296,7 @@ func (d *Driver) Update(ctx context.Context, id string, c driver.Change) error {
 		}
 		data := map[string][]byte{tokenKey: c.Token}
 		d.putTrust(data, spec.Egress.CAPEM)
-		if err := d.putSecret(ctx, id, data); err != nil {
+		if err := d.putSecret(ctx, id, pvc, data); err != nil {
 			return err
 		}
 	}
@@ -294,11 +305,14 @@ func (d *Driver) Update(ctx context.Context, id string, c driver.Change) error {
 		if err != nil {
 			return change{}, err
 		}
+		out := change{env: c.Env}
+		// The record is rewritten only for a field it holds. An update of
+		// the environment alone is a write of the Secret and no patch.
+		if c.Labels != nil || c.Resources != nil || c.Lifecycle != nil {
+			out.spec = &spec
+		}
 		if c.Labels != nil {
 			spec.Labels = maps.Clone(*c.Labels)
-		}
-		if c.Env != nil {
-			spec.Env = maps.Clone(*c.Env)
 		}
 		// The size is recorded where a start reads it, so the next Pod is
 		// rendered at the size the sandbox was last asked to hold whether
@@ -308,7 +322,6 @@ func (d *Driver) Update(ctx context.Context, id string, c driver.Change) error {
 			spec.Resources.CPULimit = c.Resources.CPULimit
 			spec.Resources.Memory = c.Resources.Memory
 		}
-		out := change{spec: &spec}
 		// The claim records that a token is projected, so a start renders
 		// the mount the create rendered. A sandbox that carried none takes
 		// the record here with the token.
@@ -359,19 +372,28 @@ func (d *Driver) Touch(ctx context.Context, id string) error {
 	return mapErr(err, "claim activity patch")
 }
 
-// change is one mutation of the claim's stamped record.
+// change is one mutation of the claim's stamped record. env is the
+// environment it sets, which is written into the sandbox's Secret and not
+// into the record.
 type change struct {
 	set    map[string]string
 	remove []string
 	spec   *driver.CreateSpec
+	env    *map[string]string
 }
 
+// empty reports a mutation that patches nothing on the claim.
 func (c change) empty() bool { return len(c.set) == 0 && len(c.remove) == 0 && c.spec == nil }
 
 // apply reads the claim, builds the mutation from what it read, and patches
 // under a compare-and-swap on the resource version and on the spec annotation
 // it built from. A lost race is rebuilt from the claim as it now stands, so
 // two writers never interleave into a record neither of them wrote.
+//
+// What the mutation keeps in the Secret is written before the patch, and so
+// are the credentials of a record written before they moved there, whose
+// rewrite rides on this patch: every write of a sandbox's record leaves it
+// without credentials.
 func (d *Driver) apply(ctx context.Context, id string, build func(*corev1.PersistentVolumeClaim) (change, error)) error {
 	var last error
 	for attempt := range patchAttempts {
@@ -382,6 +404,15 @@ func (d *Driver) apply(ctx context.Context, id string, build func(*corev1.Persis
 		mutation, err := build(pvc)
 		if err != nil {
 			return err
+		}
+		data, err := secretWrite(pvc, &mutation)
+		if err != nil {
+			return err
+		}
+		if len(data) > 0 {
+			if err := d.putSecret(ctx, id, pvc, data); err != nil {
+				return err
+			}
 		}
 		if mutation.empty() {
 			return nil
@@ -431,11 +462,11 @@ func patchFor(pvc *corev1.PersistentVolumeClaim, c change) ([]byte, error) {
 		ops = append(ops, patchOp{Op: "add", Path: "/metadata/annotations", Value: map[string]string{}})
 	}
 	if c.spec != nil {
-		encoded, err := json.Marshal(*c.spec)
+		encoded, err := encodeRecord(*c.spec)
 		if err != nil {
 			return nil, err
 		}
-		ops = append(ops, patchOp{Op: "add", Path: annPath(annSpec), Value: string(encoded)})
+		ops = append(ops, patchOp{Op: "add", Path: annPath(annSpec), Value: encoded})
 	}
 	for _, key := range slices.Sorted(maps.Keys(c.set)) {
 		ops = append(ops, patchOp{Op: "add", Path: annPath(key), Value: c.set[key]})
