@@ -6,6 +6,7 @@ package postgres_test
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/url"
@@ -21,6 +22,7 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
+	"latere.ai/x/ci-gate/reap"
 
 	"latere.ai/x/cella/controller"
 	"latere.ai/x/cella/internal/events"
@@ -37,6 +39,12 @@ import (
 // The server is an ephemeral container started once per test binary. Where no
 // container runtime answers, every case here skips and says so; the memory
 // adapter's run of the same suite still covers the contract.
+//
+// A binary that never reaches TestMain's terminate, because it panicked on
+// -timeout or was killed, leaves its container to the next sweep: the
+// container carries the labels of latere.ai/x/ci-gate/reap, naming the
+// process that owns it, and every start removes the ones whose owner has
+// exited.
 
 // TestMain terminates the container this binary started, whatever the suite
 // did, so a failed run leaves no server behind.
@@ -522,6 +530,13 @@ var (
 	container testcontainers.Container
 )
 
+// sweep and run reach the container engine; variables so a test can stand in
+// for it.
+var (
+	sweep = reap.Sweep
+	run   = tcpostgres.Run
+)
+
 // server is the Postgres every case runs against, started once per binary.
 func server(t *testing.T) string {
 	t.Helper()
@@ -536,15 +551,22 @@ func start() {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	socket(ctx)
-	ctr, err := tcpostgres.Run(ctx, "postgres:17-alpine",
+	_, _ = sweep(ctx)
+	ctr, err := run(ctx, "postgres:17-alpine",
 		tcpostgres.WithDatabase("cella_admin"),
 		tcpostgres.WithUsername("cella"),
 		tcpostgres.WithPassword("cella"),
+		testcontainers.WithLabels(reap.Labels()),
 		testcontainers.WithWaitStrategy(
 			wait.ForLog("database system is ready to accept connections").
 				WithOccurrence(2).WithStartupTimeout(2*time.Minute)),
 	)
 	if err != nil {
+		// A container that started and then failed its wait comes back with
+		// the error, and nothing else holds it.
+		if ctr != nil {
+			_ = ctr.Terminate(ctx)
+		}
 		serverErr = err
 		return
 	}
@@ -657,5 +679,93 @@ func TestTheReaperIsOffBehindAPodmanLink(t *testing.T) {
 	reaperFor(link)
 	if got := os.Getenv("TESTCONTAINERS_RYUK_DISABLED"); got != "true" {
 		t.Fatalf("a link into a Podman machine left the reaper at %q", got)
+	}
+}
+
+// stoppable records Terminate. It embeds the interface, left nil, so it
+// satisfies testcontainers.Container with only Terminate implemented.
+type stoppable struct {
+	testcontainers.Container
+	terminated int
+}
+
+func (s *stoppable) Terminate(context.Context, ...testcontainers.TerminateOption) error {
+	s.terminated++
+	return nil
+}
+
+// engine stands in for the container engine for one call of start: sweep and
+// run are recorded, run answers with ctr and runErr, and the server this
+// binary holds, if the suite started one, is put back afterwards for TestMain
+// to terminate.
+func engine(t *testing.T, ctr *tcpostgres.PostgresContainer, runErr error) *[]string {
+	t.Helper()
+	// A DOCKER_HOST that is not Podman keeps socket from asking the machine
+	// for its socket or setting anything.
+	t.Setenv("DOCKER_HOST", "unix:///nonexistent/docker.sock")
+	prevSweep, prevRun := sweep, run
+	prevURL, prevErr, prevContainer := serverURL, serverErr, container
+	t.Cleanup(func() {
+		sweep, run = prevSweep, prevRun
+		serverURL, serverErr, container = prevURL, prevErr, prevContainer
+	})
+	var calls []string
+	sweep = func(context.Context) (int, error) {
+		calls = append(calls, "sweep")
+		return 0, nil
+	}
+	run = func(_ context.Context, _ string, opts ...testcontainers.ContainerCustomizer) (*tcpostgres.PostgresContainer, error) {
+		req := testcontainers.GenericContainerRequest{}
+		for _, o := range opts {
+			if err := o.Customize(&req); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for k, v := range reap.Labels() {
+			if req.Labels[k] != v {
+				t.Errorf("the container's label %s = %q, want %q", k, req.Labels[k], v)
+			}
+		}
+		calls = append(calls, "run")
+		return ctr, runErr
+	}
+	return &calls
+}
+
+// TestAFailedStartStopsTheContainerItMade: a container that started and then
+// failed its wait comes back with the error. Dropped there, nothing held it
+// and TestMain had nothing to terminate, so every slow start leaked one
+// Postgres, and a machine short of memory starts slowly.
+func TestAFailedStartStopsTheContainerItMade(t *testing.T) {
+	fake := &stoppable{}
+	engine(t, &tcpostgres.PostgresContainer{Container: fake}, errors.New("wait until ready: deadline exceeded"))
+	start()
+	if fake.terminated != 1 {
+		t.Fatalf("the failed container was terminated %d times, want once", fake.terminated)
+	}
+	if serverErr == nil {
+		t.Fatal("the failed start reported no error, so the suite would not skip")
+	}
+}
+
+// TestAStartThatMadeNoContainerHasNothingToStop: a start that failed before
+// the engine made a container returns none, and start reports the error
+// rather than stopping a nil container.
+func TestAStartThatMadeNoContainerHasNothingToStop(t *testing.T) {
+	engine(t, nil, errors.New("pull refused"))
+	start()
+	if serverErr == nil {
+		t.Fatal("the failed start reported no error")
+	}
+}
+
+// TestAStartSweepsThenLabels: every start removes what exited test binaries
+// left, then labels its own container with its owner, so the next sweep can
+// tell whether the process that started it is still running.
+func TestAStartSweepsThenLabels(t *testing.T) {
+	calls := engine(t, nil, errors.New("stop after the request"))
+	start()
+	if got := strings.Join(*calls, ","); got != "sweep,run" {
+		t.Fatalf("calls = %s, want a sweep before the start", got)
 	}
 }
