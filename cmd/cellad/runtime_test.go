@@ -5,9 +5,12 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -187,5 +190,53 @@ func TestReadinessIncludesRuntime(t *testing.T) {
 	}
 	if code, body := get(t, internal+"/readyz"); code != 503 {
 		t.Fatalf("missing runtime ready: %d %s", code, body)
+	}
+}
+
+// mover is a driver that moves credentials out of its records, answering
+// the count and the failure it is given.
+type mover struct {
+	runtime.Driver
+	moved int
+	err   error
+	calls int
+}
+
+func (m *mover) MoveCredentials(context.Context) (int, error) {
+	m.calls++
+	return m.moved, m.err
+}
+
+// TestMoveCredentialsIsLoggedAndFailsNothing: a driver that moves
+// credentials is asked once, what it moved and what it could not are logged,
+// and one that moves nothing is not asked.
+func TestMoveCredentialsIsLoggedAndFailsNothing(t *testing.T) {
+	var out bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&out, nil))
+	m := &mover{moved: 2, err: errors.New("sandbox sbx_a: claim patch: forbidden")}
+	moveCredentials(t.Context(), m, log)
+	if m.calls != 1 {
+		t.Fatalf("the driver was asked %d times", m.calls)
+	}
+	for _, want := range []string{"count=2", "sbx_a", "level=WARN"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("the log %q does not carry %q", out.String(), want)
+		}
+	}
+
+	out.Reset()
+	moveCredentials(t.Context(), &mover{}, log)
+	if out.Len() != 0 {
+		t.Errorf("a move with nothing to do logged %q", out.String())
+	}
+	// A driver with no records to move is not asked at all.
+	plain, err := native.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = plain.Close() })
+	moveCredentials(t.Context(), plain, log)
+	if out.Len() != 0 {
+		t.Errorf("a driver with no move logged %q", out.String())
 	}
 }

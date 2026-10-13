@@ -190,6 +190,7 @@ func workerRole(ctx context.Context, args []string, getenv config.Getenv, stdout
 	}
 	_, _ = fmt.Fprintf(stdout, "cellad: %s worker driver=%s isolation=%s control-plane=%s\n",
 		version.Version, runtimeDriver.Name(), runtimeDriver.Isolation(), cfg.URL)
+	moveCredentials(ctx, runtimeDriver, slog.Default())
 	if err = w.Run(ctx); err != nil {
 		return fail(stderr, err)
 	}
@@ -434,6 +435,7 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	if err := runtimeDriver.Preflight(run); err != nil {
 		return fail(stderr, fmt.Errorf("runtime preflight: %w", err))
 	}
+	moveCredentials(run, runtimeDriver, tel.log)
 	// The gateways of the environment connect to this hub, and the
 	// controller pushes each sandbox's boundary through it before the
 	// driver is called (spec 018).
@@ -878,6 +880,31 @@ func openRuntime(cfg config.Config, roots []byte) (runtime.Driver, func() error,
 		}
 		driver.SetTrustRoots(roots)
 		return driver, driver.Close, nil
+	}
+}
+
+// credentialMover is a driver whose earlier versions stamped a sandbox's
+// credentials on the sandbox's objects and that moves them out of the ones
+// still carrying them: the k8s driver.
+type credentialMover interface {
+	MoveCredentials(ctx context.Context) (int, error)
+}
+
+// moveCredentials runs the driver's move once, at start, so the credentials
+// an earlier version left in object metadata leave it when this version rolls
+// out. It fails nothing: a record it cannot rewrite is still served as it
+// stands and is rewritten at its sandbox's next change, so it is logged.
+func moveCredentials(ctx context.Context, d runtime.Driver, log *slog.Logger) {
+	mover, ok := d.(credentialMover)
+	if !ok {
+		return
+	}
+	moved, err := mover.MoveCredentials(ctx)
+	if moved > 0 {
+		log.InfoContext(ctx, "sandbox records rewritten without credentials", "count", moved)
+	}
+	if err != nil {
+		log.WarnContext(ctx, "some sandbox records still carry credentials, each rewritten at its sandbox's next change", "err", err)
 	}
 }
 
