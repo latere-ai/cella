@@ -45,7 +45,7 @@ const (
 // driver made is still an HTTP status. After that byte the status can no
 // longer change, which is what the error frame carries instead.
 func (h *handler) execStream(w http.ResponseWriter, r *http.Request, obj v1.Sandbox, req execRequest, timeout time.Duration) {
-	h.touch(r, obj)
+	defer h.holdActive(r, obj)()
 	started := time.Now()
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()

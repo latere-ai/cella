@@ -14,6 +14,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"latere.ai/x/cella/authorizer"
@@ -40,6 +41,37 @@ func (h *handler) touch(r *http.Request, obj v1.Sandbox) {
 	if err := h.Controller.Touch(r.Context(), obj.Status.ID); err != nil {
 		slog.WarnContext(r.Context(), "activity stamp failed", "sandbox", obj.Status.ID, "error", err)
 	}
+}
+
+// activeEvery is how often a running command stamps its sandbox active.
+// The controller coalesces stamps per sandbox to its touch interval, so a
+// period shorter than that interval costs a map lookup, not a driver write.
+var activeEvery = 30 * time.Second
+
+// holdActive stamps the sandbox a command runs in active at once and then
+// every activeEvery until the returned function is called or the request
+// ends. A running command is activity: stamped only at its start, a command
+// that ran past the sandbox's autoStop had the reaper stop the sandbox
+// under it.
+func (h *handler) holdActive(r *http.Request, obj v1.Sandbox) (release func()) {
+	h.touch(r, obj)
+	done := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(activeEvery)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-r.Context().Done():
+				return
+			case <-ticker.C:
+				h.touch(r, obj)
+			}
+		}
+	}()
+	var once sync.Once
+	return func() { once.Do(func() { close(done) }) }
 }
 
 // workspaceOf is the directory a sandbox's files live in: the path its

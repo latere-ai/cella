@@ -260,6 +260,48 @@ func TestActivityIsStamped(t *testing.T) {
 	}
 }
 
+// TestARunningCommandHoldsItsSandboxActive: a command stamps its sandbox
+// active for as long as it runs, in both forms, so the idle stop never ends
+// a sandbox under a command that is still running. Stamped only at its
+// start, a command longer than the sandbox's autoStop had the reaper stop
+// the sandbox under it.
+func TestARunningCommandHoldsItsSandboxActive(t *testing.T) {
+	was := activeEvery
+	activeEvery = 20 * time.Millisecond
+	t.Cleanup(func() { activeEvery = was })
+	stamps := &touchDriver{}
+	f := setupDriver(t, nil, func(d runtime.Driver) runtime.Driver {
+		stamps.Driver = d
+		return stamps
+	})
+	var obj v1.Sandbox
+	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice, createBody, 201), &obj); err != nil {
+		t.Fatal(err)
+	}
+	count := func() int {
+		n := 0
+		for _, id := range stamps.stamped() {
+			if id == obj.Status.ID {
+				n++
+			}
+		}
+		return n
+	}
+	for _, form := range []string{"?wait=1", ""} {
+		before := count()
+		f.request("POST", "/v1/sandboxes/"+obj.Status.ID+"/exec"+form, f.alice, `{"command":["sleep","0.3"]}`, 200)
+		if got := count() - before; got < 4 {
+			t.Errorf("exec%s running 300ms stamped %d times, want one at its start and one each 20ms", form, got)
+		}
+		// Once the command ended, nothing stamps on its behalf.
+		ended := count()
+		time.Sleep(100 * time.Millisecond)
+		if got := count(); got != ended {
+			t.Errorf("exec%s stamped %d times after it ended", form, got-ended)
+		}
+	}
+}
+
 // TestUploadsSpoolUnderTheConfiguredDirectory: the archive is written to the
 // spool directory the handler was given and to nothing else, because the
 // operating system's temp dir is not writable everywhere cellad runs (a

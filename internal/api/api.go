@@ -867,7 +867,7 @@ func (h *handler) execRequest(w http.ResponseWriter, r *http.Request) (execReque
 // execWait serves the bounded form: one JSON result with the exit code and
 // both output channels, each capped at a mebibyte with the head kept.
 func (h *handler) execWait(w http.ResponseWriter, r *http.Request, obj v1.Sandbox, req execRequest, timeout time.Duration) {
-	h.touch(r, obj)
+	defer h.holdActive(r, obj)()
 	started := time.Now()
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
