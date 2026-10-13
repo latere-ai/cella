@@ -6,6 +6,25 @@ refused before it is pushed.
 
 ## Unreleased
 
+### Security
+
+- **On Kubernetes, a sandbox's credentials are no longer copied into object
+  metadata.** The annotation that records a sandbox on its
+  PersistentVolumeClaim held the values of the sandbox's environment and
+  its gateway credential, so an account that could read claims in the
+  sandbox namespace could read them. The annotation now leaves both out,
+  and they are kept in the sandbox's own Secret, which already held its
+  workload token and is removed with the sandbox. The Secret now also
+  names the claim as its owner. No label or annotation of any object the
+  driver writes carries them. `cellad serve` and `cellad worker` rewrite
+  the annotations an earlier release wrote, once, when they start, and log
+  how many they rewrote; a claim they could not rewrite is rewritten at
+  its sandbox's next stop, start or update. A running sandbox is
+  unchanged: its environment, its gateway credential and its commands are
+  the same. The Role needs nothing new: `create`, `get`, `update` and
+  `delete` on `secrets` are the verbs it already grants. `cellad check`
+  still writes nothing.
+
 ## v0.13.2 - 2026-10-14
 
 ### Fixed
