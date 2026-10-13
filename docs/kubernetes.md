@@ -244,6 +244,16 @@ The policies themselves are the driver's: one per sandbox and one per mesh,
 each made with `create` and replaced or removed with `delete` on
 `networkpolicies`, which the same Role grants.
 
+Each sandbox also has one Secret, written with `create` and `update` on
+`secrets` and removed with the sandbox. It holds the sandbox's workload
+token, its trust file, the values of its environment and its gateway
+credential. Those values are kept there and not in any label or annotation
+of the sandbox's claim or Pod, so reading the namespace's object metadata
+does not read them. The Secret names the claim as its owner, so a claim
+removed by hand takes the Secret with it. A control plane that starts
+rewrites, once, the claims an earlier release annotated with those values,
+and logs how many it rewrote.
+
 `cellad serve` checks every access in the Role when it starts and does not
 start without all of them, naming the ones it is missing; `cellad check`
 answers the same question at any time. The two accesses of

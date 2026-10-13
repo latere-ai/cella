@@ -20,9 +20,11 @@
 # 1.35 as create as well) and the SPDY upgrade's POST as create.
 #
 # Two objects the driver does write, and why: a Secret per sandbox holds
-# the workload token (spec 006) and the gateway's authority, never a secret
-# value, which stays sealed in the store under CELLA_SECRET_KEY; a
-# NetworkPolicy per sandbox confines it to the gateway and DNS (spec 018),
+# the workload token (spec 006), the gateway's authority, and the sandbox's
+# environment values and gateway credential, which the claim's annotations
+# leave out because every account that reads claims reads those. A mounted
+# secret's value is never in it: that stays sealed in the store under
+# CELLA_SECRET_KEY. A NetworkPolicy per sandbox confines it to the gateway and DNS (spec 018),
 # and a NetworkPolicy and a headless Service per mesh (spec 022) admit peers
 # to each other. A sandbox's policy is replaced by a delete and a create,
 # so neither needs a verb beyond those two.
