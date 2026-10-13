@@ -409,25 +409,32 @@ func (d *Driver) apply(ctx context.Context, id string, build func(*corev1.Persis
 		if err != nil {
 			return err
 		}
+		err = nil
 		if len(data) > 0 {
-			if err := d.putSecret(ctx, id, pvc, data); err != nil {
+			err = d.putSecret(ctx, id, pvc, data)
+		}
+		switch {
+		case apierrors.IsConflict(err):
+			// A Secret another writer changed between its read and this
+			// write is a lost race like a lost patch, rebuilt from the
+			// claim as it now stands.
+		case err != nil:
+			return err
+		case mutation.empty():
+			return nil
+		default:
+			var patch []byte
+			if patch, err = patchFor(pvc, mutation); err != nil {
 				return err
 			}
-		}
-		if mutation.empty() {
-			return nil
-		}
-		patch, err := patchFor(pvc, mutation)
-		if err != nil {
-			return err
-		}
-		_, err = d.cs.CoreV1().PersistentVolumeClaims(d.opts.Namespace).
-			Patch(ctx, pvc.Name, types.JSONPatchType, patch, metav1.PatchOptions{})
-		if err == nil {
-			return nil
-		}
-		if !retryable(err) {
-			return mapErr(err, "claim patch")
+			_, err = d.cs.CoreV1().PersistentVolumeClaims(d.opts.Namespace).
+				Patch(ctx, pvc.Name, types.JSONPatchType, patch, metav1.PatchOptions{})
+			if err == nil {
+				return nil
+			}
+			if !retryable(err) {
+				return mapErr(err, "claim patch")
+			}
 		}
 		last = err
 		if attempt < patchAttempts-1 {
@@ -438,7 +445,7 @@ func (d *Driver) apply(ctx context.Context, id string, build func(*corev1.Persis
 			}
 		}
 	}
-	return fmt.Errorf("claim patch lost %d attempts: %w", patchAttempts, last)
+	return fmt.Errorf("claim write lost %d attempts: %w", patchAttempts, last)
 }
 
 type patchOp struct {

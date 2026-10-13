@@ -6,6 +6,7 @@ package k8s
 import (
 	"encoding/json"
 	"errors"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -341,24 +342,12 @@ func (h *harness) moved(t *testing.T, id string, env map[string]string, credenti
 	if err := json.Unmarshal(stored.Data[envKey], &got); err != nil {
 		t.Fatalf("the Secret's environment of %s: %v", id, err)
 	}
-	if !mapsEqual(got, env) || string(stored.Data[credentialKey]) != credential {
+	if !maps.Equal(got, env) || string(stored.Data[credentialKey]) != credential {
 		t.Fatalf("the Secret of %s holds %v and %q, want %v and %q", id, got, stored.Data[credentialKey], env, credential)
 	}
 	if string(stored.Data[tokenKey]) == "" {
 		t.Errorf("the move lost the token of %s", id)
 	}
-}
-
-func mapsEqual(a, b map[string]string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for k, v := range a {
-		if w, ok := b[k]; !ok || w != v {
-			return false
-		}
-	}
-	return true
 }
 
 // TestMoveCredentialsRewritesAnOldRecord: a record an earlier driver stamped
@@ -561,5 +550,36 @@ func TestAMoveThatCannotWriteLeavesTheRecord(t *testing.T) {
 	})
 	if _, err := h.MoveCredentials(t.Context()); err == nil {
 		t.Error("a move that could not list the claims reported nothing")
+	}
+}
+
+// TestALostSecretWriteIsRebuilt: a Secret another writer changed between its
+// read and this write, as a move running beside an update of the same
+// sandbox does, is a lost race and not a failed change. The change is rebuilt
+// and lands, and a Secret that keeps changing under it fails the change after
+// the same bound a lost patch does.
+func TestALostSecretWriteIsRebuilt(t *testing.T) {
+	h := newHarnessWith(t, withGateway)
+	const id = "sbx_race"
+	h.created(t, credentialSpec(id))
+	lost := 1
+	h.cs.PrependReactor("update", "secrets", func(k8stesting.Action) (bool, kruntime.Object, error) {
+		if lost == 0 {
+			return false, nil, nil
+		}
+		lost--
+		return true, nil, apierrors.NewConflict(corev1.Resource("secrets"), tokenSecretName(id), errors.New("the object has been modified"))
+	})
+	env := map[string]string{"MODEL_KEY": rotatedValue}
+	if err := h.Update(t.Context(), id, driver.Change{Env: &env}); err != nil {
+		t.Fatalf("an update that lost one Secret write: %v", err)
+	}
+	if got := string(h.secretOf(t, id).Data[envKey]); !strings.Contains(got, rotatedValue) {
+		t.Errorf("the rebuilt update left the environment %q", got)
+	}
+
+	lost = patchAttempts
+	if err := h.Update(t.Context(), id, driver.Change{Env: &env}); !apierrors.IsConflict(err) {
+		t.Errorf("an update whose every Secret write was lost is %v, want the conflict", err)
 	}
 }
