@@ -8,7 +8,7 @@ depends_on:
 affects: [runtime/, runtime/k8s/, runtime/podman/, runtime/native/, runtime/local/, runtime/vm/, runtime/remote/, runtime/runtimetest/, internal/config/]
 effort: large
 created: 2026-09-12
-updated: 2026-10-03
+updated: 2026-10-14
 author: changkun
 ---
 
@@ -199,6 +199,20 @@ hypervisor's metadata; `local` and `native` write a JSON record beside
 the sandbox directory with the same two halves. `Filter` selects on
 the label half only.
 
+No label or annotation carries a credential. On k8s the claim's `spec`
+annotation is the `CreateSpec` without the environment's values and
+without the gateway credential, because every account that may read the
+namespace's claims or Pods reads their metadata, a wider set than those
+that may read Secrets. Both are kept in the sandbox's Secret, beside the
+token and the trust file and under keys the projection does not list,
+and the Secret names the claim as its owner. `Start` renders its Pod from
+the record and the Secret together, and `Exec` and `Attach` wrap the
+environment the Secret holds. A record an earlier version wrote with the
+values is read as it stands and rewritten without them, the values moved
+into the Secret first, by the next change of its sandbox and by the k8s
+driver's `MoveCredentials`, which `cellad serve` and `cellad worker` run
+once at start; `Preflight` stays read-only.
+
 ### Phases
 
 Every driver reports one of `Pending`, `Starting`, `Running`,
@@ -251,7 +265,9 @@ own mesh peers only; the mesh rule a second policy
 selecting peers by the mesh label plus a headless Service per mesh; the
 token and CA a projected Secret, and the gateway's doors and the
 sandbox's credential in the workload container's environment
-([[070-k8s-egress]]). With `CELLA_EGRESS_SIDECAR=1` the
+([[070-k8s-egress]]). The same Secret keeps the environment's values and
+the credential the claim's record leaves out (see "Stamped identity"
+above). With `CELLA_EGRESS_SIDECAR=1` the
 driver adds the gateway as a native sidecar and points the proxy
 variables at it; the sidecar is then part of the baseline below.
 
@@ -489,6 +505,7 @@ requests ([[023-computer-use-operations]]); the microVM driver's design
 | `Mesh`: podman puts each member on one network per mesh under `<name>.mesh`, k8s renders the policy admitting that mesh alone with a headless Service and each Pod's `hostname` and `subdomain`, the object ends with the last member, and `native` declares none | `TestMeshNetwork` and `TestPodmanMeshOnARealEngine`, `TestRenderMesh`, `TestMeshPolicyAdmitsTheMeshAndNothingElse`, `TestMeshLifetime`, `TestNativeDeclaresNoMesh` | built ([[040-mesh-and-spawn]]); on k8s two members reach each other by name under the egress rule, `TestAMeshMemberReachesItsPeersAlone` and on the kind tier `TestClusterMeshReachability` ([[070-k8s-egress]]); the driver suite has no peer case yet |
 | `k8s` declares `none`, `allowlist` and `open` once the gateway's Pods are named and none otherwise; each sandbox runs under its own NetworkPolicy, written before its Pod, rewritten at a start and before a transfer's helper, and removed after its Pod, which admits no ingress and, with the gateway named, egress to DNS, the gateway and the sandbox's mesh peers alone; the workload container carries the gateway's doors and the sandbox's credential, and the Secret the gateway's authority | `TestEgressModesFollowTheGateway`, `TestTheSandboxRuleAdmitsDNSAndTheGateway`, `TestTheSandboxRuleWithoutAGatewayConfinesIngress`, `TestTheSandboxRuleIsWrittenBeforeThePod`, `TestStartRewritesTheSandboxRule`, `TestTheFileHelperRunsUnderTheSandboxRule`, `TestDeleteRemovesTheSandboxRule`, `TestThePodCarriesTheGatewayProjection` | passing ([[070-k8s-egress]]), and on the kind tier `TestClusterEgressBoundary` and `TestClusterNoLateralMovement` |
 | Every stamped label value is a legal Kubernetes label value and every key a legal key, for an owner with `@` and a user label with a `/` | `TestStampedIdentityIsLegal` | passing, [[036-k8s-driver]] |
+| No label or annotation of any object the k8s driver writes carries an environment value or the gateway credential: the claim's record leaves both out, the sandbox's Secret keeps them under keys the projection does not mount, and the Secret names the claim as its owner; `Start` renders them back, `Exec` carries the environment an update set, and an adoption writes the adopter's; a record an earlier version wrote with them is read as it stands, and is rewritten by its sandbox's next change and by `MoveCredentials`, which reports a record it cannot rewrite and leaves it whole | `TestNoMetadataCarriesACredential`, `TestTheProjectionMountsNoCredential`, `TestStartRendersTheCredentialsFromTheSecret`, `TestAnEmptyEnvironmentIsWritten`, `TestAnAdoptedSandboxStartsWithTheAdoptersCredentials`, `TestMoveCredentialsRewritesAnOldRecord`, `TestAWriteRewritesAnOldRecord`, `TestTheSecretIsOwnedByTheClaim`, `TestASecretReadFailureIsNotAnEmptyEnvironment`, `TestAMoveThatCannotWriteLeavesTheRecord`, `TestMoveCredentialsIsLoggedAndFailsNothing` | passing |
 | The workload token a create carries is a file inside the sandbox its owner alone reads, at `/run/cella/token` or at the path `CELLA_TOKEN_FILE` names where the driver has no mount namespace of its own, and `Change.Token` is what the next read returns | the `TokenProjection` case of the conformance suite | passing on `native` and on `podman` against a real engine; on `k8s` over the client double, and in the cluster run where one is configured ([[045-workload-tokens]]) |
 | A decorator that removes the token mount, sets `privileged`, adds `hostNetwork` or `shareProcessNamespace`, or mounts a service account token is refused with `decorator_violation` naming the field | `TestDecoratorCannotWeakenTheBaseline`, table-driven over the baseline | not built |
 | With `CELLA_K8S_RUNTIME_CLASS_ISOLATION=vm`, `Isolation()` is `vm` and the Pod carries the class; unset, `container` regardless of the class name | `TestK8sIsolationIsDeclared` | not built |

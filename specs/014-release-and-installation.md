@@ -9,7 +9,7 @@ depends_on:
 affects: [.github/workflows/release.yml, .github/workflows/verify.yml, Dockerfile.ci, deploy/, tools/release/, docs/install.md, docs/upgrades/, cmd/cellad/]
 effort: medium
 created: 2026-09-12
-updated: 2026-10-03
+updated: 2026-10-14
 author: changkun
 ---
 
@@ -171,8 +171,10 @@ the driver's own `Preflight` and not a dry run of four creates:
 `Preflight` runs one `SelfSubjectAccessReview` per entry of the driver's
 verb table, which is the list the Role is written from, and it writes
 nothing. The driver of [[036-k8s-driver]] writes one Secret per
-sandbox, which holds the workload token and never a secret value, since
-a secret value stays sealed in the store under `CELLA_SECRET_KEY`, and a
+sandbox, which holds the workload token, the trust file, and the
+environment's values and gateway credential the claim's record leaves
+out ([[004-runtime-contract]]), and never a mounted secret's value, which
+stays sealed in the store under `CELLA_SECRET_KEY`, and a
 NetworkPolicy per sandbox and per mesh beside a mesh's headless Service
 ([[018-egress-and-secrets]], [[022-mesh-and-spawn]]), so the table and
 the Role carry those verbs too. The
