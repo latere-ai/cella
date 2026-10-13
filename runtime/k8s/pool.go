@@ -188,7 +188,7 @@ func (d *Driver) projectAdopted(ctx context.Context, id string, owner *corev1.Pe
 		data[tokenKey] = a.Token
 	}
 	d.putTrust(data, a.Egress.CAPEM)
-	if err := d.putSecret(ctx, id, owner, data); err != nil {
+	if err := d.putSecret(ctx, id, owner, data, nil); err != nil {
 		return fmt.Errorf("adopting %s: %w", id, err)
 	}
 	labels := map[string]any{labelPool: nil}

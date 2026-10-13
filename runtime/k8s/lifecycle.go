@@ -86,20 +86,23 @@ func (d *Driver) Create(ctx context.Context, s driver.CreateSpec) (driver.Ref, e
 	// later (specs 006 and 018). A prewarmed entry's Secret carries an empty
 	// token, which an adoption replaces. The sandbox's credentials are
 	// written beside them, since the claim's record leaves them out and a
-	// later Start renders its Pod from the two together.
-	data := map[string][]byte{}
+	// later Start renders its Pod from the two together, and so is every
+	// variable the Pod's container references.
+	data := podEnvData(s, now, token)
 	if _, held := strip(s); !held.empty() {
-		if data, err = held.data(); err != nil {
+		record, err := held.data()
+		if err != nil {
 			rollback()
 			return driver.Ref{}, err
 		}
+		maps.Copy(data, record)
 	}
 	if token {
 		data[tokenKey] = s.Token
 	}
 	d.putTrust(data, s.Egress.CAPEM)
 	if len(data) > 0 {
-		if err := d.putSecret(ctx, s.ID, created, data); err != nil {
+		if err := d.putSecret(ctx, s.ID, created, data, isEnvVarKey); err != nil {
 			rollback()
 			return driver.Ref{}, err
 		}
@@ -136,7 +139,7 @@ func (d *Driver) Start(ctx context.Context, id string) error {
 			return err
 		}
 	}
-	spec, err := d.fullSpec(ctx, id, pvc)
+	spec, _, err := d.fullSpec(ctx, id, pvc)
 	if err != nil {
 		return err
 	}
@@ -148,16 +151,19 @@ func (d *Driver) Start(ctx context.Context, id string) error {
 	}
 	// The trust file is written again for the same reason: a sandbox
 	// created while it carried the gateway's authority alone starts with
-	// the public roots beside it.
-	trust := map[string][]byte{}
-	d.putTrust(trust, spec.Egress.CAPEM)
-	if len(trust) > 0 {
-		if err := d.putSecret(ctx, id, pvc, trust); err != nil {
+	// the public roots beside it. The variables the new Pod references are
+	// written with it, replacing the previous start's, so the Pod starts
+	// with the environment the record and the Secret hold now.
+	started := d.opts.Now().UTC()
+	token := pvc.Annotations[annToken] == "true"
+	data := podEnvData(spec, started, token)
+	d.putTrust(data, spec.Egress.CAPEM)
+	if len(data) > 0 {
+		if err := d.putSecret(ctx, id, pvc, data, isEnvVarKey); err != nil {
 			return err
 		}
 	}
-	started := d.opts.Now().UTC()
-	fresh, err := d.pod(spec, started, pvc.Annotations[annToken] == "true")
+	fresh, err := d.pod(spec, started, token)
 	if err != nil {
 		return err
 	}
@@ -296,7 +302,7 @@ func (d *Driver) Update(ctx context.Context, id string, c driver.Change) error {
 		}
 		data := map[string][]byte{tokenKey: c.Token}
 		d.putTrust(data, spec.Egress.CAPEM)
-		if err := d.putSecret(ctx, id, pvc, data); err != nil {
+		if err := d.putSecret(ctx, id, pvc, data, nil); err != nil {
 			return err
 		}
 	}
@@ -409,32 +415,25 @@ func (d *Driver) apply(ctx context.Context, id string, build func(*corev1.Persis
 		if err != nil {
 			return err
 		}
-		err = nil
 		if len(data) > 0 {
-			err = d.putSecret(ctx, id, pvc, data)
-		}
-		switch {
-		case apierrors.IsConflict(err):
-			// A Secret another writer changed between its read and this
-			// write is a lost race like a lost patch, rebuilt from the
-			// claim as it now stands.
-		case err != nil:
-			return err
-		case mutation.empty():
-			return nil
-		default:
-			var patch []byte
-			if patch, err = patchFor(pvc, mutation); err != nil {
+			if err := d.putSecret(ctx, id, pvc, data, nil); err != nil {
 				return err
 			}
-			_, err = d.cs.CoreV1().PersistentVolumeClaims(d.opts.Namespace).
-				Patch(ctx, pvc.Name, types.JSONPatchType, patch, metav1.PatchOptions{})
-			if err == nil {
-				return nil
-			}
-			if !retryable(err) {
-				return mapErr(err, "claim patch")
-			}
+		}
+		if mutation.empty() {
+			return nil
+		}
+		patch, err := patchFor(pvc, mutation)
+		if err != nil {
+			return err
+		}
+		_, err = d.cs.CoreV1().PersistentVolumeClaims(d.opts.Namespace).
+			Patch(ctx, pvc.Name, types.JSONPatchType, patch, metav1.PatchOptions{})
+		if err == nil {
+			return nil
+		}
+		if !retryable(err) {
+			return mapErr(err, "claim patch")
 		}
 		last = err
 		if attempt < patchAttempts-1 {
@@ -445,7 +444,7 @@ func (d *Driver) apply(ctx context.Context, id string, build func(*corev1.Persis
 			}
 		}
 	}
-	return fmt.Errorf("claim write lost %d attempts: %w", patchAttempts, last)
+	return fmt.Errorf("claim patch lost %d attempts: %w", patchAttempts, last)
 }
 
 type patchOp struct {

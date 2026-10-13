@@ -143,9 +143,10 @@ func TestAttachRoundTripOverTheExecStream(t *testing.T) {
 	}
 
 	// The shell runs with the sandbox's environment under the request's, in
-	// the request's directory, through the same wrapper as Exec.
+	// the request's directory, through the same wrapper as Exec. The
+	// sandbox's own A is inherited from the container, not repeated.
 	call := h.exec.last()
-	want := []string{"env", "A=1", "B=request", "sh", "-c", `cd "$0" && exec "$@"`, "/workspace/sub", "sh"}
+	want := []string{"env", "B=request", "sh", "-c", `cd "$0" && exec "$@"`, "/workspace/sub", "sh"}
 	if !reflect.DeepEqual(call.argv, want) {
 		t.Fatalf("argv %q, want %q", call.argv, want)
 	}

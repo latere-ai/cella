@@ -78,7 +78,7 @@ func TestTokenIsASecretProjectedReadOnly(t *testing.T) {
 	if mount.MountPath != tokenMount || !mount.ReadOnly {
 		t.Errorf("the token mount is %+v, want %s read-only", mount, tokenMount)
 	}
-	if got := envOf(pod)[driver.TokenFileEnv]; got != driver.TokenPath {
+	if got := h.envOf(t, pod)[driver.TokenFileEnv]; got != driver.TokenPath {
 		t.Errorf("%s = %q, want %q", driver.TokenFileEnv, got, driver.TokenPath)
 	}
 }
@@ -122,7 +122,7 @@ func TestStartKeepsTheProjection(t *testing.T) {
 	}
 	pod := h.podOf(t, id)
 	mountNamed(t, pod, tokenVolume)
-	if got := envOf(pod)[driver.TokenFileEnv]; got != driver.TokenPath {
+	if got := h.envOf(t, pod)[driver.TokenFileEnv]; got != driver.TokenPath {
 		t.Errorf("%s = %q after a start, want %q", driver.TokenFileEnv, got, driver.TokenPath)
 	}
 	if got := string(h.secretOf(t, id).Data[tokenKey]); got != "first" {
@@ -211,7 +211,7 @@ func TestNoTokenProjectsNothing(t *testing.T) {
 	if slices.ContainsFunc(pod.Spec.Volumes, func(v corev1.Volume) bool { return v.Name == tokenVolume }) {
 		t.Error("a token volume was rendered for a sandbox that carries none")
 	}
-	if _, ok := envOf(pod)[driver.TokenFileEnv]; ok {
+	if _, ok := h.envOf(t, pod)[driver.TokenFileEnv]; ok {
 		t.Errorf("%s is set on a sandbox with no token", driver.TokenFileEnv)
 	}
 	if h.claimOf(t, id).Annotations[annToken] != "" {
@@ -259,10 +259,50 @@ func mountNamed(t *testing.T, pod *corev1.Pod, name string) corev1.VolumeMount {
 	return corev1.VolumeMount{}
 }
 
-func envOf(pod *corev1.Pod) map[string]string {
+// resolved is the environment a rendered Pod's workload container would
+// start with, given the Secret data its start writes: an inline value as
+// written and a reference as the data holds its key. A reference whose key
+// is not in the data is absent, so a comparison names it.
+func resolved(pod *corev1.Pod, data map[string][]byte) map[string]string {
 	out := map[string]string{}
 	for _, e := range pod.Spec.Containers[0].Env {
-		out[e.Name] = e.Value
+		switch {
+		case e.ValueFrom == nil:
+			out[e.Name] = e.Value
+		case e.ValueFrom.SecretKeyRef != nil:
+			if value, ok := data[e.ValueFrom.SecretKeyRef.Key]; ok {
+				out[e.Name] = string(value)
+			}
+		}
+	}
+	return out
+}
+
+// envOf is the environment the kubelet gives a Pod's workload container: an
+// inline value as written and a reference resolved against the Secret it
+// names as the cluster double holds it now. A reference to a key that is not
+// there fails the test, as it keeps a real container from starting.
+func (h *harness) envOf(t *testing.T, pod *corev1.Pod) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	for _, e := range pod.Spec.Containers[0].Env {
+		if e.ValueFrom == nil {
+			out[e.Name] = e.Value
+			continue
+		}
+		ref := e.ValueFrom.SecretKeyRef
+		if ref == nil {
+			t.Fatalf("%s is neither a value nor a Secret reference: %+v", e.Name, e.ValueFrom)
+		}
+		secret, err := h.cs.CoreV1().Secrets(pod.Namespace).Get(t.Context(), ref.Name, metav1.GetOptions{})
+		if err != nil {
+			t.Fatalf("%s references the Secret %s: %v", e.Name, ref.Name, err)
+		}
+		value, ok := secret.Data[ref.Key]
+		if !ok {
+			t.Fatalf("%s references the key %s, which the Secret %s does not hold", e.Name, ref.Key, ref.Name)
+		}
+		out[e.Name] = string(value)
 	}
 	return out
 }

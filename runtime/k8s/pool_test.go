@@ -148,7 +148,7 @@ func TestAdoptionRewritesTheClaim(t *testing.T) {
 	if len(stored.Env) > 0 || stored.Egress.Credential != "" {
 		t.Errorf("the claim's record carries credentials after adoption: %+v", stored)
 	}
-	spec, err := h.fullSpec(t.Context(), "sbx_pool", pvc)
+	spec, _, err := h.fullSpec(t.Context(), "sbx_pool", pvc)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -470,7 +470,7 @@ func TestThePodCarriesTheGatewayProjection(t *testing.T) {
 	s.Display = &driver.Geometry{Width: 1280, Height: 800}
 	h.created(t, s)
 	pod := h.podOf(t, id)
-	env := envOf(pod)
+	env := h.envOf(t, pod)
 	want := egress.Projection{
 		ProxyAddr: s.Egress.ProxyAddr, ReverseAddr: s.Egress.ReverseAddr,
 		Credential: s.Egress.Credential, CAPath: egress.CAPath,
@@ -504,7 +504,7 @@ func TestThePodCarriesTheGatewayProjection(t *testing.T) {
 	if err := h.Start(t.Context(), id); err != nil {
 		t.Fatal(err)
 	}
-	if got := envOf(h.podOf(t, id))["HTTPS_PROXY"]; got != want["HTTPS_PROXY"] {
+	if got := h.envOf(t, h.podOf(t, id))["HTTPS_PROXY"]; got != want["HTTPS_PROXY"] {
 		t.Errorf("a started Pod's HTTPS_PROXY is %q", got)
 	}
 
@@ -513,7 +513,7 @@ func TestThePodCarriesTheGatewayProjection(t *testing.T) {
 	bare.Token = nil
 	h.created(t, bare)
 	mountNamed(t, h.podOf(t, "sbx_notoken"), tokenVolume)
-	if _, ok := envOf(h.podOf(t, "sbx_notoken"))[driver.TokenFileEnv]; ok {
+	if _, ok := h.envOf(t, h.podOf(t, "sbx_notoken"))[driver.TokenFileEnv]; ok {
 		t.Error("a sandbox with no token names a token file")
 	}
 }
@@ -641,7 +641,7 @@ func TestAnAdoptionWritesTheAuthority(t *testing.T) {
 	}
 	// The running entry's environment cannot change, so the proxy variables
 	// arrive with its next Pod, rendered from the adopted record.
-	if _, ok := envOf(h.podOf(t, "sbx_pool"))["HTTPS_PROXY"]; ok {
+	if _, ok := h.envOf(t, h.podOf(t, "sbx_pool"))["HTTPS_PROXY"]; ok {
 		t.Fatal("the entry's running Pod was rewritten with the proxy variables")
 	}
 	if err := h.Stop(t.Context(), "sbx_pool"); err != nil {
@@ -651,7 +651,7 @@ func TestAnAdoptionWritesTheAuthority(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := egress.Projection{ProxyAddr: boundary.ProxyAddr, Credential: boundary.Credential}.Env()["HTTPS_PROXY"]
-	if got := envOf(h.podOf(t, "sbx_pool"))["HTTPS_PROXY"]; got != want {
+	if got := h.envOf(t, h.podOf(t, "sbx_pool"))["HTTPS_PROXY"]; got != want {
 		t.Fatalf("the adopted sandbox's next Pod carries HTTPS_PROXY %q, want %q", got, want)
 	}
 	// An adoption that carries neither a token nor an authority writes no
@@ -676,7 +676,7 @@ func TestNoGatewayProjectsNothing(t *testing.T) {
 	h.created(t, s)
 	pod := h.podOf(t, id)
 	for _, key := range egress.ReservedEnv() {
-		if _, ok := envOf(pod)[key]; ok {
+		if _, ok := h.envOf(t, pod)[key]; ok {
 			t.Errorf("%s is set on a sandbox with no gateway", key)
 		}
 	}

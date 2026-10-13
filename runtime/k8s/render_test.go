@@ -29,7 +29,8 @@ func TestRenderPodAndClaim(t *testing.T) {
 		Resources: driver.Resources{CPU: "2", Memory: "512Mi", Disk: "20Gi"},
 		Workspace: driver.Workspace{Path: "/data"},
 	}
-	pod, err := h.pod(s, h.clock.now(), false)
+	now := h.clock.now()
+	pod, err := h.pod(s, now, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,8 +41,18 @@ func TestRenderPodAndClaim(t *testing.T) {
 	if !reflect.DeepEqual(c.Command, s.Command) || !reflect.DeepEqual(c.Args, s.Args) {
 		t.Fatalf("command %v args %v", c.Command, c.Args)
 	}
-	if want := []corev1.EnvVar{{Name: "A", Value: "1"}, {Name: "B", Value: "2"}}; !reflect.DeepEqual(c.Env, want) {
+	// Every variable is a reference to its own key of the sandbox's
+	// Secret, sorted, and the keys the start writes hold the values.
+	ref := func(name string) corev1.EnvVar {
+		return corev1.EnvVar{Name: name, ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{
+			Name: tokenSecretName(s.ID), Key: envVarKey(generation(now), name),
+		}}}
+	}
+	if want := []corev1.EnvVar{ref("A"), ref("B")}; !reflect.DeepEqual(c.Env, want) {
 		t.Fatalf("env %v, want it sorted as %v", c.Env, want)
+	}
+	if got := resolved(pod, podEnvData(s, now, false)); !maps.Equal(got, s.Env) {
+		t.Fatalf("the references resolve to %v, want %v", got, s.Env)
 	}
 	if c.WorkingDir != "/workspace/sub" {
 		t.Fatalf("workdir %q", c.WorkingDir)

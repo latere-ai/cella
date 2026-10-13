@@ -319,6 +319,26 @@ func (d *Driver) claim(s driver.CreateSpec, now time.Time) (*corev1.PersistentVo
 // that holds the Pod open for Exec and leaves on the first TERM.
 var keepAlive = []string{"/bin/sh", "-c", "trap 'exit 0' TERM; while :; do sleep 60 & wait $!; done"}
 
+// workloadEnv is the environment the workload container starts with: the
+// sandbox's own, the token's path where it carries an identity, the gateway's
+// doors, the sandbox's credential and the trust variables, so every client
+// that honors them leaves through the gateway the rule leaves open (spec
+// 018), and the screen to draw on beside the desktop of spec 023.
+func workloadEnv(s driver.CreateSpec, token bool) map[string]string {
+	environment := maps.Clone(s.Env)
+	if environment == nil {
+		environment = map[string]string{}
+	}
+	if token {
+		environment[driver.TokenFileEnv] = driver.TokenPath
+	}
+	environment = egressEnv(environment, s.Egress)
+	if s.Display != nil {
+		environment = withDisplayEnv(environment)
+	}
+	return environment
+}
+
 // pod renders the compute half. Every field of the security baseline is set
 // here rather than inherited, so a cluster with permissive defaults grants a
 // sandbox nothing extra.
@@ -326,6 +346,10 @@ var keepAlive = []string{"/bin/sh", "-c", "trap 'exit 0' TERM; while :; do sleep
 // token says whether the sandbox carries an identity, which a create reads
 // off the spec it was given and a start off the claim's record, because the
 // value the create carried is not kept anywhere this call can reach.
+//
+// Every variable of the workload container is a reference to a key of the
+// sandbox's Secret, named for the start at now; the caller writes those keys
+// before it creates the Pod (podEnvData).
 func (d *Driver) pod(s driver.CreateSpec, now time.Time, token bool) (*corev1.Pod, error) {
 	if err := d.validate(s); err != nil {
 		return nil, err
@@ -341,19 +365,9 @@ func (d *Driver) pod(s driver.CreateSpec, now time.Time, token bool) (*corev1.Po
 	// The rule of spec 018 selects the Pod by this label, which the helper
 	// of a transfer carries as well.
 	labels[labelSandbox] = s.ID
-	environment := s.Env
 	if token {
 		annotations[annToken] = "true"
-		environment = maps.Clone(s.Env)
-		if environment == nil {
-			environment = map[string]string{}
-		}
-		environment[driver.TokenFileEnv] = driver.TokenPath
 	}
-	// The gateway's doors, the sandbox's credential and the trust variables,
-	// so every client that honors them leaves through the gateway the rule
-	// leaves open (spec 018).
-	environment = egressEnv(environment, s.Egress)
 	uid, gid, err := runAs(s.User)
 	if err != nil {
 		return nil, err
@@ -407,7 +421,7 @@ func (d *Driver) pod(s driver.CreateSpec, now time.Time, token bool) (*corev1.Po
 				Image:      s.Image,
 				Command:    slices.Clone(command),
 				Args:       slices.Clone(args),
-				Env:        env(environment),
+				Env:        secretEnv(s.ID, generation(now), workloadEnv(s, token)),
 				WorkingDir: workdir,
 				Resources:  limits,
 				VolumeMounts: []corev1.VolumeMount{
@@ -431,15 +445,14 @@ func (d *Driver) pod(s driver.CreateSpec, now time.Time, token bool) (*corev1.Po
 	}
 	// The desktop of spec 023 is a second container sharing the workload's
 	// /tmp, which is where the X socket lands. The workload is told which
-	// screen to draw on and needs none of the desktop's own tools.
+	// screen to draw on (workloadEnv) and needs none of the desktop's own
+	// tools.
 	if s.Display != nil {
 		desktop, err := d.displayContainer(*s.Display)
 		if err != nil {
 			return nil, err
 		}
 		pod.Spec.Containers = append(pod.Spec.Containers, desktop)
-		workload := &pod.Spec.Containers[0]
-		workload.Env = env(withDisplayEnv(environment))
 	}
 	return pod, nil
 }
@@ -470,8 +483,10 @@ func hardened() *corev1.SecurityContext {
 	}
 }
 
-// env renders the environment sorted, so two renders of one spec are equal
-// objects and a diff of a Pod is a diff of the sandbox.
+// env renders an environment of the driver's own constants inline, sorted, so
+// two renders of one spec are equal objects and a diff of a Pod is a diff of
+// the sandbox. Only the desktop container's geometry is rendered this way;
+// the workload's variables are references (secretEnv).
 func env(m map[string]string) []corev1.EnvVar {
 	out := make([]corev1.EnvVar, 0, len(m))
 	for _, k := range slices.Sorted(maps.Keys(m)) {

@@ -50,16 +50,16 @@ func (d *Driver) Attach(ctx context.Context, id string, req driver.AttachRequest
 	if strings.TrimSpace(command[0]) == "" {
 		return nil, fmt.Errorf("%w: the command's first word is blank", driver.ErrInvalid)
 	}
-	pvc, err := d.runningClaim(ctx, id)
+	pvc, pod, err := d.runningClaim(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	spec, err := d.fullSpec(ctx, id, pvc)
+	spec, data, err := d.fullSpec(ctx, id, pvc)
 	if err != nil {
 		return nil, err
 	}
 	inR, inW := io.Pipe()
-	o := execOpts{argv: wrapped(spec, command, req.Env, req.Workdir), stdin: true, tty: true, window: w}
+	o := execOpts{argv: wrapped(spec, startedWith(pod, id, data), command, req.Env, req.Workdir), stdin: true, tty: true, window: w}
 	e, err := d.launch(ctx, objectName(id), o, inR, 0, func() {
 		// The executor copies stdin until its reader ends; a session whose
 		// process exited ends the reader here rather than at the next

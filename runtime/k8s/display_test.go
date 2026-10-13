@@ -73,7 +73,9 @@ func TestCapabilitiesFollowTheDisplayImage(t *testing.T) {
 // same hardened context the workload carries.
 func TestPodWithDisplay(t *testing.T) {
 	h := desktopHarness(t)
-	pod, err := h.pod(driver.CreateSpec{ID: "sbx_a", Name: "a", Owner: "alice", Image: image, Display: &desk}, h.clock.now(), false)
+	now := h.clock.now()
+	withDesk := driver.CreateSpec{ID: "sbx_a", Name: "a", Owner: "alice", Image: image, Display: &desk}
+	pod, err := h.pod(withDesk, now, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,10 +123,7 @@ func TestPodWithDisplay(t *testing.T) {
 	}
 	// The workload is told which screen to draw on and nothing else of the
 	// desktop's own environment.
-	workload := map[string]string{}
-	for _, e := range pod.Spec.Containers[0].Env {
-		workload[e.Name] = e.Value
-	}
+	workload := resolved(pod, podEnvData(withDesk, now, false))
 	if !maps.Equal(workload, map[string]string{display.DisplayEnv: display.DisplayValue}) {
 		t.Fatalf("the workload's environment is %v", workload)
 	}

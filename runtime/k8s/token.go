@@ -5,6 +5,7 @@ package k8s
 
 import (
 	"context"
+	"fmt"
 	"maps"
 	"path"
 
@@ -99,7 +100,12 @@ func (d *Driver) putTrust(data map[string][]byte, authority string) {
 // names it as its owner, so a claim removed by anything other than this
 // driver takes the Secret, and the credentials in it, with it. A claim with no
 // uid, which only a client double answers, is named by no reference.
-func (d *Driver) putSecret(ctx context.Context, id string, owner *corev1.PersistentVolumeClaim, data map[string][]byte) error {
+//
+// replaced, when set, names keys the write owns as a set: one it reports
+// that is not in data is removed, so a variable an earlier start carried does
+// not outlive it. A write that loses a race to another writer of the Secret
+// reads it again and merges again, since what it merges is fixed keys.
+func (d *Driver) putSecret(ctx context.Context, id string, owner *corev1.PersistentVolumeClaim, data map[string][]byte, replaced func(string) bool) error {
 	secrets := d.cs.CoreV1().Secrets(d.opts.Namespace)
 	secret := &corev1.Secret{
 		Name: tokenSecretName(id), Namespace: d.opts.Namespace,
@@ -112,17 +118,30 @@ func (d *Driver) putSecret(ctx context.Context, id string, owner *corev1.Persist
 	if !apierrors.IsAlreadyExists(err) {
 		return mapErr(err, "token secret create")
 	}
-	current, err := secrets.Get(ctx, secret.Name, metav1.GetOptions{})
-	if err != nil {
-		return mapErr(err, "token secret get")
+	var last error
+	for range patchAttempts {
+		current, err := secrets.Get(ctx, secret.Name, metav1.GetOptions{})
+		if err != nil {
+			return mapErr(err, "token secret get")
+		}
+		if current.Data == nil {
+			current.Data = map[string][]byte{}
+		}
+		if replaced != nil {
+			maps.DeleteFunc(current.Data, func(key string, _ []byte) bool {
+				_, kept := data[key]
+				return replaced(key) && !kept
+			})
+		}
+		maps.Copy(current.Data, data)
+		current.OwnerReferences = ownedBy(current.OwnerReferences, owner)
+		_, err = secrets.Update(ctx, current, metav1.UpdateOptions{})
+		if !apierrors.IsConflict(err) {
+			return mapErr(err, "token secret update")
+		}
+		last = err
 	}
-	if current.Data == nil {
-		current.Data = map[string][]byte{}
-	}
-	maps.Copy(current.Data, data)
-	current.OwnerReferences = ownedBy(current.OwnerReferences, owner)
-	_, err = secrets.Update(ctx, current, metav1.UpdateOptions{})
-	return mapErr(err, "token secret update")
+	return fmt.Errorf("token secret update lost %d attempts: %w", patchAttempts, last)
 }
 
 // ownedBy adds the claim to a Secret's owner references when it is not there

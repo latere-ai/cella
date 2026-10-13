@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"maps"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -43,71 +44,87 @@ func credentialSpec(id string) driver.CreateSpec {
 	return s
 }
 
-// metadataLeaks names every label and annotation, on every object the driver
-// wrote in the namespace, whose value holds one of the given secrets.
-func (h *harness) metadataLeaks(t *testing.T, secrets ...string) []string {
+// leaks names every object the driver wrote in the namespace, other than a
+// Secret, that holds one of the given secrets anywhere: its spec, its labels,
+// its annotations. A Secret is checked for its labels and annotations only,
+// since its data is where the values are kept.
+func (h *harness) leaks(t *testing.T, secrets ...string) []string {
 	t.Helper()
 	ctx := t.Context()
-	var objects []metav1.Object
+	whole := map[string]any{}
 	claims, err := h.cs.CoreV1().PersistentVolumeClaims(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	for i := range claims.Items {
-		objects = append(objects, &claims.Items[i])
+		whole["claim "+claims.Items[i].Name] = &claims.Items[i]
 	}
 	pods, err := h.cs.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	for i := range pods.Items {
-		objects = append(objects, &pods.Items[i])
-	}
-	stored, err := h.cs.CoreV1().Secrets(namespace).List(ctx, metav1.ListOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for i := range stored.Items {
-		objects = append(objects, &stored.Items[i])
+		whole["pod "+pods.Items[i].Name] = &pods.Items[i]
 	}
 	policies, err := h.cs.NetworkingV1().NetworkPolicies(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	for i := range policies.Items {
-		objects = append(objects, &policies.Items[i])
+		whole["policy "+policies.Items[i].Name] = &policies.Items[i]
 	}
 	services, err := h.cs.CoreV1().Services(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	for i := range services.Items {
-		objects = append(objects, &services.Items[i])
+		whole["service "+services.Items[i].Name] = &services.Items[i]
 	}
-	if len(objects) == 0 {
-		t.Fatal("the namespace holds no object to check")
+	stored, err := h.cs.CoreV1().Secrets(namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		t.Fatal(err)
 	}
-	var leaks []string
-	for _, o := range objects {
-		for kind, m := range map[string]map[string]string{"label": o.GetLabels(), "annotation": o.GetAnnotations()} {
-			for key, value := range m {
-				for _, secret := range secrets {
-					if strings.Contains(value, secret) {
-						leaks = append(leaks, o.GetName()+" "+kind+" "+key)
-					}
-				}
+	for i := range stored.Items {
+		meta := stored.Items[i].ObjectMeta
+		whole["secret metadata "+meta.Name] = map[string]any{"labels": meta.Labels, "annotations": meta.Annotations}
+	}
+	if len(pods.Items) == 0 || len(claims.Items) == 0 {
+		t.Fatal("the namespace holds no sandbox to check")
+	}
+	var found []string
+	for name, object := range whole {
+		encoded, err := json.Marshal(object)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, secret := range secrets {
+			if strings.Contains(string(encoded), secret) {
+				found = append(found, name+" holds "+secret)
 			}
 		}
 	}
-	slices.Sort(leaks)
-	return leaks
+	slices.Sort(found)
+	return found
+}
+
+// referencesOnly fails the test for a workload variable of a sandbox's Pod
+// that carries its value inline rather than a reference to the sandbox's
+// Secret.
+func (h *harness) referencesOnly(t *testing.T, id string) {
+	t.Helper()
+	for _, e := range h.podOf(t, id).Spec.Containers[0].Env {
+		ref := e.ValueFrom
+		if e.Value != "" || ref == nil || ref.SecretKeyRef == nil || ref.SecretKeyRef.Name != tokenSecretName(id) {
+			t.Errorf("the Pod of %s carries %s as %+v, not a reference to its Secret", id, e.Name, e)
+		}
+	}
 }
 
 // ran runs one command in a sandbox, waits for it, and returns the argv the
 // cluster was asked to run, which carries the environment the driver wraps.
-func (h *harness) ran(t *testing.T, id string) []string {
+func (h *harness) ran(t *testing.T, id string, env map[string]string) []string {
 	t.Helper()
-	e, err := h.Exec(t.Context(), id, driver.ExecRequest{Command: []string{"true"}})
+	e, err := h.Exec(t.Context(), id, driver.ExecRequest{Command: []string{"true"}, Env: env})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,33 +134,59 @@ func (h *harness) ran(t *testing.T, id string) []string {
 	return h.exec.last().argv
 }
 
-// containerEnv reads one variable off the workload container of a Pod.
-func containerEnv(pod *corev1.Pod, name string) (string, bool) {
-	for _, c := range pod.Spec.Containers {
-		if c.Name != Container {
-			continue
-		}
-		for _, e := range c.Env {
-			if e.Name == name {
-				return e.Value, true
-			}
-		}
+// assignments is what an argv's leading env sets.
+func assignments(argv []string) map[string]string {
+	out := map[string]string{}
+	if len(argv) == 0 || argv[0] != "env" {
+		return out
 	}
-	return "", false
+	for _, a := range argv[1:] {
+		name, value, ok := strings.Cut(a, "=")
+		if !ok {
+			break
+		}
+		out[name] = value
+	}
+	return out
 }
 
-// TestNoMetadataCarriesACredential walks every object the driver writes,
-// through a create, an update of the environment, a stop and a start, and an
-// adoption, and finds no environment value and no gateway credential in any
-// label or annotation. The values are in the sandbox's Secret.
-func TestNoMetadataCarriesACredential(t *testing.T) {
+// commandEnv is the environment a command in a sandbox runs with: what its
+// container started with, which the command inherits, under what the argv
+// sets.
+func (h *harness) commandEnv(t *testing.T, id string, env map[string]string) map[string]string {
+	t.Helper()
+	argv := h.ran(t, id, env)
+	out := h.envOf(t, h.podOf(t, id))
+	maps.Copy(out, assignments(argv))
+	return out
+}
+
+// startsWith checks that a sandbox's Pod carries references only and that
+// they resolve to the environment the driver renders for the spec.
+func (h *harness) startsWith(t *testing.T, id string, s driver.CreateSpec, token bool) {
+	t.Helper()
+	h.referencesOnly(t, id)
+	if got, want := h.envOf(t, h.podOf(t, id)), workloadEnv(s, token); !maps.Equal(got, want) {
+		t.Errorf("the container of %s starts with %v, want %v", id, got, want)
+	}
+}
+
+// TestNoObjectButTheSecretCarriesACredential walks every object the driver
+// writes, through a create, an update of the environment, a stop and a
+// start, and an adoption and its next start, and finds no environment value
+// and no gateway credential anywhere but the sandbox's Secret: not in a
+// label or an annotation, and not in a Pod's spec, which references every
+// variable of the workload. The proxy variables, which carry the
+// credential, are references too.
+func TestNoObjectButTheSecretCarriesACredential(t *testing.T) {
 	h := newHarnessWith(t, withGateway)
 	const id = "sbx_creds"
 	h.created(t, credentialSpec(id))
 	secrets := []string{envValue, credValue, rotatedValue, adoptedValue, adoptedCred}
-	if leaks := h.metadataLeaks(t, secrets...); len(leaks) > 0 {
-		t.Fatalf("after create, metadata carries a credential: %v", leaks)
+	if found := h.leaks(t, secrets...); len(found) > 0 {
+		t.Fatalf("after create: %v", found)
 	}
+	h.referencesOnly(t, id)
 	stored := h.secretOf(t, id)
 	if !strings.Contains(string(stored.Data[envKey]), envValue) || string(stored.Data[credentialKey]) != credValue {
 		t.Fatalf("the Secret does not keep the credentials: %v", stored.Data)
@@ -160,9 +203,10 @@ func TestNoMetadataCarriesACredential(t *testing.T) {
 	if err := h.Start(t.Context(), id); err != nil {
 		t.Fatal(err)
 	}
-	if leaks := h.metadataLeaks(t, secrets...); len(leaks) > 0 {
-		t.Fatalf("after an update and a restart, metadata carries a credential: %v", leaks)
+	if found := h.leaks(t, secrets...); len(found) > 0 {
+		t.Fatalf("after an update and a restart: %v", found)
 	}
+	h.referencesOnly(t, id)
 
 	prewarm(t, h, "sbx_entry")
 	adoption := driver.Adoption{
@@ -174,18 +218,29 @@ func TestNoMetadataCarriesACredential(t *testing.T) {
 	if err := h.Update(t.Context(), "sbx_entry", driver.Change{Adopt: &adoption}); err != nil {
 		t.Fatal(err)
 	}
-	if leaks := h.metadataLeaks(t, secrets...); len(leaks) > 0 {
-		t.Fatalf("after an adoption, metadata carries a credential: %v", leaks)
+	if found := h.leaks(t, secrets...); len(found) > 0 {
+		t.Fatalf("after an adoption: %v", found)
 	}
+	if err := h.Stop(t.Context(), "sbx_entry"); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Start(t.Context(), "sbx_entry"); err != nil {
+		t.Fatal(err)
+	}
+	if found := h.leaks(t, secrets...); len(found) > 0 {
+		t.Fatalf("after an adopted sandbox's start: %v", found)
+	}
+	h.referencesOnly(t, "sbx_entry")
 }
 
-// TestTheProjectionMountsNoCredential: the keys the credentials are kept
-// under are not in the projection, so the sandbox's file system never holds
-// them through the mount.
+// TestTheProjectionMountsNoCredential: the keys the credentials and the
+// variables are kept under are not in the projection, so the sandbox's file
+// system never holds them through the mount.
 func TestTheProjectionMountsNoCredential(t *testing.T) {
 	h := newHarnessWith(t, withGateway)
 	h.created(t, credentialSpec("sbx_mount"))
 	pod := h.podOf(t, "sbx_mount")
+	mounted := 0
 	for _, v := range pod.Spec.Volumes {
 		if v.Projected == nil {
 			continue
@@ -195,42 +250,95 @@ func TestTheProjectionMountsNoCredential(t *testing.T) {
 				continue
 			}
 			for _, item := range source.Secret.Items {
-				if item.Key == envKey || item.Key == credentialKey {
+				mounted++
+				if item.Key == envKey || item.Key == credentialKey || isEnvVarKey(item.Key) {
 					t.Errorf("the projection mounts %s at %s", item.Key, item.Path)
 				}
 			}
 		}
 	}
+	if mounted == 0 {
+		t.Fatal("the fixture mounts no projection to check")
+	}
 }
 
-// TestStartRendersTheCredentialsFromTheSecret: the Pod a start renders, and
-// the command an exec wraps, carry the environment and the credential the
-// Secret keeps, including an environment an update replaced.
-func TestStartRendersTheCredentialsFromTheSecret(t *testing.T) {
+// TestTheContainerStartsWithTheSameEnvironment: the references of the Pod a
+// create and a start render resolve to the environment the driver renders
+// for the sandbox, the token's path and the gateway's variables included; an
+// update of the environment leaves the running container as it started and
+// reaches its next start; and a start removes the keys of the start before
+// it, so a variable an update dropped is not kept.
+func TestTheContainerStartsWithTheSameEnvironment(t *testing.T) {
 	h := newHarnessWith(t, withGateway)
-	const id = "sbx_start"
-	h.created(t, credentialSpec(id))
+	const id = "sbx_same"
+	s := credentialSpec(id)
+	h.created(t, s)
+	h.startsWith(t, id, s, true)
+	if got := h.envOf(t, h.podOf(t, id))["HTTPS_PROXY"]; !strings.Contains(got, credValue) {
+		t.Fatalf("the proxy variable resolves to %q, without the credential", got)
+	}
 	if err := h.Stop(t.Context(), id); err != nil {
 		t.Fatal(err)
 	}
 	if err := h.Start(t.Context(), id); err != nil {
 		t.Fatal(err)
 	}
-	pod := h.podOf(t, id)
-	if got, _ := containerEnv(pod, "MODEL_KEY"); got != envValue {
-		t.Errorf("the restarted Pod's MODEL_KEY is %q", got)
+	h.startsWith(t, id, s, true)
+
+	env := map[string]string{"MODEL_KEY": rotatedValue}
+	if err := h.Update(t.Context(), id, driver.Change{Env: &env}); err != nil {
+		t.Fatal(err)
 	}
-	if got, _ := containerEnv(pod, "CELLA_GATEWAY_CREDENTIAL"); got != credValue {
-		t.Errorf("the restarted Pod's gateway credential is %q", got)
+	// The container keeps the environment it started with.
+	h.startsWith(t, id, s, true)
+	if err := h.Stop(t.Context(), id); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Start(t.Context(), id); err != nil {
+		t.Fatal(err)
+	}
+	updated := s
+	updated.Env = env
+	h.startsWith(t, id, updated, true)
+	referenced := map[string]bool{}
+	for _, e := range h.podOf(t, id).Spec.Containers[0].Env {
+		referenced[e.ValueFrom.SecretKeyRef.Key] = true
+	}
+	for key := range h.secretOf(t, id).Data {
+		if isEnvVarKey(key) && !referenced[key] {
+			t.Errorf("the Secret keeps %s, which no running container references", key)
+		}
+	}
+}
+
+// TestACommandCarriesOnlyWhatTheContainerLacks: a command inherits the
+// environment its container started with, so the exec request repeats none
+// of the sandbox's own values on its argv until an update has changed one,
+// and then that one; the command's environment is what it was when every
+// value was repeated. The request's own variables are always on the argv.
+func TestACommandCarriesOnlyWhatTheContainerLacks(t *testing.T) {
+	h := newHarnessWith(t, withGateway)
+	const id = "sbx_argv"
+	h.created(t, credentialSpec(id))
+	argv := h.ran(t, id, map[string]string{"REQUEST": "per-call"})
+	if set := assignments(argv); len(set) != 1 || set["REQUEST"] != "per-call" {
+		t.Errorf("a fresh sandbox's command is %q, want the request's variable alone", argv)
+	}
+	if got := h.commandEnv(t, id, nil); got["MODEL_KEY"] != envValue || got["PLAIN"] != "visible" {
+		t.Errorf("the command runs with %v", got)
 	}
 
 	env := map[string]string{"MODEL_KEY": rotatedValue}
 	if err := h.Update(t.Context(), id, driver.Change{Env: &env}); err != nil {
 		t.Fatal(err)
 	}
-	argv := h.ran(t, id)
-	if !slices.Contains(argv, "MODEL_KEY="+rotatedValue) || slices.Contains(argv, "PLAIN=visible") {
-		t.Errorf("the exec after an update of the environment runs %q", argv)
+	if set := assignments(h.ran(t, id, nil)); !maps.Equal(set, env) {
+		t.Errorf("after an update the command sets %v, want the changed variable alone", set)
+	}
+	// As before, a variable the update dropped is not taken from a command
+	// whose container started with it.
+	if got := h.commandEnv(t, id, nil); got["MODEL_KEY"] != rotatedValue || got["PLAIN"] != "visible" {
+		t.Errorf("after an update the command runs with %v", got)
 	}
 	if err := h.Stop(t.Context(), id); err != nil {
 		t.Fatal(err)
@@ -238,20 +346,19 @@ func TestStartRendersTheCredentialsFromTheSecret(t *testing.T) {
 	if err := h.Start(t.Context(), id); err != nil {
 		t.Fatal(err)
 	}
-	pod = h.podOf(t, id)
-	if got, _ := containerEnv(pod, "MODEL_KEY"); got != rotatedValue {
-		t.Errorf("the Pod after an update of the environment has MODEL_KEY %q", got)
+	if set := assignments(h.ran(t, id, nil)); len(set) != 0 {
+		t.Errorf("after the next start the command sets %v", set)
 	}
-	if _, kept := containerEnv(pod, "PLAIN"); kept {
-		t.Error("a variable the update dropped is still in the Pod")
+	if got := h.commandEnv(t, id, nil); got["MODEL_KEY"] != rotatedValue {
+		t.Errorf("after the next start the command runs with %v", got)
 	}
-	if got, _ := containerEnv(pod, "CELLA_GATEWAY_CREDENTIAL"); got != credValue {
-		t.Errorf("the update of the environment lost the gateway credential: %q", got)
+	if _, kept := h.commandEnv(t, id, nil)["PLAIN"]; kept {
+		t.Error("the dropped variable survived the next start")
 	}
 }
 
 // TestAnEmptyEnvironmentIsWritten: an update to no environment at all leaves
-// the Secret saying so, and a command runs with none.
+// the Secret saying so, and a command sets none of the sandbox's variables.
 func TestAnEmptyEnvironmentIsWritten(t *testing.T) {
 	h := newHarnessWith(t, withGateway)
 	const id = "sbx_empty"
@@ -263,14 +370,15 @@ func TestAnEmptyEnvironmentIsWritten(t *testing.T) {
 	if got := string(h.secretOf(t, id).Data[envKey]); got != "{}" {
 		t.Errorf("the Secret's environment is %q, want {}", got)
 	}
-	if argv := h.ran(t, id); slices.ContainsFunc(argv, func(a string) bool { return strings.HasPrefix(a, "MODEL_KEY=") }) {
-		t.Errorf("the exec after the environment was cleared runs %q", argv)
+	if set := assignments(h.ran(t, id, nil)); len(set) != 0 {
+		t.Errorf("the command after the environment was cleared sets %v", set)
 	}
 }
 
 // TestAnAdoptedSandboxStartsWithTheAdoptersCredentials: the adopter's
-// environment and credential are what an exec carries and what the next
-// start renders.
+// environment is what a command in the running entry carries, on its argv
+// since the entry's container started without it, and the adopter's
+// environment and credential are what the next start renders.
 func TestAnAdoptedSandboxStartsWithTheAdoptersCredentials(t *testing.T) {
 	h := newHarnessWith(t, withGateway)
 	const id = "sbx_adopt"
@@ -284,8 +392,8 @@ func TestAnAdoptedSandboxStartsWithTheAdoptersCredentials(t *testing.T) {
 	if err := h.Update(t.Context(), id, driver.Change{Adopt: &adoption}); err != nil {
 		t.Fatal(err)
 	}
-	if argv := h.ran(t, id); !slices.Contains(argv, "MODEL_KEY="+adoptedValue) {
-		t.Errorf("the exec in the adopted sandbox runs %q", argv)
+	if got := h.commandEnv(t, id, nil); got["MODEL_KEY"] != adoptedValue {
+		t.Errorf("the command in the adopted sandbox runs with %v", got)
 	}
 	if err := h.Stop(t.Context(), id); err != nil {
 		t.Fatal(err)
@@ -293,18 +401,22 @@ func TestAnAdoptedSandboxStartsWithTheAdoptersCredentials(t *testing.T) {
 	if err := h.Start(t.Context(), id); err != nil {
 		t.Fatal(err)
 	}
-	pod := h.podOf(t, id)
-	if got, _ := containerEnv(pod, "MODEL_KEY"); got != adoptedValue {
-		t.Errorf("the adopted sandbox restarts with MODEL_KEY %q", got)
+	pvc := h.claimOf(t, id)
+	adopted, _, err := h.fullSpec(t.Context(), id, pvc)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if got, _ := containerEnv(pod, "CELLA_GATEWAY_CREDENTIAL"); got != adoptedCred {
-		t.Errorf("the adopted sandbox restarts with the gateway credential %q", got)
+	h.startsWith(t, id, adopted, true)
+	env := h.envOf(t, h.podOf(t, id))
+	if env["MODEL_KEY"] != adoptedValue || env["CELLA_GATEWAY_CREDENTIAL"] != adoptedCred {
+		t.Errorf("the adopted sandbox restarts with %v", env)
 	}
 }
 
 // legacy makes a sandbox as a driver from before the move left it: the whole
-// spec, credentials included, in the claim's record, and a Secret holding the
-// token and the trust file alone.
+// spec, credentials included, in the claim's record, a Pod whose container
+// carries every variable inline, and a Secret holding the token and the trust
+// file alone.
 func legacy(t *testing.T, h *harness, s driver.CreateSpec) {
 	t.Helper()
 	h.created(t, s)
@@ -318,9 +430,15 @@ func legacy(t *testing.T, h *harness, s driver.CreateSpec) {
 	if _, err := h.cs.CoreV1().PersistentVolumeClaims(namespace).Update(ctx, pvc, metav1.UpdateOptions{}); err != nil {
 		t.Fatal(err)
 	}
+	pod := h.podOf(t, s.ID)
+	pod.Spec.Containers[0].Env = env(workloadEnv(s, len(s.Token) > 0))
+	if _, err := h.cs.CoreV1().Pods(namespace).Update(ctx, pod, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
 	secret := h.secretOf(t, s.ID)
-	delete(secret.Data, envKey)
-	delete(secret.Data, credentialKey)
+	maps.DeleteFunc(secret.Data, func(key string, _ []byte) bool {
+		return key == envKey || key == credentialKey || isEnvVarKey(key)
+	})
 	if _, err := h.cs.CoreV1().Secrets(namespace).Update(ctx, secret, metav1.UpdateOptions{}); err != nil {
 		t.Fatal(err)
 	}
@@ -350,11 +468,11 @@ func (h *harness) moved(t *testing.T, id string, env map[string]string, credenti
 	}
 }
 
-// TestMoveCredentialsRewritesAnOldRecord: a record an earlier driver stamped
-// with credentials is read as it stands until it is rewritten, Preflight
-// writes nothing, MoveCredentials rewrites the record and moves the values
-// into the Secret, the sandbox restarts with them, and a second run finds
-// nothing to do.
+// TestMoveCredentialsRewritesAnOldRecord: a sandbox an earlier driver left
+// with its credentials in its record and inline in its Pod runs commands as
+// before, Preflight writes nothing, MoveCredentials rewrites the record and
+// moves the values into the Secret, a second run finds nothing to do, and the
+// sandbox's next start renders a Pod that references every variable.
 func TestMoveCredentialsRewritesAnOldRecord(t *testing.T) {
 	h := newHarnessWith(t, withGateway)
 	versioned(h.cs)
@@ -363,9 +481,14 @@ func TestMoveCredentialsRewritesAnOldRecord(t *testing.T) {
 	plain := spec("sbx_plain")
 	h.created(t, plain)
 
-	// Before the rewrite, a command still runs with the record's values.
-	if argv := h.ran(t, s.ID); !slices.Contains(argv, "MODEL_KEY="+envValue) {
-		t.Errorf("the exec on an old record runs %q", argv)
+	// Before the rewrite, a command runs with the record's values, which
+	// the old Pod's container holds and so the argv does not repeat.
+	argv := h.ran(t, s.ID, nil)
+	if _, repeated := assignments(argv)["MODEL_KEY"]; repeated {
+		t.Errorf("the command on an old Pod repeats a value its container holds: %q", argv)
+	}
+	if got := h.commandEnv(t, s.ID, nil); got["MODEL_KEY"] != envValue {
+		t.Errorf("the command on an old record runs with %v", got)
 	}
 
 	if err := h.Preflight(t.Context()); err != nil {
@@ -379,9 +502,6 @@ func TestMoveCredentialsRewritesAnOldRecord(t *testing.T) {
 		t.Fatalf("the move rewrote %d records: %v", rewritten, err)
 	}
 	h.moved(t, s.ID, s.Env, credValue)
-	if leaks := h.metadataLeaks(t, envValue, credValue); len(leaks) > 0 {
-		t.Fatalf("after the move, metadata carries a credential: %v", leaks)
-	}
 	if _, err := h.cs.CoreV1().Secrets(namespace).Get(t.Context(), tokenSecretName(plain.ID), metav1.GetOptions{}); !apierrors.IsNotFound(err) {
 		t.Errorf("a sandbox with no credentials was given a Secret: %v", err)
 	}
@@ -395,19 +515,34 @@ func TestMoveCredentialsRewritesAnOldRecord(t *testing.T) {
 	if err := h.Start(t.Context(), s.ID); err != nil {
 		t.Fatal(err)
 	}
-	pod := h.podOf(t, s.ID)
-	if got, _ := containerEnv(pod, "MODEL_KEY"); got != envValue {
-		t.Errorf("the rewritten sandbox restarts with MODEL_KEY %q", got)
+	if found := h.leaks(t, envValue, credValue); len(found) > 0 {
+		t.Fatalf("after the move and the next start: %v", found)
 	}
-	if got, _ := containerEnv(pod, "CELLA_GATEWAY_CREDENTIAL"); got != credValue {
-		t.Errorf("the rewritten sandbox restarts with the gateway credential %q", got)
-	}
+	h.startsWith(t, s.ID, s, true)
 	state, err := h.Inspect(t.Context(), s.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if state.Name != s.Name || state.MeshID != s.Mesh.ID {
 		t.Errorf("the rewritten sandbox reads back as %+v", state)
+	}
+}
+
+// TestAnOldPodsExpandedValueIsRepeated: the kubelet expands "$(NAME)" and
+// "$$" in a value a Pod carries inline, so a command on an old Pod is given
+// such a value on its argv as written, as it always was, rather than
+// inheriting the expanded one.
+func TestAnOldPodsExpandedValueIsRepeated(t *testing.T) {
+	h := newHarnessWith(t, withGateway)
+	s := credentialSpec("sbx_dollar")
+	s.Env["TEMPLATE"] = "a$$b$(PLAIN)"
+	legacy(t, h, s)
+	set := assignments(h.ran(t, s.ID, nil))
+	if set["TEMPLATE"] != "a$$b$(PLAIN)" {
+		t.Errorf("the command on an old Pod sets %v, without the value the kubelet expanded", set)
+	}
+	if _, repeated := set["MODEL_KEY"]; repeated {
+		t.Errorf("the command on an old Pod repeats a value its container holds: %v", set)
 	}
 }
 
@@ -541,8 +676,8 @@ func TestAMoveThatCannotWriteLeavesTheRecord(t *testing.T) {
 	if !inline(h.claimOf(t, s.ID)) {
 		t.Error("the record lost its credentials before the Secret held them")
 	}
-	if argv := h.ran(t, s.ID); !slices.Contains(argv, "MODEL_KEY="+envValue) {
-		t.Errorf("the exec on a record the move left runs %q", argv)
+	if got := h.commandEnv(t, s.ID, nil); got["MODEL_KEY"] != envValue {
+		t.Errorf("the command on a record the move left runs with %v", got)
 	}
 
 	h.cs.PrependReactor("list", "persistentvolumeclaims", func(k8stesting.Action) (bool, kruntime.Object, error) {
@@ -554,14 +689,15 @@ func TestAMoveThatCannotWriteLeavesTheRecord(t *testing.T) {
 }
 
 // TestALostSecretWriteIsRebuilt: a Secret another writer changed between its
-// read and this write, as a move running beside an update of the same
-// sandbox does, is a lost race and not a failed change. The change is rebuilt
-// and lands, and a Secret that keeps changing under it fails the change after
-// the same bound a lost patch does.
+// read and this write, as a move running beside an update or a start of the
+// same sandbox does, is a lost race and not a failed change. The write reads
+// the Secret again and lands, and one that keeps losing fails after the same
+// bound a lost patch does.
 func TestALostSecretWriteIsRebuilt(t *testing.T) {
 	h := newHarnessWith(t, withGateway)
 	const id = "sbx_race"
-	h.created(t, credentialSpec(id))
+	s := credentialSpec(id)
+	h.created(t, s)
 	lost := 1
 	h.cs.PrependReactor("update", "secrets", func(k8stesting.Action) (bool, kruntime.Object, error) {
 		if lost == 0 {
@@ -575,11 +711,48 @@ func TestALostSecretWriteIsRebuilt(t *testing.T) {
 		t.Fatalf("an update that lost one Secret write: %v", err)
 	}
 	if got := string(h.secretOf(t, id).Data[envKey]); !strings.Contains(got, rotatedValue) {
-		t.Errorf("the rebuilt update left the environment %q", got)
+		t.Errorf("the update left the environment %q", got)
 	}
+	if err := h.Stop(t.Context(), id); err != nil {
+		t.Fatal(err)
+	}
+	lost = 1
+	if err := h.Start(t.Context(), id); err != nil {
+		t.Fatalf("a start that lost one Secret write: %v", err)
+	}
+	updated := s
+	updated.Env = env
+	h.startsWith(t, id, updated, true)
 
 	lost = patchAttempts
 	if err := h.Update(t.Context(), id, driver.Change{Env: &env}); !apierrors.IsConflict(err) {
 		t.Errorf("an update whose every Secret write was lost is %v, want the conflict", err)
+	}
+}
+
+// TestEachVariableHasItsOwnKey: a variable's key names the start and the
+// variable, two variables and two starts never share one, and a name outside
+// the key grammar is kept under a hash of it that no name spells.
+func TestEachVariableHasItsOwnKey(t *testing.T) {
+	keys := map[string]string{}
+	for _, gen := range []string{"a1", "a2"} {
+		for _, name := range []string{"MODEL_KEY", "json", "token", "a.b", "a-b", "Ü", strings.Repeat("N", 300)} {
+			key := envVarKey(gen, name)
+			if !isEnvVarKey(key) || len(key) > 253 || !regexp.MustCompile(`^[-._a-zA-Z0-9]+$`).MatchString(key) {
+				t.Errorf("%s of %q is no Secret key this driver owns", key, name)
+			}
+			if other, taken := keys[key]; taken {
+				t.Errorf("%q and %q share the key %s", other, gen+"/"+name, key)
+			}
+			keys[key] = gen + "/" + name
+		}
+	}
+	for _, fixed := range []string{tokenKey, authorityKey, envKey, credentialKey} {
+		if isEnvVarKey(fixed) {
+			t.Errorf("the key %s reads as a variable's", fixed)
+		}
+	}
+	if got := envVarKey("g", "MODEL_KEY"); got != "env-g-MODEL_KEY" {
+		t.Errorf("a POSIX name's key is %s", got)
 	}
 }

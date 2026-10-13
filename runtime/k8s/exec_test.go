@@ -65,9 +65,10 @@ func TestExecWrapsAndExits(t *testing.T) {
 	if err := e.Close(); err != nil {
 		t.Fatal(err)
 	}
-	// The sandbox's environment, the request's overrides and the working
-	// directory all travel in the argv, sorted.
-	want := []string{"env", "A=1", "B=override", "sh", "-c", `cd "$0" && exec "$@"`, driver.DefaultWorkdir, "sh", "-c", "exit 3"}
+	// The request's overrides and the working directory travel in the argv,
+	// sorted. The sandbox's own A is not repeated there: the container
+	// started with it, and the command inherits it.
+	want := []string{"env", "B=override", "sh", "-c", `cd "$0" && exec "$@"`, driver.DefaultWorkdir, "sh", "-c", "exit 3"}
 	if got := h.exec.last().argv; !reflect.DeepEqual(got, want) {
 		t.Fatalf("argv %q, want %q", got, want)
 	}

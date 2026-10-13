@@ -143,7 +143,7 @@ func (d *Driver) runner(pod, container string) display.Runner {
 
 // desktop is the geometry one running sandbox was created with.
 func (d *Driver) desktop(ctx context.Context, id string) (driver.Geometry, error) {
-	pvc, err := d.runningClaim(ctx, id)
+	pvc, _, err := d.runningClaim(ctx, id)
 	if err != nil {
 		return driver.Geometry{}, err
 	}

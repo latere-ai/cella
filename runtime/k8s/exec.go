@@ -132,25 +132,36 @@ func (d *Driver) Exec(ctx context.Context, id string, req driver.ExecRequest) (d
 	if len(req.Command) == 0 || req.Timeout < 0 {
 		return nil, fmt.Errorf("%w: a command is required", driver.ErrInvalid)
 	}
-	pvc, err := d.runningClaim(ctx, id)
+	pvc, pod, err := d.runningClaim(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	spec, err := d.fullSpec(ctx, id, pvc)
+	spec, data, err := d.fullSpec(ctx, id, pvc)
 	if err != nil {
 		return nil, err
 	}
-	o := execOpts{argv: wrapped(spec, req.Command, req.Env, req.Workdir), stdin: req.Stdin != nil, tty: req.TTY}
+	o := execOpts{argv: wrapped(spec, startedWith(pod, id, data), req.Command, req.Env, req.Workdir), stdin: req.Stdin != nil, tty: req.TTY}
 	return d.launch(ctx, objectName(id), o, req.Stdin, req.Timeout, nil)
 }
 
 // wrapped is argv as the exec subresource runs it in one sandbox: the
 // sandbox's environment with the request's over it, sorted, and the working
 // directory, the request's or else the sandbox's.
-func wrapped(spec driver.CreateSpec, argv []string, env map[string]string, workdir string) []string {
-	environment := maps.Clone(spec.Env)
-	if environment == nil {
-		environment = map[string]string{}
+//
+// A command inherits the environment its container started with, so a
+// variable of the sandbox's that the container holds at the same value,
+// which is every one an update since the start has not changed, is not
+// repeated on the argv: the exec request then carries none of the
+// sandbox's own values in the common case and the command sees the same
+// environment. held is that start environment as startedWith read it. The
+// request's own variables are always on the argv; they have no other way in.
+func wrapped(spec driver.CreateSpec, held map[string]string, argv []string, env map[string]string, workdir string) []string {
+	environment := map[string]string{}
+	for name, value := range spec.Env {
+		if have, ok := held[name]; ok && have == value {
+			continue
+		}
+		environment[name] = value
 	}
 	maps.Copy(environment, env)
 	if workdir == "" {
@@ -164,27 +175,27 @@ func wrapped(spec driver.CreateSpec, argv []string, env map[string]string, workd
 
 // runningClaim is the read every execution path shares: the sandbox exists,
 // it has a Pod, and the Pod is running. A command reads the sandbox's
-// environment through fullSpec over the claim it returns; the desktop reads
-// the record alone.
-func (d *Driver) runningClaim(ctx context.Context, id string) (*corev1.PersistentVolumeClaim, error) {
+// environment through fullSpec over the claim it returns and what the Pod
+// started with; the desktop reads the record alone.
+func (d *Driver) runningClaim(ctx context.Context, id string) (*corev1.PersistentVolumeClaim, *corev1.Pod, error) {
 	pvc, err := d.getClaim(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	pod, err := d.getPod(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if pod == nil || pod.DeletionTimestamp != nil {
-		return nil, driver.ErrNotRunning
+		return nil, nil, driver.ErrNotRunning
 	}
 	if _, _, ended := terminated(pod); ended {
-		return nil, driver.ErrNotRunning
+		return nil, nil, driver.ErrNotRunning
 	}
 	if !started(pod) {
-		return nil, startingErr(pod)
+		return nil, nil, startingErr(pod)
 	}
-	return pvc, nil
+	return pvc, pod, nil
 }
 
 // startingErr is the answer for a sandbox whose Pod exists and whose workload
