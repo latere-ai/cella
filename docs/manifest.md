@@ -141,7 +141,7 @@ sandbox runs until you stop or delete it.
 
 | Field | Meaning |
 |---|---|
-| `spec.lifecycle.autoStop` | stop the sandbox after this much time without activity. Commands, file operations, and sessions count as activity |
+| `spec.lifecycle.autoStop` | stop the sandbox after this much time without activity. Commands, file operations, and sessions count as activity; a command counts for as long as it runs |
 | `spec.lifecycle.ttl` | delete it this long after it was created. A child's defaults to what is left of its parent's, and cannot exceed it |
 | `spec.lifecycle.autoDelete` | delete it this long after it stopped |
 

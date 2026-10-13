@@ -6,6 +6,14 @@ refused before it is pushed.
 
 ## Unreleased
 
+### Fixed
+
+- **A running command keeps its sandbox from stopping.** A command marked
+  its sandbox active only when it started, so one that ran longer than
+  the sandbox's `autoStop`, such as a long download or build, had the
+  sandbox stopped under it. A command now marks its sandbox active every
+  30 seconds until it ends, whether it is run with `?wait=1` or streamed.
+
 ## v0.13.0 - 2026-10-12
 
 - Changed: a start of a `Failed` sandbox whose main process ran and ended

@@ -308,7 +308,11 @@ rebuilds, and every desired sandbox with no observed counterpart is
 Activity: the API's exec, attach, input, and file handlers call
 `Controller.Touch(id)`, which coalesces per sandbox and calls
 `Driver.Touch` at most once per `TouchInterval`, so a busy terminal
-does not write the substrate per keystroke.
+does not write the substrate per keystroke. An exec calls it at its
+start and every 30 seconds until the command ends, in both forms: a
+running command is activity. Stamped only at its start, a command that
+ran past the sandbox's `autoStop` had the reaper stop the sandbox under
+it (2026-10-13, a ten-minute browser download stopped eight times).
 
 ### Recovery
 
@@ -382,6 +386,7 @@ store behind `Store` ([[010-state]]); the token's shape
 | An errored `List` rebuilds nothing | `TestListErrorIsNotEmpty` | built, with the observed rebuild and the lost rule it holds ([[043-postgres-store]]) |
 | A token past two thirds of its life is re-minted, re-projected, and the old `jti` revoked in one act | `TestTokenReprojection` under a fake clock | built ([[045-workload-tokens]]); a token whose expiry is already its sandbox's is not rotated, because a re-mint cannot extend it |
 | `Touch` reaches the driver at most once per interval per sandbox | `TestTouchCoalesces` | built ([[037-lifecycle-enforcement]]) |
+| A running command holds its sandbox active until it ends, in both exec forms, and stamps nothing after | `TestARunningCommandHoldsItsSandboxActive` | built |
 | A `Lost` sandbox with Postgres recovers with the same id, a new token, the old `jti` revoked, and its volumes' files; a managed workspace the driver lost is `Recreated`; a missing volume is `Failed VolumeMissing`; exhausted attempts are `Failed RecoveryExhausted` with the stated backoff | `TestRecoveryRecreates`, `TestRecoveryAdopts`, `TestRecoveryExhausts`, `TestRecoveryMintsAndRevokes` | built for the id, name, labels, annotations and lifecycle, and for the exhausted attempts with their backoff ([[043-postgres-store]]), and for the new token with the previous `jti` revoked ([[045-workload-tokens]]); the workspace and the volumes wait for [[019-volumes]] |
 | Without a durable store a lost sandbox is `Deleting` after the grace with reason `Lost` | `TestLostGraceReaps` | built ([[043-postgres-store]]) |
 | Deleting a root deletes descendants deepest first with reason `Parent`, then the root; volumes are detached, `retain: false` volumes with no other attachment deleted, `retain: true` kept; the map is purged and the `jti` revoked | `TestCascade` | built ([[040-mesh-and-spawn]]) for the deepest-first order, the `Parent` reason on every descendant and the tree's removal; the map purge and the `jti` revocation are not asserted on the cascade path, and the volume rules wait on [[019-volumes]] |
