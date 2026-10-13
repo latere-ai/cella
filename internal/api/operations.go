@@ -46,18 +46,19 @@ func (h *handler) touch(r *http.Request, obj v1.Sandbox) {
 // activeEvery is how often a running command stamps its sandbox active.
 // The controller coalesces stamps per sandbox to its touch interval, so a
 // period shorter than that interval costs a map lookup, not a driver write.
-var activeEvery = 30 * time.Second
+const activeEvery = 30 * time.Second
 
 // holdActive stamps the sandbox a command runs in active at once and then
-// every activeEvery until the returned function is called or the request
+// every h.activeEvery until the returned function is called or the request
 // ends. A running command is activity: stamped only at its start, a command
 // that ran past the sandbox's autoStop had the reaper stop the sandbox
 // under it.
 func (h *handler) holdActive(r *http.Request, obj v1.Sandbox) (release func()) {
 	h.touch(r, obj)
+	every := h.activeEvery
 	done := make(chan struct{})
 	go func() {
-		ticker := time.NewTicker(activeEvery)
+		ticker := time.NewTicker(every)
 		defer ticker.Stop()
 		for {
 			select {

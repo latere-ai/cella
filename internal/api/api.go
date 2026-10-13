@@ -117,6 +117,10 @@ type handler struct {
 	following   atomic.Int64
 	followLimit int
 	heartbeat   time.Duration
+	// activeEvery is how often a running command stamps its sandbox
+	// active, activeEvery's default unless a test sets it before any
+	// request.
+	activeEvery time.Duration
 	// patterns is every route this handler registered, in registration
 	// order. It is the half of design 008's document that the server knows;
 	// TestTheDocumentAndTheMuxAgree reads it against api/openapi.yaml, so a
@@ -140,6 +144,7 @@ func New(o Options) (http.Handler, error) {
 		log:         cmp.Or(o.Log, slog.Default()),
 		followLimit: cmp.Or(o.FollowLimit, DefaultFollowLimit),
 		heartbeat:   cmp.Or(o.FollowHeartbeat, DefaultFollowHeartbeat),
+		activeEvery: activeEvery,
 	}
 	// The routes whose answer is one object or one page, in the syntax the
 	// request negotiated.

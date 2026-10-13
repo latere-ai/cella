@@ -266,14 +266,12 @@ func TestActivityIsStamped(t *testing.T) {
 // start, a command longer than the sandbox's autoStop had the reaper stop
 // the sandbox under it.
 func TestARunningCommandHoldsItsSandboxActive(t *testing.T) {
-	was := activeEvery
-	activeEvery = 20 * time.Millisecond
-	t.Cleanup(func() { activeEvery = was })
 	stamps := &touchDriver{}
 	f := setupDriver(t, nil, func(d runtime.Driver) runtime.Driver {
 		stamps.Driver = d
 		return stamps
 	})
+	f.h.(*handler).activeEvery = 20 * time.Millisecond
 	var obj v1.Sandbox
 	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice, createBody, 201), &obj); err != nil {
 		t.Fatal(err)

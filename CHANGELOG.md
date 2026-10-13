@@ -6,6 +6,12 @@ refused before it is pushed.
 
 ## Unreleased
 
+### Fixed
+
+- v0.13.1 was not published: its release stopped on a data race in one
+  of its own tests. This release carries its change: a running command
+  keeps its sandbox from stopping.
+
 ## v0.13.1 - 2026-10-13
 
 ### Fixed
