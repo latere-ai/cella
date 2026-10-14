@@ -6,6 +6,38 @@ refused before it is pushed.
 
 ## Unreleased
 
+### Security
+
+- **A sandbox's environment values and gateway credential are no longer
+  kept in plain text in the database or in podman labels.** With
+  `CELLA_DB_URL` and `CELLA_SECRET_KEY` set, the row that records a
+  sandbox held the values of its environment and its gateway credential
+  as written, so an account that could read the database, or a dump of
+  it, could read them. Both are now sealed in the row under
+  `CELLA_SECRET_KEY`, the key mounted secrets are already sealed under,
+  and the row of a deleted sandbox keeps neither. The API returns what it
+  returned before. When `cellad serve` becomes the writer it seals the
+  rows an earlier release wrote, once, before it loads them, and logs how
+  many it rewrote; a row it could not rewrite is sealed at its sandbox's
+  next write. Without `CELLA_SECRET_KEY` the rows keep the values as
+  before, and `cellad serve` says so once at start. On podman, the volume
+  that records what changes about a sandbox carried its environment, the
+  gateway credential among it, in a label; no label carries it now. The
+  container keeps the environment it was created with, and what an update
+  or a pool adoption sets is kept inside the container, readable by root
+  alone, beside the sandbox's token. `cellad serve` and `cellad worker`
+  move the environment an earlier release labeled, once, at start, and
+  log how many records they moved.
+- The database gains two nullable columns, `objects.sealed_key` and
+  `objects.sealed` (migration 7). An earlier release cannot read a sealed
+  row. During a rolling update, a replica of an earlier release that
+  becomes the writer again after a replica of this release refuses the
+  rows and exits rather than serve sandboxes without their values, and
+  one that starts after the migration refuses the schema, as it does for
+  every migration. Going back to an earlier release needs every row
+  unsealed, which no release does, so the down migration refuses while a
+  row holds sealed values.
+
 ## v0.14.3 - 2026-10-14
 
 ### Fixed
