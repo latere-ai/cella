@@ -1003,43 +1003,14 @@ func credentials(t TB, open Opener) {
 		obj := object("sbx_a", "alice", "work")
 		obj.Data, obj.Status = data, status
 		version := put(t, s, obj, 0)
-		read := func(what string, wantStatus []byte) {
-			t.Helper()
-			with(t, s, func(tx store.Tx) error {
-				byID, err := tx.Desired().Get(ctx, store.KindSandbox, "sbx_a")
-				if err != nil {
-					return err
-				}
-				byName, err := tx.Desired().ByName(ctx, store.KindSandbox, "alice", "work")
-				if err != nil {
-					return err
-				}
-				listed, _, err := tx.Desired().List(ctx, store.KindSandbox, store.Filter{}, store.Page{})
-				if err != nil {
-					return err
-				}
-				if len(listed) != 1 {
-					t.Errorf("the list after %s holds %d rows", what, len(listed))
-					return nil
-				}
-				for _, got := range []store.Object{byID, byName, listed[0]} {
-					sameJSON(t, got.Data, data, "the object after "+what)
-					sameJSON(t, got.Status, wantStatus, "the status after "+what)
-					if got.Version != version {
-						t.Errorf("the version after %s is %d, want %d", what, got.Version, version)
-					}
-				}
-				return nil
-			})
-		}
-		read("a create", status)
+		readsBack(t, s, obj, version, "a create")
 		version = put(t, s, obj, version)
-		read("a write", status)
-		next := []byte(`{"id":"sbx_a","phase":"Stopped","egressState":{"credential":"c-next","version":3}}`)
+		readsBack(t, s, obj, version, "a write")
+		obj.Status = []byte(`{"id":"sbx_a","phase":"Stopped","egressState":{"credential":"c-next","version":3}}`)
 		with(t, s, func(tx store.Tx) error {
-			return tx.Desired().PutStatus(ctx, store.KindSandbox, "sbx_a", next)
+			return tx.Desired().PutStatus(ctx, store.KindSandbox, "sbx_a", obj.Status)
 		})
-		read("a status write", next)
+		readsBack(t, s, obj, version, "a status write")
 		with(t, s, func(tx store.Tx) error {
 			return tx.Desired().Delete(ctx, store.KindSandbox, "sbx_a")
 		})
@@ -1048,6 +1019,39 @@ func credentials(t TB, open Opener) {
 			return err
 		})
 	}
+}
+
+// readsBack asserts that one object reads back as written, at the version
+// given, by its id, by its name and in a list of its kind.
+func readsBack(t TB, s store.Store, want store.Object, version int64, what string) {
+	t.Helper()
+	ctx := context.Background()
+	with(t, s, func(tx store.Tx) error {
+		byID, err := tx.Desired().Get(ctx, want.Kind, want.ID)
+		if err != nil {
+			return err
+		}
+		byName, err := tx.Desired().ByName(ctx, want.Kind, want.Owner, want.Name)
+		if err != nil {
+			return err
+		}
+		listed, _, err := tx.Desired().List(ctx, want.Kind, store.Filter{}, store.Page{})
+		if err != nil {
+			return err
+		}
+		if len(listed) != 1 {
+			t.Errorf("the list after %s holds %d rows", what, len(listed))
+			return nil
+		}
+		for _, got := range []store.Object{byID, byName, listed[0]} {
+			sameJSON(t, got.Data, want.Data, "the object after "+what)
+			sameJSON(t, got.Status, want.Status, "the status after "+what)
+			if got.Version != version {
+				t.Errorf("the version after %s is %d, want %d", what, got.Version, version)
+			}
+		}
+		return nil
+	})
 }
 
 // NextKey is the key the rotation case moves to, as fixed as Key is.

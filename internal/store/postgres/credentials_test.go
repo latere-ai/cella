@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io/fs"
 	"maps"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -392,6 +393,11 @@ func TestSealCredentialsReportsWhatItCannotSeal(t *testing.T) {
 		t.Fatalf("SealCredentials = %d, %v, want sbx_old sealed and sbx_foreign reported", n, err)
 	}
 	noRowHolds(t, dsn, "old-canary", "old-credential")
+	gone, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := s.SealCredentials(gone); err == nil {
+		t.Error("a rewrite whose caller gave up reported nothing")
+	}
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -433,5 +439,60 @@ func TestTheSealedColumnsOutliveTheirValues(t *testing.T) {
 	query(t, dsn, `select count(*) from information_schema.columns where table_name = 'objects' and column_name in ('sealed', 'sealed_key')`, nil, &columns)
 	if columns != 0 {
 		t.Errorf("the down migration left %d sealed column(s)", columns)
+	}
+}
+
+// TestSealCredentialsReadsEveryPage: a table holding more rows in the clear
+// than one page has every one of them sealed in one run.
+func TestSealCredentialsReadsEveryPage(t *testing.T) {
+	dsn := database(t, server(t))
+	const rows = store.DefaultPageLimit + 7
+	s := open(t, dsn, storetest.Key, time.Hour)
+	execute(t, dsn, `insert into objects (id, kind, owner, name, data, status)
+		select 'sbx_' || lpad(n::text, 4, '0'), 'Sandbox', 'alice', 'n' || n,
+			jsonb_build_object('spec', jsonb_build_object('env', jsonb_build_object('API_KEY', 'paged-canary'))),
+			jsonb_build_object('egressState', jsonb_build_object('credential', 'paged-credential'))
+		from generate_series(1, `+strconv.Itoa(rows)+`) n`)
+	n, err := s.SealCredentials(t.Context())
+	if err != nil || n != rows {
+		t.Fatalf("SealCredentials = %d, %v, want %d", n, err, rows)
+	}
+	noRowHolds(t, dsn, "paged-canary", "paged-credential")
+	if got := len(loaded(t, s)); got != rows {
+		t.Errorf("%d sandboxes loaded after the rewrite, want %d", got, rows)
+	}
+}
+
+// TestAWriteCannotForgeTheMarker: an object whose environment is already the
+// marker is refused rather than stored as a sealed row with nothing sealed,
+// and a status write over a row this store cannot open fails rather than
+// dropping what it holds.
+func TestAWriteCannotForgeTheMarker(t *testing.T) {
+	dsn := database(t, server(t))
+	ctx := t.Context()
+	s := open(t, dsn, storetest.Key, time.Hour)
+	forged := store.Object{Kind: store.KindSandbox, ID: "sbx_forged", Owner: "alice", Name: "forged",
+		Data: []byte(`{"spec":{"env":"sealed"}}`), Status: []byte(`{"egressState":{"credential":"c"}}`)}
+	if err := s.Tx(ctx, func(tx store.Tx) error {
+		_, err := tx.Desired().Put(ctx, forged, 0)
+		return err
+	}); err == nil {
+		t.Error("an object already marked sealed was stored")
+	}
+	other := open(t, dsn, storetest.NextKey, time.Hour)
+	if err := store.ForController(other, "default", store.Journaled).Write(ctx,
+		sandbox("sbx_a", "work", map[string]string{"API_KEY": "v"}, "c"), controller.MutationCreated); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Tx(ctx, func(tx store.Tx) error {
+		return tx.Desired().PutStatus(ctx, store.KindSandbox, "sbx_a", []byte(`{"phase":"Stopped"}`))
+	}); err == nil || !strings.Contains(err.Error(), "sbx_a") {
+		t.Errorf("a status write over a row sealed under another key = %v", err)
+	}
+	keyless := open(t, dsn, nil, time.Hour)
+	if err := keyless.Tx(ctx, func(tx store.Tx) error {
+		return tx.Desired().PutStatus(ctx, store.KindSandbox, "sbx_gone", []byte(`{}`))
+	}); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("a status write on a store without a key over no row = %v, want ErrNotFound", err)
 	}
 }
