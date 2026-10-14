@@ -36,6 +36,18 @@ import (
 // cluster that may be pulling the sandbox's image.
 const ready = 5 * time.Minute
 
+// tierValue is the env value the tier's sandbox is given, which must reach
+// its container and no object but its Secret.
+const tierValue = "tier-value-7f3a2c"
+
+// clusterName is the kind cluster the tier brings up or was pointed at.
+func clusterName() string {
+	if c := os.Getenv("CELLA_TEST_CLUSTER"); c != "" {
+		return c
+	}
+	return "cella-tier"
+}
+
 // TestClusterLifecycle is the tier: create, read, exec, delete, with the
 // events each act produced at the sink and the check Job green.
 func TestClusterLifecycle(t *testing.T) {
@@ -46,7 +58,7 @@ func TestClusterLifecycle(t *testing.T) {
 	const name = "tier"
 	manifest := `{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox",
 		"metadata":{"name":"` + name + `"},
-		"spec":{"image":"docker.io/library/alpine:3.22","command":["sleep","600"]}}`
+		"spec":{"image":"docker.io/library/alpine:3.22","command":["sleep","600"],"env":{"TIER_VALUE":"` + tierValue + `"}}}`
 	code, body := call(t, client, http.MethodPost, url+"/v1/sandboxes", token, []byte(manifest))
 	if code != http.StatusCreated && code != http.StatusOK {
 		t.Fatalf("the create answered %d: %s", code, body)
@@ -70,6 +82,20 @@ func TestClusterLifecycle(t *testing.T) {
 	}
 	if !strings.Contains(string(body), "from the cluster") {
 		t.Errorf("the exec answered %s", body)
+	}
+
+	// The sandbox's env reaches the container from its Secret: the main
+	// process sees the value, and no object of the cluster but the Secret
+	// carries it.
+	code, body = call(t, client, http.MethodPost, url+"/v1/sandboxes/"+name+"/exec?wait=1", token,
+		[]byte(`{"command":["sh","-c","tr '\\0' '\\n' < /proc/1/environ | grep '^TIER_VALUE='"]}`))
+	if code != http.StatusOK || !strings.Contains(string(body), "TIER_VALUE="+tierValue) {
+		t.Errorf("the container's main process does not hold the sandbox's env: %d %s", code, body)
+	}
+	if out, err := exec.Command("kubectl", "--context", "kind-"+clusterName(), "get", "pods,pvc,svc,networkpolicies", "-A", "-o", "yaml").Output(); err != nil {
+		t.Errorf("read the cluster's objects: %v", err)
+	} else if strings.Contains(string(out), tierValue) {
+		t.Errorf("an object other than the sandbox's Secret carries its env value")
 	}
 
 	// The records of spec 009 reached the sink the control plane was
@@ -135,10 +161,7 @@ func bringUp() {
 		return
 	}
 	overlay := filepath.Join(root, "deploy", "examples", "kind-stubs")
-	cluster := os.Getenv("CELLA_TEST_CLUSTER")
-	if cluster == "" {
-		cluster = "cella-tier"
-	}
+	cluster := clusterName()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 	defer cancel()
 	up := exec.CommandContext(ctx, "bash", filepath.Join(overlay, "up.sh"), "-name", cluster)
