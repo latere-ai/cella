@@ -34,9 +34,40 @@ refused before it is pushed.
   becomes the writer again after a replica of this release refuses the
   rows and exits rather than serve sandboxes without their values, and
   one that starts after the migration refuses the schema, as it does for
-  every migration. Going back to an earlier release needs every row
-  unsealed, which no release does, so the down migration refuses while a
-  row holds sealed values.
+  every migration.
+- **`CELLA_SECRET_KEY` is required once the database holds anything
+  sealed.** `cellad serve` refuses to start without it, or with another
+  key, and says how many sandbox rows it cannot open, where it used to
+  start and fail when it became the writer. `cellad check` says whether
+  the key opens them. The Deployment and the check Job in `deploy/base`
+  now read the key from the `cellad-db` Secret as a required key, so an
+  installation that runs the base without a database creates that Secret
+  with `CELLA_SECRET_KEY` before applying this release's manifests:
+
+  ```sh
+  kubectl -n cella get secret cellad-db > /dev/null 2>&1 || \
+    kubectl -n cella create secret generic cellad-db \
+      --from-literal=CELLA_SECRET_KEY="$(openssl rand -base64 32)"
+  ```
+
+  The install document does the same. `CELLA_DB_URL` in that Secret stays
+  optional.
+- Added: `cellad rotate` moves every data key the database holds, each
+  secret value's and each sealed sandbox's, from `CELLA_SECRET_KEY` to
+  `CELLA_SECRET_KEY_NEXT` in one transaction, without reading a value.
+  Stop every replica, run it, then start the replicas with the new key
+  as `CELLA_SECRET_KEY`. A rotation that meets a row written while it
+  runs changes nothing and can be run again.
+- Added: `cellad unseal` takes a database back to an earlier release. Stop
+  every replica of this release first, since its writer seals each row
+  again at its next write and every row when it takes over. Then run
+  `cellad unseal` from this release, with `CELLA_DB_URL` naming the
+  database's direct endpoint and `CELLA_SECRET_KEY` the key the rows are
+  sealed under: it puts every sandbox's environment values and gateway
+  credential back in its row and migrates the schema down to version 6.
+  Then deploy the earlier release. A second run does nothing. Both
+  commands refuse while a replica holds the writer lease, and print
+  counts and never a value.
 
 ## v0.14.3 - 2026-10-14
 
