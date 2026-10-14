@@ -38,7 +38,7 @@ type txn struct {
 	appended []store.Event
 }
 
-func (t *txn) Desired() store.Desired   { return desired{t.q} }
+func (t *txn) Desired() store.Desired   { return desired{t.q, t.env} }
 func (t *txn) Observed() store.Observed { return observed{t.q} }
 func (t *txn) Journal() store.Journal   { return journal{t.q, &t.appended} }
 func (t *txn) Values() store.Values     { return values{t.q, t.env} }
@@ -56,21 +56,31 @@ const (
 	objectLiveName   = "objects_live_name"
 )
 
-const objectColumns = `id, kind, owner, name, environment, phase, labels, data, status, last_applied, version, created_at, updated_at`
+const objectColumns = `id, kind, owner, name, environment, phase, labels, data, status, last_applied, version, created_at, updated_at, sealed_key, sealed`
 
-type desired struct{ q querier }
+// desired is the objects table. A sandbox row's environment values and gateway
+// credential are sealed under env on the way in and opened on the way out
+// (credentials.go), so what a caller reads is the object it wrote.
+type desired struct {
+	q   querier
+	env store.Envelope
+}
 
 func (x desired) Put(ctx context.Context, obj store.Object, ifVersion int64) (int64, error) {
 	labels, err := labelsText(obj.Labels)
 	if err != nil {
 		return 0, err
 	}
-	data, status := jsonText(obj.Data), jsonText(obj.Status)
+	rawData, rawStatus, wrapped, sealed, err := seal(x.env, obj)
+	if err != nil {
+		return 0, err
+	}
+	data, status := jsonText(rawData), jsonText(rawStatus)
 	if ifVersion == 0 {
 		var version int64
-		err := x.q.QueryRow(ctx, `insert into objects (id, kind, owner, name, environment, phase, labels, data, status)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9) returning version`,
-			obj.ID, obj.Kind, obj.Owner, obj.Name, obj.Environment, obj.Phase, labels, data, status).Scan(&version)
+		err := x.q.QueryRow(ctx, `insert into objects (id, kind, owner, name, environment, phase, labels, data, status, sealed_key, sealed)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) returning version`,
+			obj.ID, obj.Kind, obj.Owner, obj.Name, obj.Environment, obj.Phase, labels, data, status, wrapped, sealed).Scan(&version)
 		if err != nil {
 			return 0, writeError(err, "creating the object")
 		}
@@ -78,9 +88,10 @@ func (x desired) Put(ctx context.Context, obj store.Object, ifVersion int64) (in
 	}
 	var version int64
 	err = x.q.QueryRow(ctx, `update objects set owner = $3, name = $4, environment = $5, phase = $6,
-			labels = $7, data = $8, status = $9, version = version + 1, updated_at = now(), deleted_at = null
+			labels = $7, data = $8, status = $9, sealed_key = $11, sealed = $12,
+			version = version + 1, updated_at = now(), deleted_at = null
 		where id = $1 and kind = $2 and version = $10 returning version`,
-		obj.ID, obj.Kind, obj.Owner, obj.Name, obj.Environment, obj.Phase, labels, data, status, ifVersion).Scan(&version)
+		obj.ID, obj.Kind, obj.Owner, obj.Name, obj.Environment, obj.Phase, labels, data, status, ifVersion, wrapped, sealed).Scan(&version)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, x.whyNoRow(ctx, obj.Kind, obj.ID)
 	}
@@ -106,13 +117,13 @@ func (x desired) whyNoRow(ctx context.Context, kind, id string) error {
 
 func (x desired) Get(ctx context.Context, kind, id string) (store.Object, error) {
 	row := x.q.QueryRow(ctx, `select `+objectColumns+` from objects where id = $1 and kind = $2 and deleted_at is null`, id, kind)
-	return scanObject(row)
+	return x.scan(row)
 }
 
 func (x desired) ByName(ctx context.Context, kind, owner, name string) (store.Object, error) {
 	row := x.q.QueryRow(ctx, `select `+objectColumns+` from objects
 		where kind = $1 and owner = $2 and name = $3 and deleted_at is null`, kind, owner, name)
-	return scanObject(row)
+	return x.scan(row)
 }
 
 func (x desired) List(ctx context.Context, kind string, f store.Filter, p store.Page) ([]store.Object, string, error) {
@@ -132,7 +143,7 @@ func (x desired) List(ctx context.Context, kind string, f store.Filter, p store.
 	defer rows.Close()
 	var out []store.Object
 	for rows.Next() {
-		obj, err := scanObject(rows)
+		obj, err := x.scan(rows)
 		if err != nil {
 			return nil, "", err
 		}
@@ -145,8 +156,15 @@ func (x desired) List(ctx context.Context, kind string, f store.Filter, p store.
 	return out, next, nil
 }
 
+// Delete marks the row deleted. A sandbox's row also drops its environment
+// values and its gateway credential, sealed or not: nothing reads a deleted
+// row's object again.
 func (x desired) Delete(ctx context.Context, kind, id string) error {
-	tag, err := x.q.Exec(ctx, `update objects set deleted_at = now(), updated_at = now(), version = version + 1
+	strip := ""
+	if kind == store.KindSandbox {
+		strip = ", " + stripCredentials
+	}
+	tag, err := x.q.Exec(ctx, `update objects set deleted_at = now(), updated_at = now(), version = version + 1`+strip+`
 		where id = $1 and kind = $2 and deleted_at is null`, id, kind)
 	if err != nil {
 		return fmt.Errorf("store: deleting the object: %w", err)
@@ -168,6 +186,9 @@ func (x desired) Count(ctx context.Context, kind, owner string) (int, error) {
 }
 
 func (x desired) PutStatus(ctx context.Context, kind, id string, status []byte) error {
+	if kind == store.KindSandbox && x.env.Ready() {
+		return x.putSandboxStatus(ctx, id, status)
+	}
 	tag, err := x.q.Exec(ctx, `update objects set status = $3, updated_at = now()
 		where id = $1 and kind = $2 and deleted_at is null`, id, kind, jsonText(status))
 	if err != nil {
@@ -175,6 +196,37 @@ func (x desired) PutStatus(ctx context.Context, kind, id string, status []byte) 
 	}
 	if tag.RowsAffected() == 0 {
 		return store.ErrNotFound
+	}
+	return nil
+}
+
+// putSandboxStatus is PutStatus for a sandbox on a store that seals: the
+// credential a status carries is sealed with the environment the row already
+// holds, so the row is read, opened, and written back whole.
+func (x desired) putSandboxStatus(ctx context.Context, id string, status []byte) error {
+	obj := store.Object{Kind: store.KindSandbox, ID: id}
+	var wrapped, sealed []byte
+	err := x.q.QueryRow(ctx, `select data, status, sealed_key, sealed from objects
+		where id = $1 and kind = $2 and deleted_at is null for update`, id, store.KindSandbox).
+		Scan(&obj.Data, &obj.Status, &wrapped, &sealed)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return store.ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("store: reading the object for its status: %w", err)
+	}
+	if err = unseal(x.env, &obj, wrapped, sealed); err != nil {
+		return err
+	}
+	obj.Status = status
+	data, encoded, wrapped, sealed, err := seal(x.env, obj)
+	if err != nil {
+		return err
+	}
+	if _, err = x.q.Exec(ctx, `update objects set data = $3, status = $4, sealed_key = $5, sealed = $6, updated_at = now()
+		where id = $1 and kind = $2 and deleted_at is null`,
+		id, store.KindSandbox, jsonText(data), jsonText(encoded), wrapped, sealed); err != nil {
+		return fmt.Errorf("store: writing the status: %w", err)
 	}
 	return nil
 }
@@ -527,7 +579,8 @@ func (x values) Delete(ctx context.Context, secretID string) error {
 }
 
 // Rewrap reads every row's wrapped data key, moves it to the new key, and
-// writes the one column back. The ciphertext column is neither read nor
+// writes the one column back: each secret value's, and each sandbox row's
+// whose credentials are sealed. The ciphertext columns are neither read nor
 // written, so a rotation moves no value and produces no plaintext beyond the
 // data key it is rewrapping.
 func (x values) Rewrap(ctx context.Context, oldKEK, newKEK []byte) (int, error) {
@@ -535,9 +588,31 @@ func (x values) Rewrap(ctx context.Context, oldKEK, newKEK []byte) (int, error) 
 	if err != nil {
 		return 0, err
 	}
-	rows, err := x.q.Query(ctx, `select secret_id, wrapped_key from secret_values order by secret_id`)
+	n := 0
+	for _, table := range []struct {
+		read, write, what string
+	}{
+		{`select secret_id, wrapped_key from secret_values order by secret_id`,
+			`update secret_values set wrapped_key = $2 where secret_id = $1`, "the secret value"},
+		{`select id, sealed_key from objects where sealed_key is not null order by id`,
+			`update objects set sealed_key = $2 where id = $1`, "the sealed sandbox credentials"},
+	} {
+		moved, err := x.rewrap(ctx, old, next, table.read, table.write, table.what)
+		if err != nil {
+			return 0, err
+		}
+		n += moved
+	}
+	x.env.Adopt(next)
+	return n, nil
+}
+
+// rewrap moves the wrapped data key of every row read selects, an id and a
+// key, and writes each back with write.
+func (x values) rewrap(ctx context.Context, old, next store.Envelope, read, write, what string) (int, error) {
+	rows, err := x.q.Query(ctx, read)
 	if err != nil {
-		return 0, fmt.Errorf("store: reading the secret values to rewrap: %w", err)
+		return 0, fmt.Errorf("store: reading %s to rewrap: %w", what, err)
 	}
 	type rewrapped struct {
 		id      string
@@ -561,11 +636,10 @@ func (x values) Rewrap(ctx context.Context, oldKEK, newKEK []byte) (int, error) 
 		return 0, err
 	}
 	for _, row := range out {
-		if _, err = x.q.Exec(ctx, `update secret_values set wrapped_key = $2 where secret_id = $1`, row.id, row.wrapped); err != nil {
-			return 0, fmt.Errorf("store: rewrapping the secret value: %w", err)
+		if _, err = x.q.Exec(ctx, write, row.id, row.wrapped); err != nil {
+			return 0, fmt.Errorf("store: rewrapping %s: %w", what, err)
 		}
 	}
-	x.env.Adopt(next)
 	return len(out), nil
 }
 
@@ -662,16 +736,23 @@ func narrow(where []string, args []any, f store.Filter, cursor string) ([]string
 	return where, args, nil
 }
 
-// scanObject reads one objects row.
-func scanObject(row pgx.Row) (store.Object, error) {
-	var obj store.Object
+// scan reads one objects row, with a sandbox's sealed values put back.
+func (x desired) scan(row pgx.Row) (store.Object, error) {
+	var (
+		obj             store.Object
+		wrapped, sealed []byte
+	)
 	err := row.Scan(&obj.ID, &obj.Kind, &obj.Owner, &obj.Name, &obj.Environment, &obj.Phase,
-		&obj.Labels, &obj.Data, &obj.Status, &obj.LastApplied, &obj.Version, &obj.CreatedAt, &obj.UpdatedAt)
+		&obj.Labels, &obj.Data, &obj.Status, &obj.LastApplied, &obj.Version, &obj.CreatedAt, &obj.UpdatedAt,
+		&wrapped, &sealed)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return store.Object{}, store.ErrNotFound
 	}
 	if err != nil {
 		return store.Object{}, fmt.Errorf("store: reading the object: %w", err)
+	}
+	if err := unseal(x.env, &obj, wrapped, sealed); err != nil {
+		return store.Object{}, err
 	}
 	return obj, nil
 }

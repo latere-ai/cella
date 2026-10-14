@@ -71,6 +71,7 @@ var cases = []struct {
 	{"Redelivery", redelivery},
 	{"Workers", workers},
 	{"Values", values},
+	{"Credentials", credentials},
 	{"Rewrap", rewrap},
 	{"Ready", ready},
 }
@@ -985,6 +986,68 @@ func values(t TB, open Opener) {
 		_, err := tx.Values().Put(ctx, "sec_a", secret)
 		return err
 	})
+}
+
+// credentials: a sandbox's environment values and its gateway credential are
+// part of the object a read returns, whatever an adapter keeps at rest, by
+// id, by name and in a list, after a status write and on a store without a
+// key alike.
+func credentials(t TB, open Opener) {
+	ctx := context.Background()
+	data := []byte(`{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox","metadata":{"name":"work"},` +
+		`"spec":{"image":"img","env":{"API_KEY":"k-value","EMPTY":""}}}`)
+	status := []byte(`{"id":"sbx_a","phase":"Running","egressState":{"credential":"c-value","version":2,` +
+		`"secrets":[{"name":"github","env":"GH","placeholder":"cph_x"}]}}`)
+	for _, key := range [][]byte{Key, nil} {
+		s := opened(t, open, key)
+		obj := object("sbx_a", "alice", "work")
+		obj.Data, obj.Status = data, status
+		version := put(t, s, obj, 0)
+		read := func(what string, wantStatus []byte) {
+			t.Helper()
+			with(t, s, func(tx store.Tx) error {
+				byID, err := tx.Desired().Get(ctx, store.KindSandbox, "sbx_a")
+				if err != nil {
+					return err
+				}
+				byName, err := tx.Desired().ByName(ctx, store.KindSandbox, "alice", "work")
+				if err != nil {
+					return err
+				}
+				listed, _, err := tx.Desired().List(ctx, store.KindSandbox, store.Filter{}, store.Page{})
+				if err != nil {
+					return err
+				}
+				if len(listed) != 1 {
+					t.Errorf("the list after %s holds %d rows", what, len(listed))
+					return nil
+				}
+				for _, got := range []store.Object{byID, byName, listed[0]} {
+					sameJSON(t, got.Data, data, "the object after "+what)
+					sameJSON(t, got.Status, wantStatus, "the status after "+what)
+					if got.Version != version {
+						t.Errorf("the version after %s is %d, want %d", what, got.Version, version)
+					}
+				}
+				return nil
+			})
+		}
+		read("a create", status)
+		version = put(t, s, obj, version)
+		read("a write", status)
+		next := []byte(`{"id":"sbx_a","phase":"Stopped","egressState":{"credential":"c-next","version":3}}`)
+		with(t, s, func(tx store.Tx) error {
+			return tx.Desired().PutStatus(ctx, store.KindSandbox, "sbx_a", next)
+		})
+		read("a status write", next)
+		with(t, s, func(tx store.Tx) error {
+			return tx.Desired().Delete(ctx, store.KindSandbox, "sbx_a")
+		})
+		fails(t, s, store.ErrNotFound, "a deleted sandbox", func(tx store.Tx) error {
+			_, err := tx.Desired().Get(ctx, store.KindSandbox, "sbx_a")
+			return err
+		})
+	}
 }
 
 // NextKey is the key the rotation case moves to, as fixed as Key is.
