@@ -6,6 +6,17 @@ refused before it is pushed.
 
 ## Unreleased
 
+### Fixed
+
+- **An operation's event is recorded when its caller has already gone.**
+  A file read, a file write, a command's exit and the other operations of
+  a sandbox were left out of the event feed, with "the event was not
+  journaled" and `context canceled` in the log, when the caller closed
+  its connection before the record was written, as a client does that
+  hangs up once it has the last byte of a file or a command's exit code.
+  The record is now written whether or not the caller is still there,
+  bounded at 10 seconds, as display and port sessions already were.
+
 ## v0.15.0 - 2026-10-14
 
 ### Security

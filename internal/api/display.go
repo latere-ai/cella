@@ -5,7 +5,6 @@ package api
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -380,12 +379,8 @@ func (h *handler) pump(r *http.Request, conn *websocket.Conn, obj v1.Sandbox, fr
 // emitScreen writes the session's record: how long it ran and how much moved
 // each way. A screen session carries nothing in, so the count is zero and the
 // field is there because design 009's shape is one shape for every session.
-//
-// The record is written on a context detached from the request's, because the
-// usual way a session ends is the caller going away, which cancels it. What
-// happened is still a fact the feed carries.
 func (h *handler) emitScreen(r *http.Request, obj v1.Sandbox, started time.Time, out int64) {
-	h.emit(r.WithContext(context.WithoutCancel(r.Context())), obj, events.TypeScreen, events.Screen{
+	h.emit(r, obj, events.TypeScreen, events.Screen{
 		DurationMS: time.Since(started).Milliseconds(), BytesOut: out,
 	})
 }

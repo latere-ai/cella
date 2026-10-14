@@ -216,11 +216,9 @@ func (h *handler) relay(r *http.Request, conn *websocket.Conn, w *frameWriter, i
 }
 
 // emitDial writes the session's record: how long it ran and how many bytes
-// moved each way, read when the session ends. The record is written on a
-// context detached from the request's, because the usual way a session ends
-// is the caller going away, which cancels it.
+// moved each way, read when the session ends.
 func (h *handler) emitDial(r *http.Request, obj v1.Sandbox, started time.Time, in, out *atomic.Int64) {
-	h.emit(r.WithContext(context.WithoutCancel(r.Context())), obj, events.TypeDial, events.Dial{
+	h.emit(r, obj, events.TypeDial, events.Dial{
 		DurationMS: time.Since(started).Milliseconds(), BytesIn: in.Load(), BytesOut: out.Load(),
 	})
 }

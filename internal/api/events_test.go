@@ -4,6 +4,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http/httptest"
@@ -19,6 +20,7 @@ import (
 	"latere.ai/x/cella/internal/events"
 	"latere.ai/x/cella/internal/store"
 	"latere.ai/x/cella/internal/store/memory"
+	v1 "latere.ai/x/cella/manifest/v1"
 	"latere.ai/x/cella/runtime"
 	"latere.ai/x/cella/runtime/native"
 )
@@ -202,6 +204,37 @@ func TestOperationsAreRecorded(t *testing.T) {
 	}
 	if len(files.Paths) != 1 || files.Paths[0] != "/workspace/canary.txt" || files.Bytes == 0 {
 		t.Errorf("the export record is %+v", files)
+	}
+}
+
+// TestARecordOutlivesItsRequest: an operation's record is journaled when the
+// request that asked for it was canceled first, as a caller that hangs up
+// once it has its answer cancels it, and it keeps the actor the request
+// carried.
+func TestARecordOutlivesItsRequest(t *testing.T) {
+	s, err := memory.Open(memory.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	h := &handler{Events: events.NewEmitter(store.EventJournal(s, store.Delivered), slog.New(slog.DiscardHandler))}
+	ctx, cancel := context.WithCancel(events.WithActor(t.Context(),
+		events.Actor{Subject: "alice", RequestID: "req-1"}))
+	cancel()
+	r := httptest.NewRequest("GET", "/v1/sandboxes/sbx_1/files?path=/workspace/a.txt", nil).WithContext(ctx)
+	var obj v1.Sandbox
+	obj.Status.ID = "sbx_1"
+	h.emit(r, obj, events.TypeFiles, events.Files{
+		Operation: events.OperationRead, Direction: events.DirectionExport,
+		Paths: []string{"/workspace/a.txt"}, Bytes: 1,
+	})
+
+	got := (&recorded{fixture: &fixture{t: t}, store: s}).records("sbx_1")
+	if len(got) != 1 || got[0].Type != events.TypeFiles {
+		t.Fatalf("the journal holds %+v, want the one read record", got)
+	}
+	if got[0].Subject != "alice" || got[0].RequestID != "req-1" {
+		t.Errorf("the record names subject %q and request %q, want the request's", got[0].Subject, got[0].RequestID)
 	}
 }
 

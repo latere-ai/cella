@@ -4,6 +4,7 @@
 package api
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -34,6 +35,11 @@ func actorOf(w http.ResponseWriter, c auth.Caller) events.Actor {
 //
 // A record that cannot be journaled is logged and never returned: the
 // operation the caller asked for has already happened.
+//
+// The record is written on a context detached from the request's, bounded by
+// journalTimeout. A caller that goes away once it has its answer, or a
+// session that ends by its caller going away, cancels the request, and what
+// happened is still a fact the feed carries.
 func (h *handler) emit(r *http.Request, obj v1.Sandbox, kind events.Type, data any) {
 	if h.Events == nil {
 		return
@@ -45,8 +51,14 @@ func (h *handler) emit(r *http.Request, obj v1.Sandbox, kind events.Type, data a
 			"type", kind, "sandbox", obj.Status.ID, "error", err)
 		return
 	}
-	h.Events.Write(r.Context(), record)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), journalTimeout)
+	defer cancel()
+	h.Events.Write(ctx, record)
 }
+
+// journalTimeout bounds writing one operation's record once the request
+// that asked for it may have ended.
+const journalTimeout = 10 * time.Second
 
 // eventFeed serves GET /v1/events: design 009's records for one object,
 // newest first and paged by the sequence the journal assigned, or with
