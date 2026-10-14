@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.14.2 - 2026-10-14
+
 ### Fixed
 
 - **A long command run over the exec socket keeps its sandbox from
