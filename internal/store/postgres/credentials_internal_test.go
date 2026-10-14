@@ -79,11 +79,11 @@ func TestSealPassesWhatItDoesNotSeal(t *testing.T) {
 func TestUnsealRefusesWhatItCannotOpen(t *testing.T) {
 	key := envelope(t, testKey)
 	marked := []byte(`{"spec":{"env":"sealed"}}`)
-	wrapped, sealed, err := key.Seal([]byte(`{"env":{"K":"v"}}`))
+	wrapped, sealed, err := key.SealBound([]byte(`{"env":{"K":"v"}}`), binding("sbx_a"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	junkWrapped, junk, err := key.Seal([]byte(`not json`))
+	junkWrapped, junk, err := key.SealBound([]byte(`not json`), binding("sbx_a"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +118,7 @@ func TestUnsealRefusesWhatItCannotOpen(t *testing.T) {
 	}
 	// A sealed credential is put back into a status that has none, and an
 	// environment that was sealed empty leaves no member behind.
-	credWrapped, credSealed, err := key.Seal([]byte(`{"credential":"c"}`))
+	credWrapped, credSealed, err := key.SealBound([]byte(`{"credential":"c"}`), binding("sbx_a"))
 	if err != nil {
 		t.Fatal(err)
 	}

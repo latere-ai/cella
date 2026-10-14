@@ -4,6 +4,7 @@
 package migrations
 
 import (
+	"fmt"
 	"io/fs"
 	"strings"
 	"testing"
@@ -76,5 +77,24 @@ func TestHighestReadsTheNumber(t *testing.T) {
 				t.Fatalf("highest = %d, %v, want %d", got, err, tc.want)
 			}
 		})
+	}
+}
+
+// TestSealedCredentialsNamesItsMigration: the number a rollback migrates down
+// past is the migration that adds the sealed columns.
+func TestSealedCredentialsNamesItsMigration(t *testing.T) {
+	matches, err := fs.Glob(FS, fmt.Sprintf("%06d_*.up.sql", SealedCredentials))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 1 {
+		t.Fatalf("migration %d is %v, want one file", SealedCredentials, matches)
+	}
+	body, err := fs.ReadFile(FS, matches[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "add column sealed_key") || !strings.Contains(string(body), "add column sealed ") {
+		t.Errorf("%s does not add the sealed columns", matches[0])
 	}
 }

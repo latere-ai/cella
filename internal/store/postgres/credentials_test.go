@@ -339,12 +339,26 @@ func TestAStoreWithoutAKeyKeepsTheValues(t *testing.T) {
 		t.Fatalf("SealCredentials with a key = %d, %v, want the row sealed", n, err)
 	}
 	noRowHolds(t, dsn, "keyless-canary", "keyless-credential")
+	// One opened before the rows were sealed fails its load; one opened
+	// after is refused at Open, before it could take the writer lease.
 	if _, err := store.ForController(keyless, "default", store.Journaled).Load(); !errors.Is(err, store.ErrNoSecretKey) {
 		t.Errorf("a store without a key loaded a sealed row: %v", err)
 	}
-	other := open(t, dsn, storetest.NextKey, time.Hour)
-	if _, err := store.ForController(other, "default", store.Journaled).Load(); err == nil {
-		t.Error("a store under another key loaded a sealed row")
+	refused(t, dsn, nil, store.ErrNoSecretKey, "CELLA_SECRET_KEY")
+	refused(t, dsn, storetest.NextKey, postgres.ErrWrongKey, "sbx_a")
+}
+
+// refused asserts that a store opened with key is refused with want, naming
+// what the operator reads.
+func refused(t *testing.T, dsn string, key []byte, want error, names string) {
+	t.Helper()
+	s, err := postgres.Open(t.Context(), postgres.Options{URL: dsn, Key: key, RenewEvery: time.Hour})
+	if err == nil {
+		_ = s.Close()
+		t.Fatalf("a store with the key %q opened over rows sealed under another", key)
+	}
+	if !errors.Is(err, want) || !strings.Contains(err.Error(), names) {
+		t.Errorf("Open = %v, want %v naming %q", err, want, names)
 	}
 }
 
@@ -366,9 +380,7 @@ func TestARotationRewrapsTheSealedCredentials(t *testing.T) {
 	}
 	holds(t, loaded(t, s), "sbx_a", obj.Spec.Env, "rotated-credential")
 	holds(t, loaded(t, open(t, dsn, storetest.NextKey, time.Hour)), "sbx_a", obj.Spec.Env, "rotated-credential")
-	if _, err := store.ForController(open(t, dsn, storetest.Key, time.Hour), "default", store.Journaled).Load(); err == nil {
-		t.Error("the key the rotation moved away from still opens the row")
-	}
+	refused(t, dsn, storetest.Key, postgres.ErrWrongKey, "sbx_a")
 	noRowHolds(t, dsn, "rotated-canary", "rotated-credential")
 }
 
@@ -378,6 +390,9 @@ func TestARotationRewrapsTheSealedCredentials(t *testing.T) {
 func TestSealCredentialsReportsWhatItCannotSeal(t *testing.T) {
 	dsn := database(t, server(t))
 	ctx := t.Context()
+	// Both stores open before anything is sealed: one opened after would be
+	// refused at Open, which TestOpenRefusesAKeyThatDoesNotOpenTheRows holds.
+	s := open(t, dsn, storetest.Key, time.Hour)
 	other := open(t, dsn, storetest.NextKey, time.Hour)
 	foreign := sandbox("sbx_foreign", "foreign", map[string]string{"API_KEY": "foreign"}, "foreign-credential")
 	if err := store.ForController(other, "default", store.Journaled).Write(ctx, foreign, controller.MutationCreated); err != nil {
@@ -387,7 +402,6 @@ func TestSealCredentialsReportsWhatItCannotSeal(t *testing.T) {
 	// it a row to rewrite, and the rewrite opens the values first.
 	execute(t, dsn, `update objects set status = jsonb_set(status, '{egressState,credential}', '"clear-credential"') where id = 'sbx_foreign'`)
 	writeAsAnEarlierRelease(t, dsn, sandbox("sbx_old", "old", map[string]string{"API_KEY": "old-canary"}, "old-credential"), false)
-	s := open(t, dsn, storetest.Key, time.Hour)
 	n, err := s.SealCredentials(ctx)
 	if n != 1 || err == nil || !strings.Contains(err.Error(), "sbx_foreign") {
 		t.Fatalf("SealCredentials = %d, %v, want sbx_old sealed and sbx_foreign reported", n, err)
@@ -443,7 +457,8 @@ func TestTheSealedColumnsOutliveTheirValues(t *testing.T) {
 }
 
 // TestSealCredentialsReadsEveryPage: a table holding more rows in the clear
-// than one page has every one of them sealed in one run.
+// than one page, live and deleted, has every live one sealed and every
+// deleted one cleared in one run, one page per statement.
 func TestSealCredentialsReadsEveryPage(t *testing.T) {
 	dsn := database(t, server(t))
 	const rows = store.DefaultPageLimit + 7
@@ -453,9 +468,14 @@ func TestSealCredentialsReadsEveryPage(t *testing.T) {
 			jsonb_build_object('spec', jsonb_build_object('env', jsonb_build_object('API_KEY', 'paged-canary'))),
 			jsonb_build_object('egressState', jsonb_build_object('credential', 'paged-credential'))
 		from generate_series(1, `+strconv.Itoa(rows)+`) n`)
+	execute(t, dsn, `insert into objects (id, kind, owner, name, data, status, deleted_at)
+		select 'sbx_gone_' || lpad(n::text, 4, '0'), 'Sandbox', 'alice', 'gone' || n,
+			jsonb_build_object('spec', jsonb_build_object('env', jsonb_build_object('API_KEY', 'paged-canary'))),
+			jsonb_build_object('egressState', jsonb_build_object('credential', 'paged-credential')), now()
+		from generate_series(1, `+strconv.Itoa(rows)+`) n`)
 	n, err := s.SealCredentials(t.Context())
-	if err != nil || n != rows {
-		t.Fatalf("SealCredentials = %d, %v, want %d", n, err, rows)
+	if err != nil || n != 2*rows {
+		t.Fatalf("SealCredentials = %d, %v, want %d live rows sealed and %d deleted ones cleared", n, err, rows, rows)
 	}
 	noRowHolds(t, dsn, "paged-canary", "paged-credential")
 	if got := len(loaded(t, s)); got != rows {
@@ -471,6 +491,7 @@ func TestAWriteCannotForgeTheMarker(t *testing.T) {
 	dsn := database(t, server(t))
 	ctx := t.Context()
 	s := open(t, dsn, storetest.Key, time.Hour)
+	keyless := open(t, dsn, nil, time.Hour)
 	forged := store.Object{Kind: store.KindSandbox, ID: "sbx_forged", Owner: "alice", Name: "forged",
 		Data: []byte(`{"spec":{"env":"sealed"}}`), Status: []byte(`{"egressState":{"credential":"c"}}`)}
 	if err := s.Tx(ctx, func(tx store.Tx) error {
@@ -489,7 +510,6 @@ func TestAWriteCannotForgeTheMarker(t *testing.T) {
 	}); err == nil || !strings.Contains(err.Error(), "sbx_a") {
 		t.Errorf("a status write over a row sealed under another key = %v", err)
 	}
-	keyless := open(t, dsn, nil, time.Hour)
 	if err := keyless.Tx(ctx, func(tx store.Tx) error {
 		return tx.Desired().PutStatus(ctx, store.KindSandbox, "sbx_gone", []byte(`{}`))
 	}); !errors.Is(err, store.ErrNotFound) {

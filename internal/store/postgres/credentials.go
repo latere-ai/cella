@@ -8,8 +8,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"latere.ai/x/cella/internal/store"
 )
@@ -36,6 +39,11 @@ const (
 	envObject, envMember               = "spec", "env"
 	credentialObject, credentialMember = "egressState", "credential"
 )
+
+// binding is the associated data a row's sealed values are sealed against: the
+// purpose and the row's id, so a sealed pair copied into another row, or into
+// another table that uses the envelope, does not open there.
+func binding(id string) []byte { return []byte("cella sandbox credentials\x00" + id) }
 
 // held is what the sealed columns of one row carry: each value as the JSON
 // the row held it as.
@@ -77,7 +85,7 @@ func seal(env store.Envelope, obj store.Object) (data, status, wrapped, sealed [
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("store: encoding the credentials of %s: %w", obj.ID, err)
 	}
-	wrapped, sealed, err = env.Seal(plaintext)
+	wrapped, sealed, err = env.SealBound(plaintext, binding(obj.ID))
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("store: sealing the credentials of %s: %w", obj.ID, err)
 	}
@@ -95,7 +103,7 @@ func unseal(env store.Envelope, obj *store.Object, wrapped, sealed []byte) error
 	if len(sealed) == 0 {
 		return fmt.Errorf("store: the sandbox %s is marked sealed and holds no sealed credentials", obj.ID)
 	}
-	plaintext, err := env.Open(wrapped, sealed)
+	plaintext, err := env.OpenBound(wrapped, sealed, binding(obj.ID))
 	if errors.Is(err, store.ErrNoSecretKey) {
 		return fmt.Errorf("store: the sandbox %s holds sealed credentials and this store has no CELLA_SECRET_KEY to open them: %w", obj.ID, err)
 	}
@@ -284,89 +292,239 @@ func blank(raw json.RawMessage) bool {
 // A live row is left as it stands on a store without a key, and the count says
 // so by leaving it out; a deleted row needs none.
 func (s *Store) SealCredentials(ctx context.Context) (int, error) {
-	s.mu.Lock()
-	closed := s.closed
-	s.mu.Unlock()
-	if closed {
-		return 0, ErrClosed
+	if err := s.open(); err != nil {
+		return 0, err
 	}
-	tag, err := s.pool.Exec(ctx, `update objects set `+stripCredentials+`
-		where kind = $1 and deleted_at is not null
-			and (data #> '{spec,env}' is not null or status #> '{egressState,credential}' is not null or sealed is not null)`,
-		store.KindSandbox)
-	if err != nil {
-		return 0, fmt.Errorf("store: clearing the credentials of deleted sandboxes: %w", err)
+	cleared, err := s.clearDeleted(ctx)
+	if err != nil || !s.env.Ready() {
+		return cleared, err
 	}
-	rewritten := int(tag.RowsAffected())
+	sealed, err := s.rewriteEach(ctx, inTheClear, "with credentials in the clear",
+		func(obj store.Object, wrapped, sealed []byte) ([]byte, []byte, []byte, []byte, error) {
+			if err := unseal(s.env, &obj, wrapped, sealed); err != nil {
+				return nil, nil, nil, nil, err
+			}
+			return seal(s.env, obj)
+		})
+	return cleared + sealed, err
+}
+
+// UnsealCredentials is SealCredentials undone, for a rollback to a release
+// that does not seal: every sandbox row whose values are sealed has them put
+// back into its data and its status as an earlier release wrote them, and its
+// sealed columns emptied, and a deleted row keeps neither value. It is paged,
+// conditional on the version each row was read at and leaves that version
+// alone, as the sealing is, and a second run finds nothing to do. It needs
+// the key the rows were sealed under. A process that seals and writes one of
+// the rows afterwards seals it again, so it is run with no replica serving.
+func (s *Store) UnsealCredentials(ctx context.Context) (int, error) {
+	if err := s.open(); err != nil {
+		return 0, err
+	}
 	if !s.env.Ready() {
-		return rewritten, nil
+		return 0, fmt.Errorf("store: unsealing needs the key the rows were sealed under: %w", store.ErrNoSecretKey)
 	}
-	var failed error
-	cursor := ""
+	cleared, err := s.clearDeleted(ctx)
+	if err != nil {
+		return cleared, err
+	}
+	unsealed, err := s.rewriteEach(ctx, `sealed is not null`, "with sealed credentials",
+		func(obj store.Object, wrapped, sealed []byte) ([]byte, []byte, []byte, []byte, error) {
+			if err := unseal(s.env, &obj, wrapped, sealed); err != nil {
+				return nil, nil, nil, nil, err
+			}
+			return obj.Data, obj.Status, nil, nil, nil
+		})
+	return cleared + unsealed, err
+}
+
+// open reports ErrClosed for a store that was closed.
+func (s *Store) open() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return ErrClosed
+	}
+	return nil
+}
+
+// clearDeleted drops both values from every deleted sandbox row that still
+// holds either, in the clear or sealed, one page per statement, and reports
+// how many rows it cleared.
+func (s *Store) clearDeleted(ctx context.Context) (int, error) {
+	cleared, cursor := 0, ""
 	for {
-		batch, err := s.unsealed(ctx, cursor)
+		rows, err := s.pool.Query(ctx, `with page as (
+				select id from objects
+				where kind = $1 and deleted_at is not null and id > $2
+					and (data #> '{spec,env}' is not null or status #> '{egressState,credential}' is not null or sealed is not null)
+				order by id limit $3)
+			update objects set `+stripCredentials+` from page where objects.id = page.id
+			returning objects.id`, store.KindSandbox, cursor, store.DefaultPageLimit)
 		if err != nil {
-			return rewritten, errors.Join(failed, err)
+			return cleared, fmt.Errorf("store: clearing the credentials of deleted sandboxes: %w", err)
+		}
+		ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil {
+			return cleared, fmt.Errorf("store: clearing the credentials of deleted sandboxes: %w", err)
+		}
+		cleared += len(ids)
+		if len(ids) < store.DefaultPageLimit {
+			return cleared, nil
+		}
+		cursor = slices.Max(ids)
+	}
+}
+
+// rewrite is what one row is written back as, from the row as it was read:
+// its data, its status and its two sealed columns.
+type rewrite func(obj store.Object, wrapped, sealed []byte) (data, status, nextWrapped, nextSealed []byte, err error)
+
+// rewriteEach pages through the live sandbox rows condition selects, in id
+// order, and writes each back as fn answers, conditional on the version it
+// was read at and leaving that version as it was. It reports how many rows it
+// wrote and every row it could not; a row that moved since it was read is
+// left to the write that moved it.
+func (s *Store) rewriteEach(ctx context.Context, condition, what string, fn rewrite) (int, error) {
+	written, cursor := 0, ""
+	var failed error
+	for {
+		batch, err := s.page(ctx, condition, what, cursor)
+		if err != nil {
+			return written, errors.Join(failed, err)
 		}
 		for _, row := range batch {
-			done, err := s.sealRow(ctx, row)
+			done, err := s.writeBack(ctx, row, fn)
 			if err != nil {
 				failed = errors.Join(failed, fmt.Errorf("sandbox %s: %w", row.obj.ID, err))
 				continue
 			}
 			if done {
-				rewritten++
+				written++
 			}
 		}
 		if len(batch) < store.DefaultPageLimit {
-			return rewritten, failed
+			return written, failed
 		}
 		cursor = batch[len(batch)-1].obj.ID
 	}
 }
 
-// unsealedRow is one live sandbox row SealCredentials rewrites, as it was read.
-type unsealedRow struct {
+// pageRow is one live sandbox row rewriteEach rewrites, as it was read.
+type pageRow struct {
 	obj             store.Object
 	wrapped, sealed []byte
 }
 
-// unsealed reads one page of the live sandbox rows that hold a value in the
-// clear, after cursor in id order.
-func (s *Store) unsealed(ctx context.Context, cursor string) ([]unsealedRow, error) {
+// page reads one page of the live sandbox rows condition selects, after
+// cursor in id order.
+func (s *Store) page(ctx context.Context, condition, what, cursor string) ([]pageRow, error) {
 	rows, err := s.pool.Query(ctx, `select id, version, data, status, sealed_key, sealed from objects
-		where kind = $1 and deleted_at is null and id > $2 and (`+inTheClear+`)
+		where kind = $1 and deleted_at is null and id > $2 and (`+condition+`)
 		order by id limit $3`, store.KindSandbox, cursor, store.DefaultPageLimit)
 	if err != nil {
-		return nil, fmt.Errorf("store: listing the sandboxes with credentials in the clear: %w", err)
+		return nil, fmt.Errorf("store: listing the sandboxes %s: %w", what, err)
 	}
-	batch, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (unsealedRow, error) {
-		row := unsealedRow{obj: store.Object{Kind: store.KindSandbox}}
+	batch, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (pageRow, error) {
+		row := pageRow{obj: store.Object{Kind: store.KindSandbox}}
 		err := r.Scan(&row.obj.ID, &row.obj.Version, &row.obj.Data, &row.obj.Status, &row.wrapped, &row.sealed)
 		return row, err
 	})
 	if err != nil {
-		return nil, fmt.Errorf("store: reading the sandboxes with credentials in the clear: %w", err)
+		return nil, fmt.Errorf("store: reading the sandboxes %s: %w", what, err)
 	}
 	return batch, nil
 }
 
-// sealRow rewrites one row read by unsealed, and reports false where the row
-// moved since, which leaves it to the write that moved it.
-func (s *Store) sealRow(ctx context.Context, row unsealedRow) (bool, error) {
-	obj := row.obj
-	if err := unseal(s.env, &obj, row.wrapped, row.sealed); err != nil {
-		return false, err
-	}
-	data, status, wrapped, sealed, err := seal(s.env, obj)
+// writeBack writes one row read by page as fn answers, and reports false
+// where the row moved since, which leaves it to the write that moved it.
+func (s *Store) writeBack(ctx context.Context, row pageRow, fn rewrite) (bool, error) {
+	data, status, wrapped, sealed, err := fn(row.obj, row.wrapped, row.sealed)
 	if err != nil {
 		return false, err
 	}
 	tag, err := s.pool.Exec(ctx, `update objects set data = $3, status = $4, sealed_key = $5, sealed = $6
 		where id = $1 and version = $2 and deleted_at is null`,
-		obj.ID, obj.Version, jsonText(data), jsonText(status), wrapped, sealed)
+		row.obj.ID, row.obj.Version, jsonText(data), jsonText(status), wrapped, sealed)
 	if err != nil {
-		return false, fmt.Errorf("store: sealing the credentials: %w", err)
+		return false, fmt.Errorf("store: rewriting the credentials: %w", err)
 	}
 	return tag.RowsAffected() == 1, nil
+}
+
+// checkSealed refuses a store whose key cannot open the sandbox credentials
+// the table holds sealed: with no key, and with a key that is not the one
+// they were sealed under. Either would otherwise start, take the writer lease,
+// and fail its controller's load on the first sealed row, on every replica.
+// A database without the sealed columns yet holds nothing sealed.
+func checkSealed(ctx context.Context, q querier, env store.Envelope) error {
+	rows, err := q.Query(ctx, `select id, sealed_key from objects where sealed is not null order by id`)
+	if isUndefinedColumn(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("store: reading the sealed sandbox credentials: %w", err)
+	}
+	type sealedRow struct {
+		id      string
+		wrapped []byte
+	}
+	held, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (sealedRow, error) {
+		var row sealedRow
+		err := r.Scan(&row.id, &row.wrapped)
+		return row, err
+	})
+	if err != nil {
+		return fmt.Errorf("store: reading the sealed sandbox credentials: %w", err)
+	}
+	if len(held) == 0 {
+		return nil
+	}
+	if !env.Ready() {
+		return fmt.Errorf("store: %d sandbox row(s) hold credentials sealed under CELLA_SECRET_KEY, which is not set; set the key they were sealed under (%w)",
+			len(held), store.ErrNoSecretKey)
+	}
+	unopened, first := 0, ""
+	for _, row := range held {
+		if _, err := env.Unwrap(row.wrapped); err != nil {
+			if unopened == 0 {
+				first = row.id
+			}
+			unopened++
+		}
+	}
+	if unopened > 0 {
+		return fmt.Errorf("store: CELLA_SECRET_KEY does not open the credentials sealed in %d of %d sandbox row(s), the first %s; set the key they were sealed under (%w)",
+			unopened, len(held), first, ErrWrongKey)
+	}
+	return nil
+}
+
+// CheckSealed is checkSealed over a pool a caller opened, for a command that
+// reads the database without opening the store: it reports how many sandbox
+// rows hold sealed credentials, and the same refusal Open gives.
+func CheckSealed(ctx context.Context, pool *pgxpool.Pool, key []byte) (int, error) {
+	env, err := store.NewEnvelope(key)
+	if err != nil {
+		return 0, err
+	}
+	if err := checkSealed(ctx, pool, env); err != nil {
+		return 0, err
+	}
+	var n int
+	err = pool.QueryRow(ctx, `select count(*) from objects where sealed is not null`).Scan(&n)
+	if isUndefinedColumn(err) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("store: counting the sealed sandbox credentials: %w", err)
+	}
+	return n, nil
+}
+
+// isUndefinedColumn is the Postgres code of a schema from before the sealed
+// columns, and of a database with no schema at all.
+func isUndefinedColumn(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && (pgErr.Code == "42703" || pgErr.Code == "42P01")
 }

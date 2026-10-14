@@ -18,6 +18,11 @@ import (
 //go:embed *.sql
 var FS embed.FS
 
+// SealedCredentials is the migration that adds the columns a sandbox row's
+// sealed values live in. A schema below it holds nothing sealed, and it is
+// the schema a rollback to a release that does not seal migrates down past.
+const SealedCredentials uint = 7
+
 // Highest is the newest migration this binary carries. The store refuses to
 // start against a schema above it: the migrator would report no change and
 // then serve statements against columns it does not know.

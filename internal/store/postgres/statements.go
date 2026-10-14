@@ -582,7 +582,10 @@ func (x values) Delete(ctx context.Context, secretID string) error {
 // writes the one column back: each secret value's, and each sandbox row's
 // whose credentials are sealed. The ciphertext columns are neither read nor
 // written, so a rotation moves no value and produces no plaintext beyond the
-// data key it is rewrapping.
+// data key it is rewrapping. Each write is conditional on the wrapped key it
+// read: a row a writer sealed again in between holds a key under the old key
+// and a value the rotation never read, so the rotation fails whole, inside
+// its transaction, rather than leave that row to the old key.
 func (x values) Rewrap(ctx context.Context, oldKEK, newKEK []byte) (int, error) {
 	old, next, err := store.RewrapKeys(oldKEK, newKEK)
 	if err != nil {
@@ -593,9 +596,9 @@ func (x values) Rewrap(ctx context.Context, oldKEK, newKEK []byte) (int, error) 
 		read, write, what string
 	}{
 		{`select secret_id, wrapped_key from secret_values order by secret_id`,
-			`update secret_values set wrapped_key = $2 where secret_id = $1`, "the secret value"},
+			`update secret_values set wrapped_key = $2 where secret_id = $1 and wrapped_key = $3`, "the secret value"},
 		{`select id, sealed_key from objects where sealed_key is not null order by id`,
-			`update objects set sealed_key = $2 where id = $1`, "the sealed sandbox credentials"},
+			`update objects set sealed_key = $2 where id = $1 and sealed_key = $3`, "the sealed sandbox credentials"},
 	} {
 		moved, err := x.rewrap(ctx, old, next, table.read, table.write, table.what)
 		if err != nil {
@@ -608,24 +611,24 @@ func (x values) Rewrap(ctx context.Context, oldKEK, newKEK []byte) (int, error) 
 }
 
 // rewrap moves the wrapped data key of every row read selects, an id and a
-// key, and writes each back with write.
+// key, and writes each back with write, which is conditional on the key read.
 func (x values) rewrap(ctx context.Context, old, next store.Envelope, read, write, what string) (int, error) {
 	rows, err := x.q.Query(ctx, read)
 	if err != nil {
 		return 0, fmt.Errorf("store: reading %s to rewrap: %w", what, err)
 	}
 	type rewrapped struct {
-		id      string
-		wrapped []byte
+		id                string
+		previous, wrapped []byte
 	}
 	var out []rewrapped
 	for rows.Next() {
 		var row rewrapped
-		if err = rows.Scan(&row.id, &row.wrapped); err != nil {
+		if err = rows.Scan(&row.id, &row.previous); err != nil {
 			rows.Close()
 			return 0, err
 		}
-		if row.wrapped, err = store.RewrapKey(old, next, row.wrapped); err != nil {
+		if row.wrapped, err = store.RewrapKey(old, next, row.previous); err != nil {
 			rows.Close()
 			return 0, err
 		}
@@ -636,8 +639,13 @@ func (x values) rewrap(ctx context.Context, old, next store.Envelope, read, writ
 		return 0, err
 	}
 	for _, row := range out {
-		if _, err = x.q.Exec(ctx, write, row.id, row.wrapped); err != nil {
+		tag, err := x.q.Exec(ctx, write, row.id, row.wrapped, row.previous)
+		if err != nil {
 			return 0, fmt.Errorf("store: rewrapping %s: %w", what, err)
+		}
+		if tag.RowsAffected() != 1 {
+			return 0, fmt.Errorf("store: %s of %s changed during the rotation, so nothing was rotated: run it again with no replica writing: %w",
+				what, row.id, store.ErrVersionConflict)
 		}
 	}
 	return len(out), nil

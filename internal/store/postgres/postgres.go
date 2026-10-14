@@ -54,6 +54,10 @@ const (
 // ErrClosed is every call after Close.
 var ErrClosed = errors.New("store: the postgres store is closed")
 
+// ErrWrongKey is a store opened with a key that does not open what the
+// database holds sealed.
+var ErrWrongKey = errors.New("store: the key is not the one the database was sealed under")
+
 // Options opens the Postgres store.
 type Options struct {
 	// URL is CELLA_DB_URL: a postgres:// URL on a direct endpoint or a
@@ -124,6 +128,10 @@ func Open(ctx context.Context, o Options) (*Store, error) {
 		return nil, fmt.Errorf("store: opening the pool: %w", err)
 	}
 	if err := prepare(ctx, pool, o.URL); err != nil {
+		pool.Close()
+		return nil, err
+	}
+	if err := checkSealed(ctx, pool, env); err != nil {
 		pool.Close()
 		return nil, err
 	}
