@@ -353,6 +353,7 @@ jobs:
         run: |
           bash deploy/examples/kind-stubs/up.sh -name cella >> "$GITHUB_ENV"
           echo "CELLA_TEST_SINK=http://localhost:30082" >> "$GITHUB_ENV"
+          echo "CELLA_TEST_CLUSTER=cella" >> "$GITHUB_ENV"
       - name: The lifecycle through the API of the stack
         shell: bash
         run: |
@@ -543,6 +544,7 @@ jobs:
           CELLA_KIND_BUILD: '0'
         run: |
           bash checkout/deploy/examples/kind-stubs/up.sh -name cella -manifests work/deploy >> "$GITHUB_ENV"
+          echo "CELLA_TEST_CLUSTER=cella" >> "$GITHUB_ENV"
       - name: Walk the document against the cluster
         env:
           CELLA_INSTALL_IMAGE: cellad:dev

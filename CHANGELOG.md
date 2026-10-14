@@ -6,6 +6,14 @@ refused before it is pushed.
 
 ## Unreleased
 
+### Fixed
+
+- v0.14.1 and v0.14.2 were not published: their releases stopped where
+  a check of the release pipeline read the wrong cluster. This release
+  carries both: a sandbox's credentials are kept in its Secret and in no
+  other object, and a long command over the exec socket keeps its
+  sandbox from stopping.
+
 ## v0.14.2 - 2026-10-14
 
 ### Fixed
