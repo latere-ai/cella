@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.14.0 - 2026-10-14
+
 ### Security
 
 - **On Kubernetes, a sandbox's credentials are no longer copied into object
