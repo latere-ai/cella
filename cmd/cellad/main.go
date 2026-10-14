@@ -291,6 +291,12 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	if fenced {
 		bound.Advertise(cfg.Replicas.AdvertiseURL).Fence(store.WriterLease)
 	}
+	// The store of spec 010 seals each sandbox's environment values and
+	// gateway credential under the key mounted secrets use. Without one it
+	// keeps them as an earlier release did, which the operator is told once.
+	if cfg.DBURL != "" && len(cfg.SecretKey) == 0 {
+		tel.log.WarnContext(run, "CELLA_SECRET_KEY is not set, so the database keeps each sandbox's environment values and gateway credential unsealed")
+	}
 	// Design 009's journal. Where desired state is design 010's store, the
 	// record of a mutation commits inside that mutation's own transaction
 	// and this is the same store read back. Where it is the local snapshot,
@@ -505,6 +511,13 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	}
 	promote := func() error {
 		started := time.Now()
+		// The rows an earlier release wrote are sealed before the
+		// controller loads them, by the writer alone: a standby that
+		// rewrote them would race the writer still serving from what it
+		// loaded (spec 010).
+		if fenced {
+			sealCredentials(run, bound.Store(), tel.log)
+		}
 		control, err := controller.Open(run, controller.Options{
 			Store: desired, Driver: runtimeDriver, Environment: cfg.DefaultEnvironment,
 			Lease: lease, ReapInterval: cfg.ReapInterval, TouchInterval: cfg.TouchInterval,
@@ -885,7 +898,7 @@ func openRuntime(cfg config.Config, roots []byte) (runtime.Driver, func() error,
 
 // credentialMover is a driver whose earlier versions stamped a sandbox's
 // credentials on the sandbox's objects and that moves them out of the ones
-// still carrying them: the k8s driver.
+// still carrying them: the k8s driver and the podman driver.
 type credentialMover interface {
 	MoveCredentials(ctx context.Context) (int, error)
 }
@@ -905,6 +918,32 @@ func moveCredentials(ctx context.Context, d runtime.Driver, log *slog.Logger) {
 	}
 	if err != nil {
 		log.WarnContext(ctx, "some sandbox records still carry credentials, each rewritten at its sandbox's next change", "err", err)
+	}
+}
+
+// credentialSealer is a store whose earlier releases kept a sandbox's
+// environment values and gateway credential in the clear and that seals the
+// rows still holding them: the Postgres store.
+type credentialSealer interface {
+	SealCredentials(ctx context.Context) (int, error)
+}
+
+// sealCredentials runs the store's rewrite once, as this process becomes the
+// writer, so the values an earlier release wrote in the clear are sealed when
+// this version rolls out. It fails nothing: a row it cannot rewrite still
+// reads as it stands and is sealed by its sandbox's next write, so it is
+// logged.
+func sealCredentials(ctx context.Context, s store.Store, log *slog.Logger) {
+	sealer, ok := s.(credentialSealer)
+	if !ok {
+		return
+	}
+	sealed, err := sealer.SealCredentials(ctx)
+	if sealed > 0 {
+		log.InfoContext(ctx, "sandbox rows rewritten without credentials in the clear", "count", sealed)
+	}
+	if err != nil {
+		log.WarnContext(ctx, "some sandbox rows still hold credentials in the clear, each sealed at its sandbox's next write", "err", err)
 	}
 }
 

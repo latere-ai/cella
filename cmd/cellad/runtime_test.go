@@ -20,6 +20,8 @@ import (
 	"latere.ai/x/pkg/authkit/issuertest"
 
 	"latere.ai/x/cella/controller"
+	"latere.ai/x/cella/internal/store"
+	"latere.ai/x/cella/internal/store/memory"
 	"latere.ai/x/cella/runtime"
 	"latere.ai/x/cella/runtime/native"
 )
@@ -238,5 +240,53 @@ func TestMoveCredentialsIsLoggedAndFailsNothing(t *testing.T) {
 	moveCredentials(t.Context(), plain, log)
 	if out.Len() != 0 {
 		t.Errorf("a driver with no move logged %q", out.String())
+	}
+}
+
+// sealer is a store that seals the credentials its rows hold in the clear,
+// answering the count and the failure it is given.
+type sealer struct {
+	store.Store
+	sealed int
+	err    error
+	calls  int
+}
+
+func (s *sealer) SealCredentials(context.Context) (int, error) {
+	s.calls++
+	return s.sealed, s.err
+}
+
+// TestSealCredentialsIsLoggedAndFailsNothing: a store that seals is asked
+// once, what it sealed and what it could not are logged, and one that seals
+// nothing is not asked.
+func TestSealCredentialsIsLoggedAndFailsNothing(t *testing.T) {
+	var out bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&out, nil))
+	s := &sealer{sealed: 3, err: errors.New("sandbox sbx_a: store: opening the credentials of sbx_a")}
+	sealCredentials(t.Context(), s, log)
+	if s.calls != 1 {
+		t.Fatalf("the store was asked %d times", s.calls)
+	}
+	for _, want := range []string{"count=3", "sbx_a", "level=WARN"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("the log %q does not carry %q", out.String(), want)
+		}
+	}
+
+	out.Reset()
+	sealCredentials(t.Context(), &sealer{}, log)
+	if out.Len() != 0 {
+		t.Errorf("a rewrite with nothing to do logged %q", out.String())
+	}
+	// A store with no rows of an earlier release to seal is not asked.
+	plain, err := memory.Open(memory.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = plain.Close() })
+	sealCredentials(t.Context(), plain, log)
+	if out.Len() != 0 {
+		t.Errorf("a store with no rewrite logged %q", out.String())
 	}
 }
