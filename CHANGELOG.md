@@ -9,21 +9,31 @@ refused before it is pushed.
 ### Security
 
 - **On Kubernetes, a sandbox's credentials are no longer copied into object
-  metadata.** The annotation that records a sandbox on its
+  metadata or into its Pod.** The annotation that records a sandbox on its
   PersistentVolumeClaim held the values of the sandbox's environment and
-  its gateway credential, so an account that could read claims in the
-  sandbox namespace could read them. The annotation now leaves both out,
-  and they are kept in the sandbox's own Secret, which already held its
-  workload token and is removed with the sandbox. The Secret now also
-  names the claim as its owner. No label or annotation of any object the
-  driver writes carries them. `cellad serve` and `cellad worker` rewrite
-  the annotations an earlier release wrote, once, when they start, and log
-  how many they rewrote; a claim they could not rewrite is rewritten at
-  its sandbox's next stop, start or update. A running sandbox is
-  unchanged: its environment, its gateway credential and its commands are
-  the same. The Role needs nothing new: `create`, `get`, `update` and
-  `delete` on `secrets` are the verbs it already grants. `cellad check`
-  still writes nothing.
+  its gateway credential, and the sandbox's Pod carried the same values,
+  the proxy variables that embed the credential among them, in its
+  container's environment, so an account that could read claims or Pods
+  in the sandbox namespace could read them. Both now leave the values out.
+  They are kept in the sandbox's own Secret, which already held its
+  workload token and is removed with the sandbox, and the Pod's container
+  takes each variable from that Secret. The Secret now also names the
+  claim as its owner. A command run in a sandbox no longer carries the
+  sandbox's own variables in the request that starts it, only ones an
+  update changed since the sandbox started and the request's own.
+  `cellad serve` and `cellad worker` rewrite the annotations an earlier
+  release wrote, once, when they start, and log how many they rewrote; a
+  claim they could not rewrite is rewritten at its sandbox's next stop,
+  start or update. A sandbox an earlier release started keeps its Pod, and
+  the values in it, until its next start: a running Pod's environment
+  cannot change, and stopping and starting a sandbox keeps its workspace.
+  The environment a sandbox sees is the same, with one exception: a value
+  holding `$(NAME)` or `$$` reached the main process rewritten by
+  Kubernetes before, and now arrives as written, as it always did for a
+  command. An update of the environment still reaches the main process at
+  its next start and a command at once. The Role needs nothing new:
+  `create`, `get`, `update` and `delete` on `secrets` are the verbs it
+  already grants. `cellad check` still writes nothing.
 
 ## v0.13.2 - 2026-10-14
 
