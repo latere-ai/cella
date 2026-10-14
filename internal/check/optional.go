@@ -20,6 +20,7 @@ import (
 	"latere.ai/x/cella/egress"
 	"latere.ai/x/cella/internal/config"
 	"latere.ai/x/cella/internal/events"
+	"latere.ai/x/cella/internal/store/postgres"
 	"latere.ai/x/cella/internal/store/postgres/migrations"
 )
 
@@ -122,7 +123,27 @@ func store(ctx context.Context, cfg config.Config) Line {
 		dirty   bool
 	)
 	err = pool.QueryRow(ctx, "select version, dirty from schema_migrations").Scan(&version, &dirty)
-	return schemaLine(version, dirty, highest, err)
+	line := schemaLine(version, dirty, highest, err)
+	if line.State != Ok || err != nil || version < int64(migrations.SealedCredentials) {
+		return line
+	}
+	sealed, err := postgres.CheckSealed(ctx, pool, cfg.SecretKey)
+	return sealedLine(line, cfg.SecretKey, sealed, err)
+}
+
+// sealedLine adds what the key does with the sandbox credentials the database
+// holds sealed to the schema's line: a key that cannot open them is the start
+// cellad serve refuses, said before it is tried.
+func sealedLine(line Line, key []byte, sealed int, err error) Line {
+	switch {
+	case err != nil:
+		return Line{Name: "store", State: Failed, Detail: err.Error()}
+	case sealed > 0:
+		line.Detail += fmt.Sprintf("; CELLA_SECRET_KEY opens the credentials of the %d sandbox row(s) it seals", sealed)
+	case len(key) == 0:
+		line.Detail += "; CELLA_SECRET_KEY is unset, so cellad serve keeps each sandbox's environment values and gateway credential unsealed"
+	}
+	return line
 }
 
 // schemaLine reads what the database said about its schema. The cases are

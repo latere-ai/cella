@@ -221,3 +221,28 @@ func TestGatewayFailsWithoutPublicRoots(t *testing.T) {
 		t.Fatalf("gateway = %s (%s), want a failure naming the roots and the file", got.State, got.Detail)
 	}
 }
+
+// TestSealedLine: the store's line says whether the key opens what the
+// database holds sealed, fails where it does not, and says so where no key
+// is set and nothing is sealed.
+func TestSealedLine(t *testing.T) {
+	ok := Line{Name: "store", State: Ok, Detail: "the database answers"}
+	for _, tc := range []struct {
+		name   string
+		key    []byte
+		sealed int
+		err    error
+		state  State
+		want   string
+	}{
+		{"a key that opens them", []byte("k"), 3, nil, Ok, "opens the credentials of the 3 sandbox row(s)"},
+		{"a key that does not", []byte("k"), 0, errors.New("store: CELLA_SECRET_KEY does not open the credentials sealed in 1 of 1 sandbox row(s)"), Failed, "does not open"},
+		{"no key and nothing sealed", nil, 0, nil, Ok, "keeps each sandbox's environment values and gateway credential unsealed"},
+		{"a key and nothing sealed", []byte("k"), 0, nil, Ok, "the database answers"},
+	} {
+		got := sealedLine(ok, tc.key, tc.sealed, tc.err)
+		if got.State != tc.state || !strings.Contains(got.Detail, tc.want) {
+			t.Errorf("%s: %+v, want %s naming %q", tc.name, got, tc.state, tc.want)
+		}
+	}
+}
