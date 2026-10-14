@@ -19,6 +19,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
+
 	v1 "latere.ai/x/cella/manifest/v1"
 	"latere.ai/x/cella/runtime"
 )
@@ -297,6 +299,46 @@ func TestARunningCommandHoldsItsSandboxActive(t *testing.T) {
 		if got := count(); got != ended {
 			t.Errorf("exec%s stamped %d times after it ended", form, got-ended)
 		}
+	}
+}
+
+// TestACommandOverTheExecSocketHoldsItsSandboxActive: a command run over
+// the exec socket, which a session core uses for long commands, stamps its
+// sandbox active until it ends with no input, so the idle stop never ends a
+// sandbox under it. Stamped only at its start and on input, such a command
+// had the reaper stop the sandbox under it.
+func TestACommandOverTheExecSocketHoldsItsSandboxActive(t *testing.T) {
+	stamps := &touchDriver{}
+	f := setupDriver(t, nil, func(d runtime.Driver) runtime.Driver {
+		stamps.Driver = d
+		return stamps
+	})
+	f.h.(*handler).activeEvery = 20 * time.Millisecond
+	var obj v1.Sandbox
+	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice, createBody, 201), &obj); err != nil {
+		t.Fatal(err)
+	}
+	count := func() int {
+		n := 0
+		for _, id := range stamps.stamped() {
+			if id == obj.Status.ID {
+				n++
+			}
+		}
+		return n
+	}
+	before := count()
+	_, r := f.attachTo("/v1/sandboxes/"+obj.Status.ID+"/exec", f.alice, `{"command":["sleep","0.3"]}`)
+	if last, code := r.ended(t); last != `{"exit":0}` || code != websocket.CloseNormalClosure {
+		t.Fatalf("the command ended %q with %d", last, code)
+	}
+	if got := count() - before; got < 4 {
+		t.Errorf("a 300ms command over the exec socket stamped %d times, want one at its start and one each 20ms", got)
+	}
+	ended := count()
+	time.Sleep(100 * time.Millisecond)
+	if got := count(); got != ended {
+		t.Errorf("the socket stamped %d times after its command ended", got-ended)
 	}
 }
 

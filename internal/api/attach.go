@@ -119,7 +119,16 @@ func (h *handler) socket(w http.ResponseWriter, r *http.Request, terminal bool) 
 	}
 	defer func() { _ = conn.Close() }()
 	defer h.goingAway(conn)()
-	h.touch(r, obj)
+	// A command run over the exec socket holds its sandbox active until
+	// it ends, as one run over POST does: stamped only at its start and on
+	// input, a long command that read no input had the reaper stop the
+	// sandbox under it. An attached terminal stays active on its input
+	// alone, so a terminal left open and idle still stops.
+	if terminal {
+		h.touch(r, obj)
+	} else {
+		defer h.holdActive(r, obj)()
+	}
 	h.session(r, conn, obj, terminal, requestID)
 }
 

@@ -6,6 +6,15 @@ refused before it is pushed.
 
 ## Unreleased
 
+### Fixed
+
+- **A long command run over the exec socket keeps its sandbox from
+  stopping too.** v0.13.2 held a sandbox active for a command run with
+  `POST /exec`; a command run over the exec socket was still marked
+  active only at its start and on input, so a long one that read no
+  input, such as a large download, had the sandbox stopped under it. An
+  attached terminal is unchanged: an idle one still stops.
+
 ## v0.14.1 - 2026-10-14
 
 ### Fixed
