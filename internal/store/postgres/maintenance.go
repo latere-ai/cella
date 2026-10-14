@@ -60,7 +60,7 @@ func Unseal(ctx context.Context, o Options) (result UnsealResult, err error) {
 	}
 	// The pool holds no lock once the run released the lease, so it stays
 	// open across the migration and closes with the run.
-	defer func() { err = errors.Join(err, s.Close()) }()
+	defer func() { err = errors.Join(err, s.close(ctx)) }()
 	if result.Unsealed, err = s.whileWriter(ctx, "unsealing", s.UnsealCredentials); err != nil {
 		return result, err
 	}
@@ -89,7 +89,7 @@ func Rotate(ctx context.Context, o Options, next []byte) (n int, err error) {
 	if err != nil {
 		return 0, err
 	}
-	defer func() { err = errors.Join(err, s.Close()) }()
+	defer func() { err = errors.Join(err, s.close(ctx)) }()
 	return s.whileWriter(ctx, "rotating the key", func(ctx context.Context) (int, error) {
 		var moved int
 		err := s.Tx(ctx, func(tx store.Tx) error {

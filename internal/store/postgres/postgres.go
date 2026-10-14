@@ -291,7 +291,12 @@ func (s *Store) Ready(ctx context.Context) error {
 
 // Close stops the renewal, releases every lease this process holds so another
 // replica takes over at once rather than after the term, and closes the pool.
-func (s *Store) Close() error {
+func (s *Store) Close() error { return s.close(context.Background()) }
+
+// close is Close with the leases released under ctx's values, inside the
+// readiness budget, and never cut short by ctx's own end: a caller that is
+// stopping is the one that most needs its leases handed back.
+func (s *Store) close(ctx context.Context) error {
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
@@ -306,7 +311,7 @@ func (s *Store) Close() error {
 	s.stop()
 	<-s.done
 
-	ctx, cancel := context.WithTimeout(context.Background(), readyBudget)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), readyBudget)
 	defer cancel()
 	var failed error
 	for name, holder := range held {
