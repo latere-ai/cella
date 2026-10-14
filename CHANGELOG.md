@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.14.3 - 2026-10-14
+
 ### Fixed
 
 - v0.14.1 and v0.14.2 were not published: their releases stopped where
