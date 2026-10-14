@@ -305,13 +305,19 @@ func connections(getenv Getenv, problems *[]string) int32 {
 // is validated where it is set, so a deployment learns at start-up that its
 // key is the wrong length rather than on the first secret.
 func secretKey(getenv Getenv, problems *[]string) []byte {
-	raw := strings.TrimSpace(getenv("CELLA_SECRET_KEY"))
+	return keyNamed(getenv, "CELLA_SECRET_KEY", problems)
+}
+
+// keyNamed reads one envelope key: 32 bytes, base64, or nothing where the
+// variable is unset.
+func keyNamed(getenv Getenv, name string, problems *[]string) []byte {
+	raw := strings.TrimSpace(getenv(name))
 	if raw == "" {
 		return nil
 	}
 	key, err := store.ParseKey(raw)
 	if err != nil {
-		*problems = append(*problems, fmt.Sprintf("CELLA_SECRET_KEY is not usable: %v", err))
+		*problems = append(*problems, fmt.Sprintf("%s is not usable: %v", name, err))
 		return nil
 	}
 	return key
