@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.15.1 - 2026-10-14
+
 ### Fixed
 
 - **An operation's event is recorded when its caller has already gone.**
