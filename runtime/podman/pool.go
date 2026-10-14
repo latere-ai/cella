@@ -62,9 +62,8 @@ func (d *Driver) adopt(ctx context.Context, id string, a driver.Adoption) error 
 	// The clock is cut to the engine's own resolution, as the create's is,
 	// so an adopted sandbox does not read as having started before it began.
 	now := time.Now().UTC().Truncate(time.Second)
-	env := tokenEnv(a.Token, egressEnv(a.Env, a.Egress))
 	next := record{
-		labels: maps.Clone(a.Labels), env: maps.Clone(env), lastActivityAt: now,
+		labels: maps.Clone(a.Labels), lastActivityAt: now,
 		ttl: a.Lifecycle.TTL, autoStop: a.Lifecycle.AutoStop, autoDelete: a.Lifecycle.AutoDelete,
 		owner: a.Owner, name: a.Name, adoptedAt: now,
 	}
@@ -82,10 +81,11 @@ func (d *Driver) adopt(ctx context.Context, id string, a driver.Adoption) error 
 	return nil
 }
 
-// projectAdopted writes the two files the adopted sandbox holds inside itself:
-// the authority its gateway signs with, and its own identity. Both are written
-// into the running container, which is why they follow the claim rather than
-// traveling with it.
+// projectAdopted writes the three files the adopted sandbox holds inside
+// itself: the authority its gateway signs with, its own identity, and the
+// environment its commands are given, which the entry's container was not
+// created with. All three are written into the running container, which is
+// why they follow the claim rather than traveling with it.
 func (d *Driver) projectAdopted(ctx context.Context, id, user string, a driver.Adoption) error {
 	if a.Egress.CAPEM != "" {
 		if err := d.putEgressCA(ctx, id, a.Egress.CAPEM); err != nil {
@@ -96,6 +96,9 @@ func (d *Driver) projectAdopted(ctx context.Context, id, user string, a driver.A
 		if err := d.putToken(ctx, id, user, a.Token); err != nil {
 			return fmt.Errorf("podman: adopting %s: %w", id, err)
 		}
+	}
+	if err := d.putEnv(ctx, id, tokenEnv(a.Token, egressEnv(a.Env, a.Egress))); err != nil {
+		return fmt.Errorf("podman: adopting %s: %w", id, err)
 	}
 	return nil
 }

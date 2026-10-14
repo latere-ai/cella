@@ -4,6 +4,7 @@
 package podman
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"sync"
@@ -107,18 +108,23 @@ func TestAdoptionWritesTheRecordAndProjects(t *testing.T) {
 	if len(c.files) < 2 {
 		t.Errorf("the adopted container holds %v, want the token and the gateway's authority", c.files)
 	}
-	// The record's environment is what the next Exec carries, which is how
-	// both container drivers hand a running sandbox a new environment.
-	records, err := d.records(t.Context(), "sbx_pool")
-	if err != nil {
-		t.Fatal(err)
+	// The environment the container keeps for its commands is what the next
+	// Exec carries, which is how both container drivers hand a running
+	// sandbox a new environment, and no label holds it.
+	env := map[string]string{}
+	if err := json.Unmarshal(c.files[envPath].body, &env); err != nil {
+		t.Fatalf("the adopted container's environment file: %v", err)
 	}
-	if got := records[0].env["GREETING"]; got != "hello" {
+	if got := env["GREETING"]; got != "hello" {
 		t.Errorf("the adopted environment holds GREETING=%q, want hello", got)
 	}
-	if got := records[0].env[driver.TokenFileEnv]; got != driver.TokenPath {
+	if got := env[driver.TokenFileEnv]; got != driver.TokenPath {
 		t.Errorf("the adopted environment names the token at %q, want %q", got, driver.TokenPath)
 	}
+	if file := c.files[envPath]; file.mode != 0o400 || file.uid != 0 || file.gid != 0 {
+		t.Errorf("the environment file is mode %o owned by %d:%d, want 400 owned by root", file.mode, file.uid, file.gid)
+	}
+	noLabelCarries(t, f, "hello", "cred")
 }
 
 // TestAdoptionIsExclusiveAcrossDrivers is the compare-and-swap. Two driver

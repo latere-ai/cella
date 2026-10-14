@@ -7,7 +7,6 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"maps"
 	"net"
 	"net/http"
 	"path"
@@ -90,7 +89,9 @@ func (d *Driver) resizeStarted(ctx context.Context, execID string, cols, rows in
 }
 
 // createExec validates the request and creates one exec session, merging the
-// sandbox's own environment with the request's as Exec does.
+// sandbox's own environment with the request's as Exec does. The session
+// inherits the container's environment, so it is given only what an update or
+// an adoption set since at another value, and the request's own.
 func (d *Driver) createExec(ctx context.Context, id string, create execCreate, reqEnv map[string]string, workdir string) (string, error) {
 	if workdir != "" && (!path.IsAbs(workdir) || strings.Contains(workdir, "..")) {
 		return "", fmt.Errorf("%w: workdir %q", driver.ErrInvalid, workdir)
@@ -109,12 +110,15 @@ func (d *Driver) createExec(ctx context.Context, id string, create execCreate, r
 	if err != nil {
 		return "", err
 	}
-	env := maps.Clone(rec.env)
-	if env == nil {
-		env = map[string]string{}
+	// A record an earlier version wrote still carries the environment in
+	// its label until its next generation moves it, and holds the newest.
+	set := rec.env
+	if set == nil {
+		if set, err = d.readEnv(ctx, id); err != nil {
+			return "", err
+		}
 	}
-	maps.Copy(env, reqEnv)
-	create.Env = envList(env)
+	create.Env = envList(commandEnv(st.env, set, reqEnv))
 	var created struct {
 		ID string `json:"Id"`
 	}

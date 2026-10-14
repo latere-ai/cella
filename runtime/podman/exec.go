@@ -83,8 +83,9 @@ func (e *execution) Close() error {
 }
 
 // Exec runs one command in the sandbox's container. The sandbox's environment
-// is what the record holds, which is what a later Update wrote, and the
-// request's own entries sit on top of it. A request with a TTY or a stdin
+// is the container's own, which the command inherits, with what a later
+// Update or an adoption wrote into the container over it, and the request's
+// own entries sit on top of both. A request with a TTY or a stdin
 // travels over a hijacked connection; without either, the reply's body is the
 // whole of the stream.
 func (d *Driver) Exec(ctx context.Context, id string, req driver.ExecRequest) (driver.Exec, error) {

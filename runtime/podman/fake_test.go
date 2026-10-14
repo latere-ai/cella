@@ -104,7 +104,11 @@ type fakeExecResult struct {
 type fakeExec struct {
 	container string
 	cmd       []string
+	// env is the session's environment as a real engine builds it: the
+	// container's own, with the request's over it. requested is what the
+	// request carried.
 	env       []string
+	requested []string
 	dir       string
 	tty       bool
 	stdin     bool
@@ -490,7 +494,7 @@ func (f *fake) oneContainer(w http.ResponseWriter, r *http.Request, rest string)
 		var ci containerInspect
 		ci.State.Status, ci.State.ExitCode = c.state, c.exitCode
 		ci.State.StartedAt, ci.State.FinishedAt = c.startedAt, c.finishedAt
-		ci.Config.User = c.user
+		ci.Config.User, ci.Config.Env = c.user, envList(c.env)
 		for port, ln := range c.published {
 			if ci.NetworkSettings.Ports == nil {
 				ci.NetworkSettings.Ports = map[string][]hostBinding{}
@@ -585,12 +589,20 @@ func (f *fake) createExec(w http.ResponseWriter, r *http.Request, container stri
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	// A session inherits its container's environment, and the request's
+	// variables are set over it.
+	session := map[string]string{}
+	if c := f.containers[container]; c != nil {
+		maps.Copy(session, c.env)
+	}
+	maps.Copy(session, envOf(in.Env))
+	env := envList(session)
 	result := fakeExecResult{}
 	if f.run != nil {
-		result = f.run(in.Cmd, in.Env, in.WorkingDir)
+		result = f.run(in.Cmd, env, in.WorkingDir)
 	}
 	id := "exec" + strconv.Itoa(len(f.execs)+1)
-	f.execs[id] = &fakeExec{container: container, cmd: in.Cmd, env: in.Env, dir: in.WorkingDir, tty: in.Tty, stdin: in.AttachStdin, result: result, running: true}
+	f.execs[id] = &fakeExec{container: container, cmd: in.Cmd, env: env, requested: in.Env, dir: in.WorkingDir, tty: in.Tty, stdin: in.AttachStdin, result: result, running: true}
 	writeJSON(w, map[string]string{"Id": id})
 }
 

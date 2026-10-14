@@ -774,11 +774,20 @@ func TestLabelRoundTrip(t *testing.T) {
 	if bare.workspacePath != driver.DefaultWorkdir {
 		t.Fatalf("a record with no path reads %q", bare.workspacePath)
 	}
-	r := record{generation: 7, labels: map[string]string{"a": "1"}, env: map[string]string{"K": "v"},
+	r := record{generation: 7, labels: map[string]string{"a": "1"},
 		stopped: true, lastActivityAt: now, ttl: time.Hour, autoStop: time.Minute, autoDelete: time.Second}
 	got := recordOf(r.volumeLabels("sbx_a"))
 	if !reflect.DeepEqual(got, r) {
 		t.Fatalf("record round trip = %+v, want %+v", got, r)
+	}
+	// An environment is never a label, and one an earlier version wrote as
+	// a label is read so it can be moved.
+	r.env = map[string]string{"K": "v"}
+	if _, ok := r.volumeLabels("sbx_a")[labelEnv]; ok {
+		t.Fatal("a record with an environment writes it as a label")
+	}
+	if old := recordOf(map[string]string{labelEnv: `{"K":"v"}`}); old.env["K"] != "v" {
+		t.Fatalf("the environment an earlier version labeled reads %v", old.env)
 	}
 	// Unreadable values fall back rather than failing a list of every sandbox.
 	broken := recordOf(map[string]string{labelGeneration: "x", labelActivity: "x", labelTTL: "x", labelEnv: "{"})

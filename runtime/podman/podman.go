@@ -35,6 +35,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -73,8 +74,11 @@ const (
 	labelTTL        = prefix + "ttl"
 	labelAutoStop   = prefix + "auto-stop"
 	labelAutoDelete = prefix + "auto-delete"
-	labelEnv        = prefix + "env"
-	labelUser       = prefix + "label."
+	// labelEnv is the label an earlier version of this driver wrote the
+	// sandbox's environment to. It is read, so the values move into the
+	// container (env.go), and never written.
+	labelEnv  = prefix + "env"
+	labelUser = prefix + "label."
 	// The pool's three keys, on the record volume rather than the workspace
 	// one: podman fixes a volume's labels at create, and an adoption
 	// rewrites all three (spec 020).
@@ -296,7 +300,8 @@ type containerInspect struct {
 		FinishedAt time.Time `json:"FinishedAt"`
 	} `json:"State"`
 	Config struct {
-		User string `json:"User"`
+		User string   `json:"User"`
+		Env  []string `json:"Env"`
 	} `json:"Config"`
 	NetworkSettings struct {
 		Ports map[string][]hostBinding `json:"Ports"`
@@ -314,7 +319,8 @@ type containerListItem struct {
 
 // status is the part of a container Inspect and List agree on, plus the user
 // it runs as, which only an Inspect reports and which a re-projected file
-// takes as its owner.
+// takes as its owner, and the environment it was created with, which only an
+// Inspect reports and which a command inherits.
 type status struct {
 	present    bool
 	state      string
@@ -322,6 +328,7 @@ type status struct {
 	startedAt  time.Time
 	finishedAt time.Time
 	user       string
+	env        map[string]string
 }
 
 // ---- identity and record ----
@@ -390,8 +397,12 @@ func identityOf(l map[string]string) identity {
 // it neither edits a label, which podman refuses, nor re-creates the
 // container, which would kill the workload.
 type record struct {
-	generation                uint64
-	labels, env               map[string]string
+	generation uint64
+	labels     map[string]string
+	// env is an environment the next generation writes into the container
+	// rather than into a label (env.go): what an update set, or what an
+	// earlier version of this driver left in the label it read it from.
+	env                       map[string]string
 	stopped                   bool
 	lastActivityAt            time.Time
 	ttl, autoStop, autoDelete time.Duration
@@ -425,11 +436,6 @@ func (r record) volumeLabels(id string) map[string]string {
 	for key, d := range map[string]time.Duration{labelTTL: r.ttl, labelAutoStop: r.autoStop, labelAutoDelete: r.autoDelete} {
 		if d > 0 {
 			l[key] = d.String()
-		}
-	}
-	if len(r.env) > 0 {
-		if b, err := json.Marshal(r.env); err == nil {
-			l[labelEnv] = string(b)
 		}
 	}
 	for k, v := range r.labels {
@@ -511,7 +517,7 @@ func (d *Driver) inspectContainer(ctx context.Context, id string) (status, error
 	}
 	return status{present: true, state: ci.State.Status, exitCode: ci.State.ExitCode,
 		startedAt: engineInstant(ci.State.StartedAt), finishedAt: engineInstant(ci.State.FinishedAt),
-		user: ci.Config.User}, nil
+		user: ci.Config.User, env: envOf(ci.Config.Env)}, nil
 }
 
 // engineInstant is one resolution for every instant a container reports. The
@@ -647,7 +653,11 @@ func (d *Driver) writeRecord(ctx context.Context, id string, previous uint64, r 
 }
 
 // edit reads the current record, applies fn, and writes the next generation.
-// fn returning false means the read found nothing to change.
+// fn returning false means the read found nothing to change. A record that
+// still carries an environment an earlier version wrote as a label is
+// rewritten whatever fn says, with the environment moved into the container
+// first, so a write that fails loses no value. The environment fn sets is
+// written into the container the same way.
 func (d *Driver) edit(ctx context.Context, id string, fn func(*record) bool) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -665,8 +675,15 @@ func (d *Driver) edit(ctx context.Context, id string, fn func(*record) bool) err
 		return err
 	}
 	previous := r.generation
-	if !fn(&r) {
+	if !fn(&r) && r.env == nil {
 		return nil
+	}
+	if r.env != nil {
+		// A container that is gone runs nothing the environment could
+		// reach, so the record is written without it.
+		if err := d.putEnv(ctx, id, r.env); err != nil && !errors.Is(err, driver.ErrNotFound) {
+			return err
+		}
 	}
 	return d.writeRecord(ctx, id, previous, r)
 }
@@ -733,7 +750,9 @@ func (d *Driver) Create(ctx context.Context, s driver.CreateSpec) (driver.Ref, e
 		_ = d.removeVolume(clean, workspaceVolume(s.ID))
 	}
 	env := displayEnv(s, tokenEnv(s.Token, egressEnv(s.Env, s.Egress)))
-	rec := record{labels: maps.Clone(s.Labels), env: maps.Clone(env), lastActivityAt: time.Now().UTC(),
+	// The environment is the container's own and no record's: a command
+	// inherits it.
+	rec := record{labels: maps.Clone(s.Labels), lastActivityAt: time.Now().UTC(),
 		ttl: s.Lifecycle.TTL, autoStop: s.Lifecycle.AutoStop, autoDelete: s.Lifecycle.AutoDelete,
 		pool: s.Prewarm}
 	if err := d.writeRecord(ctx, s.ID, 0, rec); err != nil {
@@ -894,7 +913,8 @@ func (d *Driver) deleteLocked(ctx context.Context, id string) error {
 
 // Update writes the next record. Podman fixes a container's labels and
 // environment at create, so neither is rewritten: the labels are read from the
-// record, and the environment reaches the sandbox through Exec.
+// record, and the environment is written into the container beside its token
+// and reaches the sandbox through Exec.
 func (d *Driver) Update(ctx context.Context, id string, c driver.Change) error {
 	adoption, err := c.Adoption()
 	if err != nil {
@@ -913,7 +933,7 @@ func (d *Driver) Update(ctx context.Context, id string, c driver.Change) error {
 	// because the container's file system is where the workload reads it.
 	// It goes in before the record so a re-projection that fails leaves the
 	// record naming the file the container still holds.
-	if len(c.Token) > 0 {
+	if len(c.Token) > 0 || c.Env != nil {
 		running, err := d.inspectContainer(ctx, id)
 		if err != nil {
 			return err
@@ -921,8 +941,10 @@ func (d *Driver) Update(ctx context.Context, id string, c driver.Change) error {
 		if !running.present {
 			return driver.ErrNotFound
 		}
-		if err := d.putToken(ctx, id, running.user, c.Token); err != nil {
-			return err
+		if len(c.Token) > 0 {
+			if err := d.putToken(ctx, id, running.user, c.Token); err != nil {
+				return err
+			}
 		}
 	}
 	return d.edit(ctx, id, func(r *record) bool {
@@ -931,6 +953,9 @@ func (d *Driver) Update(ctx context.Context, id string, c driver.Change) error {
 		}
 		if c.Env != nil {
 			r.env = maps.Clone(*c.Env)
+			if r.env == nil {
+				r.env = map[string]string{}
+			}
 		}
 		if c.Lifecycle != nil {
 			r.ttl, r.autoStop, r.autoDelete = c.Lifecycle.TTL, c.Lifecycle.AutoStop, c.Lifecycle.AutoDelete
