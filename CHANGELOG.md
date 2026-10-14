@@ -38,8 +38,8 @@ refused before it is pushed.
 - **`CELLA_SECRET_KEY` is required once the database holds anything
   sealed.** `cellad serve` refuses to start without it, or with another
   key, and says how many sandbox rows it cannot open, where it used to
-  start and fail when it became the writer. `cellad check` says whether
-  the key opens them. The Deployment and the check Job in `deploy/base`
+  start and fail when it became the writer. The Deployment and the check
+  Job in `deploy/base`
   now read the key from the `cellad-db` Secret as a required key, so an
   installation that runs the base without a database creates that Secret
   with `CELLA_SECRET_KEY` before applying this release's manifests:

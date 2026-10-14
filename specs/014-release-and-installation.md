@@ -189,10 +189,7 @@ the probe too ([[006-identity]]). Each optional dependency is checked
 only when its configuration is set and reported as not configured
 otherwise: admission answers a probe when `CELLA_ADMISSION_URL` is set,
 the sink when `CELLA_EVENTS_URL` is set, and Postgres is reachable and at
-the binary's schema when `CELLA_DB_URL` is set, and that
-`CELLA_SECRET_KEY` opens the sandbox credentials the database holds
-sealed, which is the start `cellad serve` refuses otherwise
-([[010-state]]). Exit 1 on any failure.
+the binary's schema when `CELLA_DB_URL` is set. Exit 1 on any failure.
 The install document ends with it.
 
 ### cellad rotate and cellad unseal
@@ -274,4 +271,4 @@ it, and nothing in the pipeline is a placeholder any more
 | A backup restores into a binary at or above the dumped schema and a lower binary refuses to start | `TestRestoreSchemaGuard` against [[010-state]]'s guard | open: the guard is built, and `cellad check` reports the schema against the binary's; the restore walk waits on `docs/upgrades/` |
 | `docs/upgrades/` rollback steps walk green and a downgrade across a migration is refused | `TestUpgradeDocRollback` | open: `docs/upgrades/` does not exist and an upgrade's steps are in its CHANGELOG section, so there are no rollback steps to walk; the refusal of a binary below the database's schema is built at the store, `TestSchemaGuards` ([[010-state]]) |
 | A tag without a CHANGELOG section is refused at pre-push and in the pipeline | the gate's `release` command | passing; `build` reads the section before it compiles and `publish` writes it as the body |
-| `cellad unseal` takes a database this release sealed back to the schema of the release before it, with every row decoding as that release decodes it and every value in its row, does nothing a second time, and is refused without the key, under another key, and while a replica holds the writer lease; `cellad rotate` moves every data key to the next key in one transaction, after which the old key is refused at start, and fails whole where a row is written meanwhile; `cellad check` says whether the key opens what is sealed; the Deployment and the check Job require the key | `TestUnsealTakesTheDatabaseBack`, `TestAMaintenanceRunWaitsForNoWriter`, `TestRotateMovesTheKey`, `TestARotationThatRacesAWriteRotatesNothing`, `TestRotateThenUnsealADatabase`, `TestMaintenanceRefusesItsConfiguration`, `TestLoadMaintenance`, `TestSealedLine`, `TestOpenRefusesAKeyThatDoesNotOpenTheRows` | passing |
+| `cellad unseal` takes a database this release sealed back to the schema of the release before it, with every row decoding as that release decodes it and every value in its row, does nothing a second time, and is refused without the key, under another key, and while a replica holds the writer lease; `cellad rotate` moves every data key to the next key in one transaction, after which the old key is refused at start, and fails whole where a row is written meanwhile; the Deployment and the check Job require the key | `TestUnsealTakesTheDatabaseBack`, `TestUnsealReadsTheSchemaFirst`, `TestAMaintenanceRunWaitsForNoWriter`, `TestRotateMovesTheKey`, `TestARotationThatRacesAWriteRotatesNothing`, `TestRotateThenUnsealADatabase`, `TestMaintenanceRefusesItsConfiguration`, `TestLoadMaintenance`, `TestOpenRefusesAKeyThatDoesNotOpenTheRows` | passing |
