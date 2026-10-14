@@ -111,7 +111,7 @@ func (e Envelope) Wrap(dataKey []byte) ([]byte, error) {
 	if kek == nil {
 		return nil, ErrNoSecretKey
 	}
-	return box(kek, dataKey)
+	return box(kek, dataKey, nil)
 }
 
 func (e Envelope) Unwrap(wrapped []byte) ([]byte, error) {
@@ -119,7 +119,7 @@ func (e Envelope) Unwrap(wrapped []byte) ([]byte, error) {
 	if kek == nil {
 		return nil, ErrNoSecretKey
 	}
-	dataKey, err := unbox(kek, wrapped)
+	dataKey, err := unbox(kek, wrapped, nil)
 	if err != nil {
 		return nil, fmt.Errorf("store: unwrapping the data key: %w", err)
 	}
@@ -129,6 +129,14 @@ func (e Envelope) Unwrap(wrapped []byte) ([]byte, error) {
 // Seal returns the wrapped data key and the sealed value. Each is its nonce
 // followed by the ciphertext, so one column holds one self-contained box.
 func (e Envelope) Seal(plaintext []byte) (wrapped, sealed []byte, err error) {
+	return e.SealBound(plaintext, nil)
+}
+
+// SealBound is Seal with the value bound to bound as associated data: only
+// OpenBound with the same bytes opens it, so a value sealed for one row does
+// not open as another's. The data key's own box is not bound, so a rotation
+// rewraps it as it rewraps every other.
+func (e Envelope) SealBound(plaintext, bound []byte) (wrapped, sealed []byte, err error) {
 	kek := e.kek()
 	if kek == nil {
 		return nil, nil, ErrNoSecretKey
@@ -141,11 +149,11 @@ func (e Envelope) Seal(plaintext []byte) (wrapped, sealed []byte, err error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	sealed, err = box(value, plaintext)
+	sealed, err = box(value, plaintext, bound)
 	if err != nil {
 		return nil, nil, err
 	}
-	wrapped, err = box(kek, dataKey)
+	wrapped, err = box(kek, dataKey, nil)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -155,6 +163,12 @@ func (e Envelope) Seal(plaintext []byte) (wrapped, sealed []byte, err error) {
 // Open unwraps the data key and returns the value. A key that did not seal
 // this row fails here, which is what a wrong CELLA_SECRET_KEY looks like.
 func (e Envelope) Open(wrapped, sealed []byte) ([]byte, error) {
+	return e.OpenBound(wrapped, sealed, nil)
+}
+
+// OpenBound reverses SealBound, and fails for any bound but the one the value
+// was sealed with.
+func (e Envelope) OpenBound(wrapped, sealed, bound []byte) ([]byte, error) {
 	dataKey, err := e.Unwrap(wrapped)
 	if err != nil {
 		return nil, err
@@ -163,7 +177,7 @@ func (e Envelope) Open(wrapped, sealed []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	plaintext, err := unbox(value, sealed)
+	plaintext, err := unbox(value, sealed, bound)
 	if err != nil {
 		return nil, fmt.Errorf("store: opening the value: %w", err)
 	}
@@ -182,22 +196,23 @@ func newAEAD(key []byte) (cipher.AEAD, error) {
 	return aead, nil
 }
 
-// box seals plaintext as nonce || ciphertext.
-func box(aead cipher.AEAD, plaintext []byte) ([]byte, error) {
+// box seals plaintext as nonce || ciphertext, with bound as the associated
+// data the box is opened against.
+func box(aead cipher.AEAD, plaintext, bound []byte) ([]byte, error) {
 	nonce := make([]byte, aead.NonceSize())
 	if _, err := rand.Read(nonce); err != nil {
 		return nil, fmt.Errorf("store: reading a nonce: %w", err)
 	}
-	return aead.Seal(nonce, nonce, plaintext, nil), nil
+	return aead.Seal(nonce, nonce, plaintext, bound), nil
 }
 
 // unbox reverses box.
-func unbox(aead cipher.AEAD, sealed []byte) ([]byte, error) {
+func unbox(aead cipher.AEAD, sealed, bound []byte) ([]byte, error) {
 	n := aead.NonceSize()
 	if len(sealed) < n {
 		return nil, errors.New("the sealed value is shorter than its nonce")
 	}
-	return aead.Open(nil, sealed[:n], sealed[n:], nil)
+	return aead.Open(nil, sealed[:n], sealed[n:], bound)
 }
 
 // RewrapKeys validates the two keys a rotation runs between. The old key must
