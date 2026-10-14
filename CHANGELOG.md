@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.15.0 - 2026-10-14
+
 ### Security
 
 - **A sandbox's environment values and gateway credential are no longer
