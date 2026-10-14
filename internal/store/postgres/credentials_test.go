@@ -394,6 +394,7 @@ func TestSealCredentialsReportsWhatItCannotSeal(t *testing.T) {
 	// refused at Open, which TestOpenRefusesAKeyThatDoesNotOpenTheRows holds.
 	s := open(t, dsn, storetest.Key, time.Hour)
 	other := open(t, dsn, storetest.NextKey, time.Hour)
+	keyless := open(t, dsn, nil, time.Hour)
 	foreign := sandbox("sbx_foreign", "foreign", map[string]string{"API_KEY": "foreign"}, "foreign-credential")
 	if err := store.ForController(other, "default", store.Journaled).Write(ctx, foreign, controller.MutationCreated); err != nil {
 		t.Fatal(err)
@@ -412,11 +413,23 @@ func TestSealCredentialsReportsWhatItCannotSeal(t *testing.T) {
 	if _, err := s.SealCredentials(gone); err == nil {
 		t.Error("a rewrite whose caller gave up reported nothing")
 	}
+	if _, err := s.UnsealCredentials(gone); err == nil {
+		t.Error("an unsealing whose caller gave up reported nothing")
+	}
+	if _, err := keyless.UnsealCredentials(ctx); !errors.Is(err, store.ErrNoSecretKey) {
+		t.Errorf("an unsealing without the key = %v, want ErrNoSecretKey", err)
+	}
+	if _, err := postgres.Unseal(ctx, postgres.Options{URL: dsn, Key: storetest.NextKey}); !errors.Is(err, postgres.ErrWrongKey) {
+		t.Errorf("Unseal under a key that does not open the rows = %v, want ErrWrongKey", err)
+	}
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.SealCredentials(ctx); !errors.Is(err, postgres.ErrClosed) {
 		t.Errorf("a closed store's SealCredentials = %v, want ErrClosed", err)
+	}
+	if _, err := s.UnsealCredentials(ctx); !errors.Is(err, postgres.ErrClosed) {
+		t.Errorf("a closed store's UnsealCredentials = %v, want ErrClosed", err)
 	}
 }
 

@@ -12,7 +12,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"latere.ai/x/cella/internal/store"
 )
@@ -500,30 +499,9 @@ func checkSealed(ctx context.Context, q querier, env store.Envelope) error {
 	return nil
 }
 
-// CheckSealed is checkSealed over a pool a caller opened, for a command that
-// reads the database without opening the store: it reports how many sandbox
-// rows hold sealed credentials, and the same refusal Open gives.
-func CheckSealed(ctx context.Context, pool *pgxpool.Pool, key []byte) (int, error) {
-	env, err := store.NewEnvelope(key)
-	if err != nil {
-		return 0, err
-	}
-	if err := checkSealed(ctx, pool, env); err != nil {
-		return 0, err
-	}
-	var n int
-	err = pool.QueryRow(ctx, `select count(*) from objects where sealed is not null`).Scan(&n)
-	if isUndefinedColumn(err) {
-		return 0, nil
-	}
-	if err != nil {
-		return 0, fmt.Errorf("store: counting the sealed sandbox credentials: %w", err)
-	}
-	return n, nil
-}
-
 // isUndefinedColumn is the Postgres code of a schema from before the sealed
-// columns, and of a database with no schema at all.
+// columns, and of a database with no schema at all, neither of which holds
+// anything sealed.
 func isUndefinedColumn(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && (pgErr.Code == "42703" || pgErr.Code == "42P01")

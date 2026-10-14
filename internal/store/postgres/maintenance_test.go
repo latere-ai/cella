@@ -8,11 +8,11 @@ import (
 	"encoding/json"
 	"errors"
 	"maps"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"latere.ai/x/cella/controller"
 	"latere.ai/x/cella/internal/store"
@@ -39,17 +39,6 @@ func connect(t *testing.T, dsn string) *pgx.Conn {
 	}
 	t.Cleanup(func() { _ = conn.Close(context.Background()) })
 	return conn
-}
-
-// pool opens a pool of one connection to the database, as cellad check does.
-func pool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	p, err := pgxpool.New(t.Context(), dsn)
-	if err != nil {
-		t.Fatalf("opening a pool: %v", err)
-	}
-	t.Cleanup(p.Close)
-	return p
 }
 
 // TestUnsealTakesTheDatabaseBack is the rollback: rows sealed by this release
@@ -295,12 +284,35 @@ func TestOpenRefusesAKeyThatDoesNotOpenTheRows(t *testing.T) {
 	}
 	refused(t, dsn, nil, store.ErrNoSecretKey, "CELLA_SECRET_KEY")
 	refused(t, dsn, storetest.NextKey, postgres.ErrWrongKey, "sbx_a")
-	pool := pool(t, dsn)
-	n, err := postgres.CheckSealed(t.Context(), pool, storetest.Key)
-	if err != nil || n != 1 {
-		t.Errorf("CheckSealed with the key = %d, %v, want the one row", n, err)
+}
+
+// TestUnsealReadsTheSchemaFirst: a database with no schema holds nothing
+// sealed and is left alone, and a schema that is dirty or ahead of this
+// binary is refused before anything is opened, as Open refuses it.
+func TestUnsealReadsTheSchemaFirst(t *testing.T) {
+	admin := server(t)
+	fresh := database(t, admin)
+	result, err := postgres.Unseal(t.Context(), postgres.Options{URL: fresh, Key: storetest.Key})
+	if err != nil || result.Unsealed != 0 || result.Schema != 0 {
+		t.Errorf("Unseal of a database with no schema = %+v, %v, want nothing done", result, err)
 	}
-	if _, err := postgres.CheckSealed(t.Context(), pool, storetest.NextKey); !errors.Is(err, postgres.ErrWrongKey) {
-		t.Errorf("CheckSealed with another key = %v, want ErrWrongKey", err)
+	for _, tc := range []struct{ name, statement, want string }{
+		{"dirty", `update schema_migrations set dirty = true`, "dirty"},
+		{"ahead", `update schema_migrations set version = 9999, dirty = false`, "9999"},
+	} {
+		dsn := database(t, admin)
+		if err := open(t, dsn, storetest.Key, time.Hour).Close(); err != nil {
+			t.Fatal(err)
+		}
+		execute(t, dsn, tc.statement)
+		if _, err := postgres.Unseal(t.Context(), postgres.Options{URL: dsn, Key: storetest.Key}); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("Unseal of a schema %s = %v, want it named", tc.name, err)
+		}
+		if _, err := postgres.Unseal(t.Context(), postgres.Options{URL: "postgres://cella@127.0.0.1:1/cella?connect_timeout=1", Key: storetest.Key}); err == nil {
+			t.Error("Unseal of a database that does not answer reported nothing")
+		}
+	}
+	if _, err := postgres.Rotate(t.Context(), postgres.Options{URL: fresh}, storetest.NextKey); !errors.Is(err, store.ErrNoSecretKey) {
+		t.Errorf("Rotate without the current key = %v, want ErrNoSecretKey", err)
 	}
 }

@@ -41,7 +41,7 @@ type UnsealResult struct {
 // migration holds a session lock a transaction pooler loses. A database
 // already below SealedCredentials holds nothing sealed, and is left as it is,
 // so a second run does nothing.
-func Unseal(ctx context.Context, o Options) (UnsealResult, error) {
+func Unseal(ctx context.Context, o Options) (result UnsealResult, err error) {
 	if len(o.Key) == 0 {
 		return UnsealResult{}, fmt.Errorf("store: unsealing needs the key the rows were sealed under: %w", store.ErrNoSecretKey)
 	}
@@ -49,27 +49,27 @@ func Unseal(ctx context.Context, o Options) (UnsealResult, error) {
 	if err != nil {
 		return UnsealResult{}, err
 	}
+	result.Schema = version
 	if version < migrations.SealedCredentials {
-		return UnsealResult{Schema: version}, nil
+		return result, nil
 	}
 	o.PoolURL = ""
 	s, err := Open(ctx, o)
 	if err != nil {
-		return UnsealResult{Schema: version}, err
+		return result, err
 	}
-	n, err := s.whileWriter(ctx, "unsealing", s.UnsealCredentials)
-	closed := s.Close()
-	if err != nil {
-		return UnsealResult{Unsealed: n, Schema: version}, errors.Join(err, closed)
-	}
-	if closed != nil {
-		return UnsealResult{Unsealed: n, Schema: version}, closed
+	// The pool holds no lock once the run released the lease, so it stays
+	// open across the migration and closes with the run.
+	defer func() { err = errors.Join(err, s.Close()) }()
+	if result.Unsealed, err = s.whileWriter(ctx, "unsealing", s.UnsealCredentials); err != nil {
+		return result, err
 	}
 	below := migrations.SealedCredentials - 1
-	if err := downTo(o.URL, below); err != nil {
-		return UnsealResult{Unsealed: n, Schema: version}, err
+	if err = downTo(o.URL, below); err != nil {
+		return result, err
 	}
-	return UnsealResult{Unsealed: n, Schema: below}, nil
+	result.Schema = below
+	return result, nil
 }
 
 // Rotate moves every data key the database holds wrapped, each secret value's
@@ -78,7 +78,7 @@ func Unseal(ctx context.Context, o Options) (UnsealResult, error) {
 // value's ciphertext is read or written. Every replica runs under the old key
 // until it restarts, so Rotate is run with none serving, and each starts again
 // under next.
-func Rotate(ctx context.Context, o Options, next []byte) (int, error) {
+func Rotate(ctx context.Context, o Options, next []byte) (n int, err error) {
 	if len(o.Key) == 0 {
 		return 0, fmt.Errorf("store: a rotation needs the key the database is sealed under now: %w", store.ErrNoSecretKey)
 	}
@@ -89,7 +89,8 @@ func Rotate(ctx context.Context, o Options, next []byte) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	n, err := s.whileWriter(ctx, "rotating the key", func(ctx context.Context) (int, error) {
+	defer func() { err = errors.Join(err, s.Close()) }()
+	return s.whileWriter(ctx, "rotating the key", func(ctx context.Context) (int, error) {
 		var moved int
 		err := s.Tx(ctx, func(tx store.Tx) error {
 			var err error
@@ -98,7 +99,6 @@ func Rotate(ctx context.Context, o Options, next []byte) (int, error) {
 		})
 		return moved, err
 	})
-	return n, errors.Join(err, s.Close())
 }
 
 // whileWriter runs fn holding the writer lease, which it takes for the run and
