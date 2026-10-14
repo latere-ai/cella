@@ -127,7 +127,7 @@ for each capability, and what the network rule of each sandbox admits.
 | `CELLA_DB_URL` | unset | a `postgres://` URL for desired state, the event journal, and secret values. Migrations run over it at start, and a schema this binary does not know stops the start. Unset, state is a snapshot under `CELLA_DATA_DIR` that one process holds, and a sandbox the runtime lost is not recovered |
 | `CELLA_DB_POOL_URL` | `CELLA_DB_URL` | a pooled endpoint for the serving path, such as a transaction-mode pooler. Migrations keep the direct URL. Set without `CELLA_DB_URL`, it stops the start |
 | `CELLA_DB_MAX_CONNS` | `4` | the connections one replica opens, between 1 and 32 |
-| `CELLA_SECRET_KEY` | unset | 32 bytes, base64, that every secret value's data key is wrapped under. Without it, a `Secret` is refused with `capability_unsupported`. `openssl rand -base64 32` makes one |
+| `CELLA_SECRET_KEY` | unset | 32 bytes, base64, that every secret value's data key is wrapped under. Without it, a `Secret` is refused with `capability_unsupported`. With `CELLA_DB_URL`, it also seals each sandbox's environment values and gateway credential in the database; without it the database keeps them unsealed and `cellad serve` says so at start. `openssl rand -base64 32` makes one |
 
 ## Replicas
 
