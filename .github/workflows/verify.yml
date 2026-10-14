@@ -127,6 +127,7 @@ jobs:
         run: |
           bash deploy/examples/kind-stubs/up.sh -name cella >> "$GITHUB_ENV"
           echo "CELLA_TEST_SINK=http://localhost:30082" >> "$GITHUB_ENV"
+          echo "CELLA_TEST_CLUSTER=cella" >> "$GITHUB_ENV"
       # The tier runs before the document's walk, because the document ends
       # by deleting the cluster: its last block is how an operator removes
       # the installation, and the walk runs every block.
