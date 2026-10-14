@@ -232,6 +232,25 @@ and `cellad worker` run once at start; `Preflight` stays read-only. A Pod
 an earlier version started keeps its inline values until the sandbox's
 next start, since a running Pod's environment cannot change.
 
+On podman no label of the record volume carries the environment, since
+every account that may list the engine's volumes reads their labels.
+The container holds the environment it was created with, the gateway's
+variables and the token's path among it, and a command inherits it.
+What an `Update` or an adoption sets afterwards, which a created
+container cannot take, is kept inside the container at
+`/run/cella/env.json`, readable by root alone, beside the token, and
+written before the record generation that follows it; an adoption
+writes it after its claim, with the token. `Exec` and `Attach` give a
+command only the variables of it the container did not start with at
+the same value, which is none until an update or an adoption has set
+one, and the request's own. A record an earlier version labeled with
+the environment is read as it stands and rewritten without it, the
+values moved into the container first, by the next change of its
+sandbox and by the podman driver's `MoveCredentials`, which `cellad
+serve` and `cellad worker` run once at start; a sandbox whose container
+is gone has its record rewritten without them, since nothing it runs
+could receive them.
+
 ### Phases
 
 Every driver reports one of `Pending`, `Starting`, `Running`,
@@ -527,6 +546,7 @@ requests ([[023-computer-use-operations]]); the microVM driver's design
 | `k8s` declares `none`, `allowlist` and `open` once the gateway's Pods are named and none otherwise; each sandbox runs under its own NetworkPolicy, written before its Pod, rewritten at a start and before a transfer's helper, and removed after its Pod, which admits no ingress and, with the gateway named, egress to DNS, the gateway and the sandbox's mesh peers alone; the workload container carries the gateway's doors and the sandbox's credential, and the Secret the gateway's authority | `TestEgressModesFollowTheGateway`, `TestTheSandboxRuleAdmitsDNSAndTheGateway`, `TestTheSandboxRuleWithoutAGatewayConfinesIngress`, `TestTheSandboxRuleIsWrittenBeforeThePod`, `TestStartRewritesTheSandboxRule`, `TestTheFileHelperRunsUnderTheSandboxRule`, `TestDeleteRemovesTheSandboxRule`, `TestThePodCarriesTheGatewayProjection` | passing ([[070-k8s-egress]]), and on the kind tier `TestClusterEgressBoundary` and `TestClusterNoLateralMovement` |
 | Every stamped label value is a legal Kubernetes label value and every key a legal key, for an owner with `@` and a user label with a `/` | `TestStampedIdentityIsLegal` | passing, [[036-k8s-driver]] |
 | No object the k8s driver writes but the sandbox's Secret carries an environment value or the gateway credential: no label or annotation, and no Pod spec, whose workload container references every variable, the proxy URLs that embed the credential included; the claim's record leaves both out, the Secret keeps them under keys the projection does not mount, one key per variable per start, and names the claim as its owner; the references resolve to the environment the driver renders, a start replaces the previous start's keys, an update of the environment reaches the next start, and an adoption writes the adopter's; a command repeats on its argv only what its container did not start with; a record an earlier version wrote with the values is read as it stands, and is rewritten by its sandbox's next change and by `MoveCredentials`, which reports a record it cannot rewrite and leaves it whole; a Secret write that loses a race is read again and retried | `TestNoObjectButTheSecretCarriesACredential`, `TestTheProjectionMountsNoCredential`, `TestTheContainerStartsWithTheSameEnvironment`, `TestACommandCarriesOnlyWhatTheContainerLacks`, `TestAnEmptyEnvironmentIsWritten`, `TestAnAdoptedSandboxStartsWithTheAdoptersCredentials`, `TestMoveCredentialsRewritesAnOldRecord`, `TestAnOldPodsExpandedValueIsRepeated`, `TestAWriteRewritesAnOldRecord`, `TestTheSecretIsOwnedByTheClaim`, `TestASecretReadFailureIsNotAnEmptyEnvironment`, `TestAMoveThatCannotWriteLeavesTheRecord`, `TestALostSecretWriteIsRebuilt`, `TestEachVariableHasItsOwnKey`, `TestMoveCredentialsIsLoggedAndFailsNothing` | passing over the client double; the kind tier has no case for it yet |
+| No label of any object the podman driver writes carries an environment value or the gateway credential: a create leaves them in the container's own environment, which a command inherits, and an update and an adoption keep theirs in a file inside the container that root alone reads; a command's request carries only what its container lacks; a second driver over the engine gives a command the adopted and the updated environment; a record an earlier version labeled is read as it stands and is rewritten by its sandbox's next change and by `MoveCredentials`, which reports a record it cannot rewrite and leaves it whole; an update of a sandbox with no container is `ErrNotFound`, and a command whose environment cannot be read is refused | `TestNoLabelCarriesAValue`, `TestACommandIsGivenWhatItsContainerLacks`, `TestTheEnvironmentOutlivesTheDriver`, `TestMoveCredentialsRewritesAnOldRecord`, `TestAWriteRewritesAnOldRecord`, `TestAMoveThatCannotWriteLeavesTheRecord`, `TestUpdatingTheEnvironmentOfAGoneContainer`, `TestAnUnreadableEnvironmentFailsTheCommand`, `TestAdoptionWritesTheRecordAndProjects`, and the update, exec and adoption cases of `TestPodmanConformance` against a real engine | passing |
 | The workload token a create carries is a file inside the sandbox its owner alone reads, at `/run/cella/token` or at the path `CELLA_TOKEN_FILE` names where the driver has no mount namespace of its own, and `Change.Token` is what the next read returns | the `TokenProjection` case of the conformance suite | passing on `native` and on `podman` against a real engine; on `k8s` over the client double, and in the cluster run where one is configured ([[045-workload-tokens]]) |
 | A decorator that removes the token mount, sets `privileged`, adds `hostNetwork` or `shareProcessNamespace`, or mounts a service account token is refused with `decorator_violation` naming the field | `TestDecoratorCannotWeakenTheBaseline`, table-driven over the baseline | not built |
 | With `CELLA_K8S_RUNTIME_CLASS_ISOLATION=vm`, `Isolation()` is `vm` and the Pod carries the class; unset, `container` regardless of the class name | `TestK8sIsolationIsDeclared` | not built |

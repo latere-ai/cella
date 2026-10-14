@@ -9,7 +9,7 @@ depends_on:
 affects: [internal/store/, internal/config/, migrations/]
 effort: large
 created: 2026-09-12
-updated: 2026-09-24
+updated: 2026-10-14
 author: changkun
 ---
 
@@ -174,6 +174,45 @@ reused after delete. Status carries the controller's own phases,
 never removes. `Count` is the count ceiling's query
 ([[007-admission]]).
 
+A sandbox's row holds two values that are credentials: the values of
+`spec.env` and the gateway credential in `status.egressState`. With
+`CELLA_SECRET_KEY`, the Postgres store takes both out of the row's
+`data` and `status` on every write and seals them together in the
+row's `sealed_key` and `sealed` columns under the envelope of secret
+values below, with a data key of the row's own. `data` then holds the
+string `"sealed"` at `spec.env`. Every release before migration 7
+decodes that member as an object and refuses the row, so its
+controller fails to load rather than serving the sandbox without its
+environment and its credential; the marker is also what makes the
+sealed columns the row's, so a row a process that does not seal wrote
+after them reads as that process wrote it. A read puts both values
+back, so `Desired` returns the object that was written and an API
+response is what it was: the environment as the caller wrote it, the
+credential stripped. A status write seals the credential it carries
+beside the sealed environment. A delete drops both from the row,
+sealed or not, since no read reaches a deleted row's object. Without a
+key the store keeps both in the row, as earlier releases did, and
+`cellad serve` logs that once at start; a row sealed by a process with
+a key is then a load failure that wraps `ErrNoSecretKey`, never a
+sandbox read without its values. The memory store keeps desired state
+in the process and holds both as written.
+
+`SealCredentials` rewrites the rows an earlier release wrote: a live
+sandbox row that holds either value in the clear is sealed, conditional
+on the version it read and leaving that version as it was, so a
+controller that loaded the row before writes it still; a deleted one is
+cleared. It reports how many rows it rewrote and each it could not.
+`cellad serve` runs it once it holds the writer lease and before its
+controller loads, and logs both; a row it could not rewrite still reads
+as it stands and is sealed by its sandbox's next write. A standby does
+not run it, because the writer still serving would write the rows back
+from what it loaded. During a rolling update only the writer reads
+desired state, at its promotion, and the writer lease's fence refuses
+every write of a writer that lost it, so an earlier release reads a
+sealed row only as a standby promoted after a new writer, which refuses
+the rows and exits; a process of an earlier release that starts after
+migration 7 refuses the schema.
+
 ### Observed state
 
 One row per sandbox per environment, the driver's `State` as JSON
@@ -191,7 +230,9 @@ data key per secret, the value encrypted under it with AES-256-GCM,
 the data key wrapped by `CELLA_SECRET_KEY` with AES-256-GCM. The row
 holds the secret id, the version, the wrapped data key with its nonce,
 and the ciphertext with its nonce; the two are separate columns so
-`Rewrap` touches one. `Open` is the only method that returns a
+`Rewrap` touches one. `Rewrap` moves the wrapped data key of every
+sealed sandbox row too, so a rotation leaves no row the new key cannot
+open. `Open` is the only method that returns a
 plaintext, and its only caller is `egress.Compile`, asserted by a test
 over `go list -deps` and call sites. The memory store holds the same
 ciphertext under the same KEK, so no store keeps a plaintext at rest.
@@ -283,7 +324,10 @@ a dirty flag is a start-up failure naming the version, for the
 operator to repair. `Ready` is `SELECT 1` with a 1 second budget,
 inside [[002-repository-scaffold]]'s readiness budget. The pool is
 sized by `CELLA_DB_MAX_CONNS` (default 4), because a replica set
-shares the database's connection ceiling.
+shares the database's connection ceiling. Migration 7 adds the two
+nullable columns a sealed sandbox row holds its values in; its down
+migration refuses while any row holds sealed values, which no statement
+could put back.
 
 Indexes, one per query shape: `objects (kind, owner, name) unique where
 deleted_at is null`; `objects (kind, owner, phase)` for lists and the
@@ -341,3 +385,4 @@ table ([[021-data-plane-workers]]); the `v1.Object` interface
 | Every list and count query in the index list uses its index | `TestQueriesUseIndexes` with `EXPLAIN` | not built |
 | Two holders contend for one lease; one holds; the other acquires after the TTL lapses | the `Leases` case of `TestSuiteHoldsTheMemoryAdapter` and `TestPostgresStore` | built, with renewal at a third of the term and a release on Close ([[043-postgres-store]]) |
 | No package outside `internal/store` imports the Postgres driver or the migrator | `TestDriverIsConfined` | built ([[043-postgres-store]]) |
+| With `CELLA_SECRET_KEY`, no row of any table holds a sandbox's environment value or gateway credential after a create, an update, a status write and a delete, and every read by id, by name and in a list returns the object written, on both stores; an earlier release cannot decode a sealed row; a row an earlier release wrote reads as written and `SealCredentials` seals each live one and clears each deleted one once, keeping the row's version; a row written in the clear after a seal reads as written; a store without the key keeps the values in the clear, and a sealed row fails its load as one under another key does; `Rewrap` moves the sealed rows' data keys; a row the rewrite cannot open is reported and left; the down migration refuses a table holding a sealed row; `cellad serve` logs what the rewrite did and fails nothing | `TestNoRowHoldsACredential`, `TestRowsAnEarlierReleaseWroteAreRead`, `TestAWriteInTheClearAfterASealStands`, `TestAStoreWithoutAKeyKeepsTheValues`, `TestARotationRewrapsTheSealedCredentials`, `TestSealCredentialsReportsWhatItCannotSeal`, `TestTheSealedColumnsOutliveTheirValues`, the `Credentials` case of `TestSuiteHoldsTheMemoryAdapter` and `TestPostgresStore`, `TestSealCredentialsIsLoggedAndFailsNothing` | built |

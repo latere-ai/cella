@@ -205,11 +205,15 @@ it is set, a backup is a `pg_dump` of the tables [[010-state]] owns
 `events`, `operations`, `workers`, `leases`, `environment_keys`) and of
 `schema_migrations`, which the guard below reads;
 `secret_values` is ciphertext under `CELLA_SECRET_KEY`
-([[018-egress-and-secrets]]), so a dump is safe only while that key is
+([[018-egress-and-secrets]]), and so are the environment values and the
+gateway credential of every sandbox row in `objects` once that key is
+set ([[010-state]]), so a dump is safe only while that key is
 held apart. A restore runs against a binary at or above the dumped
 schema: a binary below it refuses to start, naming both versions, by the
 same `schema_migrations` guard that refuses a downgrade
-([[010-state]]).
+([[010-state]]). A downgrade below migration 7 is refused while a
+sandbox row holds sealed values, which no earlier release reads, and
+its down migration says so.
 
 ## Not in this spec
 

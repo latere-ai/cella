@@ -20,7 +20,7 @@ depends_on:
 affects: [internal/auth/, internal/api/, internal/egressd/, internal/worker/, internal/store/, runtime/, egress/, controller/, manifest/, deploy/, test/e2e/, SECURITY.md]
 effort: medium
 created: 2026-09-12
-updated: 2026-10-03
+updated: 2026-10-14
 author: changkun
 ---
 
@@ -88,7 +88,7 @@ Open:
 | the hosts and clusters sandboxes run on | the data plane |
 | other sandboxes and their workspaces | the data plane |
 | secret values | the store, encrypted; a gateway's memory, in plaintext, for its environment |
-| the gateway credential per sandbox | the map and the sandbox's environment |
+| the gateway credential per sandbox | the map, the sandbox's environment, and the store, sealed where it holds a key |
 | the workload token, the environment keys | the sandbox's projection; the worker's and gateway's hosts |
 | `CELLA_TOKEN_KEY`, `CELLA_SECRET_KEY`, `CELLA_AUTHORIZER_TOKEN`, `CELLA_ADMISSION_TOKEN`, `CELLA_EVENTS_SECRET` | the control plane's configuration |
 | `CELLA_EGRESS_CA_KEY`, the authority every sandbox trusts | the gateway's host |
@@ -123,6 +123,7 @@ what a correctly configured control plane refuses.
 | egress to a host the manifest does not allow | the driver's rule routes every connection to the gateway; the gateway's policy gate refuses a CONNECT or a reverse-door request off the allow list, on the deny list under `open`, or any at all under `none`, before a byte flows; an entry substitutes only toward its hosts and ports | 003, 018 | `TestGateMatrix`, `TestClusterEgressBoundary`, `TestSubstitutionIsScopedAndPlaced` |
 | a secret's value in a sandbox | the sandbox holds a per-sandbox random placeholder; the value is decrypted in the control plane only inside `Compile` and reaches only the gateway; a placeholder sent off scope leaves as an inert string | 018, 010 | `TestSecretValueIsWriteOnly`, `TestNoSecretLeaks`, `TestValuesAreConfined` |
 | secret values at rest | envelope encryption: a data key per secret under AES-256-GCM, wrapped by `CELLA_SECRET_KEY`; `Values.Open` has one caller; `Rewrap` rotates the KEK without touching a ciphertext | 010, 018 | `TestValuesAreConfined`, `TestRewrapRotatesTheKey` |
+| a sandbox's environment values and gateway credential read from the database or from object metadata | with `CELLA_SECRET_KEY` the Postgres store seals both in each sandbox row under the same envelope and a deleted row keeps neither; no label or annotation of any object the k8s or podman driver writes carries either | 004, 010 | `TestNoRowHoldsACredential`, `TestNoObjectButTheSecretCarriesACredential`, `TestNoLabelCarriesAValue` |
 | a secret aimed at the cluster | the host rule refuses IP literals, single labels, and private ranges in a scope and in an allow list | 003, 018 | `TestHostRule`, `TestSecretRefusals` |
 | a `Secret` owner aiming at a victim's host | a secret is mounted only when the authorizer's `secret.mount` allows it for the mounting subject; a mounted secret's hosts join the allow list at resolve; two secrets on one host are refused | 003, 006, 018 | `TestSecretReferences`, `TestLookupErrors` |
 | a sandbox authenticating to the gateway as another | each door checks the sandbox's own credential from the map before any dial; the credential lives as long as the sandbox and never rotates under it | 018 | `TestProxyDoorNeedsTheSandboxsOwnCredential`, `TestReverseDoor` |
