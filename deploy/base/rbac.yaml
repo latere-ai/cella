@@ -19,15 +19,17 @@
 # the API server authorizes the WebSocket's GET as get (and from Kubernetes
 # 1.35 as create as well) and the SPDY upgrade's POST as create.
 #
-# Two objects the driver does write, and why: a Secret per sandbox holds
-# the workload token (spec 006), the gateway's authority, and the sandbox's
-# environment values and gateway credential, which the claim's annotations
-# leave out because every account that reads claims reads those. A mounted
-# secret's value is never in it: that stays sealed in the store under
-# CELLA_SECRET_KEY. A NetworkPolicy per sandbox confines it to the gateway and DNS (spec 018),
-# and a NetworkPolicy and a headless Service per mesh (spec 022) admit peers
-# to each other. A sandbox's policy is replaced by a delete and a create,
-# so neither needs a verb beyond those two.
+# Two objects the driver does write, and why: a Secret per sandbox holds the
+# workload token (spec 006), the gateway's authority, and the sandbox's
+# environment values and gateway credential, which neither the claim's
+# annotations nor the Pod's spec carry because every account that reads
+# claims or Pods reads those; the Pod's container takes each variable from
+# the Secret. A mounted secret's value is never in it: that stays sealed in
+# the store under CELLA_SECRET_KEY. A NetworkPolicy per sandbox confines it
+# to the gateway and DNS (spec 018), and a NetworkPolicy and a headless
+# Service per mesh (spec 022) admit peers to each other. A sandbox's policy
+# is replaced by a delete and a create, so neither needs a verb beyond those
+# two.
 #
 # The last two rules are the only ones the driver starts without. Sizing a
 # sandbox inside the ceiling its manifest names (spec.resources.max) raises a

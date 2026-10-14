@@ -87,7 +87,7 @@ else, all in the one namespace:
 | `pods/exec` | `create`, `get` | commands, terminals, file transfers, the port probe, the desktop's tools |
 | `pods/log` | `get` | a sandbox's output |
 | `pods/portforward` | `get`, `create` | the dial socket, the port proxy and `cella port-forward` |
-| `secrets` | `create`, `get`, `update`, `delete` | one Secret per sandbox: its workload token, the gateway's authority, and its environment values and gateway credential, which are kept out of the claim's annotations. A mounted secret's value is never in it; that stays sealed in the store under `CELLA_SECRET_KEY` |
+| `secrets` | `create`, `get`, `update`, `delete` | one Secret per sandbox: its workload token, the gateway's authority, and its environment values and gateway credential, which are kept out of the claim's annotations and the Pod's spec; the Pod's container takes each variable from it. A mounted secret's value is never in it; that stays sealed in the store under `CELLA_SECRET_KEY` |
 | `services`, `networkpolicies` | `create`, `delete` | one headless Service and one policy per mesh, and one policy per sandbox, replaced by a delete and a create |
 | `pods/resize` | `patch` | raising a running sandbox's memory inside the ceiling its manifest names. Optional: see below |
 | `pods` in `metrics.k8s.io` | `get` | reading how much memory a sandbox's workload uses, which decides a raise. Optional: see below |

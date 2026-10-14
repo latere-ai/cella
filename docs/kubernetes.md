@@ -247,12 +247,19 @@ each made with `create` and replaced or removed with `delete` on
 Each sandbox also has one Secret, written with `create` and `update` on
 `secrets` and removed with the sandbox. It holds the sandbox's workload
 token, its trust file, the values of its environment and its gateway
-credential. Those values are kept there and not in any label or annotation
-of the sandbox's claim or Pod, so reading the namespace's object metadata
-does not read them. The Secret names the claim as its owner, so a claim
-removed by hand takes the Secret with it. A control plane that starts
-rewrites, once, the claims an earlier release annotated with those values,
-and logs how many it rewrote.
+credential. Those values are kept there and nowhere else in the namespace:
+not in a label or an annotation of the sandbox's claim or Pod, and not in
+the Pod's spec, whose container takes each variable from the Secret. The
+Secret names the claim as its owner, so a claim removed by hand takes the
+Secret with it. A control plane that starts rewrites, once, the claims an
+earlier release annotated with those values, and logs how many it
+rewrote. A sandbox an earlier release started keeps its Pod as it was
+until its next start.
+
+A variable's value reaches the sandbox exactly as the manifest wrote it.
+Kubernetes rewrites `$(NAME)` and `$$` in a value written into a Pod, so
+before this a value holding either reached the sandbox's main process
+rewritten, though never a command run in it.
 
 `cellad serve` checks every access in the Role when it starts and does not
 start without all of them, naming the ones it is missing; `cellad check`
