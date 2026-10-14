@@ -151,7 +151,13 @@ is how it reaches the API server with the Role's grants under
 kustomization but outside it, `prometheusrule.yaml` carries the alerts of
 [[017-observability]] for a cluster that has the operator's CRD.
 `deploy/bootstrap`: the Namespace and Secret templates for
-`CELLA_TOKEN_KEY` and the webhook secrets, applied by hand once.
+`CELLA_TOKEN_KEY`, `CELLA_SECRET_KEY` and the webhook secrets, applied by
+hand once. The Deployment and the check Job read `CELLA_SECRET_KEY` as a
+required key of `cellad-db`, beside the signing key: once the store holds
+anything sealed under it, a process without it cannot serve, so a Secret
+that lost it keeps the Pod from starting, and the install document mints
+one where the Secret is absent. `CELLA_DB_URL` in the same Secret stays
+optional.
 `deploy/examples/kind`, `deploy/examples/generic`: overlays an operator
 starts from. Every overlay renders in CI.
 
@@ -183,8 +189,35 @@ the probe too ([[006-identity]]). Each optional dependency is checked
 only when its configuration is set and reported as not configured
 otherwise: admission answers a probe when `CELLA_ADMISSION_URL` is set,
 the sink when `CELLA_EVENTS_URL` is set, and Postgres is reachable and at
-the binary's schema when `CELLA_DB_URL` is set. Exit 1 on any failure.
+the binary's schema when `CELLA_DB_URL` is set, and that
+`CELLA_SECRET_KEY` opens the sandbox credentials the database holds
+sealed, which is the start `cellad serve` refuses otherwise
+([[010-state]]). Exit 1 on any failure.
 The install document ends with it.
+
+### cellad rotate and cellad unseal
+
+Two runs against the database's direct `CELLA_DB_URL`, each with every
+replica of `cellad serve` stopped, since a replica holds the key it
+started with and seals what it writes. Each takes the writer lease for
+its run and refuses while a replica holds it, and prints counts and
+versions and never a value.
+
+`cellad rotate` moves every data key the database holds wrapped, each
+secret value's and each sealed sandbox row's, from `CELLA_SECRET_KEY` to
+`CELLA_SECRET_KEY_NEXT` in one transaction, reading no value; a row
+written meanwhile fails it whole. The replicas then start with the new
+key as `CELLA_SECRET_KEY`.
+
+`cellad unseal` is the rollback across the release that seals sandbox
+credentials in the database. The steps are: stop every replica of this
+release, since its writer seals each row again at its next write and all
+of them when it takes over; run `cellad unseal` from this release with
+the key the rows are sealed under, which puts every sandbox's
+environment values and gateway credential back in its row and migrates
+the schema down to version 6; deploy the earlier release, which starts
+on that schema. A second run finds the schema below the sealed columns
+and does nothing.
 
 ### Versioning
 
@@ -211,9 +244,9 @@ set ([[010-state]]), so a dump is safe only while that key is
 held apart. A restore runs against a binary at or above the dumped
 schema: a binary below it refuses to start, naming both versions, by the
 same `schema_migrations` guard that refuses a downgrade
-([[010-state]]). A downgrade below migration 7 is refused while a
-sandbox row holds sealed values, which no earlier release reads, and
-its down migration says so.
+([[010-state]]). A downgrade below migration 7 is `cellad unseal`
+above; the down migration alone refuses while any sandbox row holds
+sealed values, which no earlier release reads.
 
 ## Not in this spec
 
@@ -241,3 +274,4 @@ it, and nothing in the pipeline is a placeholder any more
 | A backup restores into a binary at or above the dumped schema and a lower binary refuses to start | `TestRestoreSchemaGuard` against [[010-state]]'s guard | open: the guard is built, and `cellad check` reports the schema against the binary's; the restore walk waits on `docs/upgrades/` |
 | `docs/upgrades/` rollback steps walk green and a downgrade across a migration is refused | `TestUpgradeDocRollback` | open: `docs/upgrades/` does not exist and an upgrade's steps are in its CHANGELOG section, so there are no rollback steps to walk; the refusal of a binary below the database's schema is built at the store, `TestSchemaGuards` ([[010-state]]) |
 | A tag without a CHANGELOG section is refused at pre-push and in the pipeline | the gate's `release` command | passing; `build` reads the section before it compiles and `publish` writes it as the body |
+| `cellad unseal` takes a database this release sealed back to the schema of the release before it, with every row decoding as that release decodes it and every value in its row, does nothing a second time, and is refused without the key, under another key, and while a replica holds the writer lease; `cellad rotate` moves every data key to the next key in one transaction, after which the old key is refused at start, and fails whole where a row is written meanwhile; `cellad check` says whether the key opens what is sealed; the Deployment and the check Job require the key | `TestUnsealTakesTheDatabaseBack`, `TestAMaintenanceRunWaitsForNoWriter`, `TestRotateMovesTheKey`, `TestARotationThatRacesAWriteRotatesNothing`, `TestRotateThenUnsealADatabase`, `TestMaintenanceRefusesItsConfiguration`, `TestLoadMaintenance`, `TestSealedLine`, `TestOpenRefusesAKeyThatDoesNotOpenTheRows` | passing |

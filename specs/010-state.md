@@ -179,7 +179,9 @@ A sandbox's row holds two values that are credentials: the values of
 `CELLA_SECRET_KEY`, the Postgres store takes both out of the row's
 `data` and `status` on every write and seals them together in the
 row's `sealed_key` and `sealed` columns under the envelope of secret
-values below, with a data key of the row's own. `data` then holds the
+values below, with a data key of the row's own and the row's id as the
+associated data of the value's box, so a sealed pair copied into another
+row does not open there. `data` then holds the
 string `"sealed"` at `spec.env`. Every release before migration 7
 decodes that member as an object and refuses the row, so its
 controller fails to load rather than serving the sandbox without its
@@ -192,16 +194,21 @@ credential stripped. A status write seals the credential it carries
 beside the sealed environment. A delete drops both from the row,
 sealed or not, since no read reaches a deleted row's object. Without a
 key the store keeps both in the row, as earlier releases did, and
-`cellad serve` logs that once at start; a row sealed by a process with
-a key is then a load failure that wraps `ErrNoSecretKey`, never a
-sandbox read without its values. The memory store keeps desired state
-in the process and holds both as written.
+`cellad serve` logs that once at start. Once a row is sealed the key is
+required: `Open` reads every sealed row's wrapped data key and refuses,
+naming the count and the first row, a store with no key
+(`ErrNoSecretKey`) and one whose key does not unwrap every one of
+them (`ErrWrongKey`), so a replica started without the key stops at once
+with that sentence rather than taking the writer lease and failing its
+load. The memory store keeps desired state in the process and holds
+both as written.
 
 `SealCredentials` rewrites the rows an earlier release wrote: a live
 sandbox row that holds either value in the clear is sealed, conditional
 on the version it read and leaving that version as it was, so a
 controller that loaded the row before writes it still; a deleted one is
-cleared. It reports how many rows it rewrote and each it could not.
+cleared. Both run a page per statement. It reports how many rows it
+rewrote and each it could not.
 `cellad serve` runs it once it holds the writer lease and before its
 controller loads, and logs both; a row it could not rewrite still reads
 as it stands and is sealed by its sandbox's next write. A standby does
@@ -212,6 +219,17 @@ every write of a writer that lost it, so an earlier release reads a
 sealed row only as a standby promoted after a new writer, which refuses
 the rows and exits; a process of an earlier release that starts after
 migration 7 refuses the schema.
+
+`UnsealCredentials` is the rewrite undone, paged and conditional on the
+version the same way: each sealed row has both values put back into
+its `data` and `status` as an earlier release wrote them, and its
+sealed columns emptied. `Unseal` is the rollback around it, which
+`cellad unseal` runs ([[014-release-and-installation]]): with no
+replica holding the writer lease it takes the lease, unseals every
+row, and migrates the schema down to the version before migration 7;
+a database already below it is left alone. `Rotate`, which `cellad
+rotate` runs, takes the lease the same way and rewraps every data key
+under the next key.
 
 ### Observed state
 
@@ -232,7 +250,9 @@ holds the secret id, the version, the wrapped data key with its nonce,
 and the ciphertext with its nonce; the two are separate columns so
 `Rewrap` touches one. `Rewrap` moves the wrapped data key of every
 sealed sandbox row too, so a rotation leaves no row the new key cannot
-open. `Open` is the only method that returns a
+open. Each of its writes is conditional on the wrapped key it read: a
+row written again in between holds a key the rotation never read, so
+the rotation fails whole inside its transaction. `Open` is the only method that returns a
 plaintext, and its only caller is `egress.Compile`, asserted by a test
 over `go list -deps` and call sites. The memory store holds the same
 ciphertext under the same KEK, so no store keeps a plaintext at rest.
@@ -385,4 +405,5 @@ table ([[021-data-plane-workers]]); the `v1.Object` interface
 | Every list and count query in the index list uses its index | `TestQueriesUseIndexes` with `EXPLAIN` | not built |
 | Two holders contend for one lease; one holds; the other acquires after the TTL lapses | the `Leases` case of `TestSuiteHoldsTheMemoryAdapter` and `TestPostgresStore` | built, with renewal at a third of the term and a release on Close ([[043-postgres-store]]) |
 | No package outside `internal/store` imports the Postgres driver or the migrator | `TestDriverIsConfined` | built ([[043-postgres-store]]) |
+| `Open` refuses a store without the key, and one under another key, once any row is sealed, naming the count and the first row; a sealed pair copied into another row does not open there; `Rewrap` fails whole where a row it read is written before its write; `UnsealCredentials` and `Unseal` take the database to the schema before migration 7 with every value in its row, and refuse while a replica holds the writer lease; the clearing of deleted rows is paged | `TestOpenRefusesAKeyThatDoesNotOpenTheRows`, `TestASealedPairDoesNotOpenInAnotherRow`, `TestARotationThatRacesAWriteRotatesNothing`, `TestUnsealTakesTheDatabaseBack`, `TestAMaintenanceRunWaitsForNoWriter`, `TestRotateMovesTheKey`, `TestSealCredentialsReadsEveryPage`, `TestSealedCredentialsNamesItsMigration` | built |
 | With `CELLA_SECRET_KEY`, no row of any table holds a sandbox's environment value or gateway credential after a create, an update, a status write and a delete, and every read by id, by name and in a list returns the object written, on both stores; an earlier release cannot decode a sealed row; a row an earlier release wrote reads as written and `SealCredentials` seals each live one and clears each deleted one once, keeping the row's version; a row written in the clear after a seal reads as written; a store without the key keeps the values in the clear, and a sealed row fails its load as one under another key does; `Rewrap` moves the sealed rows' data keys; a row the rewrite cannot open is reported and left; the down migration refuses a table holding a sealed row; `cellad serve` logs what the rewrite did and fails nothing | `TestNoRowHoldsACredential`, `TestRowsAnEarlierReleaseWroteAreRead`, `TestAWriteInTheClearAfterASealStands`, `TestAStoreWithoutAKeyKeepsTheValues`, `TestARotationRewrapsTheSealedCredentials`, `TestSealCredentialsReportsWhatItCannotSeal`, `TestTheSealedColumnsOutliveTheirValues`, the `Credentials` case of `TestSuiteHoldsTheMemoryAdapter` and `TestPostgresStore`, `TestSealCredentialsIsLoggedAndFailsNothing` | built |
