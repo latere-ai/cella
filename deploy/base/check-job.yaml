@@ -102,7 +102,6 @@ spec:
                 secretKeyRef:
                   name: cellad-db
                   key: CELLA_SECRET_KEY
-                  optional: true
           envFrom:
             - configMapRef:
                 name: cellad

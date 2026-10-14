@@ -127,7 +127,35 @@ for each capability, and what the network rule of each sandbox admits.
 | `CELLA_DB_URL` | unset | a `postgres://` URL for desired state, the event journal, and secret values. Migrations run over it at start, and a schema this binary does not know stops the start. Unset, state is a snapshot under `CELLA_DATA_DIR` that one process holds, and a sandbox the runtime lost is not recovered |
 | `CELLA_DB_POOL_URL` | `CELLA_DB_URL` | a pooled endpoint for the serving path, such as a transaction-mode pooler. Migrations keep the direct URL. Set without `CELLA_DB_URL`, it stops the start |
 | `CELLA_DB_MAX_CONNS` | `4` | the connections one replica opens, between 1 and 32 |
-| `CELLA_SECRET_KEY` | unset | 32 bytes, base64, that every secret value's data key is wrapped under. Without it, a `Secret` is refused with `capability_unsupported`. With `CELLA_DB_URL`, it also seals each sandbox's environment values and gateway credential in the database; without it the database keeps them unsealed and `cellad serve` says so at start. `openssl rand -base64 32` makes one |
+| `CELLA_SECRET_KEY` | unset | 32 bytes, base64, that every secret value's data key is wrapped under. Without it, a `Secret` is refused with `capability_unsupported`. With `CELLA_DB_URL`, it also seals each sandbox's environment values and gateway credential in the database; without it the database keeps them unsealed and `cellad serve` says so at start. Once the database holds anything sealed, the key is required: `cellad serve` refuses to start without it, or with another key, and names how many sandbox rows it cannot open. `openssl rand -base64 32` makes one |
+| `CELLA_SECRET_KEY_NEXT` | unset | read by `cellad rotate` alone: the key it moves the database to |
+
+### Changing the key, and going back to a release that does not seal
+
+Both are runs of `cellad` against the database's direct `CELLA_DB_URL`,
+with every replica of `cellad serve` stopped: a running replica holds the
+key it started with and seals what it writes under it. Each takes the
+writer lease for its run and refuses while a replica holds it, and each
+prints counts and versions and never a value.
+
+To change the key, stop every replica, run `cellad rotate` with the
+current key as `CELLA_SECRET_KEY` and the new one as
+`CELLA_SECRET_KEY_NEXT`, then set `CELLA_SECRET_KEY` to the new key and
+start the replicas again. The rotation rewraps every data key the
+database holds, a secret value's and a sandbox's, in one transaction, and
+reads no value; a row written while it runs fails it whole and leaves
+everything under the old key, so it can be run again.
+
+To go back to a release from before the database sealed sandbox values,
+stop every replica of this release first: a replica that is the writer
+seals each row again at its next write, and seals every row when it
+becomes the writer. Then run `cellad unseal`, from this release, with the
+key the rows are sealed under. It puts each sandbox's environment values
+and gateway credential back in its row in the clear and migrates the
+schema down to version 6, which the earlier release starts on. Run again,
+it finds the schema there and does nothing. Then deploy the earlier
+release. The earlier release keeps the values in the clear, as it always
+did.
 
 ## Replicas
 

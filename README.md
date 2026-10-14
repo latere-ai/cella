@@ -173,9 +173,10 @@ sandbox and `cellad check`. Every release publishes the image
 `deploy-<tag>.tar.gz`, the Kubernetes manifests with the image pinned by
 digest.
 
-You supply an OpenID Connect issuer, a signing key, and a hostname. An
-authorization endpoint, an event sink, Postgres, and an egress gateway
-are each optional, and the manifests turn each one on with one Secret.
+You supply an OpenID Connect issuer, a signing key, a secret key, and a
+hostname. An authorization endpoint, an event sink, Postgres, and an
+egress gateway are each optional, and the manifests turn each one on with
+one Secret.
 An admission endpoint is optional too.
 
 ## Identity

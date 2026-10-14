@@ -116,8 +116,11 @@ spec:
                   key: CELLA_EVENTS_SECRET
                   optional: true
             # The store of spec 010 and the key every secret value's data
-            # key is sealed under. Optional: with no Secret every state is
-            # in memory, one replica, and recovery is off.
+            # key is sealed under. The database is optional: without it
+            # every state is in memory, one replica, and recovery is off.
+            # The key is not: what it sealed cannot be read without it, so
+            # a Secret that lost it keeps the Pod from starting rather than
+            # starting one that cannot serve.
             - name: CELLA_DB_URL
               valueFrom:
                 secretKeyRef:
@@ -129,7 +132,6 @@ spec:
                 secretKeyRef:
                   name: cellad-db
                   key: CELLA_SECRET_KEY
-                  optional: true
           # Everything an installation chooses: the public URL, the
           # issuers, the environment's name, the gateway's doors, and the
           # driver's own knobs. The overlay carries the ConfigMap; a

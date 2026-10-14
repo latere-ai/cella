@@ -54,11 +54,16 @@ if ! kind get clusters 2>/dev/null | grep -qx "$name"; then
 fi
 kind load docker-image cellad:dev cella-stubs:dev cella-display:dev --name "$name" >&2
 
-# 3. The namespace, the one mandatory Secret, and the overlay.
+# 3. The namespace, the two mandatory Secrets, and the overlay. The secret
+# key is minted only where the cluster holds none yet: a new one would not
+# open what the old one sealed.
 kubectl apply -f "$manifests/bootstrap/namespace.yaml" >&2
 openssl genrsa -out "$work/token.pem" 2048 2>/dev/null
 kubectl -n cella create secret generic cellad-token \
   --from-file=CELLA_TOKEN_KEY="$work/token.pem" --dry-run=client -o yaml | kubectl apply -f - >&2
+kubectl -n cella get secret cellad-db > /dev/null 2>&1 ||
+  kubectl -n cella create secret generic cellad-db \
+    --from-literal=CELLA_SECRET_KEY="$(openssl rand -base64 32)" >&2
 kubectl apply -k "$overlay" >&2
 kubectl -n cella rollout status deploy/cellad --timeout=300s >&2
 

@@ -51,15 +51,16 @@ downloaded.
 Everything an installation chooses is the ConfigMap `cellad`, which the
 overlay carries: the public URL, the issuers, the environment's name, the
 gateway's doors, and the driver's defaults. Everything that is a
-credential is a Secret from `bootstrap/`, and each is read as an optional
-key, so a dependency is turned on by applying its Secret and nothing else.
+credential is a Secret from `bootstrap/`. The signing key and the secret
+key are required; every other key is read as an optional one, so a
+dependency is turned on by applying its Secret and nothing else.
 
 | Secret | Turns on | Without it |
 |---|---|---|
 | `cellad-token` | required in every mode: the key cellad signs a sandbox's identity with | the Pod does not start |
 | `cellad-authorizer` | your authorization endpoint | the built-in owner policy decides, and `CELLA_ADMIN_SUBJECTS` names who acts on everything |
 | `cellad-events` | signed delivery of every record to a sink | the journal holds every record and nothing is delivered |
-| `cellad-db` | desired state in Postgres, and sealed secret values | every state is in memory: nothing survives a restart, and a sandbox the backend lost is not recovered |
+| `cellad-db` | `CELLA_SECRET_KEY` is required in every mode: the key secret values, and with a database each sandbox's environment values and gateway credential, are sealed under. `CELLA_DB_URL` puts desired state in Postgres | without the key the Pod does not start; without the URL every state is in memory: nothing survives a restart, and a sandbox the backend lost is not recovered |
 | `cellad-egress` | read by the egress gateway, not by the control plane | a sandbox whose manifest declares a boundary is refused at create |
 
 A URL and the bearer that authorizes it are in one Secret, because a URL

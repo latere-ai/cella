@@ -118,7 +118,22 @@ is two PEM blocks in this one value: prepend the new key, apply, and remove
 the old block on a later apply, so nothing a sandbox already holds is
 refused in between.
 
-The other four Secrets are optional, one per dependency, and
+## The secret key
+
+A second secret is required in every installation: the key cellad seals
+every secret value under, and, with a database, each sandbox's environment
+values and gateway credential. What it sealed cannot be read without it,
+so keep it beside `token.pem`, and the walk mints one only where the
+Secret is not there yet.
+
+```sh
+kubectl -n "$CELLA_INSTALL_NAMESPACE" get secret cellad-db > /dev/null 2>&1 || \
+  kubectl -n "$CELLA_INSTALL_NAMESPACE" create secret generic cellad-db \
+    --from-literal=CELLA_SECRET_KEY="$(openssl rand -base64 32)"
+```
+
+The other Secrets are optional, one per dependency, and so is the
+database URL in `cellad-db`;
 [`deploy/bootstrap/secrets.example.yaml`](../deploy/bootstrap/secrets.example.yaml)
 is the template for each with the command that mints its value. This walk
 applies none of them, so the installation runs on the built-in owner
