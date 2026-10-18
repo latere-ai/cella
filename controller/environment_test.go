@@ -602,9 +602,10 @@ func TestASpawnRunsWhereItsParentRuns(t *testing.T) {
 	}
 }
 
-// TestDeleteEnvironment: an environment with nothing placed on it goes, and
-// one that holds a sandbox is refused rather than left with sandboxes nothing
-// drives.
+// TestDeleteEnvironment: an environment with nothing placed on it goes, a
+// worker environment holding a sandbox goes with the sandbox's record and
+// releases its workers, and the control plane's own environment holding one
+// is refused as in use rather than left with sandboxes nothing drives.
 func TestDeleteEnvironment(t *testing.T) {
 	var released atomic.Bool
 	c, _, w, _ := twoEnvironments(t, Options{
@@ -619,14 +620,19 @@ func TestDeleteEnvironment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = c.DeleteEnvironment(t.Context(), "eu-gpu"); !errors.Is(err, ErrEnvironmentInUse) {
-		t.Errorf("an environment holding a sandbox was deleted: %v", err)
-	}
-	if _, err = c.Act(t.Context(), created.Status.ID, "delete"); err != nil {
+	here := workspace()
+	here.Metadata.Name = "here"
+	if _, err = realized(t.Context(), c, here, "alice", 0); err != nil {
 		t.Fatal(err)
 	}
+	if err = c.DeleteEnvironment(t.Context(), c.Environment()); !errors.Is(err, ErrEnvironmentInUse) {
+		t.Errorf("the control plane's own environment holding a sandbox answered %v", err)
+	}
 	if err = c.DeleteEnvironment(t.Context(), "eu-gpu"); err != nil {
-		t.Fatalf("an empty environment was not deleted: %v", err)
+		t.Fatalf("a worker environment holding a sandbox was not deleted: %v", err)
+	}
+	if _, err = c.Get(t.Context(), created.Status.ID, "alice"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("the sandbox's record outlived its worker environment: %v", err)
 	}
 	if !released.Load() {
 		t.Errorf("the delete left the environment's workers holding their streams")

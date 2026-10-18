@@ -216,7 +216,7 @@ func (c *Controller) recoverLocked(ctx context.Context, obj v1.Sandbox, now time
 	if err != nil {
 		return false, err
 	}
-	_, err = d.Create(ctx, specOf(obj, lifecycle, c.egressSpec(boundary.Map), boundary.Env, token))
+	_, err = d.Create(ctx, specOf(obj, lifecycle, c.egressSpec(c.sandboxEnvironment(obj), boundary.Map), boundary.Env, token))
 	switch {
 	case errors.Is(err, driver.ErrAlreadyExists):
 		// The driver had the sandbox after all and adopted it, which means

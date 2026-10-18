@@ -4,6 +4,7 @@
 package controller
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"maps"
@@ -227,14 +228,48 @@ func needsGatewayFor(spec v1.SandboxSpec) bool {
 // kept placed for want of one.
 const gatewayRetry = 100 * time.Millisecond
 
+// sandboxEnvironment is the environment a sandbox runs on, or will: the one its
+// status names once placed, the one its manifest names before, and the
+// control plane's own where it names none.
+func (c *Controller) sandboxEnvironment(obj v1.Sandbox) string {
+	return cmp.Or(obj.Status.Environment, obj.Spec.Environment, c.environment)
+}
+
+// driverEnforced reports whether a boundary on one environment is held by
+// its driver alone: an environment other than the control plane's own whose
+// driver declares EgressLocal, a mode of none or an allow list, no denied
+// host and no mounted secret. Such a boundary needs no gateway, and none is
+// projected into it (spec 083).
+func (c *Controller) driverEnforced(environment string, spec v1.SandboxSpec) bool {
+	e := spec.Network.Egress
+	return environment != c.environment && c.CapabilitiesOf(environment).EgressLocal &&
+		(e.Mode == v1.EgressNone || e.Mode == v1.EgressAllowlist) &&
+		len(e.DeniedHosts) == 0 && len(spec.Secrets) == 0
+}
+
+// gatewayHolds reports whether a gateway can hold a boundary needing one on
+// one environment: the hub serves the control plane's own environment alone
+// (spec 021), so a sandbox on any other gets no gateway, connected or not.
+func (c *Controller) gatewayHolds(environment string) bool {
+	return environment == c.environment && c.egress != nil && c.egress.Connected() > 0
+}
+
+// needsGatewayOn is needsGatewayFor on one environment: a boundary its
+// driver enforces alone needs none.
+func (c *Controller) needsGatewayOn(environment string, spec v1.SandboxSpec) bool {
+	return needsGatewayFor(spec) && !c.driverEnforced(environment, spec)
+}
+
 // awaitGateway holds a create, a spawn or an apply whose boundary needs a
 // gateway while none is connected, for what is left of the grace since this
 // controller opened, or until the caller leaves. It runs before the
 // controller's lock is taken, so a wait holds no other request. What follows
 // decides as it always did: a gateway that connected is used, and none at the
 // end of the grace is ErrNoGateway.
-func (c *Controller) awaitGateway(ctx context.Context, spec v1.SandboxSpec) {
-	if c.egress == nil || c.gatewayGrace <= 0 || !needsGatewayFor(spec) {
+func (c *Controller) awaitGateway(ctx context.Context, obj v1.Sandbox) {
+	// A gateway serves the control plane's own environment alone, so a
+	// boundary on any other waits for none.
+	if c.egress == nil || c.gatewayGrace <= 0 || !needsGatewayFor(obj.Spec) || c.sandboxEnvironment(obj) != c.environment {
 		return
 	}
 	until := c.opened.Add(c.gatewayGrace)
@@ -271,6 +306,15 @@ func (c *Controller) pushEgress(ctx context.Context, obj *v1.Sandbox) (boundary,
 	if err != nil {
 		return boundary{}, err
 	}
+	// The gateway serves the control plane's own environment alone. A
+	// sandbox on any other is held by its driver or by nothing, and its
+	// map goes to no gateway.
+	if environment := c.sandboxEnvironment(*obj); environment != c.environment {
+		if needsGateway(b.Map) && !c.driverEnforced(environment, obj.Spec) {
+			return b, ErrNoGateway
+		}
+		return b, nil
+	}
 	if c.egress == nil {
 		if needsGateway(b.Map) {
 			return b, ErrNoGateway
@@ -293,8 +337,14 @@ func (c *Controller) pushEgress(ctx context.Context, obj *v1.Sandbox) (boundary,
 
 // egressSpec is what the driver projects into the sandbox: the boundary it
 // enforces itself, the doors to point the workload at, the sandbox's own
-// credential, and the authority that signs the proxy door's leaves.
-func (c *Controller) egressSpec(m egress.Map) driver.Egress {
+// credential, and the authority that signs the proxy door's leaves. A
+// sandbox on an environment other than the control plane's own gets the
+// boundary alone: no gateway serves it, so no door, credential or authority
+// of one is projected (spec 083).
+func (c *Controller) egressSpec(environment string, m egress.Map) driver.Egress {
+	if environment != c.environment {
+		return driver.Egress{Mode: string(m.Mode), AllowedHosts: slices.Clone(m.Allow), DeniedHosts: slices.Clone(m.Deny)}
+	}
 	spec := driver.Egress{
 		Mode:         string(m.Mode),
 		AllowedHosts: slices.Clone(m.Allow),
@@ -315,11 +365,17 @@ func (c *Controller) egressSpec(m egress.Map) driver.Egress {
 // condition says which one is missing rather than reporting true.
 func (c *Controller) egressCondition(environment string, m egress.Map, held bool, now time.Time) v1.Condition {
 	cond := v1.Condition{Type: v1.ConditionEgressEnforced, Status: v1.ConditionTrue, Reason: v1.ReasonEnforced, Since: now}
+	caps := c.CapabilitiesOf(environment)
 	switch {
-	case !slices.Contains(c.CapabilitiesOf(environment).Egress, m.Mode):
+	case !slices.Contains(caps.Egress, m.Mode):
 		cond.Status = v1.ConditionFalse
 		cond.Reason = v1.ReasonNotEnforcedByDriver
 		cond.Message = "This environment records the boundary and does not confine the workload to it."
+	case environment != c.environment && caps.EgressLocal && m.Mode != v1.EgressOpen &&
+		len(m.Deny) == 0 && len(m.Entries) == 0 && len(m.NotInjectable) == 0:
+		// The driver's own proxy is the only route out, which stands in
+		// for a gateway (spec 083).
+		cond.Reason = v1.ReasonDriverEnforced
 	case !held:
 		cond.Status = v1.ConditionFalse
 		cond.Reason = v1.ReasonNoGateway
@@ -355,7 +411,9 @@ func (c *Controller) EgressMaps(ctx context.Context) []egress.Map {
 	defer c.mu.Unlock()
 	out := make([]egress.Map, 0, len(c.objects))
 	for _, obj := range c.objects {
-		if obj.Status.Phase == "Deleting" {
+		// The gateway serves the control plane's own environment alone,
+		// and a sandbox on any other is none of its business.
+		if obj.Status.Phase == "Deleting" || c.sandboxEnvironment(obj) != c.environment {
 			continue
 		}
 		sb := clone(obj)

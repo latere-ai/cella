@@ -314,33 +314,45 @@ func (c *Controller) driverOfEnvironment(obj v1.Environment) (driver.Driver, err
 	return c.newDriver(obj)
 }
 
-// DeleteEnvironment drops one environment and the driver serving it. The
-// control plane's own is never deleted, and one a sandbox is placed on is
-// refused rather than left with sandboxes nothing drives.
+// DeleteEnvironment drops one environment and the driver serving it. One a
+// sandbox is placed on is refused rather than left with sandboxes nothing
+// drives, unless it is a worker environment: its sandboxes' records are
+// dropped with it, and the worker, told that the environment may not be
+// served, stops and deletes what its driver holds (spec 083). The control
+// plane's own environment is never deleted.
 func (c *Controller) DeleteEnvironment(ctx context.Context, name string) error {
 	if c.environmentStore == nil {
 		return ErrNoEnvironmentStore
 	}
-	if name == c.environment {
-		return ErrEnvironmentReserved
-	}
+	obj, held := c.environmentOf(name)
+	worker := held && obj.Spec.Mode == v1.EnvironmentWorker
 	// The controller's lock comes before the registry's, which is the order
 	// every call site takes them in.
 	c.mu.Lock()
-	placed := false
-	for _, obj := range c.objects {
-		if obj.Status.Environment == name {
-			placed = true
-			break
+	var placed []v1.Sandbox
+	for _, o := range c.objects {
+		if o.Status.Environment == name {
+			placed = append(placed, clone(o))
+		}
+	}
+	if len(placed) > 0 && !worker {
+		c.mu.Unlock()
+		return ErrEnvironmentInUse
+	}
+	if name == c.environment {
+		c.mu.Unlock()
+		return ErrEnvironmentReserved
+	}
+	for i := range placed {
+		if err := c.dropLocked(ctx, &placed[i]); err != nil {
+			c.mu.Unlock()
+			return err
 		}
 	}
 	c.mu.Unlock()
-	if placed {
-		return ErrEnvironmentInUse
-	}
 	c.envMu.Lock()
 	defer c.envMu.Unlock()
-	obj, held := c.environments[name]
+	obj, held = c.environments[name]
 	if !held {
 		return ErrNoEnvironment
 	}
@@ -356,6 +368,22 @@ func (c *Controller) DeleteEnvironment(ctx context.Context, name string) error {
 	}
 	c.emitEnvironment(ctx, MutationEnvironmentDeleted, obj)
 	return nil
+}
+
+// ReasonEnvironmentDeleted is a sandbox whose worker environment was deleted
+// with it on: its record is gone, and its worker deletes what it ran.
+const ReasonEnvironmentDeleted = "EnvironmentDeleted"
+
+// dropLocked ends one sandbox's record without asking its driver, which is
+// its worker's to delete once it learns its environment is gone. It runs
+// under the controller's lock.
+func (c *Controller) dropLocked(ctx context.Context, obj *v1.Sandbox) error {
+	obj.Status.Phase = PhaseDeleting
+	obj.Status.Reason = ReasonEnvironmentDeleted
+	if err := c.persist(ctx, *obj, MutationDeleting); err != nil {
+		return err
+	}
+	return c.forgetOne(ctx, obj)
 }
 
 // admits reports whether one environment takes a sandbox now. Spec 021 places

@@ -572,7 +572,7 @@ func (c *Controller) forget(ctx context.Context, id, mutation string) error {
 // nothing behind, and the create takes the slow path under an id of its own,
 // which it can only do before the caller has read one.
 func (c *Controller) Create(ctx context.Context, obj v1.Sandbox, owner string, max int) (v1.Sandbox, error) {
-	c.awaitGateway(ctx, obj.Spec)
+	c.awaitGateway(ctx, obj)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.create(ctx, obj, owner, max, nil)
@@ -609,7 +609,7 @@ func (c *Controller) create(ctx context.Context, obj v1.Sandbox, owner string, m
 	// Whether a gateway is connected is known now, so a boundary that needs
 	// one while none is connected is refused on the request, with nothing
 	// written, rather than failed once the create has answered.
-	if needsGatewayFor(obj.Spec) && (c.egress == nil || c.egress.Connected() == 0) {
+	if environment := c.sandboxEnvironment(obj); c.needsGatewayOn(environment, obj.Spec) && !c.gatewayHolds(environment) {
 		return obj, ErrNoGateway
 	}
 	pool, _ := c.poolOf(environment)
@@ -865,7 +865,7 @@ func (c *Controller) adopt(ctx context.Context, obj v1.Sandbox, d driver.Driver,
 		return export(obj), errors.Join(err, c.persist(settle, obj, MutationFailed))
 	}
 	obj.Status.TokenState = tokenState
-	adoption := adoptionOf(obj, lifecycle, c.egressSpec(boundary.Map), boundary.Env, token)
+	adoption := adoptionOf(obj, lifecycle, c.egressSpec(c.sandboxEnvironment(obj), boundary.Map), boundary.Env, token)
 	if err = d.Update(ctx, id, driver.Change{Adopt: &adoption}); err != nil {
 		c.purgeEgress(settle, id)
 		revoked := c.revokeToken(settle, tokenState)
@@ -979,7 +979,7 @@ func (c *Controller) realize(ctx context.Context, id string) error {
 		c.purgeEgress(settle, id)
 		return errors.Join(err, c.revokeToken(settle, tokenState))
 	}
-	spec := specOf(obj, lifecycle, c.egressSpec(boundary.Map), boundary.Env, token)
+	spec := specOf(obj, lifecycle, c.egressSpec(c.sandboxEnvironment(obj), boundary.Map), boundary.Env, token)
 	c.realizing[id] = struct{}{}
 	c.mu.Unlock()
 	out := drive(ctx, d, spec, token)
@@ -1511,6 +1511,14 @@ func (c *Controller) deleteOne(ctx context.Context, obj *v1.Sandbox) error {
 	if err != nil {
 		return err
 	}
+	return c.forgetOne(ctx, obj)
+}
+
+// forgetOne ends everything the control plane holds of one sandbox whose
+// driver object is gone: its activity, its map, its identity, its ledger
+// row, its row, and the volumes it held.
+func (c *Controller) forgetOne(ctx context.Context, obj *v1.Sandbox) error {
+	id := obj.Status.ID
 	c.forgetTouch(id)
 	c.forgetLost(id)
 	c.purgeEgress(ctx, id)
@@ -1666,7 +1674,7 @@ func crockfordULID(b [16]byte) string {
 // driver is not called, because design 003 marks every field a running
 // sandbox would have to be recreated for immutable.
 func (c *Controller) Update(ctx context.Context, obj v1.Sandbox) (v1.Sandbox, error) {
-	c.awaitGateway(ctx, obj.Spec)
+	c.awaitGateway(ctx, obj)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	held, ok := c.objects[obj.Status.ID]

@@ -80,10 +80,12 @@ type gatewayDriver struct {
 	modes  []v1.EgressMode
 	specs  []driver.CreateSpec
 	create error
+	// local declares EgressLocal: the driver enforces its own allow list.
+	local bool
 }
 
 func (d *gatewayDriver) Capabilities() driver.Capabilities {
-	return driver.Capabilities{Egress: d.modes}
+	return driver.Capabilities{Egress: d.modes, EgressLocal: d.local}
 }
 
 func (d *gatewayDriver) Create(_ context.Context, s driver.CreateSpec) (driver.Ref, error) {
