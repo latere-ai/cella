@@ -27,7 +27,57 @@ import (
 var (
 	ErrRegistrationMismatch = errors.New("remote: this worker reports another driver or isolation class than the environment's")
 	ErrUnknownWorker        = errors.New("remote: this worker has not registered")
+	// ErrWorkerLimit is a registration, or a stream, beyond the
+	// environment's spec.workers.max, which is 409 worker_limit at the API
+	// and the stream closed with that reason (spec 083).
+	ErrWorkerLimit = errors.New("remote: the environment holds as many live workers as it takes")
+	// ErrServeRefused is a recheck the authorizer refused: the
+	// environment may not be served any longer.
+	ErrServeRefused = errors.New("remote: the environment may not be served")
 )
+
+// MaxRecheck is the longest a live stream goes without environment.serve
+// being asked again, whatever TTL the decision named (spec 083).
+const MaxRecheck = 5 * time.Minute
+
+// CloseTryAgain is the close code of a stream the control plane ends because
+// it could not decide whether the worker may go on serving: 1013, try again
+// later. It is no refusal, so the worker reconnects and asks again.
+const CloseTryAgain = 1013
+
+// ReasonAuthorizerUnavailable is the reason a stream closed with
+// CloseTryAgain carries.
+const ReasonAuthorizerUnavailable = "authorizer_unavailable"
+
+// pendingWindow is how long a registration whose stream has not opened yet
+// counts as a live worker against spec.workers.max, so two registrations
+// racing for the last place do not both take it.
+const pendingWindow = HeartbeatTimeout
+
+// Admission is what the control plane knows of a registration beyond what
+// the worker sent: the key it registered with, the environment's limit on
+// live workers, and how long the decision that admitted it holds.
+type Admission struct {
+	// JTI is the jti of the key the worker authenticated with, read from
+	// the verified bearer and never from the body.
+	JTI string
+	// MaxWorkers is the environment's spec.workers.max, zero for no limit.
+	MaxWorkers int
+	// TTL is how long the environment.serve decision that admitted the
+	// registration holds, which the stream's first recheck waits.
+	TTL time.Duration
+}
+
+// Replacement is a registration that named the key of a live worker on an
+// environment already holding as many as it takes: the worker it met, both
+// declarations, and whether it replaced that worker, which it does only when
+// the two report the same host (spec 083).
+type Replacement struct {
+	Worker   string
+	Previous Registration
+	Next     Registration
+	Replaced bool
+}
 
 // Queue is the operations table of design 010 as the hub uses it: the row
 // that records who holds an operation, so a dropped connection redelivers to
@@ -89,7 +139,9 @@ type pendingCreate struct {
 type environment struct {
 	registration Registration
 	registered   bool
-	workers      map[string]*worker
+	// maxWorkers is spec.workers.max as the latest registration read it.
+	maxWorkers int
+	workers    map[string]*worker
 	// observed is the last state the workers reported, and reported says
 	// whether any of them has. A control plane that has been told nothing
 	// asks the worker rather than answering an empty world.
@@ -109,6 +161,16 @@ type worker struct {
 	// host is the machine the worker reported, nil where its driver
 	// reports none.
 	host *v1.HostInfo
+	// jti is the key the worker registered with, declared what it
+	// registered as, registered when, and ttl how long the decision that
+	// admitted it holds.
+	jti        string
+	declared   Registration
+	registered time.Time
+	ttl        time.Duration
+	// ended marks a registration whose stream was refused, which no longer
+	// holds a place while its pending window runs.
+	ended bool
 }
 
 // NewHub returns a hub holding no environment and no connection.
@@ -148,12 +210,44 @@ const DefaultOffline = 2 * time.Minute
 // registration and every later worker must report the same, or the
 // environment would be two data planes under one name.
 func (h *Hub) Register(environmentID string, r Registration) (Registered, error) {
+	registered, _, err := h.RegisterWith(environmentID, r, Admission{})
+	return registered, err
+}
+
+// RegisterWith is Register with what the control plane knows of the
+// registration. On an environment holding as many live workers as its
+// spec.workers.max takes, a registration is refused with ErrWorkerLimit,
+// except one with the key of a live worker that reports the same host: it
+// replaces that worker, whose stream is closed with worker_replaced, because
+// a worker reconnecting after a dropped connection must not wait out the
+// lease. The Replacement says what met what, for the record the control
+// plane writes, whether it replaced the worker or was refused.
+func (h *Hub) RegisterWith(environmentID string, r Registration, a Admission) (Registered, *Replacement, error) {
 	if environmentID == "" || r.Driver == "" || r.Isolation == "" {
-		return Registered{}, fmt.Errorf("%w: a registration names an environment, a driver and an isolation class", runtime.ErrInvalid)
+		return Registered{}, nil, fmt.Errorf("%w: a registration names an environment, a driver and an isolation class", runtime.ErrInvalid)
 	}
 	h.mu.Lock()
-	defer h.mu.Unlock()
+	registered, replacement, displaced, err := h.registerLocked(environmentID, r, a)
+	h.mu.Unlock()
+	// The replaced stream is shut after the lock is released: a link's
+	// shutdown and the connection that releases it both take that lock.
+	if displaced != nil {
+		displaced.Shutdown(&CloseError{Code: ClosePolicy, Reason: ReasonWorkerReplaced})
+	}
+	return registered, replacement, err
+}
+
+func (h *Hub) registerLocked(environmentID string, r Registration, a Admission) (Registered, *Replacement, *Link, error) {
 	env := h.environmentLocked(environmentID)
+	if env.registered && (env.registration.Driver != r.Driver || env.registration.Isolation != r.Isolation) {
+		return Registered{}, nil, nil, fmt.Errorf("%w: the environment runs %s with %s isolation and this worker reports %s with %s",
+			ErrRegistrationMismatch, env.registration.Driver, env.registration.Isolation, r.Driver, r.Isolation)
+	}
+	env.maxWorkers = a.MaxWorkers
+	replacement, displaced, err := h.admitLocked(env, r, a)
+	if err != nil {
+		return Registered{}, replacement, nil, err
+	}
 	switch {
 	case !env.registered:
 		env.registration = Registration{
@@ -161,9 +255,6 @@ func (h *Hub) Register(environmentID string, r Registration) (Registered, error)
 			Capacity: r.Capacity, Labels: maps.Clone(r.Labels), Version: r.Version,
 		}
 		env.registered = true
-	case env.registration.Driver != r.Driver || env.registration.Isolation != r.Isolation:
-		return Registered{}, fmt.Errorf("%w: the environment runs %s with %s isolation and this worker reports %s with %s",
-			ErrRegistrationMismatch, env.registration.Driver, env.registration.Isolation, r.Driver, r.Isolation)
 	default:
 		// Several workers serve one environment and what it can do is what
 		// all of them can do: a caller gated on a capability must not reach
@@ -174,16 +265,101 @@ func (h *Hub) Register(environmentID string, r Registration) (Registered, error)
 	if id == "" {
 		id = "wrk_" + h.newID()
 	}
-	w := &worker{id: id, replica: r.Version, lastHeartbeat: h.now()}
+	now := h.now()
+	w := &worker{id: id, replica: r.Version, lastHeartbeat: now, jti: a.JTI, declared: r, registered: now, ttl: a.TTL}
 	if r.Host != nil {
 		host := cloneHost(*r.Host)
 		w.host = &host
+		w.declared.Host = &host
 	}
 	env.workers[id] = w
 	return Registered{
 		Worker: id, Environment: environmentID,
 		HeartbeatInterval: v1.Duration(HeartbeatInterval.String()), Lease: v1.Duration(HeartbeatTimeout.String()),
-	}, nil
+	}, replacement, displaced, nil
+}
+
+// admitLocked holds a registration to spec.workers.max. Below the limit, or
+// with no limit, it admits. At the limit it admits only a registration with
+// the key of a live worker reporting the same host, which replaces that
+// worker: its record is dropped here and its link returned to be shut.
+func (h *Hub) admitLocked(env *environment, r Registration, a Admission) (*Replacement, *Link, error) {
+	if a.MaxWorkers <= 0 {
+		return nil, nil, nil
+	}
+	live := h.liveWorkersLocked(env, "")
+	if len(live) < a.MaxWorkers {
+		return nil, nil, nil
+	}
+	for _, w := range live {
+		if a.JTI == "" || w.jti != a.JTI {
+			continue
+		}
+		replacement := &Replacement{Worker: w.id, Previous: w.declared, Next: r}
+		if !sameHost(w.host, r.Host) {
+			return replacement, nil, fmt.Errorf("%w: a live worker holds this key and reports another host", ErrWorkerLimit)
+		}
+		replacement.Replaced = true
+		delete(env.workers, w.id)
+		return replacement, w.link, nil
+	}
+	return nil, nil, fmt.Errorf("%w: it takes %d", ErrWorkerLimit, a.MaxWorkers)
+}
+
+// liveWorkersLocked is every worker of the environment that counts against
+// spec.workers.max: one holding a stream inside the offline window, and one
+// whose registration is younger than the pending window and whose stream has
+// not opened yet. except names one worker left out of the count.
+func (h *Hub) liveWorkersLocked(env *environment, except string) []*worker {
+	now := h.now()
+	var out []*worker
+	for _, w := range env.workers {
+		switch {
+		case w.id == except:
+		case w.link != nil && !w.lastHeartbeat.Before(now.Add(-h.offline)):
+			out = append(out, w)
+		case w.link == nil && w.registered.After(now.Add(-pendingWindow)) && !w.ended:
+			out = append(out, w)
+		}
+	}
+	slices.SortFunc(out, func(a, b *worker) int { return strings.Compare(a.id, b.id) })
+	return out
+}
+
+// sameHost reports whether two registrations report the same host facts:
+// both none, or the same operating system, architecture, grants and network.
+func sameHost(a, b *v1.HostInfo) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return a.Equal(*b)
+}
+
+// Revoke closes every stream a key registered, with key_revoked, and drops
+// those workers' records, so a revoked key stops serving at once rather than
+// at its next request (spec 083). It reports how many streams it closed.
+func (h *Hub) Revoke(jti string) int {
+	if jti == "" {
+		return 0
+	}
+	h.mu.Lock()
+	var links []*Link
+	for _, env := range h.environments {
+		for id, w := range env.workers {
+			if w.jti != jti {
+				continue
+			}
+			if w.link != nil {
+				links = append(links, w.link)
+			}
+			delete(env.workers, id)
+		}
+	}
+	h.mu.Unlock()
+	for _, link := range links {
+		link.Shutdown(&CloseError{Code: ClosePolicy, Reason: ReasonKeyRevoked})
+	}
+	return len(links)
 }
 
 // Forget drops one worker's registration, which is what a clean disconnect
@@ -202,7 +378,23 @@ func (h *Hub) Forget(environmentID, workerID string) {
 // has nothing to route to it. Nothing is dispatched to the connection before
 // the hello, so a socket that opens and says nothing holds no work.
 func (h *Hub) Serve(ctx context.Context, environmentID string, conn FrameConn) error {
-	c := &connection{hub: h, environment: environmentID}
+	return h.ServeWith(ctx, environmentID, conn, ServeOptions{})
+}
+
+// ServeOptions is what the control plane adds to one worker stream.
+type ServeOptions struct {
+	// Recheck asks environment.serve again for the registration the
+	// stream's hello named, and returns how long the answer holds. An
+	// error wrapping ErrServeRefused closes the stream with serve_refused;
+	// any other error is no decision, and a second in a row closes it with
+	// CloseTryAgain so the worker reconnects and is decided anew. Nil asks
+	// nothing while the stream lives.
+	Recheck func(ctx context.Context, r Registration) (time.Duration, error)
+}
+
+// ServeWith is Serve with the control plane's options for the stream.
+func (h *Hub) ServeWith(ctx context.Context, environmentID string, conn FrameConn, o ServeOptions) error {
+	c := &connection{hub: h, environment: environmentID, recheck: o.Recheck, ctx: ctx}
 	c.link = NewLink(conn, LinkOptions{OnMessage: c.onMessage, Window: h.window})
 	defer c.release()
 	go h.beat(ctx, c.link)
@@ -222,6 +414,10 @@ type connection struct {
 	hub         *Hub
 	environment string
 	link        *Link
+	// recheck is the control plane's environment.serve, asked on the
+	// decision's TTL while the stream lives, and ctx the stream's.
+	recheck func(ctx context.Context, r Registration) (time.Duration, error)
+	ctx     context.Context
 
 	mu     sync.Mutex
 	worker *worker
@@ -300,13 +496,57 @@ func (c *connection) hello(m Message) error {
 			return err
 		}
 	}
-	if err := c.bind(m.Worker); err != nil {
+	w, err := c.bind(m.Worker)
+	if err != nil {
 		return err
 	}
 	if m.Watch {
 		go c.watch()
 	}
+	if c.recheck != nil {
+		go c.rechecks(w.declared, w.ttl)
+	}
 	return nil
+}
+
+// rechecks asks environment.serve again on every decision TTL, at most
+// MaxRecheck apart, for as long as the stream lives. A refusal closes the
+// stream with serve_refused. A recheck that produced no decision keeps the
+// stream for one more TTL, and a second one closes it with CloseTryAgain:
+// the worker reconnects, and its registration is decided anew.
+func (c *connection) rechecks(r Registration, ttl time.Duration) {
+	missed := false
+	for {
+		select {
+		case <-c.link.Done():
+			return
+		case <-time.After(recheckAfter(ttl)):
+		}
+		next, err := c.recheck(c.ctx, r)
+		switch {
+		case err == nil:
+			missed, ttl = false, next
+		case errors.Is(err, ErrServeRefused):
+			c.hub.log.Warn("the authorizer refused a live worker's stream", "environment", c.environment, "err", err)
+			c.link.Shutdown(&CloseError{Code: ClosePolicy, Reason: ReasonServeRefused})
+			return
+		case missed:
+			c.hub.log.Warn("the authorizer gave no decision on a live worker's stream twice", "environment", c.environment, "err", err)
+			c.link.Shutdown(&CloseError{Code: CloseTryAgain, Reason: ReasonAuthorizerUnavailable})
+			return
+		default:
+			missed = true
+		}
+	}
+}
+
+// recheckAfter is how long a stream waits before environment.serve is asked
+// again: the decision's TTL, and MaxRecheck where it named none or longer.
+func recheckAfter(ttl time.Duration) time.Duration {
+	if ttl <= 0 || ttl > MaxRecheck {
+		return MaxRecheck
+	}
+	return ttl
 }
 
 // issue sends one operation of the connection's own on this connection
@@ -451,29 +691,43 @@ func (c *connection) workerID() string {
 }
 
 // bind attaches this connection to the registration its hello named. A second
-// hello on one connection is refused: one stream is one worker.
-func (c *connection) bind(workerID string) error {
+// hello on one connection is refused: one stream is one worker. A stream that
+// would hold one worker more than spec.workers.max takes is refused with
+// worker_limit, which catches two registrations that raced for one place.
+func (c *connection) bind(workerID string) (*worker, error) {
 	if workerID == "" {
-		return ErrUnknownWorker
+		return nil, ErrUnknownWorker
 	}
 	if c.bound() != nil {
-		return fmt.Errorf("%w: one stream is one worker", ErrFrame)
+		return nil, fmt.Errorf("%w: one stream is one worker", ErrFrame)
 	}
 	c.hub.mu.Lock()
 	defer c.hub.mu.Unlock()
 	env, held := c.hub.environments[c.environment]
 	if !held {
-		return ErrUnknownWorker
+		return nil, ErrUnknownWorker
 	}
 	w, has := env.workers[workerID]
 	if !has {
-		return ErrUnknownWorker
+		return nil, ErrUnknownWorker
+	}
+	if env.maxWorkers > 0 {
+		streams := 0
+		for _, other := range c.hub.liveWorkersLocked(env, w.id) {
+			if other.link != nil {
+				streams++
+			}
+		}
+		if streams >= env.maxWorkers {
+			w.ended = true
+			return nil, &CloseError{Code: ClosePolicy, Reason: ReasonWorkerLimit}
+		}
 	}
 	w.link, w.lastHeartbeat = c.link, c.hub.now()
 	c.mu.Lock()
 	c.worker = w
 	c.mu.Unlock()
-	return nil
+	return w, nil
 }
 
 // beat sends the heartbeat an idle stream needs, so a worker that has nothing
@@ -645,8 +899,10 @@ func (h *Hub) Release(environmentID string) {
 		}
 	}
 	h.mu.Unlock()
+	// A deleted environment may not be served, which the worker reads as
+	// the end of everything it ran for the environment (spec 083).
 	for _, link := range links {
-		link.Shutdown(errors.New("remote: the environment was deleted"))
+		link.Shutdown(&CloseError{Code: ClosePolicy, Reason: ReasonServeRefused})
 	}
 	for _, s := range subscribers {
 		s.close()
@@ -899,6 +1155,7 @@ func intersect(a, b runtime.Capabilities) runtime.Capabilities {
 		Resize: a.Resize && b.Resize, Pool: a.Pool && b.Pool,
 		Files: a.Files && b.Files, Detach: a.Detach && b.Detach,
 		HostWorkspace: a.HostWorkspace && b.HostWorkspace,
+		EgressLocal:   a.EgressLocal && b.EgressLocal,
 		Autosize:      a.Autosize.And(b.Autosize),
 	}
 	for _, mode := range a.Egress {

@@ -3,6 +3,8 @@
 
 package remote
 
+import "time"
+
 // Peak is the most bytes one sub-stream has held on this side of the link,
 // which the window bounds.
 func (l *Link) Peak() int64 { return l.peak.Load() }
@@ -63,3 +65,7 @@ func (h *Hub) links(environmentID string) []*Link {
 
 // Intersect is what two workers' declarations both provide.
 var Intersect = intersect
+
+// RecheckAfter is how long a live stream waits before environment.serve is
+// asked again, for a decision of the TTL given.
+func RecheckAfter(ttl time.Duration) time.Duration { return recheckAfter(ttl) }
