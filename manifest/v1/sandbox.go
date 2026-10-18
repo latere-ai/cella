@@ -51,9 +51,12 @@ type SandboxSpec struct {
 	Workspace   Workspace         `json:"workspace,omitzero"`
 	Env         map[string]string `json:"env,omitempty"`
 	Secrets     []SecretMount     `json:"secrets,omitempty"`
-	Network     Network           `json:"network,omitzero"`
-	Mesh        Mesh              `json:"mesh,omitzero"`
-	Lifecycle   Lifecycle         `json:"lifecycle,omitzero"`
+	// Volumes are the Volume objects the sandbox mounts beside its
+	// workspace (spec 019).
+	Volumes   []VolumeMount `json:"volumes,omitempty"`
+	Network   Network       `json:"network,omitzero"`
+	Mesh      Mesh          `json:"mesh,omitzero"`
+	Lifecycle Lifecycle     `json:"lifecycle,omitzero"`
 	// Scheduling is where in its environment's queues the sandbox waits. It
 	// is read only on an environment in the queued mode, and a direct one
 	// refuses every field of it.
@@ -191,14 +194,17 @@ type SandboxStatus struct {
 	Ports []PortStatus `json:"ports,omitempty"`
 	// Secrets is which placeholders are in the sandbox's environment and
 	// which of them the gateway will not substitute.
-	Secrets        SecretsStatus `json:"secrets,omitzero"`
-	CreatedAt      time.Time     `json:"createdAt"`
-	StartedAt      time.Time     `json:"startedAt,omitzero"`
-	StoppedAt      time.Time     `json:"stoppedAt,omitzero"`
-	LastActivityAt time.Time     `json:"lastActivityAt,omitzero"`
-	ExpiresAt      time.Time     `json:"expiresAt,omitzero"`
-	ExitCode       *int          `json:"exitCode,omitempty"`
-	Reason         string        `json:"reason,omitempty"`
+	Secrets SecretsStatus `json:"secrets,omitzero"`
+	// Volumes is one entry per mount of spec.volumes: the volume it was
+	// bound to at create and whether it is attached.
+	Volumes        []VolumeAttachment `json:"volumes,omitempty"`
+	CreatedAt      time.Time          `json:"createdAt"`
+	StartedAt      time.Time          `json:"startedAt,omitzero"`
+	StoppedAt      time.Time          `json:"stoppedAt,omitzero"`
+	LastActivityAt time.Time          `json:"lastActivityAt,omitzero"`
+	ExpiresAt      time.Time          `json:"expiresAt,omitzero"`
+	ExitCode       *int               `json:"exitCode,omitempty"`
+	Reason         string             `json:"reason,omitempty"`
 	// Preemptions is how many times the scheduler stopped this sandbox to
 	// place one of higher priority (spec 020). It is status and not a
 	// label or a table of its own because the bound it is held to must

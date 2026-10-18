@@ -25,19 +25,22 @@ const (
 // Capabilities declare enforcement and optional operations, never aspirations.
 // An empty Egress list means no egress enforcement is provided.
 type Capabilities struct {
-	Egress    []EgressMode `json:"egress"`
-	Mesh      bool         `json:"mesh"`
-	Ingress   bool         `json:"ingress"`
-	Volumes   bool         `json:"volumes"`
-	Snapshots bool         `json:"snapshots"`
-	Attach    bool         `json:"attach"`
-	Dial      bool         `json:"dial"`
-	Display   bool         `json:"display"`
-	Input     bool         `json:"input"`
-	Resize    bool         `json:"resize"`
-	Pool      bool         `json:"pool"`
-	Files     bool         `json:"files"`
-	Detach    bool         `json:"detach"`
+	Egress  []EgressMode `json:"egress"`
+	Mesh    bool         `json:"mesh"`
+	Ingress bool         `json:"ingress"`
+	Volumes bool         `json:"volumes"`
+	// VolumeImages says a Volume can be filled from an OCI image, which
+	// is the image source of spec 019. It is false wherever Volumes is.
+	VolumeImages bool `json:"volumeImages"`
+	Snapshots    bool `json:"snapshots"`
+	Attach       bool `json:"attach"`
+	Dial         bool `json:"dial"`
+	Display      bool `json:"display"`
+	Input        bool `json:"input"`
+	Resize       bool `json:"resize"`
+	Pool         bool `json:"pool"`
+	Files        bool `json:"files"`
+	Detach       bool `json:"detach"`
 	// Autosize says which resources the driver sizes inside a manifest's
 	// spec.resources.max. It is always on the wire, each flag false where
 	// the driver holds that resource fixed.
@@ -72,7 +75,7 @@ func (c Capabilities) Equal(other Capabilities) bool {
 		}
 	}
 	return c.Mesh == other.Mesh && c.Ingress == other.Ingress && c.Volumes == other.Volumes &&
-		c.Snapshots == other.Snapshots && c.Attach == other.Attach && c.Dial == other.Dial &&
+		c.VolumeImages == other.VolumeImages && c.Snapshots == other.Snapshots && c.Attach == other.Attach && c.Dial == other.Dial &&
 		c.Display == other.Display && c.Input == other.Input && c.Resize == other.Resize &&
 		c.Pool == other.Pool && c.Files == other.Files && c.Detach == other.Detach &&
 		c.Autosize == other.Autosize

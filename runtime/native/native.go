@@ -156,6 +156,11 @@ func (d *Driver) Create(ctx context.Context, s driver.CreateSpec) (driver.Ref, e
 	if s.Image != "" {
 		return driver.Ref{}, driver.ErrUnsupported
 	}
+	// A host process has no mount namespace to put a volume in, so this
+	// driver keeps none and refuses a spec that mounts one.
+	if len(s.Volumes) > 0 {
+		return driver.Ref{}, fmt.Errorf("%w: the native driver mounts no volume", driver.ErrUnsupported)
+	}
 	if len(s.Args) > 0 && len(s.Command) == 0 {
 		return driver.Ref{}, driver.ErrInvalid
 	}

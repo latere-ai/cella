@@ -125,13 +125,16 @@ func (d *Driver) Capabilities() runtime.Capabilities {
 }
 
 // carried is a worker's capabilities less the ones whose operation has no
-// frame on the worker stream: a dial, the desktop's screen and input, and
-// the readings and the change of size that sizing a sandbox inside a ceiling
-// is made of. A worker whose own driver serves them declares them, and
+// frame on the worker stream: a dial, the desktop's screen and input, the
+// volumes, and the readings and the change of size that sizing a sandbox
+// inside a ceiling is made of. A worker whose own driver serves them declares them, and
 // declaring them here would pass a gate for a request this driver has no way
 // to send.
 func carried(c runtime.Capabilities) runtime.Capabilities {
 	c.Dial, c.Display, c.Input = false, false, false
+	// A volume is created, read and deleted by operations the stream does
+	// not carry yet, so a worker's volumes are not this driver's to offer.
+	c.Volumes, c.VolumeImages, c.Snapshots = false, false, false
 	c.Autosize = runtime.Capabilities{}.Autosize
 	return c
 }
@@ -173,6 +176,9 @@ func (d *Driver) call(ctx context.Context, opType string, req Request) (Response
 func (d *Driver) Create(ctx context.Context, spec runtime.CreateSpec) (runtime.Ref, error) {
 	if err := spec.CheckPrewarm(); err != nil {
 		return runtime.Ref{}, err
+	}
+	if len(spec.Volumes) > 0 {
+		return runtime.Ref{}, fmt.Errorf("%w: the worker stream carries no volume", runtime.ErrUnsupported)
 	}
 	// The token is carried beside the spec: CreateSpec never serializes it,
 	// and the worker's driver is what projects it inside the sandbox.

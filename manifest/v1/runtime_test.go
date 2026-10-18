@@ -14,7 +14,7 @@ import (
 func TestCapabilitiesEqual(t *testing.T) {
 	full := Capabilities{
 		Egress: []EgressMode{EgressNone, EgressAllowlist}, Mesh: true, Ingress: true, Volumes: true,
-		Snapshots: true, Attach: true, Dial: true, Display: true, Input: true, Resize: true,
+		VolumeImages: true, Snapshots: true, Attach: true, Dial: true, Display: true, Input: true, Resize: true,
 		Pool: true, Files: true, Detach: true, Autosize: Autosize{CPU: true, Memory: true, Disk: true},
 	}
 	same := full
@@ -28,6 +28,7 @@ func TestCapabilitiesEqual(t *testing.T) {
 		"mesh":                     func(c *Capabilities) { c.Mesh = false },
 		"ingress":                  func(c *Capabilities) { c.Ingress = false },
 		"volumes":                  func(c *Capabilities) { c.Volumes = false },
+		"volume images":            func(c *Capabilities) { c.VolumeImages = false },
 		"snapshots":                func(c *Capabilities) { c.Snapshots = false },
 		"attach":                   func(c *Capabilities) { c.Attach = false },
 		"dial":                     func(c *Capabilities) { c.Dial = false },

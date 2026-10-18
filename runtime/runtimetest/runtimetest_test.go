@@ -441,7 +441,7 @@ func TestDeclaredWithoutCaseNamesEveryUncheckedCapability(t *testing.T) {
 		Volumes: true, Snapshots: true, Attach: true, Dial: true, Display: true,
 		Input: true, Resize: true, Pool: true, Files: true, Detach: true,
 	}
-	want := []string{"Egress", "Mesh", "Ingress", "Volumes", "Snapshots", "Resize"}
+	want := []string{"Egress", "Mesh", "Ingress", "Snapshots", "Resize"}
 	if got := declaredWithoutCase(all); !slices.Equal(got, want) {
 		t.Errorf("declaredWithoutCase reports %v, want %v", got, want)
 	}

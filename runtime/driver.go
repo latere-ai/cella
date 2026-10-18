@@ -178,7 +178,12 @@ type CreateSpec struct {
 	User                            string
 	Resources                       Resources
 	Workspace                       Workspace
-	Egress                          Egress
+	// Volumes are the volumes the sandbox mounts, each Available on this
+	// driver before the create (spec 019). A driver that declares no
+	// Volumes capability refuses a spec that carries one with
+	// ErrUnsupported.
+	Volumes []Mount `json:"volumes,omitempty"`
+	Egress  Egress
 	// Display is the virtual desktop the sandbox asks for, nil for a sandbox
 	// with no screen. The geometry is fixed at create: the X server sizes its
 	// frame buffer once and the manifest field is immutable (spec 003).

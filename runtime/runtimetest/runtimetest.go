@@ -102,6 +102,8 @@ var cases = []caseDef{
 	{"PortsReportListening", portsReportListening},
 	{"DialReachesAPort", dialReachesAPort},
 	{"DetachRecovers", detachRecovers},
+	{"VolumeLifecycle", volumeLifecycle},
+	{"AttachFailureIsClean", attachFailureIsClean},
 }
 
 // pollTimeout bounds every wait on an observed state change.
@@ -135,7 +137,7 @@ func declaredWithoutCase(c runtime.Capabilities) []string {
 	for _, f := range []struct {
 		name string
 		on   bool
-	}{{"Egress", len(c.Egress) > 0}, {"Mesh", c.Mesh}, {"Ingress", c.Ingress}, {"Volumes", c.Volumes}, {"Snapshots", c.Snapshots}, {"Resize", c.Resize},
+	}{{"Egress", len(c.Egress) > 0}, {"Mesh", c.Mesh}, {"Ingress", c.Ingress}, {"Snapshots", c.Snapshots}, {"Resize", c.Resize},
 		// A change of size has its case; what grows a sandbox toward its
 		// ceiling is the controller's reading of the driver, which no call
 		// of this interface makes on its own.
