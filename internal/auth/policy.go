@@ -11,6 +11,7 @@ import (
 	"latere.ai/x/pkg/authz"
 
 	"latere.ai/x/cella/authorizer"
+	v1 "latere.ai/x/cella/manifest/v1"
 )
 
 // The reasons the owner policy adds to the shared frame's. The frame
@@ -49,6 +50,11 @@ type OwnerPolicy struct {
 	// DefaultEnvironment is CELLA_DEFAULT_ENVIRONMENT, the one
 	// environment every subject may use.
 	DefaultEnvironment string
+	// OwnedEnvironments is CELLA_OWNED_ENVIRONMENTS=worker: any subject
+	// may create a worker environment and acts on the ones it owns as it
+	// acts on its sandboxes (spec 083). Off, environments are
+	// administrators' alone.
+	OwnedEnvironments bool
 }
 
 // Authorize answers one request, so the owner policy and an operator's
@@ -114,20 +120,23 @@ func (p *OwnerPolicy) decide(req authz.Request) authz.Decision {
 	if id, ok := strings.CutPrefix(req.Subject, SandboxPrefix); ok && id != "" {
 		return workloadDecision(req, id)
 	}
-	if _, ok := strings.CutPrefix(req.Subject, EnvironmentPrefix); ok {
-		return authz.Decision{Reason: ReasonWorkerKey}
-	}
-
-	admin := slices.Contains(p.Admins, req.Subject)
-	if !admin {
-		// Every environment but the default is admins': theirs to make,
-		// to key, to change, to remove, and theirs alone to use.
-		if kind == authorizer.KindEnvironment {
-			if req.Action != authorizer.ActionEnvironmentUse || !p.isDefault(req.Resource) {
-				return authz.Decision{Reason: ReasonAdminOnly}
-			}
+	if id, ok := strings.CutPrefix(req.Subject, EnvironmentPrefix); ok {
+		// A key serves its own environment and asks nothing else. A
+		// revoked key never reaches this: the verifier refuses it at the
+		// door, and the hub closes a stream it opened.
+		if req.Action == authorizer.ActionEnvironmentServe && id != "" && req.Resource.ID == id {
 			return authz.Decision{Allow: true}
 		}
+		return authz.Decision{Reason: ReasonWorkerKey}
+	}
+	admin := slices.Contains(p.Admins, req.Subject)
+	if !admin && req.Action == authorizer.ActionEnvironmentServe {
+		// Serving is a worker's act, asked with its key and never with a
+		// person's token.
+		return authz.Decision{Reason: ReasonWorkerKey}
+	}
+	if !admin && kind == authorizer.KindEnvironment {
+		return p.environmentDecision(req)
 	}
 	if authz.IsList(req.Action) {
 		if admin {
@@ -138,6 +147,36 @@ func (p *OwnerPolicy) decide(req authz.Request) authz.Decision {
 	}
 	frame := authz.Policy{Admins: p.Admins, Create: createAction(kind)}
 	return frame.Decide(req, object(req.Resource))
+}
+
+// environmentDecision is the owner policy's answer about an environment for
+// a subject that is not an administrator. Every subject uses the default
+// environment. Every other environment is administrators' to make, key,
+// change, remove and use, unless OwnedEnvironments is set: then a subject
+// creates a worker environment of its own and acts on the worker
+// environments it owns as it acts on its sandboxes, and lists its own. An
+// in-process environment stays administrators' either way.
+func (p *OwnerPolicy) environmentDecision(req authz.Request) authz.Decision {
+	if req.Action == authorizer.ActionEnvironmentUse && p.isDefault(req.Resource) {
+		return authz.Decision{Allow: true}
+	}
+	if !p.OwnedEnvironments {
+		return authz.Decision{Reason: ReasonAdminOnly}
+	}
+	if authz.IsList(req.Action) {
+		return authz.Decision{Allow: true, Filter: &authz.Filter{Owners: []string{req.Subject}}}
+	}
+	if req.Resource.String("mode") != v1.EnvironmentWorker {
+		return authz.Decision{Reason: ReasonAdminOnly}
+	}
+	owner := req.Resource.String("owner")
+	if req.Action == authorizer.ActionEnvironmentCreate && (owner == "" || owner == req.Subject) {
+		return authz.Decision{Allow: true}
+	}
+	if owner != "" && owner == req.Subject && req.Action != authorizer.ActionEnvironmentCreate {
+		return authz.Decision{Allow: true}
+	}
+	return authz.Decision{Reason: authz.ReasonNotOwner}
 }
 
 // Decide is the same answer under the name latere.ai/x/pkg/authz/server

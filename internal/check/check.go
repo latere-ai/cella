@@ -143,6 +143,7 @@ func identity(ctx context.Context, cfg config.Config, client *http.Client) (*aut
 		AuthorizerTimeout:  cfg.AuthorizerTimeout,
 		AdminSubjects:      cfg.AdminSubjects,
 		DefaultEnvironment: cfg.DefaultEnvironment,
+		OwnedEnvironments:  cfg.OwnedEnvironments,
 		HTTP:               client,
 	})
 	if err != nil {

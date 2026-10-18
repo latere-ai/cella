@@ -10,6 +10,7 @@ import (
 
 	"latere.ai/x/cella/authorizer"
 	"latere.ai/x/cella/internal/auth"
+	v1 "latere.ai/x/cella/manifest/v1"
 )
 
 const defaultEnvironment = "default"
@@ -71,6 +72,11 @@ func TestOwnerPolicy(t *testing.T) {
 				}
 				if d := decide(t, p, bob, a.Name, owned[a.Kind]); d.Allow || d.Reason != auth.ReasonAdminOnly {
 					t.Errorf("a subject used an environment that is not the default: %+v", d)
+				}
+			case a.Name == authorizer.ActionEnvironmentServe:
+				// Serving is asked with a key; a person is refused it.
+				if d := decide(t, p, bob, a.Name, owned[a.Kind]); d.Allow || d.Reason != auth.ReasonWorkerKey {
+					t.Errorf("a subject was allowed to serve an environment: %+v", d)
 				}
 			case environment:
 				// Create, key, read, update, delete and list are admins'.
@@ -442,5 +448,63 @@ func TestAClaimNobodyCanParseIsADeny(t *testing.T) {
 	}
 	if d.Allow || d.Reason != authz.ReasonGrant {
 		t.Fatalf("the answer is %+v, want a %q deny", d, authz.ReasonGrant)
+	}
+}
+
+// TestAKeyServesItsOwnEnvironment: an environment key is allowed
+// environment.serve on the environment it names and on no other, and is
+// refused every other question (spec 083).
+func TestAKeyServesItsOwnEnvironment(t *testing.T) {
+	p := policy()
+	key := auth.EnvironmentPrefix + "laptop"
+	if d := decide(t, p, key, authorizer.ActionEnvironmentServe, auth.Environment{ID: "laptop"}.Resource()); !d.Allow {
+		t.Errorf("a key was refused its own environment: %+v", d)
+	}
+	if d := decide(t, p, key, authorizer.ActionEnvironmentServe, auth.Environment{ID: "desk"}.Resource()); d.Allow || d.Reason != auth.ReasonWorkerKey {
+		t.Errorf("a key served another environment: %+v", d)
+	}
+	if d := decide(t, p, key, authorizer.ActionEnvironmentRead, auth.Environment{ID: "laptop"}.Resource()); d.Allow || d.Reason != auth.ReasonWorkerKey {
+		t.Errorf("a key read its environment: %+v", d)
+	}
+}
+
+// TestOwnedEnvironmentPolicy is CELLA_OWNED_ENVIRONMENTS=worker: a subject
+// creates a worker environment of its own and acts on it, lists its own, and
+// is refused another's and any in-process one; the default stays usable.
+func TestOwnedEnvironmentPolicy(t *testing.T) {
+	p := policy()
+	p.OwnedEnvironments = true
+	mine := auth.Environment{ID: "laptop", Name: "laptop", Owner: bob, Mode: v1.EnvironmentWorker}.Resource()
+	theirs := auth.Environment{ID: "desk", Name: "desk", Owner: alice, Mode: v1.EnvironmentWorker}.Resource()
+	inproc := auth.Environment{ID: "other", Name: "other", Owner: bob, Mode: v1.EnvironmentInprocess}.Resource()
+	for _, action := range []string{authorizer.ActionEnvironmentCreate, authorizer.ActionEnvironmentRead,
+		authorizer.ActionEnvironmentUpdate, authorizer.ActionEnvironmentDelete, authorizer.ActionEnvironmentKey,
+		authorizer.ActionEnvironmentUse} {
+		if d := decide(t, p, bob, action, mine); !d.Allow {
+			t.Errorf("the owner was denied %s on its own worker environment: %+v", action, d)
+		}
+		if d := decide(t, p, bob, action, inproc); d.Allow || d.Reason != auth.ReasonAdminOnly {
+			t.Errorf("a subject was allowed %s on an in-process environment: %+v", action, d)
+		}
+	}
+	for _, action := range []string{authorizer.ActionEnvironmentRead, authorizer.ActionEnvironmentKey,
+		authorizer.ActionEnvironmentDelete, authorizer.ActionEnvironmentCreate} {
+		if d := decide(t, p, bob, action, theirs); d.Allow || d.Reason != authz.ReasonNotOwner {
+			t.Errorf("a subject was allowed %s on another's environment: %+v", action, d)
+		}
+	}
+	unowned := auth.Environment{ID: "new", Name: "new", Mode: v1.EnvironmentWorker}.Resource()
+	if d := decide(t, p, bob, authorizer.ActionEnvironmentCreate, unowned); !d.Allow {
+		t.Errorf("a create of a worker environment nobody owns yet was refused: %+v", d)
+	}
+	if d := decide(t, p, bob, authorizer.ActionEnvironmentRead, unowned); d.Allow {
+		t.Errorf("a read of an environment nobody owns was allowed: %+v", d)
+	}
+	d := decide(t, p, bob, authorizer.ActionEnvironmentList, auth.List(authorizer.ActionEnvironmentList))
+	if !d.Allow || d.Filter == nil || len(d.Filter.Owners) != 1 || d.Filter.Owners[0] != bob {
+		t.Errorf("the list answered %+v, want the subject's own", d)
+	}
+	if d := decide(t, p, bob, authorizer.ActionEnvironmentUse, auth.Environment{ID: "env_DEFAULT", Name: defaultEnvironment}.Resource()); !d.Allow {
+		t.Errorf("a subject was refused the default environment: %+v", d)
 	}
 }

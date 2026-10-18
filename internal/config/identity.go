@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"latere.ai/x/pkg/authz"
+
+	v1 "latere.ai/x/cella/manifest/v1"
 )
 
 // Defaults for the identity variables of spec 006. The three figures the
@@ -90,6 +92,11 @@ type Identity struct {
 	// DefaultEnvironment is the environment the owner policy lets every
 	// subject use.
 	DefaultEnvironment string
+	// OwnedEnvironments is CELLA_OWNED_ENVIRONMENTS set to worker: under
+	// the owner policy any subject may create a worker environment and act
+	// on the ones it owns (spec 083). Read and unused with an authorizer
+	// set.
+	OwnedEnvironments bool
 }
 
 // loadIdentity reads spec 006's variables and returns one problem per
@@ -150,6 +157,13 @@ func (i *Identity) loadIdentity(getenv Getenv) []string {
 		}
 	}
 	i.DefaultEnvironment = withDefault(getenv("CELLA_DEFAULT_ENVIRONMENT"), DefaultEnvironment)
+	switch owned := strings.TrimSpace(getenv("CELLA_OWNED_ENVIRONMENTS")); owned {
+	case "":
+	case v1.EnvironmentWorker:
+		i.OwnedEnvironments = true
+	default:
+		problems = append(problems, "CELLA_OWNED_ENVIRONMENTS is "+strconv.Quote(owned)+"; the one mode a subject may own is worker")
+	}
 	return problems
 }
 

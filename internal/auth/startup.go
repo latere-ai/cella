@@ -42,6 +42,9 @@ type Options struct {
 	AuthorizerTimeout  time.Duration
 	AdminSubjects      []string
 	DefaultEnvironment string
+	// OwnedEnvironments is CELLA_OWNED_ENVIRONMENTS=worker, the owner
+	// policy's row that lets a subject own a worker environment.
+	OwnedEnvironments bool
 	// HTTP sends the discovery reads and the authorizer's calls. An
 	// instrumented client is built when none is given.
 	HTTP *http.Client
@@ -97,7 +100,9 @@ func Start(ctx context.Context, o Options) (*Identity, error) {
 	if o.AuthorizerURL == "" {
 		// CELLA_ADMIN_SUBJECTS is read here and read nowhere else; with
 		// an authorizer set it is read and unused.
-		id.Authorizer = NewAuthorizer(&OwnerPolicy{Admins: o.AdminSubjects, DefaultEnvironment: o.DefaultEnvironment})
+		id.Authorizer = NewAuthorizer(&OwnerPolicy{
+			Admins: o.AdminSubjects, DefaultEnvironment: o.DefaultEnvironment, OwnedEnvironments: o.OwnedEnvironments,
+		})
 		return id, nil
 	}
 	if o.AuthorizerToken == "" {

@@ -412,6 +412,7 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		AuthorizerTimeout:  cfg.AuthorizerTimeout,
 		AdminSubjects:      cfg.AdminSubjects,
 		DefaultEnvironment: cfg.DefaultEnvironment,
+		OwnedEnvironments:  cfg.OwnedEnvironments,
 		Revocations:        revocations,
 	})
 	if err != nil {
