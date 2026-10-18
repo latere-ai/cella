@@ -34,6 +34,13 @@ refused before it is pushed.
   with `controller.ErrVolumeQuota`; `authorizer.Limits` gains
   `MaxVolumes`.
 
+### Fixed
+
+- **An exec's workdir may be in the sandbox's own workspace.** A sandbox
+  whose workspace is a host folder bound in place (the local runtime) takes
+  an exec or a terminal with a workdir in that folder or in its scratch
+  directories, where `/workspace` was the only root accepted before.
+
 ## v0.17.1 - 2026-10-18
 
 ### Fixed
