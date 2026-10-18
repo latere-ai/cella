@@ -399,6 +399,15 @@ a shared file system. Its conformance run is the same suite.
 
 ### The local driver
 
+Spec 081 builds this driver and changes four points of the text below:
+a granted host folder named by `workspace.host` is bound in place as the
+workspace and never deleted; exec with stdin runs as an attached stage;
+the host's own allowlist narrows what a sandbox asks for, so `mode: open`
+resolves to the host's list rather than being refused, and enforcing it
+stands in for a gateway; and volumes are not declared, since the host's
+granted folders take their place. Where the two differ, spec 081 is
+right.
+
 The operator's own machine, the harness they already have installed
 and logged in, and an OS sandbox around the process, through
 `latere.ai/x/pkg/hostsandbox` v0.60.1. What that package provides and
