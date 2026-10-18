@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.17.0 - 2026-10-18
+
 ### Added
 
 - **The worker is a package a program embeds.** `latere.ai/x/cella/worker`
