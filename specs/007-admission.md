@@ -54,6 +54,10 @@ Built:
   and `Deleting` not, and checked again when a stopped sandbox starts
   ([[080-running-sandbox-count]]). A spawn is counted against its
   parent's owner, which is the root's ([[022-mesh-and-spawn]], v0.2.0).
+- The volume ceiling from the authorizer's `limits.max_volumes` on the
+  allow of `volume.create`, counted under the controller's lock over
+  the subject's volumes that are not `Deleting` ([[019-volumes]],
+  v0.18.0).
 - The boundary check of stage 6 runs after admission in `Resolve`, so a
   webhook cannot open a child's boundary.
 
@@ -259,6 +263,12 @@ allow of `sandbox.update`, under the same lock
 For a workload creating a child, the subject counted is the root's
 owner, so a spawn tree never escapes its owner's ceiling. The refusal
 is `quota_exceeded`, 422; [[008-api]] carries its sentence.
+
+Volumes have a ceiling of the same shape, the authorizer's
+`limits.max_volumes` on the allow of `volume.create`, which no variable
+configures. It counts the subject's volumes that are not `Deleting`
+under the same lock, and its refusal is `volume_quota_exceeded`, 422
+([[019-volumes]]).
 
 ### What a platform does here
 

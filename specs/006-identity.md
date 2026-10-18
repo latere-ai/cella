@@ -8,7 +8,7 @@ depends_on:
 affects: [authorizer/, internal/auth/, internal/config/, internal/api/, test/stubs/]
 effort: medium
 created: 2026-09-12
-updated: 2026-10-05
+updated: 2026-10-18
 author: changkun
 ---
 
@@ -64,6 +64,9 @@ Built:
 - A token minted from a service account's key is narrowed by its grants
   under the owner policy (v0.9.0), and `sandbox.update` and
   `secret.update` carry `resource.proposed` (v0.10.0).
+- `volume.create` carries `resource.proposed`, the Volume the create
+  would store, and its allow's `limits.max_volumes` is the owner's
+  volume ceiling, counted by the controller ([[019-volumes]], v0.18.0).
 
 The `resource` builders live in `internal/auth` and not in the
 vocabulary package, because an object's fields are
@@ -220,20 +223,31 @@ issuer commonly stamps beside two a platform's issuer adds.
 | `sandbox.read`, `.update`, `.delete`, `.exec`, `.token` | the sandbox as above |
 | `sandbox.list` | `{"kind": "Sandbox"}`; the response may carry `filter` |
 | `secret.create`, `.read`, `.update`, `.delete`, `.list`, `.mount` | `{"kind": "Secret", "id", "name", "owner", "labels"}`; `mount` is asked at resolve for every secret a manifest names ([[018-egress-and-secrets]]) |
-| `volume.create`, `.read`, `.update`, `.delete`, `.list`, `.attach`, `.snapshot` | `{"kind": "Volume", "id", "name", "owner", "environment", "labels"}`; `attach` asked at resolve ([[019-volumes]]) |
+| `volume.create` | `{"kind": "Volume", "name", "owner", "environment", "labels", "proposed"}` from the resolved manifest; no `id` yet ([[019-volumes]]) |
+| `volume.read`, `.update`, `.delete`, `.list`, `.attach`, `.snapshot` | `{"kind": "Volume", "id", "name", "owner", "environment", "labels"}`; `attach` asked at resolve ([[019-volumes]]) |
 | `set.create`, `.read`, `.update`, `.delete`, `.list` | `{"kind": "SandboxSet", "id", "name", "owner", "environment", "labels"}` ([[020-scheduling-and-sets]]) |
 | `environment.create`, `.read`, `.update`, `.delete`, `.list`, `.key`, `.use`, `.serve` | `{"kind": "Environment", "id", "name", "owner", "isolation", "mode", "workers", "labels"}`, with `workers` the value of `spec.workers.max`, 0 when unset; `key` also carries `ttl`, the lifetime in seconds the key will get; `use` asked at resolve for the environment a manifest names ([[021-data-plane-workers]]); `serve` asked with an environment key's subject when a worker registers and on every decision TTL while its stream lives, with `registration`, `{"driver", "isolation", "host"}` of the worker ([[083-environments-a-subject-owns]]) |
 
-`sandbox.update` and `secret.update` carry one more member, `proposed`:
-`{"owner", "metadata", "spec"}` of the object the request would write,
-so an authorizer reads the change and not only the object it is made
-to, and can refuse a label it reads tenancy from being dropped or
-rewritten. A start and a stop propose the sandbox unchanged. An apply
+`sandbox.update`, `secret.update` and `volume.update` carry one more
+member, `proposed`: `{"owner", "metadata", "spec"}` of the object the
+request would write, so an authorizer reads the change and not only the
+object it is made to, and can refuse a label it reads tenancy from being
+dropped or rewritten. A start and a stop propose the sandbox unchanged. An apply
 reads and resolves its body before it asks, so a body that does not
 resolve is refused before the authorizer sees it. On `secret.update`
 the other members are the stored Secret's, and the proposed `spec`
 never carries `value`, since no authorization request carries a
 secret's value (amended 2026-09-29).
+
+`volume.create` carries `proposed` as well: the Volume the create would
+store, which the apply resolves before it asks, so `spec.source.kind`,
+`spec.access` and `spec.retain` carry their defaults where the body left
+them out, `spec.environment` names the environment, `spec.size` is the
+quantity the body wrote, and an image source is the digest-pinned
+reference admission answered. The other members are the same Volume's,
+with the caller as `owner`. An authorizer holds a create to a source
+kind, an image or a size there, parsing the size as the Kubernetes
+quantity it is (amended 2026-10-18).
 
 Response, 200:
 
@@ -242,7 +256,7 @@ Response, 200:
   "allow": true,
   "reason": "",
   "ttl": 60,
-  "limits": {"requests_per_minute": 1200, "max_sandboxes": 10, "max_priority": 5},
+  "limits": {"requests_per_minute": 1200, "max_sandboxes": 10, "max_priority": 5, "max_volumes": 20},
   "filter": {"owners": ["https://login.example.com|alice"], "labels": {"team": "research"}}
 }
 ```
@@ -261,7 +275,13 @@ deleting one not ([[080-running-sandbox-count]]). It is read from the
 allow of `sandbox.create` for a create and of `sandbox.update` for a
 start;
 `max_priority` caps `scheduling.priority` and
-reaches `Resolve` as `Limits.MaxPriority` ([[003-manifest-contract]]).
+reaches `Resolve` as `Limits.MaxPriority` ([[003-manifest-contract]]);
+`max_volumes` is the subject's volume ceiling, read from the allow of
+`volume.create`: the subject's volumes that are not `Deleting`, whatever
+their phase, counted under the controller's lock with the write, so two
+concurrent creates cannot both pass it. A create past it is
+`volume_quota_exceeded`, 422, and no variable configures it, so an
+absent figure is no ceiling ([[019-volumes]]).
 `filter`, on a list action, narrows the list to the owners and labels
 named, and each row it admits is then decided by the kind's read; the
 default environment is decided by its `environment.read` alone (amended
@@ -433,11 +453,11 @@ the HTTP envelope of 401 and 403 ([[008-api]]); the revocation store
 | An environment key registers and claims for its environment, is refused on every other route, and is refused at once after `DELETE .../keys/{jti}`; two keys on one environment work independently | `TestEnvironmentKeyRoutes`, `TestRevokedKeyIsRefusedOnTheWorkerRoutes`, `TestEnvironmentKeyReachesItsOwnEnvironmentOnly`, `TestEnvironmentKeysCannotAccessSandboxRoutes`, `TestWorkerStreamRoute`, `TestWorkerRefusesARevokedKey` | built ([[051-environments-and-workers]]): a key registers a worker and holds its operations stream, `TestWorkerStreamRoute`; the handler admits an environment key on its own environment's worker and gateway routes and refuses it on every other, so a path naming another environment, the environment and key routes and every sandbox route answer 403, `TestEnvironmentKeyReachesItsOwnEnvironmentOnly` and `TestEnvironmentKeysCannotAccessSandboxRoutes`; a revoked key is refused on its next request, registration and stream included, while a second key on the same environment keeps working, `TestEnvironmentKeyRoutes` and `TestRevokedKeyIsRefusedOnTheWorkerRoutes`, and on a running `cellad`, `TestWorkerRefusesARevokedKey` |
 | The keys of an environment are listed under `environment.key` with each key's `jti`, mint time, `exp`, revocation and minter, and never the token | `TestEnvironmentKeyList`, `TestEnvironmentKeysRecordAndList` | built ([[067-environment-list-ports-redirect-keys]]) |
 | Every failure mode in the rules list is `authorizer_unavailable` and never an allow, and unavailability fails the request without flipping readiness; a connection failure before a response line is retried once and nothing else is | `TestAuthorizerFailsClosed`, table-driven over six modes; `TestAuthorizerRetriesOnlyBeforeAResponseLine` | built: the six modes, the one retry and the readiness rule hold; the 503 they render as is [[008-api]]'s |
-| Every action in the table reaches the authorizer with the resource shape in its row, `workload` set for a sandbox caller, `issuer` and `sub` apart, and every claim of the token in `claims` verbatim | `TestAuthorizerRequestShapes` against the stub | built ([[040-mesh-and-spawn]]): every row's shape holds, and `workload` carries the caller's sandbox with its `parent`, `root`, `mesh` and `spawn` read from the store |
+| Every action in the table reaches the authorizer with the resource shape in its row, `workload` set for a sandbox caller, `issuer` and `sub` apart, and every claim of the token in `claims` verbatim | `TestAuthorizerRequestShapes` against the stub; `TestAVolumeCreateCarriesItsProposal`, `TestAVolumeCreateIsDecidedOnItsProposal` | built ([[040-mesh-and-spawn]]): every row's shape holds, and `workload` carries the caller's sandbox with its `parent`, `root`, `mesh` and `spawn` read from the store; `volume.create` carries the resolved Volume as `proposed`, and an authorizer refuses a create on its source or size |
 | A deny on an own action is `forbidden`; a deny through `Lookup` is `not_found` and identical to a missing object | `TestDenyMapping` | built: the two codes hold at the guard; the 403 and the 404 they render as are [[008-api]]'s |
 | The cache serves a second identical decision without a call, expires an allow at the answer's `ttl` and at the `600s` cap, a deny at `5s`, never caches unavailability, and keys `create` and `list` without a resource id | `TestDecisionCache` | built |
 | The probe id is denied by the stub authorizer and by the owner policy for every subject and action, and `cellad check` reports an authorizer that allows it | `TestProbeIdIsAlwaysDenied`, `TestAuthorizerConformance`, `TestTheAuthorizerDeniesTheProbe`, `TestCheckNamesEachFailure`, `TestCheckHoldsUnderTheOwnerPolicyAndAnEndpoint` | built: the owner policy denies it for every subject and action, `TestProbeIdIsAlwaysDenied`; the stub denies it for every action through the probe case of the shared suite, `TestAuthorizerConformance`, and the authorizer of `cella-stubs` for every action, `TestTheAuthorizerDeniesTheProbe`; `cellad check` fails its `authorizer` line against an endpoint that allows the probe, `TestCheckNamesEachFailure`, and passes it, naming the probe id, under the owner policy and under the stub, `TestCheckHoldsUnderTheOwnerPolicyAndAnEndpoint` ([[048-release-and-check]]) |
-| `limits` override the rate limit, the count ceiling, and the priority cap; `filter` narrows a list | `TestLimitsAndFilterReachTheCaller`, `TestCountCeilingCountsRunningSandboxes`, `TestEnvironmentListAppliesTheFilter`, `TestTheDefaultEnvironmentIsListedByItsRead`, `TestSecretListAppliesTheWholeFilter` | partial: `max_sandboxes` is honored at create and at start as the count [[007-admission]] defines, and the filter narrows the sandbox, secret and environment lists by owners and labels, with the default environment decided by its read alone ([[067-environment-list-ports-redirect-keys]]); there is still no rate limit ([[008-api]]), and `cellad` passes no `max_priority` to `Resolve`, whose `Limits.MaxPriority` caps `scheduling.priority` for a plane that sets it ([[003-manifest-contract]]) |
+| `limits` override the rate limit, the count ceiling, the volume ceiling, and the priority cap; `filter` narrows a list | `TestLimitsAndFilterReachTheCaller`, `TestCountCeilingCountsRunningSandboxes`, `TestAVolumeCreatePastTheCeilingIsVolumeQuotaExceeded`, `TestEnvironmentListAppliesTheFilter`, `TestTheDefaultEnvironmentIsListedByItsRead`, `TestSecretListAppliesTheWholeFilter` | partial: `max_sandboxes` is honored at create and at start as the count [[007-admission]] defines, `max_volumes` at a volume create as [[019-volumes]] defines, and the filter narrows the sandbox, secret and environment lists by owners and labels, with the default environment decided by its read alone ([[067-environment-list-ports-redirect-keys]]); there is still no rate limit ([[008-api]]), and `cellad` passes no `max_priority` to `Resolve`, whose `Limits.MaxPriority` caps `scheduling.priority` for a plane that sets it ([[003-manifest-contract]]) |
 | The owner policy's rules hold for every kind and action, including that only an admin creates an environment and only the default environment is usable by a non-admin | `TestOwnerPolicy`, table-driven | built |
 | A sandbox's token reads and execs itself, reads its descendants, cannot read a sibling or delete itself, and cannot mount a secret its parent did not | `TestWorkloadIsLeastPrivileged`; `TestWorkloadReachesItsOwnSandbox` over the served routes | built, and held over the API as well as over the policy ([[045-workload-tokens]]); a sandbox creating a child is [[040-mesh-and-spawn]]'s `TestSpawnOverTheAPI`, and the secret a child's parent mounts is not reachable through the API yet |
 | A workload token and an environment key minted under a public URL with a path name the URL with its path as `iss`, and the control plane accepts both under the base it is served at | `TestServingUnderABasePathEndToEnd` | built ([[071-serving-under-a-base-path]]) |

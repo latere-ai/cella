@@ -73,7 +73,12 @@ than enforcing it in a proxy in front: a create or a start past it is
 refused with `quota_exceeded`. The limit counts the sandboxes that run,
 so a stopped one holds no slot and starting it again takes one; bound
 what your subjects keep stopped with `ttl` or `autoDelete` from your
-admission endpoint. Of the
+admission endpoint. Carry your plan's volume limit the same way, as
+`max_volumes` on the allow of `volume.create`: a create past it is
+refused with `volume_quota_exceeded`. The volume limit counts every
+volume the subject holds that is not being deleted, a failed one
+included, so a subject frees a slot by deleting a volume. Leave a figure
+out for no limit. Of the
 other two figures the type carries, this release does not apply
 `max_priority`, and refuses any request whose allow carries
 `requests_per_minute` with `capability_unsupported`, so leave both out.
@@ -105,6 +110,17 @@ proposes removing it. The body is read and validated before you are asked,
 so a request that would be refused for its body never reaches you. On
 `secret.update` the rest of the resource is the stored Secret, and the
 proposed `spec` never carries the value.
+
+A volume's create is decided on what it would store. `volume.create`
+carries `resource.proposed` too, the Volume as it will be written: the
+defaults are filled, so `spec.source.kind` is `empty` or `image` even when
+the request left it out, and an image source is the digest-pinned
+reference your admission endpoint answered. To allow image volumes of at
+most 10Gi, refuse a proposal whose `spec.source.kind` is not `image`, or
+whose `spec.size` is above `10Gi`. The size is the Kubernetes quantity the
+request wrote, such as `10Gi` or `10240Mi`, so compare it parsed; in Go,
+`manifest.ParseQuantity` from `latere.ai/x/cella/manifest` parses it the
+way the core does.
 
 ### What a manifest becomes
 
@@ -198,7 +214,7 @@ plans, and its own image catalog.
 | Concern | Through the webhooks | Through the packages |
 |---|---|---|
 | accounts and organizations | the claims of your issuer, read by your authorizer | your own middleware, before `Resolve` |
-| plans and quotas | `max_sandboxes` on an allow, and the ceilings your admission endpoint applies | `Options.Ceilings` and the count you pass to `Create` and `Start` |
+| plans and quotas | `max_sandboxes` and `max_volumes` on an allow, and the ceilings your admission endpoint applies | `Options.Ceilings` and the counts you pass to `Create`, `Start` and `CreateVolume` |
 | an image catalog | admission rewrites the image | an admission function in `Options` |
 | secrets | the `Secret` kind holds the value; your authorizer decides who may mount one | the same kind through the store you construct |
 | audit and usage | the event sink | your own implementation of the controller's event seam |

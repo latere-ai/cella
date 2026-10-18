@@ -1514,7 +1514,10 @@ paths:
         passes this server's admission step as a sandbox's image does, and is
         stored as the digest-pinned reference it resolved to. A second apply
         changes the labels, the annotations and `retain`. Authorized as
-        `volume.create` with `environment.use`, or `volume.update`.
+        `volume.create` with `environment.use`, or `volume.update`;
+        `volume.create` is asked with the resolved volume as `proposed`. A
+        create past the caller's volume limit, the `max_volumes` the
+        authorizer granted, is refused with 422 `volume_quota_exceeded`.
       requestBody:
         required: true
         content:

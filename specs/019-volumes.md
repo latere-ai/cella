@@ -35,7 +35,10 @@ needs: the `Volume` kind with an `empty` and an `image` source, the
 fill and its loop, a sandbox's `spec.volumes` with the access table,
 retain and delete, the Lost rule and `VolumeMissing`, the events, the
 `/v1/volumes` routes, and the podman and k8s drivers. Its Outcome
-lists where the design below was amended while it was built.
+lists where the design below was amended while it was built. The
+authorizer's view of a create, the resolved Volume as `proposed`, and
+the owner's volume ceiling from `limits.max_volumes` followed in
+v0.18.0, below.
 
 Not built: the `snapshot` and `archive` sources with `Snapshotter`,
 `CELLA_SOURCE_ALLOW` and `CELLA_MAX_SOURCE_BYTES`; a named `class`
@@ -109,6 +112,28 @@ that needs it fails with `VolumeMissing` ([[005-lifecycle-controller]]).
 `attachedTo` is every sandbox whose desired state mounts it, `Stopped`
 included; `capacity` is what the driver granted; `snapshots` is a
 count. Ids are `vol_` and `snp_` prefixed ULIDs ([[001-architecture]]).
+
+### Authorization and the volume ceiling
+
+A create asks `volume.create` after the body is resolved, with the
+Volume it would store as `resource.proposed` ([[006-identity]]): the
+defaults filled, `spec.source.kind` among them, the environment named,
+`spec.size` as written, and an image source pinned by the admission
+step above. An authorizer that allows image volumes only, or volumes up
+to a size, decides on that proposal. The create then asks
+`environment.use` on the volume's environment.
+
+The allow of `volume.create` may carry `limits.max_volumes`, the
+owner's volume ceiling. The controller counts the owner's volumes that
+are not `Deleting`, in any environment and whatever their phase, so a
+`Failed` or `Lost` volume holds its slot until its owner deletes it,
+and refuses a create that would exceed the figure with
+`volume_quota_exceeded`, 422, and nothing written. The count and the
+write run under the controller's lock, on the replica that holds the
+writer lease, so two concurrent creates at the ceiling yield one volume
+and one refusal. An absent figure, or `0`, is no ceiling; no variable
+of `cellad`'s sets one. The managed workspace below is not a Volume
+and takes no slot.
 
 ### Access
 
@@ -266,5 +291,7 @@ that uses `Write` ([[020-scheduling-and-sets]]).
 | A snapshot is listed, is a source for a new volume in its environment, is refused in another, is deleted with its volume, and has a `snp_` id | `TestSnapshots` | not built |
 | Growth succeeds where `ResizeVolume` does and is `capability_unsupported` where the class cannot expand; a shrink is `invalid_field` | `TestVolumeUpdate` | partial ([[084-image-volumes]]): a shrink is `invalid_field` and a growth `capability_unsupported` on every driver, since none resizes yet |
 | A `vol_` id in `volumes[].volume` attaches another subject's volume when the authorizer allows and is `not_found` when it does not | `TestAttachByIdUnderTheAuthorizer` | built ([[084-image-volumes]]) |
+| `volume.create` carries the resolved Volume as `proposed`, the source kind defaulted and an image source pinned, and an authorizer refuses a create on it | `TestAVolumeCreateCarriesItsProposal`, `TestAVolumeCreateIsDecidedOnItsProposal` | built |
+| `limits.max_volumes` refuses a create past the owner's count with `volume_quota_exceeded` and nothing written; `Available`, `Failed` and `Lost` volumes count and a `Deleting` one does not; another owner's volumes do not count; concurrent creates at the ceiling yield exactly the ceiling | `TestTheVolumeCeilingCountsTheOwnersVolumes`, `TestADeletingVolumeTakesNoSlot`, `TestTheVolumeCeilingHoldsUnderConcurrentCreates`, `TestAVolumeCreatePastTheCeilingIsVolumeQuotaExceeded` | built |
 | Every transition emits its event | `TestVolumeEvents` | partial ([[084-image-volumes]]): created, updated, attached, detached, failed and deleted; snapshotted waits on snapshots |
 | The conformance cases `VolumeLifecycle`, `VolumeAttachDetachWhileStopped`, `AttachFailureIsClean`, and `SnapshotAndRestore` pass on every driver that declares the capability | `TestPodmanConformance`, `TestClusterConformance` | partial ([[084-image-volumes]]): `VolumeLifecycle` and `AttachFailureIsClean` run on every driver that declares `Volumes`; `VolumeAttachDetachWhileStopped` and `SnapshotAndRestore` wait on `Change.Volumes` and snapshots |

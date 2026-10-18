@@ -483,7 +483,9 @@ is a delete in flight, and `Lost` a volume its runtime no longer holds,
 which is never recreated. `status.attachedTo` names every sandbox that
 mounts it, a stopped one included; a volume that any sandbox mounts
 cannot be deleted (`volume_busy`). The labels, the annotations and
-`retain` change on a second apply; every other field is fixed.
+`retain` change on a second apply; every other field is fixed. Where your
+installation limits how many volumes you hold, a create past the limit is
+refused with `volume_quota_exceeded` ([the API reference](api.md#volumes)).
 
 ## Environment
 
