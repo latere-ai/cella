@@ -22,14 +22,16 @@ func TestDecodeLimits(t *testing.T) {
 		{"absent", "", Limits{}, false},
 		{"null", "null", Limits{}, false},
 		{"empty", "{}", Limits{}, false},
-		{"spec 006's example", `{"requests_per_minute": 1200, "max_sandboxes": 10, "max_priority": 5}`,
-			Limits{RequestsPerMinute: 1200, MaxSandboxes: 10, MaxPriority: 5}, false},
+		{"spec 006's example", `{"requests_per_minute": 1200, "max_sandboxes": 10, "max_priority": 5, "max_volumes": 20}`,
+			Limits{RequestsPerMinute: 1200, MaxSandboxes: 10, MaxPriority: 5, MaxVolumes: 20}, false},
 		{"one ceiling", `{"max_sandboxes": 3}`, Limits{MaxSandboxes: 3}, false},
+		{"a volume ceiling alone", `{"max_volumes": 20}`, Limits{MaxVolumes: 20}, false},
 		{"an explicit zero", `{"max_sandboxes": 0}`, Limits{}, false},
 		{"an unknown field", `{"max_seats": 3, "max_priority": 2}`, Limits{MaxPriority: 2}, false},
 		{"a rate below zero", `{"requests_per_minute": -1}`, Limits{}, true},
 		{"a count below zero", `{"max_sandboxes": -1}`, Limits{}, true},
 		{"a priority below zero", `{"max_priority": -1}`, Limits{}, true},
+		{"a volume count below zero", `{"max_volumes": -1}`, Limits{}, true},
 		{"a count that is not a number", `{"max_sandboxes": "ten"}`, Limits{}, true},
 		{"not an object", `[1]`, Limits{}, true},
 	} {
@@ -65,9 +67,10 @@ func TestWireLimitsLeavesOutWhatItDoesNotSet(t *testing.T) {
 		{"none", WireLimits{}, `{}`, Limits{}},
 		{"a count alone", WireLimits{MaxSandboxes: ptr(10)}, `{"max_sandboxes":10}`, Limits{MaxSandboxes: 10}},
 		{"a count of zero", WireLimits{MaxSandboxes: ptr(0)}, `{"max_sandboxes":0}`, Limits{}},
-		{"spec 006's example", WireLimits{RequestsPerMinute: ptr(1200), MaxSandboxes: ptr(10), MaxPriority: ptr(5)},
-			`{"requests_per_minute":1200,"max_sandboxes":10,"max_priority":5}`,
-			Limits{RequestsPerMinute: 1200, MaxSandboxes: 10, MaxPriority: 5}},
+		{"a volume count alone", WireLimits{MaxVolumes: ptr(20)}, `{"max_volumes":20}`, Limits{MaxVolumes: 20}},
+		{"spec 006's example", WireLimits{RequestsPerMinute: ptr(1200), MaxSandboxes: ptr(10), MaxPriority: ptr(5), MaxVolumes: ptr(20)},
+			`{"requests_per_minute":1200,"max_sandboxes":10,"max_priority":5,"max_volumes":20}`,
+			Limits{RequestsPerMinute: 1200, MaxSandboxes: 10, MaxPriority: 5, MaxVolumes: 20}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			raw, err := json.Marshal(tc.wire)

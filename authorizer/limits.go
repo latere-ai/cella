@@ -12,7 +12,7 @@ import (
 // Limits are what an allow granted the subject, decoded from the
 // answer's limits object one wire name to one figure. Zero is no
 // figure: an absent field grants nothing and takes nothing away. No
-// variable of cellad's sets any of the three; the allow is their only
+// variable of cellad's sets any of the four; the allow is their only
 // source.
 type Limits struct {
 	// RequestsPerMinute is a request rate for this subject (spec 008).
@@ -34,20 +34,27 @@ type Limits struct {
 	// applies it by passing it to manifest.Resolve as
 	// Options.Limits.MaxPriority. 0 is no ceiling.
 	MaxPriority int
+	// MaxVolumes is the subject's volume ceiling: the volumes the subject
+	// owns that are not being deleted, whatever their phase, so a failed
+	// or lost one holds its slot until it is deleted (spec 019). cellad
+	// reads it from the allow of volume.create and refuses a create past
+	// it with volume_quota_exceeded. 0 is no ceiling.
+	MaxVolumes int
 }
 
 // WireLimits is the limits object as an answer carries it, exported so
 // an authorizer renders its answer through the type cellad decodes
-// rather than through three string literals. Every member is optional; a
+// rather than through string literals. Every member is optional; a
 // member the object does not name stays nil, and omitempty leaves it
-// out, so an authorizer that sets one ceiling sends one and the other
-// two stay absent, which grants nothing and takes nothing away. All
-// three are pointers, so a member deliberately set to zero is still sent
-// and decodes to zero, the same grant as absence.
+// out, so an authorizer that sets one ceiling sends one and the others
+// stay absent, which grants nothing and takes nothing away. All of them
+// are pointers, so a member deliberately set to zero is still sent and
+// decodes to zero, the same grant as absence.
 type WireLimits struct {
 	RequestsPerMinute *int `json:"requests_per_minute,omitempty"`
 	MaxSandboxes      *int `json:"max_sandboxes,omitempty"`
 	MaxPriority       *int `json:"max_priority,omitempty"`
+	MaxVolumes        *int `json:"max_volumes,omitempty"`
 }
 
 // DecodeLimits reads a decision's limits object. A decision with no
@@ -69,6 +76,7 @@ func DecodeLimits(d authz.Decision) (Limits, error) {
 		{"requests_per_minute", w.RequestsPerMinute, &l.RequestsPerMinute},
 		{"max_sandboxes", w.MaxSandboxes, &l.MaxSandboxes},
 		{"max_priority", w.MaxPriority, &l.MaxPriority},
+		{"max_volumes", w.MaxVolumes, &l.MaxVolumes},
 	} {
 		if f.src == nil {
 			continue

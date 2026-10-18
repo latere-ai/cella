@@ -68,7 +68,7 @@ func TestScaffoldAnswersEachRow(t *testing.T) {
 			if err != nil {
 				t.Fatalf("the ceilings of an allow: %v", err)
 			}
-			if want := (authorizer.Limits{RequestsPerMinute: 1200, MaxSandboxes: 10, MaxPriority: 5}); limits != want {
+			if want := (authorizer.Limits{RequestsPerMinute: 1200, MaxSandboxes: 10, MaxPriority: 5, MaxVolumes: 20}); limits != want {
 				t.Errorf("the allow granted %+v, want spec 006's %+v", limits, want)
 			}
 			if authz.IsList(a.Name) {
@@ -146,15 +146,15 @@ func (ownerPolicy) Decide(_ context.Context, req authz.Request) (authz.Decision,
 		d = authz.Decision{Allow: true, Filter: &authz.Filter{Owners: []string{req.Subject}}}
 	}
 	if d.Allow {
-		d.Limits = grant(1200, 10, 5)
+		d.Limits = grant(1200, 10, 5, 20)
 	}
 	return d, nil
 }
 
-// grant renders the three ceilings of spec 006 the way an endpoint does.
-func grant(rate, sandboxes, priority int) json.RawMessage {
+// grant renders the four ceilings of spec 006 the way an endpoint does.
+func grant(rate, sandboxes, priority, volumes int) json.RawMessage {
 	raw, err := json.Marshal(authorizer.WireLimits{
-		RequestsPerMinute: &rate, MaxSandboxes: &sandboxes, MaxPriority: &priority,
+		RequestsPerMinute: &rate, MaxSandboxes: &sandboxes, MaxPriority: &priority, MaxVolumes: &volumes,
 	})
 	if err != nil {
 		panic(err)

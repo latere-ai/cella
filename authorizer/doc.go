@@ -38,6 +38,10 @@
 //
 //	limits := authorizer.WireLimits{MaxSandboxes: &ten}
 //
+// cellad reads max_sandboxes from the allow of sandbox.create and
+// sandbox.update, and max_volumes from the allow of volume.create; it
+// counts the subject's objects itself and refuses a create past either
+// figure.
 // A member the endpoint does not set is left out, which grants nothing
 // and takes nothing away; a member set to zero is sent and reads as
 // zero, the same grant. DecodeLimits is the reading half, cellad's own,

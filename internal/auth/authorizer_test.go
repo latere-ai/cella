@@ -483,13 +483,13 @@ func TestAnUnknownActionCostsNoRoundTrip(t *testing.T) {
 	}
 }
 
-// TestLimitsAndFilterReachTheCaller: the three ceilings of spec 006 and
+// TestLimitsAndFilterReachTheCaller: the four ceilings of spec 006 and
 // the filter of a list reach cellad as the figures its specs name.
 func TestLimitsAndFilterReachTheCaller(t *testing.T) {
 	s := stub.New(t, stub.WithVocabulary(authorizer.Vocabulary()))
 	s.SetRules(stub.Rule{
 		Allow:  true,
-		Limits: map[string]any{"requests_per_minute": 1200, "max_sandboxes": 10, "max_priority": 5},
+		Limits: map[string]any{"requests_per_minute": 1200, "max_sandboxes": 10, "max_priority": 5, "max_volumes": 20},
 		Filter: &authz.Filter{Owners: []string{alice}, Labels: map[string]string{"team": "research"}},
 	})
 	a := asking(t, s.URL(), s.Token(), nil)
@@ -498,7 +498,7 @@ func TestLimitsAndFilterReachTheCaller(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := (authorizer.Limits{RequestsPerMinute: 1200, MaxSandboxes: 10, MaxPriority: 5}); d.Limits != want {
+	if want := (authorizer.Limits{RequestsPerMinute: 1200, MaxSandboxes: 10, MaxPriority: 5, MaxVolumes: 20}); d.Limits != want {
 		t.Errorf("the ceilings read as %+v, want %+v", d.Limits, want)
 	}
 	if d.Filter == nil || len(d.Filter.Owners) != 1 || d.Filter.Owners[0] != alice {
