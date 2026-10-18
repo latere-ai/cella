@@ -68,6 +68,10 @@ const (
 	ActionEnvironmentList   = "environment.list"
 	ActionEnvironmentKey    = "environment.key"
 	ActionEnvironmentUse    = "environment.use"
+	// ActionEnvironmentServe is asked with an environment key's subject
+	// when a worker registers and again on every decision TTL while its
+	// stream lives (spec 083).
+	ActionEnvironmentServe = "environment.serve"
 )
 
 // table is spec 006's action table in its order, one row per action, and
@@ -111,6 +115,7 @@ var table = []authz.Action{
 	{Name: ActionEnvironmentList, Kind: KindEnvironment},
 	{Name: ActionEnvironmentKey, Kind: KindEnvironment},
 	{Name: ActionEnvironmentUse, Kind: KindEnvironment},
+	{Name: ActionEnvironmentServe, Kind: KindEnvironment},
 }
 
 // labels is the name a person reads for each resource kind. A kind is a

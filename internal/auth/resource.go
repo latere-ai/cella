@@ -91,20 +91,51 @@ func (s Set) Resource() authz.Resource {
 
 // Environment is the resource of every environment.* action, use
 // included, which is asked at resolve for the environment a manifest
-// names.
+// names. Mode and Workers let an authorizer decide a subject's own worker
+// environment on what it is and how many workers may serve it (spec 083);
+// Workers is always sent, 0 for an environment that sets no limit.
 type Environment struct {
 	ID        string
 	Name      string
 	Owner     string
 	Isolation string
+	Mode      string
+	Workers   int
 	Labels    map[string]string
+	// TTL is the lifetime in seconds a key mint gives the key, sent on
+	// environment.key alone, so an authorizer can refuse a long one.
+	TTL int64
+	// Registration is what a worker declared, sent on environment.serve
+	// alone: its driver, its isolation class and the host it runs on.
+	Registration *Registration
+}
+
+// Registration is a worker's declaration as environment.serve carries it.
+type Registration struct {
+	Driver    string
+	Isolation string
+	// Host is the host the worker reported, rendered as the registration
+	// carried it; nil for a worker whose driver reports none.
+	Host any
 }
 
 // Resource renders the environment as the envelope carries it.
 func (e Environment) Resource() authz.Resource {
-	return authz.NewResource(authorizer.KindEnvironment, e.ID, fields(
-		field{"name", e.Name}, field{"owner", e.Owner}, field{"isolation", e.Isolation}, labels(e.Labels),
-	))
+	list := []field{
+		{"name", e.Name}, {"owner", e.Owner}, {"isolation", e.Isolation}, {"mode", e.Mode},
+		{"workers", e.Workers}, labels(e.Labels),
+	}
+	if e.TTL > 0 {
+		list = append(list, field{"ttl", e.TTL})
+	}
+	if r := e.Registration; r != nil {
+		registration := map[string]any{"driver": r.Driver, "isolation": r.Isolation}
+		if r.Host != nil {
+			registration["host"] = r.Host
+		}
+		list = append(list, field{"registration", registration})
+	}
+	return authz.NewResource(authorizer.KindEnvironment, e.ID, fields(list...))
 }
 
 // List is the resource of a list action: the kind and nothing else. The

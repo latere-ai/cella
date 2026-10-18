@@ -222,7 +222,7 @@ issuer commonly stamps beside two a platform's issuer adds.
 | `secret.create`, `.read`, `.update`, `.delete`, `.list`, `.mount` | `{"kind": "Secret", "id", "name", "owner", "labels"}`; `mount` is asked at resolve for every secret a manifest names ([[018-egress-and-secrets]]) |
 | `volume.create`, `.read`, `.update`, `.delete`, `.list`, `.attach`, `.snapshot` | `{"kind": "Volume", "id", "name", "owner", "environment", "labels"}`; `attach` asked at resolve ([[019-volumes]]) |
 | `set.create`, `.read`, `.update`, `.delete`, `.list` | `{"kind": "SandboxSet", "id", "name", "owner", "environment", "labels"}` ([[020-scheduling-and-sets]]) |
-| `environment.create`, `.read`, `.update`, `.delete`, `.list`, `.key`, `.use` | `{"kind": "Environment", "id", "name", "owner", "isolation", "labels"}`; `use` asked at resolve for the environment a manifest names ([[021-data-plane-workers]]) |
+| `environment.create`, `.read`, `.update`, `.delete`, `.list`, `.key`, `.use`, `.serve` | `{"kind": "Environment", "id", "name", "owner", "isolation", "mode", "workers", "labels"}`, with `workers` the value of `spec.workers.max`, 0 when unset; `key` also carries `ttl`, the lifetime in seconds the key will get; `use` asked at resolve for the environment a manifest names ([[021-data-plane-workers]]); `serve` asked with an environment key's subject when a worker registers and on every decision TTL while its stream lives, with `registration`, `{"driver", "isolation", "host"}` of the worker ([[083-environments-a-subject-owns]]) |
 
 `sandbox.update` and `secret.update` carry one more member, `proposed`:
 `{"owner", "metadata", "spec"}` of the object the request would write,

@@ -21,8 +21,8 @@ import (
 // names and the spec does not is a row nobody decided on.
 func TestVocabularyMatchesSpec006(t *testing.T) {
 	want := actionsOfSpec006(t)
-	if len(want) != 32 {
-		t.Fatalf("spec 006's table names %d actions, want the thirty-two: %v", len(want), want)
+	if len(want) != 33 {
+		t.Fatalf("spec 006's table names %d actions, want the thirty-three: %v", len(want), want)
 	}
 	if got := Vocabulary().Actions; !slices.Equal(got, want) {
 		t.Errorf("the vocabulary drifted from spec 006:\n got %v\nwant %v", got, want)
