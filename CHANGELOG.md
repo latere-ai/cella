@@ -6,6 +6,34 @@ refused before it is pushed.
 
 ## Unreleased
 
+### Added
+
+- **A volume create is decided on what it would store.** `volume.create`
+  now carries `resource.proposed`, `{owner, metadata, spec}` of the Volume
+  the create would write, as `volume.update` already did. The body is
+  resolved before the question: `spec.source.kind` is `empty` or `image`
+  even where the request left it out, `spec.access`, `spec.retain` and
+  `spec.environment` carry their defaults, `spec.size` is the quantity the
+  request wrote, and an image source is the digest-pinned reference the
+  admission step answered. An authorizer can now allow image volumes only,
+  or volumes up to a size, by reading the proposal.
+- **A volume limit.** An allow of `volume.create` may carry
+  `max_volumes` in its `limits`, `authorizer.WireLimits.MaxVolumes`. The
+  control plane counts the subject's volumes that are not being deleted,
+  whatever their phase, under the lock its create writes under, so two
+  concurrent creates at the limit yield one volume, and refuses a create
+  past it with the new code `volume_quota_exceeded`, 422, "You have
+  reached your limit of volumes. Delete one to create another.", with
+  the count in `details.detail`. An allow without the figure sets no
+  limit, and no variable sets one.
+
+### Changed
+
+- For a package importer: `controller.CreateVolume` takes the owner's
+  volume ceiling as a fourth argument, `0` for none, and refuses past it
+  with `controller.ErrVolumeQuota`; `authorizer.Limits` gains
+  `MaxVolumes`.
+
 ### Fixed
 
 - **A command on the local runtime reads its own output with the data
