@@ -61,8 +61,10 @@ func (h *handler) applyVolume(w http.ResponseWriter, r *http.Request) {
 // body, so the source kind and the other defaults are filled, the environment
 // is named, and an image source is the digest-pinned reference admission
 // answered, which is what lets an authorizer hold a create to a source, an
-// image or a size. The volume lives in an environment, so the caller's use of
-// it is asked as a sandbox's create asks it, besides volume.create.
+// image or a size. The allow's max_volumes is the owner's volume ceiling,
+// which the controller counts. The volume lives in an environment, so the
+// caller's use of it is asked as a sandbox's create asks it, besides
+// volume.create.
 func (h *handler) createVolume(w http.ResponseWriter, r *http.Request, key string) {
 	obj, ok := h.readVolume(w, r, key, nil)
 	if !ok {
@@ -71,7 +73,8 @@ func (h *handler) createVolume(w http.ResponseWriter, r *http.Request, key strin
 	c := caller(r)
 	obj.Status.Owner = c.Subject
 	res := withProposal(volumeResource(obj), c.Subject, obj.Metadata, obj.Spec)
-	if _, err := h.decide(r, authorizer.ActionVolumeCreate, res); err != nil {
+	d, err := h.decide(r, authorizer.ActionVolumeCreate, res)
+	if err != nil {
 		respondError(w, err)
 		return
 	}
@@ -81,7 +84,7 @@ func (h *handler) createVolume(w http.ResponseWriter, r *http.Request, key strin
 		respondError(w, err)
 		return
 	}
-	stored, err := h.Controller.CreateVolume(r.Context(), obj, c.Subject)
+	stored, err := h.Controller.CreateVolume(r.Context(), obj, c.Subject, d.Limits.MaxVolumes)
 	if err != nil {
 		respondError(w, err)
 		return

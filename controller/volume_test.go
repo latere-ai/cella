@@ -6,9 +6,12 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
 	"maps"
 	"slices"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	v1 "latere.ai/x/cella/manifest/v1"
@@ -51,7 +54,7 @@ var imageSource = v1.VolumeSource{Kind: v1.VolumeSourceImage, Image: pinnedImage
 // filled creates a volume and runs one pass of the volume loop to its end.
 func filled(t *testing.T, c *Controller, obj v1.Volume) v1.Volume {
 	t.Helper()
-	created, err := c.CreateVolume(t.Context(), obj, "alice")
+	created, err := c.CreateVolume(t.Context(), obj, "alice", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,14 +88,14 @@ func mountingVolume(name, volume string, readOnly bool) v1.Sandbox {
 // a restart reads a volume the driver already holds.
 func TestFillLifecycle(t *testing.T) {
 	c, vd, _, o := volumeController(t)
-	created, err := c.CreateVolume(t.Context(), aVolume("grader", v1.VolumeAccessSharedRead, imageSource), "alice")
+	created, err := c.CreateVolume(t.Context(), aVolume("grader", v1.VolumeAccessSharedRead, imageSource), "alice", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if created.Status.Phase != v1.VolumePending || created.Status.ID == "" || created.Status.AttachedTo == nil {
 		t.Fatalf("created %+v, want Pending with an id and an empty attachedTo", created.Status)
 	}
-	if _, err := c.CreateVolume(t.Context(), aVolume("grader", v1.VolumeAccessSharedRead, imageSource), "alice"); !errors.Is(err, ErrNameTaken) {
+	if _, err := c.CreateVolume(t.Context(), aVolume("grader", v1.VolumeAccessSharedRead, imageSource), "alice", 0); !errors.Is(err, ErrNameTaken) {
 		t.Fatalf("a second volume of one name: %v", err)
 	}
 	fillPass(t, c)
@@ -108,7 +111,7 @@ func TestFillLifecycle(t *testing.T) {
 	vd.Fill = func(driver.VolumeSpec) (driver.VolumeState, error) {
 		return driver.VolumeState{Phase: driver.VolumePending}, nil
 	}
-	slow, err := c.CreateVolume(t.Context(), aVolume("slow", v1.VolumeAccessSingle, imageSource), "alice")
+	slow, err := c.CreateVolume(t.Context(), aVolume("slow", v1.VolumeAccessSingle, imageSource), "alice", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +139,7 @@ func TestFillLifecycle(t *testing.T) {
 		{"unsupported", driver.ErrUnsupported, driver.ReasonSourceUnsupported},
 	} {
 		vd.Fill = func(driver.VolumeSpec) (driver.VolumeState, error) { return driver.VolumeState{}, tc.err }
-		obj, err := c.CreateVolume(t.Context(), aVolume("failing-"+tc.reason, v1.VolumeAccessSingle, imageSource), "alice")
+		obj, err := c.CreateVolume(t.Context(), aVolume("failing-"+tc.reason, v1.VolumeAccessSingle, imageSource), "alice", 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -152,7 +155,7 @@ func TestFillLifecycle(t *testing.T) {
 	vd.Fill = func(driver.VolumeSpec) (driver.VolumeState, error) {
 		return driver.VolumeState{}, errors.New("the engine did not answer")
 	}
-	retried, err := c.CreateVolume(t.Context(), aVolume("retried", v1.VolumeAccessSingle, imageSource), "alice")
+	retried, err := c.CreateVolume(t.Context(), aVolume("retried", v1.VolumeAccessSingle, imageSource), "alice", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,11 +288,11 @@ func TestAttachWaitsOnAvailable(t *testing.T) {
 	vd.Fill = func(driver.VolumeSpec) (driver.VolumeState, error) {
 		return driver.VolumeState{Phase: driver.VolumePending}, nil
 	}
-	ok, err := c.CreateVolume(t.Context(), aVolume("grader", v1.VolumeAccessSharedRead, imageSource), "alice")
+	ok, err := c.CreateVolume(t.Context(), aVolume("grader", v1.VolumeAccessSharedRead, imageSource), "alice", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	bad, err := c.CreateVolume(t.Context(), aVolume("broken", v1.VolumeAccessSharedRead, imageSource), "alice")
+	bad, err := c.CreateVolume(t.Context(), aVolume("broken", v1.VolumeAccessSharedRead, imageSource), "alice", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -407,7 +410,7 @@ func TestADeleteDuringAFillRemovesWhatTheFillMade(t *testing.T) {
 		<-release
 		return driver.VolumeState{Phase: driver.VolumeAvailable}, nil
 	}
-	obj, err := c.CreateVolume(t.Context(), aVolume("grader", v1.VolumeAccessSharedRead, imageSource), "alice")
+	obj, err := c.CreateVolume(t.Context(), aVolume("grader", v1.VolumeAccessSharedRead, imageSource), "alice", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -502,6 +505,120 @@ func TestVolumeEvents(t *testing.T) {
 	}
 }
 
+// TestTheVolumeCeilingCountsTheOwnersVolumes: a create past the owner's
+// ceiling is ErrVolumeQuota with the count in its detail and nothing written;
+// an Available, a Failed and a Lost volume each hold a slot; another owner's
+// volumes are not counted; 0 is no ceiling; and a delete gives its slot back.
+func TestTheVolumeCeilingCountsTheOwnersVolumes(t *testing.T) {
+	c, vd, _, _ := volumeController(t)
+	empty := v1.VolumeSource{Kind: v1.VolumeSourceEmpty}
+	kept := filled(t, c, aVolume("kept", v1.VolumeAccessSingle, empty))
+	lost := filled(t, c, aVolume("lost", v1.VolumeAccessSingle, empty))
+	vd.Lose(lost.Status.ID)
+	if _, err := c.Reap(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	vd.Fill = func(driver.VolumeSpec) (driver.VolumeState, error) {
+		return driver.VolumeState{}, driver.ErrUnsupported
+	}
+	broken, err := c.CreateVolume(t.Context(), aVolume("broken", v1.VolumeAccessSingle, imageSource), "alice", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fillPass(t, c)
+	vd.Fill = nil
+	for id, want := range map[string]string{kept.Status.ID: v1.VolumeAvailable, lost.Status.ID: v1.VolumeLost, broken.Status.ID: v1.VolumeFailed} {
+		if got, err := c.GetVolume(t.Context(), id, "alice"); err != nil || got.Status.Phase != want {
+			t.Fatalf("the volume %s is %+v, %v; want %s", id, got.Status, err, want)
+		}
+	}
+
+	_, err = c.CreateVolume(t.Context(), aVolume("fourth", v1.VolumeAccessSingle, empty), "alice", 3)
+	if !errors.Is(err, ErrVolumeQuota) || !strings.Contains(err.Error(), "holds 3 volumes of a ceiling of 3") {
+		t.Fatalf("a create past the ceiling: %v", err)
+	}
+	if _, err := c.GetVolume(t.Context(), "fourth", "alice"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("a refused create left a volume: %v", err)
+	}
+	if _, err := c.CreateVolume(t.Context(), aVolume("fourth", v1.VolumeAccessSingle, empty), "bob", 1); err != nil {
+		t.Fatalf("another owner's volumes counted against bob: %v", err)
+	}
+	if _, err := c.CreateVolume(t.Context(), aVolume("unbounded", v1.VolumeAccessSingle, empty), "alice", 0); err != nil {
+		t.Fatalf("a create with no ceiling: %v", err)
+	}
+	if _, err := c.DeleteVolume(t.Context(), broken.Status.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.CreateVolume(t.Context(), aVolume("fourth", v1.VolumeAccessSingle, empty), "alice", 4); err != nil {
+		t.Fatalf("a create after a delete freed a slot: %v", err)
+	}
+}
+
+// TestADeletingVolumeTakesNoSlot: a volume whose delete waits on a fill in
+// flight is Deleting, and gives its slot up at once rather than when the fill
+// settles.
+func TestADeletingVolumeTakesNoSlot(t *testing.T) {
+	c, vd, _, _ := volumeController(t)
+	release := make(chan struct{})
+	entered := make(chan struct{})
+	vd.Fill = func(driver.VolumeSpec) (driver.VolumeState, error) {
+		close(entered)
+		<-release
+		return driver.VolumeState{Phase: driver.VolumeAvailable}, nil
+	}
+	going, err := c.CreateVolume(t.Context(), aVolume("going", v1.VolumeAccessSharedRead, imageSource), "alice", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.FillVolumes(t.Context())
+	<-entered
+	if got, err := c.DeleteVolume(t.Context(), going.Status.ID); err != nil || got.Status.Phase != v1.VolumeDeleting {
+		t.Fatalf("the delete answered %+v, %v", got.Status, err)
+	}
+	if _, err := c.CreateVolume(t.Context(), aVolume("next", v1.VolumeAccessSharedRead, imageSource), "alice", 1); err != nil {
+		t.Fatalf("a Deleting volume held the only slot: %v", err)
+	}
+	close(release)
+	c.fillWork.Wait()
+}
+
+// TestTheVolumeCeilingHoldsUnderConcurrentCreates: creates racing for the
+// last slots of a ceiling yield exactly that many volumes, since the count
+// and the write are one act under the controller's lock.
+func TestTheVolumeCeilingHoldsUnderConcurrentCreates(t *testing.T) {
+	c, _, _, _ := volumeController(t)
+	const ceiling, racers = 3, 16
+	var created, refused atomic.Int32
+	var wg sync.WaitGroup
+	for i := range racers {
+		wg.Go(func() {
+			obj := aVolume(fmt.Sprintf("racer-%d", i), v1.VolumeAccessSingle, v1.VolumeSource{Kind: v1.VolumeSourceEmpty})
+			_, err := c.CreateVolume(t.Context(), obj, "alice", ceiling)
+			switch {
+			case err == nil:
+				created.Add(1)
+			case errors.Is(err, ErrVolumeQuota):
+				refused.Add(1)
+			default:
+				t.Error(err)
+			}
+		})
+	}
+	wg.Wait()
+	if created.Load() != ceiling || refused.Load() != racers-ceiling {
+		t.Fatalf("%d creates, %d refusals; want %d and %d", created.Load(), refused.Load(), ceiling, racers-ceiling)
+	}
+	held := 0
+	for _, v := range c.ListVolumes() {
+		if v.Status.Owner == "alice" {
+			held++
+		}
+	}
+	if held != ceiling {
+		t.Fatalf("alice holds %d volumes, want %d", held, ceiling)
+	}
+}
+
 // TestVolumesNeedAStoreAndADriverThatKeepThem: a store that keeps no volumes
 // refuses every volume act, and so does an environment whose driver keeps
 // none.
@@ -516,7 +633,7 @@ func TestVolumesNeedAStoreAndADriverThatKeepThem(t *testing.T) {
 	if c.VolumesEnabled() {
 		t.Fatal("a store with no volume seam reports volumes")
 	}
-	if _, err := c.CreateVolume(t.Context(), aVolume("v", v1.VolumeAccessSingle, imageSource), "alice"); !errors.Is(err, ErrNoVolumeStore) {
+	if _, err := c.CreateVolume(t.Context(), aVolume("v", v1.VolumeAccessSingle, imageSource), "alice", 0); !errors.Is(err, ErrNoVolumeStore) {
 		t.Fatalf("create: %v", err)
 	}
 	if _, err := c.UpdateVolume(t.Context(), aVolume("v", v1.VolumeAccessSingle, imageSource), "vol_x"); !errors.Is(err, ErrNoVolumeStore) {
@@ -530,7 +647,7 @@ func TestVolumesNeedAStoreAndADriverThatKeepThem(t *testing.T) {
 	}
 
 	plain := openController(t, Options{Driver: d})
-	if _, err := plain.CreateVolume(t.Context(), aVolume("v", v1.VolumeAccessSingle, imageSource), "alice"); !errors.Is(err, driver.ErrUnsupported) {
+	if _, err := plain.CreateVolume(t.Context(), aVolume("v", v1.VolumeAccessSingle, imageSource), "alice", 0); !errors.Is(err, driver.ErrUnsupported) {
 		t.Fatalf("a driver that keeps no volumes: %v", err)
 	}
 }
@@ -613,7 +730,7 @@ func TestRunVolumesFillsOnCreate(t *testing.T) {
 	done := make(chan struct{})
 	go func() { defer close(done); c.RunVolumes(ctx) }()
 	t.Cleanup(func() { cancel(); <-done })
-	obj, err := c.CreateVolume(t.Context(), aVolume("grader", v1.VolumeAccessSharedRead, imageSource), "alice")
+	obj, err := c.CreateVolume(t.Context(), aVolume("grader", v1.VolumeAccessSharedRead, imageSource), "alice", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -638,7 +755,7 @@ func TestAWaitingSandboxKeepsItsCreatesRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := withDriver(t, st, vd, clock, Options{Events: events})
-	vol, err := c.CreateVolume(t.Context(), aVolume("grader", v1.VolumeAccessSharedRead, imageSource), "alice")
+	vol, err := c.CreateVolume(t.Context(), aVolume("grader", v1.VolumeAccessSharedRead, imageSource), "alice", 0)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -52,6 +52,7 @@ var table = []struct {
 	{"environment_mismatch", 422, 3},
 	{"admission_refused", 422, 3},
 	{"quota_exceeded", 422, 3},
+	{"volume_quota_exceeded", 422, 3},
 	{"boundary_exceeded", 422, 3},
 	{"spawn_budget_exhausted", 422, 3},
 	{"rate_limited", 429, 3},

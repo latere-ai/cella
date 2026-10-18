@@ -139,6 +139,7 @@ code in the `X-Cella-Error` trailer.
 | `capability_unsupported` | 422 | the environment cannot provide what the request or the manifest needs |
 | `ceiling_exceeded` | 422 | a value is above what this server allows |
 | `quota_exceeded` | 422 | you run as many sandboxes as your limit allows; stop one to create or start another |
+| `volume_quota_exceeded` | 422 | you hold as many volumes as your limit allows; delete one to create another |
 | `admission_refused` | 422 | the admission step refused the manifest, with its reason in `detail` |
 | `boundary_exceeded` | 422 | a child asked for more than its parent has |
 | `spawn_budget_exhausted` | 422 | the sandbox has no spawn budget left |
@@ -312,9 +313,16 @@ waits for the fill before it starts.
 | Route | Action | What it does |
 |---|---|---|
 | `GET /v1/volumes` | `volume.list` | list your volumes; `owner` and `label` narrow the list as they do for sandboxes |
-| `PUT /v1/volumes/{name}` | `volume.create` and `environment.use`, or `volume.update` | apply by name. A create answers `201` with the volume `Pending`; it is `Available` once filled, or `Failed` with a reason. An image source must be pinned by digest, or be a name this server's admission step resolves to one, and is stored as that pinned reference. A second apply changes the labels, the annotations and `retain` |
+| `PUT /v1/volumes/{name}` | `volume.create` and `environment.use`, or `volume.update` | apply by name. A create answers `201` with the volume `Pending`; it is `Available` once filled, or `Failed` with a reason. An image source must be pinned by digest, or be a name this server's admission step resolves to one, and is stored as that pinned reference. A create past your volume limit is `volume_quota_exceeded`. A second apply changes the labels, the annotations and `retain` |
 | `GET /v1/volumes/{name}` | `volume.read` | read one volume by name or `vol_` id; `status.attachedTo` names every sandbox that mounts it |
 | `DELETE /v1/volumes/{name}` | `volume.delete` | delete a volume no sandbox mounts; a mounted one, a stopped sandbox's included, is `volume_busy` |
+
+**Your volume limit counts what you hold.** Where your installation sets
+a volume limit, every volume you hold takes a place in it, whatever its
+phase, until you delete it: a failed volume and a lost one count, and one
+being deleted does not. When you are at the limit, a create is refused
+with `volume_quota_exceeded`; delete a volume first. The limit is yours
+alone, so another person's volumes never count against it.
 
 ### Environments
 

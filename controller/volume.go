@@ -24,6 +24,9 @@ var (
 	// ErrNoVolumeStore is a volume act on a control plane whose store keeps
 	// no volumes. Design 008 answers it capability_unsupported.
 	ErrNoVolumeStore = errors.New("this control plane's store keeps no volumes")
+	// ErrVolumeQuota is a create past the owner's volume ceiling. Design 008
+	// answers it with 422 volume_quota_exceeded.
+	ErrVolumeQuota = errors.New("volume count limit reached")
 )
 
 // The mutations the controller appends for the Volume kind: design 009's
@@ -106,8 +109,12 @@ func (c *Controller) volumeDriver(environment string) (driver.VolumeDriver, erro
 
 // CreateVolume stores a resolved Volume under a fresh id, Pending, and wakes
 // the volume loop, which asks the driver to fill it. The name is unique among
-// the owner's live volumes, as it is for every other kind.
-func (c *Controller) CreateVolume(ctx context.Context, obj v1.Volume, owner string) (v1.Volume, error) {
+// the owner's live volumes, as it is for every other kind. max is the owner's
+// volume ceiling, 0 for none: a create that would hold more than max volumes
+// is ErrVolumeQuota. The count and the write run under one hold of the
+// controller's lock, so two creates racing for the last slot yield one volume
+// and one refusal.
+func (c *Controller) CreateVolume(ctx context.Context, obj v1.Volume, owner string, max int) (v1.Volume, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.volumes == nil {
@@ -120,6 +127,9 @@ func (c *Controller) CreateVolume(ctx context.Context, obj v1.Volume, owner stri
 		if held.Status.Owner == owner && held.Metadata.Name == obj.Metadata.Name {
 			return obj, ErrNameTaken
 		}
+	}
+	if count := c.countVolumesLocked(owner); max > 0 && count >= max {
+		return obj, fmt.Errorf("%w: the owner holds %d volumes of a ceiling of %d", ErrVolumeQuota, count, max)
 	}
 	if err := c.admits(obj.Spec.Environment); err != nil {
 		return obj, err
@@ -138,6 +148,22 @@ func (c *Controller) CreateVolume(ctx context.Context, obj v1.Volume, owner stri
 	}
 	c.wakeVolumes()
 	return c.volumeRead(id), nil
+}
+
+// countVolumesLocked is how many volumes the owner holds against the volume
+// ceiling: every one of its volumes but those being deleted. A Failed or Lost
+// volume keeps its slot, since its row and its name stay until the owner
+// deletes it, and a Deleting one gives its slot up at once, since nothing can
+// mount it again and the volume loop finishes its delete. The caller holds
+// the controller's lock.
+func (c *Controller) countVolumesLocked(owner string) int {
+	count := 0
+	for _, held := range c.volumeObjects {
+		if held.Status.Owner == owner && held.Status.Phase != v1.VolumeDeleting {
+			count++
+		}
+	}
+	return count
 }
 
 // UpdateVolume replaces one Volume's metadata and the fields of its spec an

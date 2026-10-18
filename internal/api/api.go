@@ -986,6 +986,8 @@ func errorEnvelope(err error, requestID string) (int, httpjson.Error) {
 		code = "volume_busy"
 	case errors.Is(err, controller.ErrQuota):
 		code = "quota_exceeded"
+	case errors.Is(err, controller.ErrVolumeQuota):
+		code = "volume_quota_exceeded"
 	case errors.Is(err, controller.ErrBudgetExhausted):
 		code = "spawn_budget_exhausted"
 	case errors.Is(err, controller.ErrPhase), errors.Is(err, driver.ErrNotRunning),
@@ -1049,6 +1051,9 @@ func errorEnvelope(err error, requestID string) (int, httpjson.Error) {
 	case "quota_exceeded":
 		status = 422
 		message = "You have reached your limit of running sandboxes. Stop one to start another."
+	case "volume_quota_exceeded":
+		status = 422
+		message = "You have reached your limit of volumes. Delete one to create another."
 	case "body_too_large":
 		status = 413
 		message = "The request body is larger than this server accepts."

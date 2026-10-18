@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -442,6 +443,56 @@ func TestAVolumeCreateIsDecidedOnItsProposal(t *testing.T) {
 		}
 		f.request(http.MethodGet, "/v1/volumes/"+tc.name, f.alice, "", want)
 	}
+}
+
+// TestAVolumeCreatePastTheCeilingIsVolumeQuotaExceeded: the allow of
+// volume.create carries max_volumes, and a create past it answers 422
+// volume_quota_exceeded with the code's one sentence and a developer detail
+// naming the count, with nothing created; a delete gives the slot back, and
+// an allow without the figure is no ceiling.
+func TestAVolumeCreatePastTheCeilingIsVolumeQuotaExceeded(t *testing.T) {
+	var ceiling atomic.Int32
+	ceiling.Store(1)
+	policy := &creates{}
+	policy.decide = func(authz.Request) authz.Decision {
+		figure := int(ceiling.Load())
+		if figure == 0 {
+			return authz.Decision{Allow: true}
+		}
+		raw, err := json.Marshal(authorizer.WireLimits{MaxVolumes: &figure})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return authz.Decision{Allow: true, Limits: raw}
+	}
+	f, _ := setupVolumes(t, policy)
+	first := decodeVolume(t, f.request(http.MethodPut, "/v1/volumes/first", f.alice,
+		volumeBody("first", v1.VolumeAccessSingle, ""), http.StatusCreated))
+	var refusal struct {
+		Error struct {
+			Code    string         `json:"code"`
+			Message string         `json:"message"`
+			Details map[string]any `json:"details"`
+		} `json:"error"`
+	}
+	body := f.request(http.MethodPut, "/v1/volumes/second", f.alice, volumeBody("second", v1.VolumeAccessSingle, ""), http.StatusUnprocessableEntity)
+	if err := json.Unmarshal(body, &refusal); err != nil {
+		t.Fatal(err)
+	}
+	e := refusal.Error
+	detail, _ := e.Details["detail"].(string)
+	if e.Code != "volume_quota_exceeded" || e.Message != "You have reached your limit of volumes. Delete one to create another." ||
+		!strings.Contains(detail, "holds 1 volumes of a ceiling of 1") {
+		t.Fatalf("the refusal: %+v", e)
+	}
+	f.request(http.MethodGet, "/v1/volumes/second", f.alice, "", http.StatusNotFound)
+	f.request(http.MethodPut, "/v1/volumes/second", f.bob, volumeBody("second", v1.VolumeAccessSingle, ""), http.StatusCreated)
+
+	f.available(first.Status.ID)
+	f.request(http.MethodDelete, "/v1/volumes/"+first.Status.ID, f.alice, "", http.StatusOK)
+	f.request(http.MethodPut, "/v1/volumes/second", f.alice, volumeBody("second", v1.VolumeAccessSingle, ""), http.StatusCreated)
+	ceiling.Store(0)
+	f.request(http.MethodPut, "/v1/volumes/third", f.alice, volumeBody("third", v1.VolumeAccessSingle, ""), http.StatusCreated)
 }
 
 // TestVolumesRefusedWhereTheyAreNotKept: an environment whose driver keeps no
