@@ -6,8 +6,6 @@ package conformance
 import (
 	"bufio"
 	"context"
-	"crypto/rand"
-	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -37,11 +35,7 @@ func case083WorkerRefusals(ctx context.Context, e *Env) error {
 	name := e.name()
 	body := []byte(`{"apiVersion":"cella.latere.ai/v1beta1","kind":"Environment","metadata":{"name":"` + name + `"},` +
 		`"spec":{"mode":"worker","isolation":"none","capacity":{"sandboxes":1},"workers":{"max":1}}}`)
-	x, err := e.admin.put(ctx, "/v1/environments/"+name, body, "application/json")
-	if err != nil {
-		return err
-	}
-	if err = x.status(http.StatusCreated); err != nil {
+	if err := e.adminCall(ctx, http.MethodPut, "/v1/environments/"+name, body, http.StatusCreated); err != nil {
 		return err
 	}
 	deleted := false
@@ -59,13 +53,17 @@ func case083WorkerRefusals(ctx context.Context, e *Env) error {
 		return err
 	}
 	registration := []byte(`{"driver":"conformance","isolation":"none"}`)
+	register := func(key string) error {
+		_, err := e.registerWorker(ctx, key, registration, http.StatusCreated)
+		return err
+	}
 
 	// The first key takes the one place; the second is refused.
 	worker, err := e.registerWorker(ctx, first, registration, http.StatusCreated)
 	if err != nil {
 		return err
 	}
-	x, err = e.admin.send(ctx, http.MethodPost, "/v1/environments/self/workers",
+	x, err := e.admin.send(ctx, http.MethodPost, "/v1/environments/self/workers",
 		request{Body: registration, ContentType: "application/json", Token: second})
 	if err != nil {
 		return err
@@ -73,57 +71,55 @@ func case083WorkerRefusals(ctx context.Context, e *Env) error {
 	if err = x.refusal("worker_limit"); err != nil {
 		return err
 	}
-
 	// The first key registering again from the same host replaces it.
-	live, err := e.openWorkerStream(ctx, name, first, worker)
-	if err != nil {
+	if err = e.closesWith(ctx, name, first, worker, "worker_replaced", func() error { return register(first) }); err != nil {
 		return err
 	}
-	if _, err = e.registerWorker(ctx, first, registration, http.StatusCreated); err != nil {
-		return err
-	}
-	if err = live.closedWith(ctx, "worker_replaced"); err != nil {
-		return err
-	}
-
 	// Revoking that key closes the stream it opened.
-	worker, err = e.registerWorker(ctx, first, registration, http.StatusCreated)
-	if err != nil {
+	if worker, err = e.registerWorker(ctx, first, registration, http.StatusCreated); err != nil {
 		return err
 	}
-	live, err = e.openWorkerStream(ctx, name, first, worker)
-	if err != nil {
+	revoke := func() error {
+		return e.adminCall(ctx, http.MethodDelete, "/v1/environments/"+name+"/keys/"+firstJTI, nil, http.StatusNoContent)
+	}
+	if err = e.closesWith(ctx, name, first, worker, "key_revoked", revoke); err != nil {
 		return err
 	}
-	x, err = e.admin.del(ctx, "/v1/environments/"+name+"/keys/"+firstJTI)
-	if err != nil {
-		return err
-	}
-	if err = x.status(http.StatusNoContent); err != nil {
-		return err
-	}
-	if err = live.closedWith(ctx, "key_revoked"); err != nil {
-		return err
-	}
-
 	// Deleting the environment closes the stream of the key left.
-	worker, err = e.registerWorker(ctx, second, registration, http.StatusCreated)
+	if worker, err = e.registerWorker(ctx, second, registration, http.StatusCreated); err != nil {
+		return err
+	}
+	return e.closesWith(ctx, name, second, worker, "serve_refused", func() error {
+		deleted = true
+		return e.adminCall(ctx, http.MethodDelete, "/v1/environments/"+name, nil, http.StatusNoContent)
+	})
+}
+
+// adminCall is one call as the administrator, held to the status wanted.
+func (e *Env) adminCall(ctx context.Context, method, path string, body []byte, want int) error {
+	req := request{Body: body}
+	if body != nil {
+		req.ContentType = "application/json"
+	}
+	x, err := e.admin.send(ctx, method, path, req)
 	if err != nil {
 		return err
 	}
-	live, err = e.openWorkerStream(ctx, name, second, worker)
+	return x.status(want)
+}
+
+// closesWith opens a registered worker's stream, does what should end it,
+// and holds the close to the reason wanted.
+func (e *Env) closesWith(ctx context.Context, environment, key, worker, reason string, act func() error) error {
+	live, err := e.openWorkerStream(ctx, environment, key, worker)
 	if err != nil {
 		return err
 	}
-	x, err = e.admin.del(ctx, "/v1/environments/"+name)
-	if err != nil {
+	if err = act(); err != nil {
+		_ = live.conn.Close()
 		return err
 	}
-	if err = x.status(http.StatusNoContent); err != nil {
-		return err
-	}
-	deleted = true
-	return live.closedWith(ctx, "serve_refused")
+	return live.closedWith(ctx, reason)
 }
 
 // mintKey mints one key of an environment as the administrator and returns
@@ -178,40 +174,28 @@ type workerStream struct {
 // stream, which is the hello having bound it.
 func (e *Env) openWorkerStream(ctx context.Context, environment, key, worker string) (*workerStream, error) {
 	path := "/v1/environments/self/operations"
-	key16 := make([]byte, 16)
-	if _, err := rand.Read(key16); err != nil {
-		return nil, err
-	}
 	resp, err := e.admin.open(ctx, http.MethodGet, path, request{Token: key, Header: map[string]string{
 		"Connection": "Upgrade", "Upgrade": "websocket", "Sec-WebSocket-Version": "13",
-		"Sec-WebSocket-Key": base64.StdEncoding.EncodeToString(key16), "Sec-WebSocket-Protocol": workerProtocol,
+		"Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==", "Sec-WebSocket-Protocol": workerProtocol,
 	}})
 	if err != nil {
 		return nil, err
 	}
-	if resp.StatusCode != http.StatusSwitchingProtocols {
+	conn, upgraded := resp.Body.(io.ReadWriteCloser)
+	if resp.StatusCode != http.StatusSwitchingProtocols || !upgraded {
 		answer, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
 		_ = resp.Body.Close()
 		x := &exchange{Method: http.MethodGet, Path: path, Status: resp.StatusCode, Header: resp.Header, Body: answer}
 		return nil, x.disagree("status 101 and the worker's stream", fmt.Sprintf("status %d", resp.StatusCode))
 	}
-	conn, ok := resp.Body.(io.ReadWriteCloser)
-	if !ok {
-		_ = resp.Body.Close()
-		return nil, errors.New("the upgraded stream cannot be written")
-	}
 	s := &workerStream{conn: conn, reader: bufio.NewReader(conn), path: path}
-	hello, err := json.Marshal(map[string]any{"type": "hello", "worker": worker})
+	// The worker id is the control plane's own token of letters, digits
+	// and an underscore, so it is written into the hello as it is.
+	hello := append([]byte(noOperation+"\x00"), `{"type":"hello","worker":"`+worker+`"}`...)
+	if err = writeMasked(conn, []byte{0x5a, 0xa5, 0x3c, 0xc3}, hello); err == nil {
+		err = e.awaitWorkers(ctx, environment, 1)
+	}
 	if err != nil {
-		_ = conn.Close()
-		return nil, err
-	}
-	frame := append(append([]byte(noOperation), 0), hello...)
-	if err = writeMasked(conn, key16[:4], frame); err != nil {
-		_ = conn.Close()
-		return nil, fmt.Errorf("saying hello on the worker's stream: %w", err)
-	}
-	if err = e.awaitWorkers(ctx, environment, 1); err != nil {
 		_ = conn.Close()
 		return nil, err
 	}
