@@ -6,7 +6,7 @@ depends_on: []
 affects: [cmd/cellad/, internal/config/, internal/version/, Makefile, .lateregate.yaml, Dockerfile, .github/workflows/, .githooks/, docs/]
 effort: small
 created: 2026-09-12
-updated: 2026-09-20
+updated: 2026-10-18
 author: changkun
 ---
 
@@ -151,7 +151,7 @@ deployment that sets one before its spec lands is not refused.
 | `CELLA_PUBLIC_ADDR`, `CELLA_INTERNAL_ADDR` | no | `:8080`, `:8081` | listen addresses; a test binds `127.0.0.1:0`; the two must differ unless both ask for port 0 |
 | `CELLA_DATA_DIR` | no | `/var/lib/cella` | local disk cellad keeps state on: the readiness write test, the native and local drivers' sandboxes and volumes (004, 019); created at start |
 | `CELLA_ALLOW_UNSAFE_NATIVE` | no | `false` | explicit consent to native execution without isolation; required with `CELLA_RUNTIME=native` (028) |
-| `CELLA_RUNTIME` | no | `k8s` | the in-process driver of the default environment: `k8s`, `podman`, `native`, and from 004 `local`, `vm`, or `none` for a control plane that serves only workers |
+| `CELLA_RUNTIME` | no | `k8s` | the in-process driver of the default environment, and the driver of the `worker` role: `k8s`, `podman`, `native`, `local` (081), and from 004 `vm`, or `none` for a control plane that serves only workers |
 | `CELLA_PUBLIC_URL` | yes, from 006 | none | the absolute URL callers reach the public listener at; the issuer of workload and environment tokens and the base of every URL in a response. Its path, when it has one, prefixes every path the control plane writes in the place of `/v1`; no query and no fragment (071) |
 | `CELLA_BASE_PATH` | 071 | unset, the root | the path the public listener answers under, in the place of `/v1`: the API's routes follow it directly, and the key set, the API document and `/version` sit under it; nothing is public outside it and no probe is public under it. Set, it equals the path of `CELLA_PUBLIC_URL`; unset beside a public URL with a path is a control plane behind a proxy that rewrites the path away |
 | `CELLA_K8S_KUBECONFIG`, `CELLA_K8S_NAMESPACE` | 004, 036 | in-cluster, `cella` | the cluster the k8s driver drives and the namespace its claims and Pods live in; an empty kubeconfig means the in-cluster configuration and never the caller's own loading rules |
@@ -164,7 +164,11 @@ deployment that sets one before its spec lands is not refused.
 | `CELLA_K8S_GATEWAY_SELECTOR`, `CELLA_K8S_GATEWAY_NAMESPACE`, `CELLA_K8S_GATEWAY_PORTS` | 018, 070 | unset, the sandbox namespace, `3128,8080` | the gateway's Pods as the peer of each sandbox's network rule: their labels, which turn on the egress half of the rule and the declared modes, their namespace, and their own listen ports; the last two are a start-up problem without the labels, and the labels without `CELLA_GATEWAY` |
 | `CELLA_K8S_DNS_SELECTOR`, `CELLA_K8S_DNS_NAMESPACE` | 018, 070 | `k8s-app=kube-dns`, `kube-system` | cluster DNS as the rule's other peer, on port 53 over UDP and TCP; a start-up problem without `CELLA_K8S_GATEWAY_SELECTOR` |
 | `CELLA_PODMAN_SOCKET` | 004 | the rootless socket, then the system one | the libpod API the podman driver drives; unset, it tries `$XDG_RUNTIME_DIR/podman/podman.sock` and then `/run/podman/podman.sock`, and `Preflight` names every candidate when none answers (035) |
-| `CELLA_LOCAL_SRT` | 004 | `srt` on `PATH` | the sandbox runtime binary the local driver confines a process with |
+| `CELLA_LOCAL_GRANTS` | 081 | unset | the folders a local sandbox may use as its workspace, comma separated, each `path:rw` or `path:ro`, read only where it names neither; the root, the home directory, a system directory, a folder another user owns, and a path on the deny table are refused at start. The sandbox runtime the driver confines a process with is `srt` on `PATH` |
+| `CELLA_LOCAL_READ_PATHS` | 081 | unset | files or folders every local command may read where they are, comma separated; the home directory, a system directory, and a path on the deny table are refused at start |
+| `CELLA_LOCAL_DENY` | 081 | unset | paths denied on top of the driver's always-deny table, comma separated |
+| `CELLA_LOCAL_NETWORK` | 081 | `none` | `none` or `allowlist`, what a local sandbox's egress is narrowed to; any other value is a start-up problem |
+| `CELLA_LOCAL_HOSTS` | 081 | unset | the hosts an `allowlist` local network reaches, comma separated |
 | `CELLA_REAP_INTERVAL`, `CELLA_TOUCH_INTERVAL`, `CELLA_LOST_GRACE`, `CELLA_RECOVERY_ATTEMPTS` | 005 | `30s`, `1m`, `10m`, `5` | the reaper's tick, each bounded to between `1s` and `1h`; how often one sandbox's activity reaches the driver; how long a sandbox is `Lost` without a durable store before it is reaped; how many recreations a durable one gets before `Failed` |
 | `CELLA_POOL_SIZE`, `CELLA_POOL_IMAGE`, `CELLA_SCHEDULING_MODE` | 020, 021 | `0`, unset, `direct` | the default environment's `spec.pool.size`, `spec.pool.image`, and `spec.scheduling.mode`; every other environment declares its own. A size above zero needs a driver that declares `Pool`, and `queued` is refused at start-up until the queue lands (038) |
 | `CELLA_POOL_CPU`, `CELLA_POOL_MEMORY`, `CELLA_POOL_DISK` | 020 | unset | the default environment's `spec.pool.resources`, each a quantity in the manifest's own syntax; a prewarmed entry and a create match on them field by field (038) |

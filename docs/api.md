@@ -154,6 +154,14 @@ code in the `X-Cella-Error` trailer.
 | `driver_unavailable` | 503 | the environment's runtime did not answer |
 | `host_timeout` | 504 | the host did not decide a create within the time its worker holds one |
 
+A worker also stops on one refusal of its own before it registers, so no
+response carries it; a program that runs the worker reads it from the
+error `worker.Run` returns:
+
+| Code | Means |
+|---|---|
+| `local_runs_as_root` | the worker's runtime is `local` and it was started as root. The local runtime confines a person's own account, and as root no grant would hold, so the worker refuses to start; run it as the person whose folders it grants ([local.md](local.md)) |
+
 ## Routes
 
 ### Sandboxes
@@ -215,7 +223,7 @@ answer carry.
 | Route | Action | What it does |
 |---|---|---|
 | `POST /v1/sandboxes/{id}/exec` | `sandbox.exec` | run a command. With `?wait=1`, one JSON answer with `exitCode`, `stdout`, `stderr`, `truncated`, and `durationMs`. Without it, a stream as the command produces output |
-| `GET /v1/sandboxes/{id}/exec` | `sandbox.exec` | a WebSocket for a command with input or a terminal |
+| `GET /v1/sandboxes/{id}/exec` | `sandbox.exec` | a WebSocket for a command with input or a terminal. An environment that declares `execStdin` and not `attach`, such as one on the [local runtime](local.md), takes a command with input and refuses a terminal |
 | `GET /v1/sandboxes/{id}/attach` | `sandbox.exec` | a WebSocket carrying a pseudo-terminal: binary frames are bytes, `{"resize":{"cols","rows"}}` resizes, and the session ends with `{"exit": n}` |
 | `GET /v1/sandboxes/{id}/logs` | `sandbox.read` | the main process's output, with `tail`, `since`, and `follow=1` |
 
@@ -228,9 +236,10 @@ each.
 
 ### Files
 
-Every path is absolute and at or below the sandbox's workspace. A path
-that leaves it, by traversal or through a link the workload planted, is
-refused.
+Every path is absolute and at or below the sandbox's workspace, or below
+one of the scratch directories a sandbox reports in `status.paths`. A
+path that leaves them, by traversal or through a link the workload
+planted, is refused.
 
 | Route | Action | What it does |
 |---|---|---|

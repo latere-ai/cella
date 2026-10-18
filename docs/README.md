@@ -19,6 +19,7 @@ platform on the packages.
 | [Deploy reference](../deploy/README.md) | what each manifest and each Secret of `deploy/` is, and why the Role grants what it does |
 | [Sandboxes on Kubernetes](kubernetes.md) | what a sandbox on a cluster can do, reaching a server inside one, what a sandbox can reach itself, what the Role has to allow, and running more than one replica |
 | [Self-hosting a data plane](workers.md) | running sandboxes on your own machines against somebody else's control plane: the key, the worker, and the outbound-only rule |
+| [Sandboxes on your own computer](local.md) | the local runtime: a worker on a person's computer, the folders it grants, what a command sees, and the network it allows |
 | [Capacity and queues](scheduling.md) | what an environment holds, what happens to a create it cannot fit, priority, preemption, and warm pools |
 | [Observability](observability.md) | the scrape surface, traces and logs over OTLP, redaction, and the alert rules |
 | [Security](../SECURITY.md) | what the project protects, the test that proves each control, and how to report a vulnerability |

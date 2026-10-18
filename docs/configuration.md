@@ -71,7 +71,7 @@ on.
 
 | Variable | Default | What it is |
 |---|---|---|
-| `CELLA_RUNTIME` | `k8s` | `k8s`, `podman`, or `native`. Any other value stops the start; nothing falls back to another runtime |
+| `CELLA_RUNTIME` | `k8s` | `k8s`, `podman`, `native`, or `local`. Any other value stops the start; nothing falls back to another runtime |
 | `CELLA_ALLOW_UNSAFE_NATIVE` | `false` | `true` is the consent the native runtime requires, because it runs sandboxes as host processes with no isolation |
 | `CELLA_PODMAN_SOCKET` | the rootless socket, then the system one | the absolute path of the libpod API socket the Podman runtime drives. Unset, it tries `$XDG_RUNTIME_DIR/podman/podman.sock` and then `/run/podman/podman.sock` |
 
@@ -113,6 +113,22 @@ start-up problem without it.
 
 [Sandboxes on Kubernetes](kubernetes.md) is what the Role has to allow
 for each capability, and what the network rule of each sandbox admits.
+
+### Local
+
+Read when `CELLA_RUNTIME` is `local`. Each sandbox is a host process
+confined by the operating system's own sandbox, on macOS or Linux, with
+its scratch directories under `CELLA_DATA_DIR/local`. These variables are
+the host's own policy: no manifest widens them.
+[Run sandboxes on your own computer](local.md) is the walkthrough.
+
+| Variable | Default | What it is |
+|---|---|---|
+| `CELLA_LOCAL_GRANTS` | unset | the folders a sandbox may use as its workspace, comma separated, each ending in `:rw` for read and write or `:ro` for read only, read only where it names neither. The root, the home directory, a system directory, a folder another user owns, and a path on the deny table are refused at start |
+| `CELLA_LOCAL_READ_PATHS` | unset | files or folders every command may read where they are, comma separated, such as `~/.gitconfig` or a toolchain like `~/.rustup`. The home directory, a system directory, and a path on the deny table are refused at start |
+| `CELLA_LOCAL_DENY` | unset | paths no command and no file route may read, comma separated, on top of the table the driver always denies (`~/.ssh`, `~/.env`, and the rest), such as a secret file inside a granted folder |
+| `CELLA_LOCAL_NETWORK` | `none` | `none` or `allowlist`. A sandbox's egress is narrowed to it and never widened: one asking for `open` on an `allowlist` host gets the host's list |
+| `CELLA_LOCAL_HOSTS` | unset | the hosts an `allowlist` network reaches, comma separated |
 
 ## Lifecycle
 
@@ -243,7 +259,7 @@ outbound to a control plane somebody else operates.
 |---|---|---|
 | `CELLA_URL` | required | the control plane's public URL, its `CELLA_PUBLIC_URL`, with the path when it has one: `https://api.example.com/v1/environments`. `http://` is accepted on loopback only, unless `CELLA_INSECURE_CONTROL_PLANE` is set |
 | `CELLA_ENVIRONMENT_KEY` | required | the environment key an administrator minted for this environment |
-| `CELLA_RUNTIME` | `k8s` | the runtime this worker drives, with its variables above: the Kubernetes section, `CELLA_PODMAN_SOCKET`, or `CELLA_ALLOW_UNSAFE_NATIVE` |
+| `CELLA_RUNTIME` | `k8s` | the runtime this worker drives, with its variables above: the Kubernetes section, `CELLA_PODMAN_SOCKET`, `CELLA_ALLOW_UNSAFE_NATIVE`, or the Local section |
 | `CELLA_DATA_DIR` | `/var/lib/cella` | local state, as for the control plane |
 | `CELLA_CAPACITY_CPU`, `CELLA_CAPACITY_MEMORY`, `CELLA_CAPACITY_DISK`, `CELLA_CAPACITY_SANDBOXES` | unset | what this one worker declares it can hold. Placement admits against it beside the environment's own capacity |
 | `CELLA_WORKER_LABELS` | unset | `key=value` pairs that describe this worker to an operator reading the fleet |

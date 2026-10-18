@@ -1,6 +1,6 @@
 ---
 title: "The local driver: process isolation on a person's own computer through hostsandbox, a granted host folder bound in place as the workspace and never deleted, exec with stdin as an attached stage, files confined in the driver to the same grants, and network from the host's own list"
-status: drafted
+status: complete
 track: core
 depends_on:
   - specs/003-manifest-contract.md
@@ -313,3 +313,105 @@ streams back to the caller and is not kept by the driver.
    `CELLA_LOCAL_*` variables.
 11. `arch_test.go` has an `engines` row for `runtime/local` that admits
    only `hostsandbox` and the standard library.
+
+## Outcome
+
+Built on 2026-10-18. `runtime/local` is the driver, `CELLA_RUNTIME=local`
+selects it in both roles, and `docs/local.md` is the walkthrough. Every
+criterion has its named test in `runtime/local`, and
+`TestLocalWorkerEndToEnd` in `cmd/cellad` drives it through every layer:
+`cellad worker` on the local runtime registering its host, a sandbox on a
+granted folder resolving with its egress narrowed, a command reading and
+writing the folder under the real sandbox, and the folder whole after the
+delete.
+
+Where the tests ran. The stand-in for `srt` in the package's tests is a
+script that drops srt's settings and runs the command, so
+`TestLocalConformance` and every bookkeeping test run on every machine,
+the gate's stripped `PATH` included. What only the real sandbox proves is
+run where `srt` is installed and skipped with the remediation printed
+where it is not: `TestLocalConformanceUnderSRT`, the confinement halves of
+`TestLocalGrantsNeverReachTheDenyTable` and
+`TestLocalReadsOutsideGrantsAreRefused`, and `TestLocalWorkerEndToEnd`.
+They ran on macOS under Seatbelt. Criterion 1's Linux half under
+bubblewrap is unrun until a machine with `srt` runs the suite.
+
+Where the code diverges from the design:
+
+- **`Options` gains `Home` and `Lookup`.** `Home` is the home directory
+  the deny table and the grants are read against, the process's own when
+  empty; `Lookup` reads the environment a stage inherits, `PATH` among
+  it. An embedder whose process environment is not the person's sets
+  them, and the tests do.
+- **A new capability, `ExecStdin`.** The conformance suite ran its stdin
+  cases under `Attach` alone, and this driver declares no `Attach`.
+  `ExecStdin` says an exec with no terminal takes stdin; the suite runs
+  the stdin cases under `Attach` or `ExecStdin` and expects a terminal
+  refused without `Attach`; the API's exec socket opens for a command with
+  input under it while the attach socket still needs `Attach`; and the
+  remote hub intersects it across workers.
+- **`status.paths` reaches the file routes.** The API admitted a path at
+  or below the workspace alone, so a caller could not place a file in the
+  scratch directories the design reports for that purpose. The file routes
+  now admit a path below `status.paths.home` or `status.paths.tmp`, and
+  the driver holds it to the same containment. An environment with
+  `process` isolation runs no image at resolve, as a `native` one does.
+- **A path outside every root is `invalid_field`.** The runtime contract
+  has no `ErrOutside`; the driver answers `ErrInvalid` as the other
+  drivers do for a path outside the workspace. A path on the deny table
+  answers the same.
+- **The scratch directory holds more.** Beside `home/`, `tmp/` and
+  `work/`, a sandbox's directory holds `record.json`, `logs/` (the main
+  stage's log), `streams/` (the error output of detached commands) and
+  `run/cella/token`, the workload token. `Delete` removes all of it and
+  nothing else.
+- **`TMPDIR` reaches the command, not srt.** srt places its own socket
+  under `TMPDIR`, and a path under the data directory is longer than a
+  Unix socket's path may be on macOS, so the stage keeps the worker's
+  `TMPDIR` and the command is started through `/usr/bin/env
+  TMPDIR=<tmp>`.
+- **A detached command's error output is a file of its own.** A stage has
+  one log, so a detached exec runs under a shell that appends its
+  standard error to a file in `streams/`, read as it grows and removed
+  when the command ends.
+- **A detached command ends with its caller.** The runtime contract has an
+  exec whose request context ends, or whose timeout passes, end its
+  command, and a worker closes every exec whose operation ended. So a
+  worker that stops on purpose ends every exec stage whatever
+  `KeepOnExit` says, and `KeepOnExit` keeps the main stage, which is the
+  detached stage of spec 082's criterion 8; what survives the worker's
+  process ending unexpectedly is every detached stage, which a driver
+  opened over the same data directory still finds running
+  (`TestLocalRunStopsItsSandboxes`).
+- **An attached command ends with the driver, not with a killed
+  process.** `Close` ends every attached command and reports it with exit
+  `-1` and `ErrLost`, which the API answers as `phase_conflict`;
+  `TestLocalExecWithStdin` proves that half. An attached stage runs in a
+  session of its own, so a worker process killed outright leaves it
+  running until its closed pipes end it: end of input on its next read,
+  `SIGPIPE` on its next write. A command that does neither runs until it
+  ends, and is not in the sandbox's record, so a later `Stop` does not
+  reach it. Recording attached stages so a restarted driver ends them is
+  left for later.
+- **Input reaches an attached command through its own pipe.** `os/exec`
+  copies a reader given as `Stdin` in a goroutine `Wait` waits on, so a
+  killed command whose input never ended would never report its exit.
+- **`Logs` reads the main stage's log file.** The log carries no times,
+  so `Since` answers the whole log or nothing by the log's last write;
+  `TailLines` and `Follow` are honored.
+- **A grant is reported as the folder it resolves to.** A grant is
+  checked under the name given and under its target, and stored and
+  reported as the target, so a grant of `~/code` that links to
+  `/Volumes/work/code` is reported as `/Volumes/work/code`. A `ReadPaths` entry that does not exist
+  yet is admitted, and linked into a sandbox's home once it does.
+- **`local_runs_as_root` is not an API response.** A worker stops on it
+  before it registers, so `docs/api.md` lists it in a table of its own
+  beside the refusal table rather than with a status; the error's text
+  carries the code, and an embedder tests for `local.ErrRunsAsRoot` with
+  `errors.Is`.
+- **`CELLA_LOCAL_SRT` is not read.** Spec 004 planned it; `srt` is found
+  on `PATH`, as `hostsandbox` finds it, and spec 002's table lists the
+  five variables of this spec in its place.
+- **The `engines` row admits `latere.ai/x/pkg/uniq` beside
+  `hostsandbox`.** The test reads the whole build list, and
+  `hostsandbox` imports that helper.

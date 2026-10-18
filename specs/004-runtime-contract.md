@@ -8,7 +8,7 @@ depends_on:
 affects: [runtime/, runtime/k8s/, runtime/podman/, runtime/native/, runtime/local/, runtime/vm/, runtime/remote/, runtime/runtimetest/, internal/config/]
 effort: large
 created: 2026-09-12
-updated: 2026-10-14
+updated: 2026-10-18
 author: changkun
 ---
 
@@ -532,8 +532,9 @@ without its declaration fails.
 `k8s` (default), `podman`, `native`, `local`, `vm`, or `none` for a
 control plane that serves only workers. A driver's own variables
 (`CELLA_K8S_KUBECONFIG`, `CELLA_K8S_NAMESPACE`, `CELLA_K8S_RUNTIME_CLASS`,
-`CELLA_K8S_RUNTIME_CLASS_ISOLATION`, `CELLA_PODMAN_SOCKET`,
-`CELLA_LOCAL_SRT`) are read only when that driver is selected. Further
+`CELLA_K8S_RUNTIME_CLASS_ISOLATION`, `CELLA_PODMAN_SOCKET`, and the
+`CELLA_LOCAL_*` variables of [[081-local-driver]]) are read only when
+that driver is selected. Further
 environments are registered objects.
 
 ## Not in this spec
@@ -549,7 +550,7 @@ requests ([[023-computer-use-operations]]); the microVM driver's design
 | Criterion | Test that proves it | State |
 |---|---|---|
 | `native` passes the whole conformance suite in the unit suite | `TestNativeConformance` | passing for the cases built, [[032-runtime-conformance-suite]], including the `Attacher` cases of [[034-terminal-attach]], the `FileStore` cases of [[033-file-operations]], the `Pool` cases of [[038-environment-pools]], and `DialReachesAPort` and `PortsReportListening` with the test binary serving the port ([[060-dial-and-port-proxy]]) |
-| `local` passes it on a machine with the sandbox runtime installed, with `Attach`, `Dial`, `Mesh`, `Display`, `Input`, `Resize`, `Pool` and the `open` egress case skipped as undeclared, and is skipped whole with the remediation printed where the runtime is absent | `TestLocalConformance` | not built |
+| `local` passes it on a machine with the sandbox runtime installed, with `Attach`, `Dial`, `Mesh`, `Display`, `Input`, `Resize`, `Pool` and the `open` egress case skipped as undeclared, and is skipped whole with the remediation printed where the runtime is absent | `TestLocalConformance`, `TestLocalConformanceUnderSRT` | built ([[081-local-driver]]): `TestLocalConformance` runs the suite on every machine with a stand-in for the sandbox runtime, which holds the driver's bookkeeping, and `TestLocalConformanceUnderSRT` runs it under the real runtime where one is installed and is skipped with the remediation printed where none is; the stdin cases run under the `ExecStdin` capability, since `Attach` stays undeclared |
 | `podman` passes it in the podman tier; `k8s` against kind; `remote` through a worker running `native` | `TestPodmanConformance`, `TestClusterConformance`, `TestWorkerConformance` | `podman` passing against a real engine, the `Attacher`, `FileStore`, display, screen, input, port and dial cases included, skipped where no socket answers, [[035-podman-driver]], [[034-terminal-attach]], [[033-file-operations]], [[041-display-and-input]], [[060-dial-and-port-proxy]]; `TestClusterConformance` built and skipped where no cluster is configured, [[036-k8s-driver]], with `Attach` declared from [[063-k8s-attach]], so a configured run holds the driver to the attach, stdin and TTY cases, and `TestAttachRoundTripOverTheExecStream`, `TestTheExecSubresourceCarriesATerminal` and `TestTheExecStreamFallsBackToSPDY` hold the terminal to a served exec endpoint on every run; with `Echo` so `DialReachesAPort` runs there, and its `DialReachesAPort` and `PortsReportListening` run against the kind cluster of `verify.yml`'s install job, held there by `TestKindRunsDeclareDial` ([[065-k8s-dial]]); both declare `Pool` and pass its cases, [[038-environment-pools]]; `remote` passes the whole suite against an in-process worker running `native`, [[051-environments-and-workers]], with `Dial`, `Display` and `Input` withheld from the worker's declaration because no frame of the worker stream carries them, `TestTheSeamDeclaresWhatItCarries`; it is reached as the driver of an `Environment` with `mode: worker` by `TestControllerRoutesByEnvironment` and `TestWorkerEnvironmentEndToEnd` ([[054-environments-desired-state]]) |
 | A driver that declares a capability without its interface, implements one it does not declare, or declares one the suite finds not to hold, fails | `TestConformanceCatchesAFalseCapability` with eleven lying wrappers | passing, [[032-runtime-conformance-suite]], [[034-terminal-attach]], [[033-file-operations]], [[045-workload-tokens]], and for a change of size declared and refused, or undeclared and dropped, [[078-self-sizing-sandboxes]] |
 | `Mesh`: podman puts each member on one network per mesh under `<name>.mesh`, k8s renders the policy admitting that mesh alone with a headless Service and each Pod's `hostname` and `subdomain`, the object ends with the last member, and `native` declares none | `TestMeshNetwork` and `TestPodmanMeshOnARealEngine`, `TestRenderMesh`, `TestMeshPolicyAdmitsTheMeshAndNothingElse`, `TestMeshLifetime`, `TestNativeDeclaresNoMesh` | built ([[040-mesh-and-spawn]]); on k8s two members reach each other by name under the egress rule, `TestAMeshMemberReachesItsPeersAlone` and on the kind tier `TestClusterMeshReachability` ([[070-k8s-egress]]); the driver suite has no peer case yet |
@@ -561,6 +562,6 @@ requests ([[023-computer-use-operations]]); the microVM driver's design
 | A decorator that removes the token mount, sets `privileged`, adds `hostNetwork` or `shareProcessNamespace`, or mounts a service account token is refused with `decorator_violation` naming the field | `TestDecoratorCannotWeakenTheBaseline`, table-driven over the baseline | not built |
 | With `CELLA_K8S_RUNTIME_CLASS_ISOLATION=vm`, `Isolation()` is `vm` and the Pod carries the class; unset, `container` regardless of the class name | `TestK8sIsolationIsDeclared` | not built |
 | `Ingress` is declared only with an `Exposer` installed, and a `public` port then has a URL that answers | `TestIngressNeedsAnExposer`, e2e `IngressURL` | not built |
-| In `local`, a stage cannot read any path in the always-deny table, asserted per entry inside a real sandbox; `workspace.path` is rewritten with a warning; `Attach` and stdin are `capability_unsupported` | `TestLocalDenyTable`, `TestLocalPathRewrite`, `TestLocalRefusesAttach` | not built |
+| In `local`, a stage cannot read any path in the always-deny table, asserted per entry inside a real sandbox; `workspace.path` is rewritten with a warning; `Attach` and stdin are `capability_unsupported` | `TestLocalGrantsNeverReachTheDenyTable`, `TestLocalReadsOutsideGrantsAreRefused`, `TestLocalDeleteLeavesTheHostFolder`, `TestLocalExecWithStdin` | superseded by [[081-local-driver]]: a granted host folder is bound in place rather than rewritten, an exec with stdin runs as an attached stage, and `Attach` stays undeclared; inside a real sandbox the first two hold `~/.ssh` and `~/.env` against `..`, an absolute path and a link placed in a grant |
 | `vm` exists, declares its class, and reports not ready with a message naming [[024-vm-driver]] | `TestVMIsAStub` | not built |
 | Every variable in the Selection section is in [[002-repository-scaffold]]'s table with the same default | `TestConfigTableAgrees` reading both files | not built; `CELLA_PODMAN_SOCKET` agrees with that table as of [[035-podman-driver]] |

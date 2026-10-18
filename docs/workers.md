@@ -34,7 +34,8 @@ nothing else. It listens on no port of its own.
 
 - A control plane you can reach, and an administrator's bearer for it.
 - A machine with the engine your driver needs: Podman, a Kubernetes
-  cluster, or nothing at all for `native`.
+  cluster, the sandbox runtime for `local` ([on your own
+  computer](local.md)), or nothing at all for `native`.
 - The `cellad` binary from the release archive.
 
 ## Apply the environment
@@ -289,11 +290,12 @@ holds no database, no issuer and no authorizer.
 |---|---|---|---|
 | `CELLA_URL` | yes | none | the control plane's public URL, which the worker connects outbound to, with its path when it is served under one: `https://api.example.com/v1/environments` |
 | `CELLA_ENVIRONMENT_KEY` | yes | none | the key that authenticates the registration and the stream |
-| `CELLA_RUNTIME` | no | `k8s` | the driver this worker runs: `k8s`, `podman` or `native` |
-| `CELLA_DATA_DIR` | no | `/var/lib/cella` | where the native driver keeps its sandboxes |
+| `CELLA_RUNTIME` | no | `k8s` | the driver this worker runs: `k8s`, `podman`, `native` or `local` |
+| `CELLA_DATA_DIR` | no | `/var/lib/cella` | where the native and local drivers keep their sandboxes |
 | `CELLA_PODMAN_SOCKET` | no | the rootless socket, then the system one | the Podman API to drive |
 | `CELLA_K8S_*` | no | in-cluster | the cluster to drive, read only with `CELLA_RUNTIME=k8s` |
 | `CELLA_ALLOW_UNSAFE_NATIVE` | with `native` | `false` | explicit consent to run without isolation |
+| `CELLA_LOCAL_*` | no | unset | the folders, read paths, denied paths and network a `local` worker allows ([on your own computer](local.md)) |
 | `CELLA_CAPACITY_CPU`, `_MEMORY`, `_DISK`, `_SANDBOXES` | no | unset | what this worker declares it can hold |
 | `CELLA_WORKER_LABELS` | no | unset | `key=value` pairs describing this worker, comma separated |
 | `CELLA_INSECURE_CONTROL_PLANE` | no | unset | `1` admits an `http://` control plane that is not on loopback |

@@ -39,6 +39,30 @@ refused before it is pushed.
   network, a manifest's egress is narrowed to what they allow, with a
   warning naming what the sandbox got, rather than refused for a mode the
   environment does not declare.
+- **The local runtime.** `CELLA_RUNTIME=local` runs each sandbox as a
+  host process confined by the operating system's own sandbox, Seatbelt
+  on macOS and bubblewrap on Linux, through the sandbox runtime `srt`.
+  `CELLA_LOCAL_GRANTS` names the folders a sandbox may use as its
+  workspace, read and write or read only, bound in place and never
+  deleted with the sandbox; `CELLA_LOCAL_READ_PATHS` the files and
+  folders every command may read where they are; `CELLA_LOCAL_DENY`
+  paths denied on top of the always-denied credential paths; and
+  `CELLA_LOCAL_NETWORK` with `CELLA_LOCAL_HOSTS` the allow list a
+  sandbox's egress is narrowed to. A command with input runs attached;
+  one without runs detached and survives the worker's process ending
+  unexpectedly. The file routes hold the same lines in the worker. A
+  worker started as root refuses to start with `local_runs_as_root`.
+  [Sandboxes on your own computer](docs/local.md) is the walkthrough, and
+  `latere.ai/x/cella/runtime/local` opens it in a program that embeds the
+  worker.
+- **`status.paths`.** A sandbox on a runtime that cannot move paths
+  reports the host paths of its own scratch directories, `home` and
+  `tmp`, and the file routes take a path below either one, so a caller
+  places a helper program or an attachment there.
+- **`execStdin`.** An environment's capabilities declare it when an exec
+  with no terminal takes input on a runtime that has no terminal; the
+  exec socket then opens for a command with input and refuses a
+  terminal.
 
 - **A subject can own a worker environment.** With
   `CELLA_OWNED_ENVIRONMENTS=worker`, the owner policy lets any subject
@@ -91,6 +115,10 @@ refused before it is pushed.
   plane closes its stream with `serve_refused` or `key_revoked`. `cellad
   worker` sets `KeepOnExit`, so an operator's worker behaves as before.
 - `internal/worker` is gone; import `latere.ai/x/cella/worker`.
+- An environment whose isolation is `process` runs the host's own tools
+  and no image, as a `native` one does: `spec.image` there is
+  `capability_unsupported` with the detail "This environment runs host
+  processes and no image."
 
 ## v0.16.0 - 2026-10-18
 

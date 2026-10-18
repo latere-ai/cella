@@ -394,8 +394,10 @@ paths:
         carry the command's input and output, a text frame
         `{"resize": {"cols": 120, "rows": 40}}` resizes a terminal, and the
         last text frame is `{"exit": 0}` with the exit code, or
-        `{"error": {...}}` with the refusal envelope. Authorized as
-        `sandbox.exec`.
+        `{"error": {...}}` with the refusal envelope. An environment whose
+        capabilities declare `execStdin` and not `attach`, such as one on the
+        local runtime, opens it for a command with input and refuses a
+        terminal with `capability_unsupported`. Authorized as `sandbox.exec`.
       responses:
         "101":
           description: The socket is open.

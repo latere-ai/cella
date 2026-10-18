@@ -1,6 +1,6 @@
 ---
 title: "The worker as a library: an exported `worker` package a program embeds to serve an environment, a host policy that admits, holds or refuses each create and checks every operation, built-in checks against the host's own grants that the control plane cannot widen, a record of every operation for the host, and the host's OS, architecture, grants and network in the registration"
-status: testing
+status: complete
 track: core
 depends_on:
   - specs/004-runtime-contract.md
@@ -251,8 +251,12 @@ worker` calls `worker.Run`, and `internal/worker` is gone. Criteria 1, 2,
 3, 5, 6, 8 and 9 have their named tests (`TestWorkerHoldsACreate`,
 `TestWorkerRefusesACreate` and `TestWorkerAdmitTimeout` end to end in
 `cmd/cellad`; the rest in `worker/`), and `examples/worker` builds under
-`TestExampleWorkerBuilds`. The spec stays at testing until spec 081 adds
-the `local` variants of criteria 4 and 7.
+`TestExampleWorkerBuilds`. Spec 081 added the `local` variants of
+criteria 4, 7 and 8 in `runtime/local`: `TestLocalBuiltInChecksIgnoreThePolicy`,
+`TestLocalRegistrationCarriesHost` and `TestLocalRunStopsItsSandboxes`,
+each a worker on the local driver behind a control plane that skips
+resolve, and `TestLocalWorkerEndToEnd` in `cmd/cellad` registers a local
+worker's host through `cellad worker` and reads it in `status.hosts`.
 
 Where the code diverges from the design:
 
@@ -264,11 +268,22 @@ Where the code diverges from the design:
   this spec's commits. Resolve writes `workspace.path` and the default
   `workdir` as the host folder, so the file routes and the driver agree on
   where the workspace is.
-- **Criteria 4 and 7 run against a test driver for now.**
+- **Criteria 4 and 7 run against both drivers.**
   `TestBuiltInChecksIgnoreThePolicy` and `TestRegistrationCarriesHost`
-  use the native driver behind a host it reports. Narrowing open egress
-  to the host's list is the driver's, so the half of criterion 4 that
-  reads the network is proved by the local driver's tests in spec 081.
+  use the native driver behind a host it reports, and their `local`
+  variants the local driver. Narrowing open egress to the host's list is
+  the driver's, so the half of criterion 4 that reads the network is
+  proved by `TestLocalBuiltInChecksIgnoreThePolicy`: a create asking for
+  `open` on a host that allows two hosts runs, and its stage's network is
+  those two hosts.
+- **Criterion 8's exec stage ends with its operation.** A worker closes
+  every exec whose operation ended, and the runtime contract has an exec
+  end with its request, so a worker that stops on purpose ends every exec
+  stage whatever `KeepOnExit` says. `KeepOnExit` keeps the sandbox and its
+  main stage, the detached stage `TestLocalRunStopsItsSandboxes` reads;
+  every detached stage, exec stages included, survives the worker's
+  process ending unexpectedly, which the same test proves with a second
+  driver over the first one's data directory.
 - **`HostApproval` Pending is status `Unknown` with reason `Pending`.**
   Condition statuses are the three Kubernetes spells, so the waiting
   state is `Unknown`, message "Waiting for the host.", and becomes `True`

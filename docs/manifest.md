@@ -392,6 +392,7 @@ The server writes `status`; it is ignored on the way in.
 | `reason` | why it is in that phase, such as `NoCapacity`, `StartDeadline`, `Preempted`, `HostRefused` or `HostTimeout` when the host a worker runs on refused the create or did not answer, the lifecycle rule that stopped it, the runtime's word for how a failed sandbox's process ended (`Exited`, `Error`, `OOMKilled`), or `MemoryRaised` or `MemoryNotRaised` on one that is `Starting` because it is being [started again after a kill for memory](#what-a-client-can-rely-on), at a larger size or at the one it holds |
 | `conditions` | statements with a type, a status, a reason, and a time: `Scheduled`, `EgressEnforced`, `DisplayReady`, `HostApproval` on a worker whose host decides each create, and others. A row of a list page whose environment did not answer carries `Observed` `False`: its status is the one last recorded, not a fresh read |
 | `parent`, `root`, `mesh`, `spawn` | where it sits in a spawn tree, its mesh, and its budget with how much is used |
+| `paths` | on a runtime that cannot move paths inside a sandbox, such as [`local`](local.md), the host paths of its own scratch directories: `home` and `tmp`. A file of your own, such as a helper program or an attachment, goes there through the file routes, and is never inside a host folder |
 | `ports` | each declared port, `listening` or `closed` |
 | `secrets` | which placeholders are mounted, and which the gateway will not substitute |
 | `volumes` | one entry per mount: the `vol_` id it was bound to at create and whether it is attached |
