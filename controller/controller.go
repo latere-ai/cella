@@ -1061,8 +1061,12 @@ func (c *Controller) settleCreate(ctx context.Context, id string, d driver.Drive
 		return created
 	case created != nil:
 		c.purgeEgress(ctx, id)
+		if refusedBy, ok := hostRefusal(cur, created, c.clock.Now()); ok {
+			return errors.Join(created, c.failCreateFor(ctx, refusedBy, refusedBy.Status.Reason, parent, token, previous))
+		}
 		return errors.Join(created, c.failCreate(ctx, cur, parent, token, previous))
 	}
+	cur = hostApproved(cur, c.clock.Now())
 	cur.Status.Conditions = setCondition(cur.Status.Conditions, scheduledCondition(false, c.clock.Now()))
 	// A sandbox with a ceiling reports the size it holds from its first
 	// read: what the manifest asked for, and what the driver says it gave
@@ -1103,8 +1107,14 @@ func (c *Controller) settleCreate(ctx context.Context, id string, d driver.Drive
 // is Failed with CreateFailed, every identity minted for it is ended, and a
 // spawn's unit is credited back to its parent. The caller has purged the map.
 func (c *Controller) failCreate(ctx context.Context, obj v1.Sandbox, parent *v1.Sandbox, tokens ...*v1.TokenState) error {
+	return c.failCreateFor(ctx, obj, ReasonCreateFailed, parent, tokens...)
+}
+
+// failCreateFor is failCreate with the reason the sandbox fails for, which is
+// the host's where the host refused the create (spec 082).
+func (c *Controller) failCreateFor(ctx context.Context, obj v1.Sandbox, reason string, parent *v1.Sandbox, tokens ...*v1.TokenState) error {
 	obj.Status.Phase = PhaseFailed
-	obj.Status.Reason = ReasonCreateFailed
+	obj.Status.Reason = reason
 	obj.Status.TokenState = nil
 	var revoked error
 	for _, token := range tokens {
@@ -1139,8 +1149,9 @@ func specOf(obj v1.Sandbox, lifecycle driver.Lifecycle, boundary driver.Egress, 
 		Command: obj.Spec.Command, Args: obj.Spec.Args, Env: withSecretEnv(obj.Spec.Env, secrets),
 		Workdir: obj.Spec.Workdir, Labels: obj.Metadata.Labels, User: obj.Spec.User,
 		Resources: sizeFor(obj),
-		Workspace: driver.Workspace{Path: obj.Spec.Workspace.Path},
+		Workspace: driver.Workspace{Path: obj.Spec.Workspace.Path, Host: obj.Spec.Workspace.Host},
 		Volumes:   mountsOf(obj),
+		Isolation: obj.Status.Isolation,
 		Lifecycle: lifecycle,
 		Egress:    boundary,
 		Display:   geometryOf(obj.Spec.Display),

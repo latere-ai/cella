@@ -51,7 +51,6 @@ var pendingControls = []string{
 	"TestControlPlaneWriter",               // spec 019, the one writer of a volume
 	"TestDecoratorCannotWeakenTheBaseline", // spec 004, a decorator against the baseline
 	"TestEgressMapCrossesOneHop",           // spec 021, a map that reaches one environment
-	"TestNoInboundToTheDataPlane",          // spec 021, no connection toward a worker
 	"TestNoSecretLeaks",                    // spec 018, the placeholder's confinement
 	"TestRateLimits",                       // spec 008, the token buckets
 	"TestReadAuthorizeAct",                 // spec 008, the handler order

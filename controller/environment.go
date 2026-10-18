@@ -81,6 +81,9 @@ type Registration struct {
 	Driver        string
 	LastHeartbeat time.Time
 	Connected     bool
+	// Host is the machine the worker runs on as its driver reports it, nil
+	// where the driver reports none (spec 082).
+	Host *v1.HostInfo
 }
 
 // EnvironmentsLease is the lease name design 010 gives the phase loop and
@@ -444,6 +447,7 @@ func (c *Controller) phaseOf(ctx context.Context, name string) error {
 	next.Status.Capabilities = d.Capabilities()
 	workers, last, reported := c.registrationsOf(name)
 	next.Status.Workers, next.Status.LastHeartbeat = workers, last
+	next.Status.Hosts = c.hostsOf(name)
 	// Spec 021 records the driver from the first registration: what an
 	// environment runs is what its workers run, and `remote` is only how the
 	// control plane reaches them.
@@ -559,10 +563,39 @@ func (c *Controller) registrationsOf(name string) (int, time.Time, string) {
 	return count, last, driverName
 }
 
+// hostsOf is the host of every worker of one environment that holds a stream
+// open and reports one, in the order the registrations list them, which is
+// status.hosts (spec 082).
+func (c *Controller) hostsOf(name string) []v1.HostStatus {
+	if c.registrations == nil {
+		return nil
+	}
+	var out []v1.HostStatus
+	for _, w := range c.registrations(name) {
+		if !w.Connected || w.Host == nil {
+			continue
+		}
+		out = append(out, v1.HostStatus{Worker: w.Worker, Host: cloneHost(*w.Host)})
+	}
+	return out
+}
+
+// cloneHost copies one host's lists, so the registry never shares them.
+func cloneHost(h v1.HostInfo) v1.HostInfo {
+	h.Grants = slices.Clone(h.Grants)
+	h.Network.Hosts = slices.Clone(h.Network.Hosts)
+	return h
+}
+
+// sameHosts reports whether two status.hosts lists say the same thing.
+func sameHosts(a, b []v1.HostStatus) bool {
+	return slices.EqualFunc(a, b, func(x, y v1.HostStatus) bool { return x.Worker == y.Worker && x.Host.Equal(y.Host) })
+}
+
 // sameObserved reports whether the loop found nothing new, so a tick that
 // changed nothing writes nothing.
 func sameObserved(a, b v1.EnvironmentStatus) bool {
-	return a.Phase == b.Phase && a.Reason == b.Reason && a.Workers == b.Workers &&
+	return a.Phase == b.Phase && a.Reason == b.Reason && a.Workers == b.Workers && sameHosts(a.Hosts, b.Hosts) &&
 		a.Gateways == b.Gateways && a.LastHeartbeat.Equal(b.LastHeartbeat) &&
 		a.Driver == b.Driver && a.Isolation == b.Isolation && a.Capabilities.Equal(b.Capabilities)
 }
@@ -632,6 +665,13 @@ func (l environmentLookup) Environment(_ context.Context, name string) (*v1.Envi
 		obj.Status.Driver = l.c.DriverNameOf(obj.Metadata.Name)
 		obj.Status.Capabilities = l.c.CapabilitiesOf(obj.Metadata.Name)
 	}
+	// The hosts are read live rather than from the last tick, so a manifest
+	// naming a host folder resolves against the workers connected now: a
+	// worker that just registered grants its folders at once, and one that
+	// left grants nothing (spec 082).
+	if l.c.registrations != nil {
+		obj.Status.Hosts = l.c.hostsOf(obj.Metadata.Name)
+	}
 	return &obj, nil
 }
 
@@ -654,5 +694,12 @@ func cloneEnvironment(obj v1.Environment) v1.Environment {
 		obj.Spec.Pool.Display = &display
 	}
 	obj.Status.Capabilities.Egress = slices.Clone(obj.Status.Capabilities.Egress)
+	if obj.Status.Hosts != nil {
+		hosts := make([]v1.HostStatus, len(obj.Status.Hosts))
+		for i, h := range obj.Status.Hosts {
+			hosts[i] = v1.HostStatus{Worker: h.Worker, Host: cloneHost(h.Host)}
+		}
+		obj.Status.Hosts = hosts
+	}
 	return obj
 }

@@ -211,6 +211,12 @@ func New(o Options) (http.Handler, error) {
 		"GET /v1/environments/{id}/egress",
 		"POST /v1/environments/{id}/workers",
 	)
+	// A create a worker holds while its host decides is shown on the
+	// sandbox this controller holds (spec 082). Each promotion builds a
+	// handler over its own controller, and this replaces the one before.
+	if o.Workers != nil {
+		o.Workers.OnHeld(h.hostPending)
+	}
 	return h, nil
 }
 
@@ -988,6 +994,12 @@ func errorEnvelope(err error, requestID string) (int, httpjson.Error) {
 		code = "version_conflict"
 	case errors.Is(err, controller.ErrEnvironmentReserved):
 		code = "reserved_prefix"
+	case errors.Is(err, driver.ErrWorkspaceNotGranted):
+		code = "workspace_not_granted"
+	case errors.Is(err, driver.ErrHostTimeout):
+		code = "host_timeout"
+	case errors.Is(err, driver.ErrHostRefused):
+		code = "host_refused"
 	case errors.Is(err, driver.ErrUnsupported):
 		code = "capability_unsupported"
 	case errors.Is(err, driver.ErrInvalid):
@@ -1049,6 +1061,15 @@ func errorEnvelope(err error, requestID string) (int, httpjson.Error) {
 	case "environment_mismatch":
 		status = 422
 		message = "This worker does not match the environment it registered on."
+	case "host_refused":
+		status = 403
+		message = "The host this environment runs on refused this; its reason is in the details."
+	case "host_timeout":
+		status = 504
+		message = "The host this environment runs on did not answer in time."
+	case "workspace_not_granted":
+		status = 422
+		message = "The host does not grant this folder to a sandbox."
 	case "invalid_field":
 		status = 400
 		message = "A field has a value it cannot take."

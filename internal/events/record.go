@@ -89,22 +89,25 @@ const (
 	// TypeResized is a change of a sandbox's size applied, and TypeAtCeiling
 	// a sandbox whose workload is at its ceiling with no room left to give
 	// (spec 078). Each carries the controller's own payload.
-	TypeResized    Type = "sandbox.resized"
-	TypeAtCeiling  Type = "sandbox.at_ceiling"
-	TypeSpawned    Type = "sandbox.spawned"
-	TypeExec       Type = "sandbox.exec"
-	TypeFiles      Type = "sandbox.files"
-	TypeScreenshot Type = "sandbox.screenshot"
-	TypeInput      Type = "sandbox.input"
-	TypeScreen     Type = "sandbox.screen"
-	TypeDial       Type = "sandbox.dial"
+	TypeResized   Type = "sandbox.resized"
+	TypeAtCeiling Type = "sandbox.at_ceiling"
+	// TypeHostPending is a create a worker holds while its host decides
+	// whether to run it (spec 082). The sandbox stays Pending.
+	TypeHostPending Type = "sandbox.host_pending"
+	TypeSpawned     Type = "sandbox.spawned"
+	TypeExec        Type = "sandbox.exec"
+	TypeFiles       Type = "sandbox.files"
+	TypeScreenshot  Type = "sandbox.screenshot"
+	TypeInput       Type = "sandbox.input"
+	TypeScreen      Type = "sandbox.screen"
+	TypeDial        Type = "sandbox.dial"
 )
 
 // Types is every type this slice emits, in the order design 009's table
 // lists them. A test walks it.
 var Types = []Type{
 	TypeCreated, TypeUpdated, TypeStarted, TypeStopped, TypeDeleted,
-	TypeFailed, TypeLost, TypeRecovering, TypeRecovered, TypeResized, TypeAtCeiling, TypeSpawned,
+	TypeFailed, TypeLost, TypeRecovering, TypeRecovered, TypeResized, TypeAtCeiling, TypeHostPending, TypeSpawned,
 	TypeExec, TypeDial, TypeFiles, TypeScreenshot, TypeInput, TypeScreen,
 	TypeSecretCreated, TypeSecretUpdated, TypeSecretDeleted,
 	TypeEnvironmentCreated, TypeEnvironmentUpdated, TypeEnvironmentRegistered,

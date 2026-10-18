@@ -4,6 +4,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -48,10 +49,20 @@ func WorkerRegistrations(hub *remote.Hub) func(string) []controller.Registration
 		for _, w := range states {
 			out = append(out, controller.Registration{
 				Worker: w.Worker, Driver: driverName,
-				LastHeartbeat: w.LastHeartbeat, Connected: w.Connected,
+				LastHeartbeat: w.LastHeartbeat, Connected: w.Connected, Host: w.Host,
 			})
 		}
 		return out
+	}
+}
+
+// hostPending writes, on the sandbox a held create is for, that the host has
+// not decided yet. It runs on the stream's read pump, so a failure is logged
+// rather than returned: the create goes on either way, and the next write of
+// the sandbox says how it ended.
+func (h *handler) hostPending(environment, sandbox string) {
+	if err := h.Controller.HostPending(context.Background(), environment, sandbox); err != nil {
+		h.log.Warn("the sandbox could not be marked as waiting for its host", "sandbox", sandbox, "err", err)
 	}
 }
 
@@ -199,3 +210,13 @@ func (s *workerSocket) WriteFrame(raw []byte) error {
 }
 
 func (s *workerSocket) Close() error { return s.conn.Close() }
+
+// CloseWith ends the stream with a close code and the reason a worker reads
+// to decide whether to reconnect, which is how the hub refuses to go on
+// serving one (spec 083). The close frame is a control frame, which gorilla
+// lets a second goroutine write beside the one that writes the stream.
+func (s *workerSocket) CloseWith(code int, reason string) error {
+	_ = s.conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(code, reason),
+		time.Now().Add(time.Second))
+	return s.conn.Close()
+}
