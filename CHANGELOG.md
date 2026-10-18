@@ -34,6 +34,8 @@ refused before it is pushed.
   with `controller.ErrVolumeQuota`; `authorizer.Limits` gains
   `MaxVolumes`.
 
+## v0.17.1 - 2026-10-18
+
 ### Fixed
 
 - **A command on the local runtime reads its own output with the data
