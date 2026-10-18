@@ -337,9 +337,12 @@ func admit(ctx context.Context, obj *v1.Sandbox, env *v1.Environment, o Options)
 }
 
 // runsImages reports whether the environment runs an image at all. An
-// environment that confines nothing runs a host process, which no image
-// describes.
-func runsImages(env *v1.Environment) bool { return env.Status.Isolation != v1.IsolationNone }
+// environment that confines nothing, and one that confines a host process in
+// the operating system's own sandbox (spec 081), run the host's own tools,
+// which no image describes.
+func runsImages(env *v1.Environment) bool {
+	return env.Status.Isolation != v1.IsolationNone && env.Status.Isolation != v1.IsolationProcess
+}
 
 // imageRule holds spec.image to what the environment can do with it. It runs
 // after admission, not at stage 1, because an image catalog is exactly the
@@ -349,7 +352,7 @@ func runsImages(env *v1.Environment) bool { return env.Status.Isolation != v1.Is
 func imageRule(obj *v1.Sandbox, env *v1.Environment) error {
 	if !runsImages(env) {
 		if obj.Spec.Image != "" {
-			return failAt("capability_unsupported", "spec.image", "Native environments do not run images.")
+			return failAt("capability_unsupported", "spec.image", "This environment runs host processes and no image.")
 		}
 		return nil
 	}

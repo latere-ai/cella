@@ -49,6 +49,10 @@ var engines = map[string][]string{
 	"./runtime":         nil,
 	"./runtime/display": nil, // the desktop vocabulary: the standard library alone
 	"./runtime/native":  nil, // the native driver runs host processes: no client
+	// The local driver confines a host process in the operating system's
+	// own sandbox through hostsandbox, which reaches one helper of its own,
+	// and nothing else (spec 081).
+	"./runtime/local": {"latere.ai/x/pkg/hostsandbox", "latere.ai/x/pkg/uniq"},
 	// The program a volume's fill runs inside the source image: it copies
 	// files from one directory to another, with the standard library alone.
 	"./runtime/k8s/fill": nil,
