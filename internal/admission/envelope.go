@@ -27,7 +27,7 @@ type actor struct {
 }
 
 // request is the body one apply POSTs. Every member is present on the
-// wire, the four that are usually absent as null, because an endpoint
+// wire, the five that are usually absent as null, because an endpoint
 // reads a fixed shape and a fixture that drives it needs them written
 // down.
 type request struct {
@@ -52,6 +52,13 @@ type request struct {
 	// Set names the replica index of a SandboxSet apply. It is null until
 	// the sets of spec 020 exist.
 	Set json.RawMessage `json:"set"`
+	// Volume is the Volume whose image source this call admits, and null
+	// on every Sandbox apply. The manifest of such a call is a Sandbox
+	// that names the volume's environment, its labels and the image and
+	// nothing else, so an endpoint that knows nothing of volumes decides
+	// on the image as it would for a sandbox, and one that does reads
+	// this member to tell the two apart (spec 007).
+	Volume json.RawMessage `json:"volume"`
 	// Manifest is the defaulted object, the output of stage 2. Stage 1
 	// refuses an unknown field before admission runs, so the typed object
 	// is the whole of what the caller wrote and marshaling it loses
@@ -107,6 +114,13 @@ func envelopeOf(in *v1.Sandbox, req manifest.AdmitRequest) ([]byte, error) {
 	}
 	if req.Workload != nil {
 		if body.Workload, err = json.Marshal(exported(*req.Workload)); err != nil {
+			return nil, err
+		}
+	}
+	if req.Volume != nil {
+		volume := *req.Volume
+		volume.Status = v1.VolumeStatus{}
+		if body.Volume, err = json.Marshal(volume); err != nil {
 			return nil, err
 		}
 	}

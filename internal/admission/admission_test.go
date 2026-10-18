@@ -194,19 +194,19 @@ func TestEnvelopeMatchesTheEndpoint(t *testing.T) {
 			t.Errorf("%s = %q, want %q", tc.name, tc.got, tc.want)
 		}
 	}
-	// The four absent members are present and null, not omitted: an
+	// The five absent members are present and null, not omitted: an
 	// endpoint reads a fixed shape.
 	var body map[string]json.RawMessage
 	if err = json.Unmarshal(sent, &body); err != nil {
 		t.Fatal(err)
 	}
 	for _, name := range []string{"subject", "issuer", "sub", "claims", "workload", "action",
-		"existing", "parent", "environment", "set", "manifest", "request"} {
+		"existing", "parent", "environment", "set", "volume", "manifest", "request"} {
 		if _, ok := body[name]; !ok {
 			t.Errorf("the body has no %q member", name)
 		}
 	}
-	for _, name := range []string{"workload", "existing", "parent", "set"} {
+	for _, name := range []string{"workload", "existing", "parent", "set", "volume"} {
 		if string(body[name]) != "null" {
 			t.Errorf("%s = %s, want null", name, body[name])
 		}
@@ -635,5 +635,45 @@ func TestSummaryOfNoEnvironment(t *testing.T) {
 	env := &v1.Environment{Metadata: v1.Metadata{Name: "default"}, Spec: v1.EnvironmentSpec{Isolation: v1.IsolationContainer}}
 	if got := summaryOf(env); got.Isolation != v1.IsolationContainer {
 		t.Fatalf("isolation = %q, want the operator's declaration where no driver answered", got.Isolation)
+	}
+}
+
+// TestAVolumeImageIsAdmittedThroughTheSandboxShape: the call that admits a
+// Volume's image carries a Sandbox manifest naming the image, which is what
+// an endpoint that knows nothing of volumes decides on, and the Volume in
+// the volume member, without its status, which is what one that does reads
+// to tell the two apart.
+func TestAVolumeImageIsAdmittedThroughTheSandboxShape(t *testing.T) {
+	e := serve(t, allow(t, nil))
+	probe := v1.Sandbox{APIVersion: v1.APIVersion, Kind: v1.KindSandbox,
+		Spec: v1.SandboxSpec{Environment: "default", Image: "grader"}}
+	req := admitRequest()
+	req.Volume = &v1.Volume{
+		APIVersion: v1.APIVersion, Kind: v1.KindVolume, Metadata: v1.Metadata{Name: "grader"},
+		Spec:   v1.VolumeSpec{Size: "1Gi", Source: v1.VolumeSource{Kind: v1.VolumeSourceImage, Image: "grader"}},
+		Status: v1.VolumeStatus{ID: "vol_01J9", Phase: v1.VolumeAvailable},
+	}
+	if _, _, err := client(t, e, Options{}).Admit(t.Context(), &probe, req); err != nil {
+		t.Fatal(err)
+	}
+	var got endpointRequest
+	var body struct {
+		Volume map[string]any `json:"volume"`
+	}
+	sent := <-e.bodies
+	if err := json.Unmarshal(sent, &got); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(sent, &body); err != nil {
+		t.Fatal(err)
+	}
+	if got.Manifest["kind"] != v1.KindSandbox || got.Manifest["spec"].(map[string]any)["image"] != "grader" {
+		t.Fatalf("the manifest sent is %v, want the Sandbox naming the image", got.Manifest)
+	}
+	if body.Volume["kind"] != v1.KindVolume || body.Volume["metadata"].(map[string]any)["name"] != "grader" {
+		t.Fatalf("the volume member is %v", body.Volume)
+	}
+	if _, carried := body.Volume["status"]; carried {
+		t.Fatalf("the volume member carries the status: %v", body.Volume)
 	}
 }

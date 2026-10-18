@@ -156,8 +156,7 @@ func inheritEgress(obj *v1.Sandbox, parent *v1.Sandbox) {
 // contract marks a boundary. Every offending path is named in one error,
 // because a caller that widened three fields learns all three in one round.
 //
-// The rules are numbered as spec 003 numbers them. Rule 4 has no field until
-// the Volume kind lands.
+// The rules are numbered as spec 003 numbers them.
 func boundary(obj *v1.Sandbox, parent *v1.Sandbox, now time.Time) error {
 	if parent == nil {
 		return nil
@@ -217,6 +216,10 @@ func boundary(obj *v1.Sandbox, parent *v1.Sandbox, now time.Time) error {
 			add(pathSecretAt(i, "name"))
 		}
 	}
+
+	// 4: a child mounts only volumes its parent mounts, and never writes
+	// one its parent holds read-only.
+	paths = append(paths, volumeBoundary(obj, parent)...)
 
 	// 5: the compute a child asks for is inside its parent's. A parent that
 	// named no amount for an axis bounds nothing on it, which is the same

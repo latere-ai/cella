@@ -1,0 +1,8 @@
+{
+  "code": "path_conflict",
+  "path": "spec.volumes[0].path",
+  "paths": [
+    "spec.volumes[0].path",
+    "spec.workspace.path"
+  ]
+}

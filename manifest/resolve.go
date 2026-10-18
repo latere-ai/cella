@@ -37,12 +37,14 @@ type Actor struct {
 // returns ErrNotFound for an object that does not exist and for one the
 // authorizer refuses, so existence does not leak, and any other error when it
 // cannot decide. The empty environment name asks for the default environment.
-// Volume joins this interface with the manifest field that names it.
 type Lookup interface {
 	Environment(ctx context.Context, name string) (*v1.Environment, error)
 	// Secret answers a mount by name among the actor's own or by sec_ id. A
 	// Secret comes back without spec.value: a read never returns one.
 	Secret(ctx context.Context, nameOrID string) (*v1.Secret, error)
+	// Volume answers a volume mount by name among the actor's own or by
+	// vol_ id, with the authorizer's volume.attach decision folded in.
+	Volume(ctx context.Context, nameOrID string) (*v1.Volume, error)
 }
 
 // SecretFunc is the secret half of a Lookup, for a caller that composes one
@@ -97,6 +99,12 @@ type AdmitRequest struct {
 	// RequestID is spec 008's X-Request-Id, which ties a refusal at the
 	// admission step to the apply that drew it.
 	RequestID string
+	// Volume is set when the call admits the image a Volume is filled
+	// from, and nil on every Sandbox apply. The manifest of such a call is
+	// a Sandbox naming the volume's environment, its labels and the image,
+	// so a step that knows nothing of volumes decides on the image as it
+	// would for a sandbox (spec 007).
+	Volume *v1.Volume
 }
 
 // AdmitFunc returns the object to continue with, warnings for status.warnings,
@@ -137,7 +145,9 @@ type Resolved struct {
 	Sandbox v1.Sandbox // spec and metadata fully resolved; status empty but warnings
 	// Secrets are the objects spec.secrets names, in the manifest's order
 	// and without their values, as the actor's own Lookup answered them.
-	Secrets  []v1.Secret
+	Secrets []v1.Secret
+	// Volumes are the objects spec.volumes names, in the manifest's order.
+	Volumes  []v1.Volume
 	Warnings []string
 }
 
@@ -180,6 +190,10 @@ func Resolve(ctx context.Context, in *v1.Sandbox, o Options) (*Resolved, error) 
 	if err != nil {
 		return nil, err
 	}
+	volumes, err := volumeReferences(ctx, &obj, env, o)
+	if err != nil {
+		return nil, err
+	}
 	if err = semantic(&obj, o); err != nil {
 		return nil, err
 	}
@@ -192,7 +206,7 @@ func Resolve(ctx context.Context, in *v1.Sandbox, o Options) (*Resolved, error) 
 	}
 	warnings = append(warnings, admitted...)
 	obj.Status.Warnings = warnings
-	return &Resolved{Sandbox: obj, Secrets: secrets, Warnings: slices.Clone(warnings)}, nil
+	return &Resolved{Sandbox: obj, Secrets: secrets, Volumes: volumes, Warnings: slices.Clone(warnings)}, nil
 }
 
 // defaulting fills every absent field that has a default and resolves the
@@ -516,6 +530,9 @@ func capabilities(obj *v1.Sandbox, env *v1.Environment, o Options) ([]string, er
 	if err := meshCapability(obj, env); err != nil {
 		return nil, err
 	}
+	if err := volumeCapabilities(obj, o); err != nil {
+		return nil, err
+	}
 	if err := schedulingCapability(obj, env); err != nil {
 		return nil, err
 	}
@@ -594,6 +611,11 @@ func (f fixedEnvironment) Environment(_ context.Context, name string) (*v1.Envir
 // Secret answers nothing: a fixed environment is the whole of what this
 // lookup knows, so a manifest that mounts a secret against it is not_found.
 func (f fixedEnvironment) Secret(context.Context, string) (*v1.Secret, error) {
+	return nil, ErrNotFound
+}
+
+// Volume answers nothing, for the reason Secret does.
+func (f fixedEnvironment) Volume(context.Context, string) (*v1.Volume, error) {
 	return nil, ErrNotFound
 }
 
@@ -696,6 +718,8 @@ func clone(obj *v1.Sandbox) v1.Sandbox {
 	out.Spec.Network.Egress.AllowedHosts = slices.Clone(obj.Spec.Network.Egress.AllowedHosts)
 	out.Spec.Network.Egress.DeniedHosts = slices.Clone(obj.Spec.Network.Egress.DeniedHosts)
 	out.Spec.Secrets = slices.Clone(obj.Spec.Secrets)
+	out.Spec.Volumes = slices.Clone(obj.Spec.Volumes)
+	out.Status.Volumes = slices.Clone(obj.Status.Volumes)
 	out.Status.Conditions = slices.Clone(obj.Status.Conditions)
 	out.Status.Secrets.Mounted = slices.Clone(obj.Status.Secrets.Mounted)
 	out.Status.Secrets.NotInjectable = slices.Clone(obj.Status.Secrets.NotInjectable)

@@ -1,0 +1,8 @@
+{
+  "apiVersion": "cella.latere.ai/v1beta1",
+  "kind": "Sandbox",
+  "metadata": {"name": "unknown-volume"},
+  "spec": {
+    "volumes": [{"name": "state", "path": "/data", "volume": "absent"}]
+  }
+}

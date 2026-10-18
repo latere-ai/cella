@@ -1,0 +1,12 @@
+{
+  "apiVersion": "cella.latere.ai/v1beta1",
+  "kind": "Sandbox",
+  "metadata": {"name": "with-volumes"},
+  "spec": {
+    "command": ["/bin/sh", "-c", "sleep 60"],
+    "volumes": [
+      {"name": "state", "path": "/data", "volume": "app-state"},
+      {"name": "tools", "path": "/opt/tools", "volume": "vol_01J0000000000000000000TOOL", "readOnly": true}
+    ]
+  }
+}

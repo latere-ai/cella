@@ -1,0 +1,8 @@
+{
+  "apiVersion": "cella.latere.ai/v1beta1",
+  "kind": "Sandbox",
+  "metadata": {"name": "nested-mount"},
+  "spec": {
+    "volumes": [{"name": "state", "path": "/workspace/data", "volume": "app-state"}]
+  }
+}

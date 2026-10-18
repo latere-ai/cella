@@ -449,6 +449,7 @@ func (f lookupFunc) Environment(ctx context.Context, name string) (*v1.Environme
 // Secret answers nothing: this fake exists to drive the environment lookup's
 // failure branches and no manifest it resolves mounts a secret.
 func (f lookupFunc) Secret(context.Context, string) (*v1.Secret, error) { return nil, ErrNotFound }
+func (f lookupFunc) Volume(context.Context, string) (*v1.Volume, error) { return nil, ErrNotFound }
 
 func TestLookupErrors(t *testing.T) {
 	obj := sandbox()

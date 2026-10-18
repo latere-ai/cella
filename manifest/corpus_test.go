@@ -55,20 +55,23 @@ func corpusEnvironment() v1.Environment {
 		Driver:    "k8s",
 		Isolation: v1.IsolationContainer,
 		Capabilities: v1.Capabilities{
-			Egress:    []v1.EgressMode{v1.EgressNone, v1.EgressAllowlist, v1.EgressOpen},
-			Mesh:      true,
-			Ingress:   true,
-			Volumes:   true,
-			Snapshots: true,
-			Attach:    true,
-			Dial:      true,
-			Display:   true,
-			Input:     true,
-			Resize:    true,
-			Pool:      true,
-			Files:     true,
-			Detach:    true,
-			Autosize:  v1.Autosize{CPU: true, Memory: true, Disk: true},
+			Egress:  []v1.EgressMode{v1.EgressNone, v1.EgressAllowlist, v1.EgressOpen},
+			Mesh:    true,
+			Ingress: true,
+			Volumes: true,
+			// The image source is a volume's and no sandbox field reads
+			// it; it is declared so the environment is the whole contract.
+			VolumeImages: true,
+			Snapshots:    true,
+			Attach:       true,
+			Dial:         true,
+			Display:      true,
+			Input:        true,
+			Resize:       true,
+			Pool:         true,
+			Files:        true,
+			Detach:       true,
+			Autosize:     v1.Autosize{CPU: true, Memory: true, Disk: true},
 		},
 	}
 	return env
@@ -96,19 +99,41 @@ func corpusSecrets() map[string]v1.Secret {
 	}
 }
 
+// corpusVolumes are the Volumes the corpus may mount: one a sandbox may
+// write, and one shared read-only, both Available in the corpus environment.
+func corpusVolumes() map[string]v1.Volume {
+	volume := func(name, id, access string) v1.Volume {
+		return v1.Volume{
+			APIVersion: v1.APIVersion,
+			Kind:       v1.KindVolume,
+			Metadata:   v1.Metadata{Name: name},
+			Spec: v1.VolumeSpec{
+				Environment: "default", Size: "1Gi", Access: access,
+				Source: v1.VolumeSource{Kind: v1.VolumeSourceEmpty},
+			},
+			Status: v1.VolumeStatus{ID: id, Owner: "https://issuer.example.com|alice", Phase: v1.VolumeAvailable},
+		}
+	}
+	return map[string]v1.Volume{
+		"app-state": volume("app-state", "vol_01J0000000000000000000STAT", v1.VolumeAccessSingle),
+		"tools":     volume("tools", "vol_01J0000000000000000000TOOL", v1.VolumeAccessSharedRead),
+	}
+}
+
 // corpusOptions is the whole of what the corpus resolves under. Nothing here
 // varies per entry: an entry that needs a parent, an update or an admission
 // step is a unit test, because the corpus is the schema's snapshot and those
 // inputs are the caller's state.
 func corpusOptions() Options {
 	secrets := corpusSecrets()
+	volumes := corpusVolumes()
 	return Options{
 		Actor: Actor{
 			Subject: "https://issuer.example.com|alice",
 			Issuer:  "https://issuer.example.com",
 			Sub:     "alice",
 		},
-		Lookup: WithSecrets(FixedEnvironment(corpusEnvironment()),
+		Lookup: WithVolumes(WithSecrets(FixedEnvironment(corpusEnvironment()),
 			func(_ context.Context, nameOrID string) (*v1.Secret, error) {
 				for _, secret := range secrets {
 					if nameOrID == secret.Metadata.Name || nameOrID == secret.Status.ID {
@@ -117,7 +142,15 @@ func corpusOptions() Options {
 					}
 				}
 				return nil, ErrNotFound
-			}),
+			}), func(_ context.Context, nameOrID string) (*v1.Volume, error) {
+			for _, volume := range volumes {
+				if nameOrID == volume.Metadata.Name || nameOrID == volume.Status.ID {
+					found := volume
+					return &found, nil
+				}
+			}
+			return nil, ErrNotFound
+		}),
 		Defaults: Defaults{
 			CPU: "1", Memory: "2Gi", Disk: "10Gi",
 			AutoStop: "15m", TTL: "24h", AutoDelete: "72h",
@@ -135,6 +168,7 @@ func corpusOptions() Options {
 type corpusResolved struct {
 	Sandbox  v1.Sandbox  `json:"sandbox"`
 	Secrets  []v1.Secret `json:"secrets,omitempty"`
+	Volumes  []v1.Volume `json:"volumes,omitempty"`
 	Warnings []string    `json:"warnings,omitempty"`
 }
 
@@ -254,7 +288,7 @@ func TestGoldenCorpus(t *testing.T) {
 				t.Fatalf("Resolve: %v", err)
 			}
 			encoded, err := json.MarshalIndent(corpusResolved{
-				Sandbox: resolved.Sandbox, Secrets: resolved.Secrets, Warnings: resolved.Warnings,
+				Sandbox: resolved.Sandbox, Secrets: resolved.Secrets, Volumes: resolved.Volumes, Warnings: resolved.Warnings,
 			}, "", "  ")
 			if err != nil {
 				t.Fatal(err)

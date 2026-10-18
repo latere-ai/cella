@@ -147,6 +147,9 @@ func validateSpec(s v1.SandboxSpec) error {
 	if err := validateMesh(s.Mesh); err != nil {
 		return err
 	}
+	if err := validateVolumes(s.Volumes); err != nil {
+		return err
+	}
 	return validateEnv(s.Env)
 }
 

@@ -1,0 +1,100 @@
+{
+  "sandbox": {
+    "apiVersion": "cella.latere.ai/v1beta1",
+    "kind": "Sandbox",
+    "metadata": {
+      "name": "with-volumes"
+    },
+    "spec": {
+      "environment": "default",
+      "image": "registry.example/base:1",
+      "command": [
+        "/bin/sh",
+        "-c",
+        "sleep 60"
+      ],
+      "workdir": "/workspace",
+      "resources": {
+        "cpu": "1",
+        "memory": "2Gi",
+        "disk": "10Gi"
+      },
+      "workspace": {
+        "path": "/workspace",
+        "source": "empty"
+      },
+      "volumes": [
+        {
+          "name": "state",
+          "path": "/data",
+          "volume": "app-state"
+        },
+        {
+          "name": "tools",
+          "path": "/opt/tools",
+          "volume": "vol_01J0000000000000000000TOOL",
+          "readOnly": true
+        }
+      ],
+      "network": {
+        "egress": {
+          "mode": "open"
+        }
+      },
+      "lifecycle": {
+        "autoStop": "15m",
+        "ttl": "24h",
+        "autoDelete": "72h"
+      },
+      "scheduling": {
+        "queue": "default"
+      }
+    }
+  },
+  "volumes": [
+    {
+      "apiVersion": "cella.latere.ai/v1beta1",
+      "kind": "Volume",
+      "metadata": {
+        "name": "app-state"
+      },
+      "spec": {
+        "environment": "default",
+        "size": "1Gi",
+        "access": "single",
+        "source": {
+          "kind": "empty"
+        }
+      },
+      "status": {
+        "id": "vol_01J0000000000000000000STAT",
+        "owner": "https://issuer.example.com|alice",
+        "phase": "Available",
+        "attachedTo": null,
+        "createdAt": "0001-01-01T00:00:00Z"
+      }
+    },
+    {
+      "apiVersion": "cella.latere.ai/v1beta1",
+      "kind": "Volume",
+      "metadata": {
+        "name": "tools"
+      },
+      "spec": {
+        "environment": "default",
+        "size": "1Gi",
+        "access": "shared-read",
+        "source": {
+          "kind": "empty"
+        }
+      },
+      "status": {
+        "id": "vol_01J0000000000000000000TOOL",
+        "owner": "https://issuer.example.com|alice",
+        "phase": "Available",
+        "attachedTo": null,
+        "createdAt": "0001-01-01T00:00:00Z"
+      }
+    }
+  ]
+}

@@ -639,6 +639,10 @@ func (environmentLookup) Secret(context.Context, string) (*v1.Secret, error) {
 	return nil, manifest.ErrNotFound
 }
 
+func (environmentLookup) Volume(context.Context, string) (*v1.Volume, error) {
+	return nil, manifest.ErrNotFound
+}
+
 // cloneEnvironment copies every reference one environment holds, so a caller
 // never writes through the registry's own object.
 func cloneEnvironment(obj v1.Environment) v1.Environment {
