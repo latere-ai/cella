@@ -7,12 +7,15 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"latere.ai/x/pkg/authz"
 
+	"latere.ai/x/cella/authorizer"
 	"latere.ai/x/cella/controller"
 	"latere.ai/x/cella/internal/auth"
 	"latere.ai/x/cella/manifest"
@@ -295,6 +298,149 @@ func TestAVolumeImagePassesAdmission(t *testing.T) {
 		volumeBody("outside", v1.VolumeAccessSharedRead, "registry.example.com/other@sha256:"+strings.Repeat("a", 64)), 422)
 	if !strings.Contains(string(body), "admission_refused") || !strings.Contains(string(body), "image_not_in_catalog") {
 		t.Fatalf("the refusal answered %s", body)
+	}
+}
+
+// proposal is the member "proposed" of one authorization request, decoded.
+type proposal struct {
+	Owner    string        `json:"owner"`
+	Metadata v1.Metadata   `json:"metadata"`
+	Spec     v1.VolumeSpec `json:"spec"`
+}
+
+// proposalOf decodes the member "proposed" of a resource; ok is false where
+// the resource carries none.
+func proposalOf(t *testing.T, res authz.Resource) (proposal, bool) {
+	t.Helper()
+	raw, carried := res.Fields["proposed"]
+	if !carried {
+		return proposal{}, false
+	}
+	b, err := json.Marshal(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var p proposal
+	if err := json.Unmarshal(b, &p); err != nil {
+		t.Fatalf("the proposal %s: %v", b, err)
+	}
+	return p, true
+}
+
+// creates records every volume.create a control plane asks, and answers it
+// with decide; every other action is allowed.
+type creates struct {
+	mu     sync.Mutex
+	asked  []authz.Request
+	decide func(authz.Request) authz.Decision
+}
+
+func (c *creates) Authorize(_ context.Context, req authz.Request) (authz.Decision, error) {
+	if req.Action != authorizer.ActionVolumeCreate {
+		return authz.Decision{Allow: true}, nil
+	}
+	c.mu.Lock()
+	c.asked = append(c.asked, req)
+	c.mu.Unlock()
+	if c.decide == nil {
+		return authz.Decision{Allow: true}, nil
+	}
+	return c.decide(req), nil
+}
+
+func (c *creates) requests() []authz.Request {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return slices.Clone(c.asked)
+}
+
+// TestAVolumeCreateCarriesItsProposal: volume.create is asked with the Volume
+// the create would store as "proposed", resolved before the question: the
+// source kind and the access and retain defaults are filled where the body
+// left them out, the environment is named, the size is the one the body
+// sent, and an image source is the pinned reference admission answered
+// rather than the name the body wrote.
+func TestAVolumeCreateCarriesItsProposal(t *testing.T) {
+	policy := &creates{}
+	f, _ := setupVolumes(t, policy)
+	bare := `{"apiVersion":"` + v1.APIVersion + `","kind":"Volume","metadata":{"name":"scratch","labels":{"team":"evals"}},` +
+		`"spec":{"size":"2Gi"}}`
+	f.request(http.MethodPut, "/v1/volumes/scratch", f.alice, bare, http.StatusCreated)
+	asked := policy.requests()
+	if len(asked) != 1 {
+		t.Fatalf("volume.create was asked %d times, want once", len(asked))
+	}
+	res := asked[0].Resource
+	if res.Kind != "Volume" || res.ID != "" || res.String("name") != "scratch" || res.String("owner") != asked[0].Subject ||
+		res.String("environment") != "default" {
+		t.Fatalf("the resource is %+v", res)
+	}
+	p, ok := proposalOf(t, res)
+	if !ok {
+		t.Fatal("volume.create carries no proposal")
+	}
+	if p.Owner != asked[0].Subject || p.Metadata.Name != "scratch" || p.Metadata.Labels["team"] != "evals" {
+		t.Errorf("the proposal names %q, %+v", p.Owner, p.Metadata)
+	}
+	if p.Spec.Source.Kind != v1.VolumeSourceEmpty || p.Spec.Size != "2Gi" || p.Spec.Environment != "default" ||
+		p.Spec.Access != v1.VolumeAccessSingle || p.Spec.Retain == nil || !*p.Spec.Retain {
+		t.Errorf("the proposed spec is %+v, want the body resolved", p.Spec)
+	}
+
+	admitting(f, func(_ context.Context, in *v1.Sandbox, _ manifest.AdmitRequest) (*v1.Sandbox, []string, error) {
+		out := *in
+		out.Spec.Image = pinnedGrader
+		return &out, nil, nil
+	})
+	f.request(http.MethodPut, "/v1/volumes/grader", f.alice, volumeBody("grader", v1.VolumeAccessSharedRead, "grader"), http.StatusCreated)
+	asked = policy.requests()
+	if len(asked) != 2 {
+		t.Fatalf("volume.create was asked %d times, want twice", len(asked))
+	}
+	p, _ = proposalOf(t, asked[1].Resource)
+	if p.Spec.Source.Kind != v1.VolumeSourceImage || p.Spec.Source.Image != pinnedGrader || p.Spec.Access != v1.VolumeAccessSharedRead {
+		t.Errorf("the proposed source is %+v, want the pinned image admission answered", p.Spec.Source)
+	}
+}
+
+// TestAVolumeCreateIsDecidedOnItsProposal: an authorizer that allows image
+// volumes of at most 10Gi refuses an empty source and a larger size with
+// forbidden and nothing created, and allows an image volume within the size.
+func TestAVolumeCreateIsDecidedOnItsProposal(t *testing.T) {
+	most, err := manifest.ParseQuantity("10Gi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy := &creates{}
+	policy.decide = func(req authz.Request) authz.Decision {
+		p, ok := proposalOf(t, req.Resource)
+		if !ok || p.Spec.Source.Kind != v1.VolumeSourceImage {
+			return authz.Decision{Reason: "image_volumes_only"}
+		}
+		size, err := manifest.ParseQuantity(p.Spec.Size)
+		if err != nil || size > most {
+			return authz.Decision{Reason: "volume_too_large"}
+		}
+		return authz.Decision{Allow: true}
+	}
+	f, _ := setupVolumes(t, policy)
+	sized := func(name, size, image string) string {
+		return strings.Replace(volumeBody(name, v1.VolumeAccessSharedRead, image), `"size":"1Gi"`, `"size":"`+size+`"`, 1)
+	}
+	for _, tc := range []struct {
+		name, body string
+		status     int
+	}{
+		{"empty", sized("empty", "1Gi", ""), http.StatusForbidden},
+		{"large", sized("large", "10241Mi", pinnedGrader), http.StatusForbidden},
+		{"fits", sized("fits", "10240Mi", pinnedGrader), http.StatusCreated},
+	} {
+		f.request(http.MethodPut, "/v1/volumes/"+tc.name, f.alice, tc.body, tc.status)
+		want := http.StatusNotFound
+		if tc.status == http.StatusCreated {
+			want = http.StatusOK
+		}
+		f.request(http.MethodGet, "/v1/volumes/"+tc.name, f.alice, "", want)
 	}
 }
 

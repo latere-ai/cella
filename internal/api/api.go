@@ -300,12 +300,13 @@ func resource(obj v1.Sandbox) authz.Resource {
 		Labels: obj.Metadata.Labels}).Resource()
 }
 
-// withProposal adds to an update's resource the object the request would
-// write, as the member "proposed": its owner, its metadata and its spec. An
-// authorizer then reads the change and not only the object it is made to, and
-// can refuse one it does not allow, such as a label its tenancy is read from.
-// The spec is sent as given: a kind whose spec carries a value no authorizer
-// may see strips it before it calls this.
+// withProposal adds to an update's resource, and to a Volume's create, the
+// object the request would write, as the member "proposed": its owner, its
+// metadata and its spec. An authorizer then reads the change and not only the
+// object it is made to, and can refuse one it does not allow, such as a label
+// its tenancy is read from, or a volume's source or size. The spec is sent as
+// given: a kind whose spec carries a value no authorizer may see strips it
+// before it calls this.
 func withProposal(res authz.Resource, owner string, metadata v1.Metadata, spec any) authz.Resource {
 	if res.Fields == nil {
 		res.Fields = map[string]any{}

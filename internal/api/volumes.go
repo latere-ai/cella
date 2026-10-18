@@ -56,9 +56,13 @@ func (h *handler) applyVolume(w http.ResponseWriter, r *http.Request) {
 	respond(w, http.StatusOK, stored)
 }
 
-// createVolume is the create half of a PUT. The volume lives in an
-// environment, so the caller's use of it is asked as a sandbox's create asks
-// it, besides volume.create.
+// createVolume is the create half of a PUT. volume.create is asked with the
+// Volume the create would store as its proposal: readVolume has resolved the
+// body, so the source kind and the other defaults are filled, the environment
+// is named, and an image source is the digest-pinned reference admission
+// answered, which is what lets an authorizer hold a create to a source, an
+// image or a size. The volume lives in an environment, so the caller's use of
+// it is asked as a sandbox's create asks it, besides volume.create.
 func (h *handler) createVolume(w http.ResponseWriter, r *http.Request, key string) {
 	obj, ok := h.readVolume(w, r, key, nil)
 	if !ok {
@@ -66,7 +70,8 @@ func (h *handler) createVolume(w http.ResponseWriter, r *http.Request, key strin
 	}
 	c := caller(r)
 	obj.Status.Owner = c.Subject
-	if _, err := h.decide(r, authorizer.ActionVolumeCreate, volumeResource(obj)); err != nil {
+	res := withProposal(volumeResource(obj), c.Subject, obj.Metadata, obj.Spec)
+	if _, err := h.decide(r, authorizer.ActionVolumeCreate, res); err != nil {
 		respondError(w, err)
 		return
 	}

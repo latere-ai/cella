@@ -54,10 +54,13 @@
 // id: its name, its owner and its labels, and the members its kind adds,
 // such as a sandbox's environment, parent and root. This package declares
 // no type for them; an endpoint reads them with authz.Resource's
-// accessors. An update carries one more: sandbox.update and secret.update
-// add "proposed", the owner, metadata and spec of the object the request
-// would write, so an endpoint reads the change and can refuse one it does
-// not allow, such as a label it reads tenancy from being dropped. A
+// accessors. An update carries one more: sandbox.update, secret.update and
+// volume.update add "proposed", the owner, metadata and spec of the object
+// the request would write, so an endpoint reads the change and can refuse
+// one it does not allow, such as a label it reads tenancy from being
+// dropped. volume.create carries "proposed" as well, the Volume as it will
+// be stored, with its defaults filled and an image source pinned, so an
+// endpoint can hold a create to a source kind, an image or a size. A
 // Secret's proposed spec never carries its value, and no request carries a
 // Secret's value in any member.
 //
