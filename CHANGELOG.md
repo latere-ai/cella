@@ -6,6 +6,60 @@ refused before it is pushed.
 
 ## Unreleased
 
+### Added
+
+- **Volumes, filled from nothing or from an image.** A `Volume` is
+  storage that outlives a sandbox: `PUT /v1/volumes/{name}` creates one,
+  `Pending` until it is filled and then `Available`, `GET` and `DELETE
+  /v1/volumes/{name or id}` read and delete it, and `GET /v1/volumes`
+  lists yours. A sandbox mounts one with `spec.volumes[] {name, path,
+  volume, readOnly}`, by name among your own or by `vol_` id where your
+  authorizer allows `volume.attach`. `access: single` takes one
+  read-write mount or any number of read-only ones; `shared-read` takes
+  read-only mounts alone, any number; a mount either excludes is
+  `volume_busy`, as is a delete of a volume any sandbox mounts, a stopped
+  one included. A sandbox created while its volume is being filled waits
+  in `Pending`. `retain: false` deletes a volume with its last sandbox.
+  `status.volumes` on a sandbox names what each mount was bound to. The
+  `snapshot` and `archive` sources, a named `class`, growth, and a change
+  of mounts on a stopped sandbox are refused with
+  `capability_unsupported` in this release.
+- **An image source is pinned by digest and admitted like a sandbox's
+  image.** `spec.source.image` is stored as a reference ending in
+  `@sha256:` and 64 hex digits, so a reader verifies a volume's content
+  by its digest. With an admission endpoint configured, the image is
+  sent to it once, at create, as a Sandbox naming the volume's
+  environment, its labels and the image, so an image catalog admits a
+  volume's image exactly as it admits a sandbox's and a catalog name can
+  come back pinned; the envelope's new `volume` member carries the
+  Volume, and is `null` on every Sandbox apply. An endpoint needs no
+  change for the catalog to hold.
+- **The podman and Kubernetes runtimes keep volumes.** On podman a volume
+  is a named volume, and an image volume is filled by the engine from a
+  never-started container's file system; its size is advisory. On
+  Kubernetes a volume is a `ReadWriteOnce` claim on
+  `CELLA_K8S_VOLUME_CLASS`, the workspace class when unset, and an image
+  volume is filled by a short-lived Pod that runs the image with `cellad
+  fill`, a new subcommand staged from `CELLA_K8S_FILL_IMAGE`: set it to
+  the `cellad` image of the same release. Without it, an image source is
+  refused. A `shared-read` volume is shared across nodes only on a class
+  whose volumes attach to no single node, such as an NFS or CephFS
+  class; on block storage its sandboxes share it on one node. The Role
+  needs no new verb. The native and remote runtimes keep no volumes.
+- The volume loop runs on the writer under a lease of its own,
+  `volumes`, which `cella_lease_held` reports. Volume events
+  (`volume.created`, `.updated`, `.attached`, `.detached`, `.failed`,
+  `.deleted`) reach the sink and the feed. The database needs no
+  migration: a volume is a row of the objects table.
+
+### Changed
+
+- For a package importer: `manifest.Lookup` gains `Volume`,
+  `controller.Events` gains `EmitVolume`, `runtime.CreateSpec` gains
+  `Volumes`, `runtime.VolumeDriver` is new, and `v1.Capabilities` gains
+  `volumeImages`. The native driver refuses a create that mounts a
+  volume.
+
 ## v0.15.1 - 2026-10-14
 
 ### Fixed
