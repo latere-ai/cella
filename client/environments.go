@@ -60,6 +60,24 @@ func (c *Client) MintEnvironmentKey(ctx context.Context, ref string) (Environmen
 	return decodeInto[EnvironmentKey](raw, err)
 }
 
+// MintEnvironmentKeyFor mints a key that lasts ttl, which the server holds
+// to its configured ceiling and an authorizer may refuse as too long. An
+// owner minting a key for a worker on their own computer asks for a short
+// one (spec 083).
+func (c *Client) MintEnvironmentKeyFor(ctx context.Context, ref string, ttl time.Duration) (EnvironmentKey, []byte, error) {
+	if ttl <= 0 {
+		return EnvironmentKey{}, nil, fmt.Errorf("cella: a key's lifetime is above zero, got %s", ttl)
+	}
+	body, err := json.Marshal(struct {
+		TTL string `json:"ttl"`
+	}{ttl.String()})
+	if err != nil {
+		return EnvironmentKey{}, nil, fmt.Errorf("cella: encode the key request: %w", err)
+	}
+	raw, err := c.send(ctx, http.MethodPost, KindEnvironment.item(ref)+"/keys", nil, body, "application/json")
+	return decodeInto[EnvironmentKey](raw, err)
+}
+
 // RevokeEnvironmentKey ends one key by the jti its mint answered. Every stream
 // and every route reads the revocation, so the key stops working on its next
 // frame and its next request.

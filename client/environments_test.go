@@ -74,6 +74,16 @@ func TestEnvironmentsAndTheirKeys(t *testing.T) {
 	if got := f.last(); got.Method != http.MethodPost || got.Path != "/v1/environments/gpu/keys" {
 		t.Fatalf("the mint called %s %s", got.Method, got.Path)
 	}
+	if _, _, err = c.MintEnvironmentKeyFor(ctx, "gpu", 720*time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.last(); got.Method != http.MethodPost || got.Path != "/v1/environments/gpu/keys" ||
+		got.Body != `{"ttl":"720h0m0s"}` || got.Header.Get("Content-Type") != "application/json" {
+		t.Fatalf("the mint with a lifetime called %s %s with %q", got.Method, got.Path, got.Body)
+	}
+	if _, _, err = c.MintEnvironmentKeyFor(ctx, "gpu", 0); err == nil {
+		t.Fatal("a mint with no lifetime was sent")
+	}
 	keys, err := c.ListEnvironmentKeys(ctx, "gpu")
 	if err != nil {
 		t.Fatal(err)
