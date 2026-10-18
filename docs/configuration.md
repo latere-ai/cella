@@ -13,6 +13,7 @@ One binary plays several roles, and each reads its own set:
 | the installation check | `cellad check` | the same as the control plane, and asks each dependency whether it answers |
 | a self-hosted data plane | `cellad worker` | [The worker](#the-worker) |
 | the egress gateway | `cellad egress` | [The egress gateway](#the-egress-gateway) |
+| a volume's fill | `cellad fill` | nothing: the Kubernetes runtime runs it inside a short-lived Pod to copy an image's files into a volume |
 | the client | `cella` | [The cella command](#the-cella-command) |
 
 Durations are written the way Go writes them: `500ms`, `30s`, `10m`,
@@ -98,6 +99,8 @@ PersistentVolumeClaim and one Pod in the namespace below.
 | `CELLA_K8S_DISPLAY_IMAGE` | unset | the desktop image, `ghcr.io/<owner>/cella-display:<tag>` from the same release. Set, a sandbox that asks for `display` gets a screen, screenshots, and input; unset, such a manifest is refused |
 | `CELLA_K8S_DISPLAY_CPU` | the default cpu | the cpu limit of the desktop container |
 | `CELLA_K8S_DISPLAY_MEMORY` | the default memory | the memory limit of the desktop container |
+| `CELLA_K8S_FILL_IMAGE` | unset | the image a volume's fill copies its program from, the `cellad` image of the same release, `ghcr.io/<owner>/cellad:<tag>`. Set, a volume can be filled from an image: a short-lived Pod copies that image's files into the volume's claim. Unset, a volume with an image source is refused |
+| `CELLA_K8S_VOLUME_CLASS` | the workspace class | the storage class each volume's claim is provisioned from. A volume several sandboxes mount read-only at once is shared across nodes only on a class whose volumes need no attaching to one node, such as an NFS or CephFS class; on a class that attaches a volume to one node, its sandboxes must land on the same node |
 | `CELLA_K8S_GATEWAY_SELECTOR` | unset | `key=value` labels of the egress gateway's Pods. Set, every sandbox reaches the network only through the gateway and the environment enforces the `none`, `allowlist` and `open` boundaries; unset, a boundary is recorded and not enforced. Needs `CELLA_GATEWAY` |
 | `CELLA_K8S_GATEWAY_NAMESPACE` | the sandbox namespace | the namespace the gateway's Pods run in |
 | `CELLA_K8S_GATEWAY_PORTS` | `3128,8080` | the ports the gateway's Pods listen on, which are the gateway's `CELLA_EGRESS_PROXY_ADDR` and `CELLA_EGRESS_REVERSE_ADDR`, not the ports of its Service |

@@ -41,6 +41,12 @@ func loadK8s(getenv Getenv, problems *[]string) k8s.Options {
 			CPU:    sized(getenv, "CELLA_K8S_DISPLAY_CPU", "", problems),
 			Memory: sized(getenv, "CELLA_K8S_DISPLAY_MEMORY", "", problems),
 		},
+		// The program a volume's fill runs comes from the operator's image
+		// or none, for the reason the desktop's does: empty is the driver
+		// declaring no image source for a volume (spec 019).
+		FillImage: strings.TrimSpace(getenv("CELLA_K8S_FILL_IMAGE")),
+		// Empty is the workspace class, which the driver falls back to.
+		VolumeClass: strings.TrimSpace(getenv("CELLA_K8S_VOLUME_CLASS")),
 	}
 	o.Gateway, o.DNS = loadPeers(getenv, problems)
 	return o

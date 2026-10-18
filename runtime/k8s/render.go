@@ -147,6 +147,9 @@ func (d *Driver) validate(s driver.CreateSpec) error {
 	if err := checkPath(ws); err != nil {
 		return err
 	}
+	if err := checkMounts(s.Volumes, ws); err != nil {
+		return err
+	}
 	if s.Workdir != "" {
 		if err := checkPath(s.Workdir); err != nil {
 			return err
@@ -437,6 +440,9 @@ func (d *Driver) pod(s driver.CreateSpec, now time.Time, token bool) (*corev1.Po
 			},
 		},
 	}
+	// The volumes the sandbox mounts (spec 019), read-only where the mount
+	// is. The record on the claim keeps them, so a start renders them again.
+	mountVolumes(pod, s.Volumes)
 	if token || s.Egress.CAPEM != "" {
 		volume, mount := tokenProjection(s.ID)
 		pod.Spec.Volumes = append(pod.Spec.Volumes, volume)

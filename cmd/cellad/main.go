@@ -88,8 +88,10 @@ func run(ctx context.Context, args []string, getenv config.Getenv, stdout, stder
 		return rotateRole(ctx, rest, getenv, stdout, stderr)
 	case "version":
 		return versionRole(rest, stdout, stderr)
+	case "fill":
+		return fillRole(rest, stdout, stderr)
 	default:
-		_, _ = fmt.Fprintf(stderr, "cellad: unknown subcommand %q; serve, worker, egress, check, unseal, rotate and version are the subcommands\n", name)
+		_, _ = fmt.Fprintf(stderr, "cellad: unknown subcommand %q; serve, worker, egress, check, unseal, rotate, version and fill are the subcommands\n", name)
 		return 2
 	}
 }

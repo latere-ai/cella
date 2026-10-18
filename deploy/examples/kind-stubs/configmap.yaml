@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # What this installation verifies against, the stub issuer inside the Pod,
-# the desktop image its sandboxes run, and the gateway its sandboxes leave
-# through.
+# the desktop image its sandboxes run, the image a volume's fill runs, and
+# the gateway its sandboxes leave through.
 # The URL is loopback, which is the address the control plane dials and the
 # iss of every token the stub signs; a caller outside the cluster mints at
 # the node port of service-stubs.yaml and the token it gets carries this
@@ -18,6 +18,10 @@ data:
   # The desktop of a sandbox that names `display`: the image up.sh built and
   # loaded under this name, so the node pulls nothing.
   CELLA_K8S_DISPLAY_IMAGE: "cella-display:dev"
+  # The program a volume's fill copies an image's files with: the control
+  # plane's own image, which up.sh built and loaded under this name, so a
+  # volume filled from an image is filled without a registry.
+  CELLA_K8S_FILL_IMAGE: "cellad:dev"
   # The gateway of gateway.yaml, as a sandbox dials its two doors, and its
   # Pods as the driver's rule names them: by the label they carry. With the
   # label named every sandbox reaches the network only through the gateway,

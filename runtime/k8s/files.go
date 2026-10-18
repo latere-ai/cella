@@ -210,6 +210,10 @@ func (d *Driver) helperPod(id string, spec driver.CreateSpec) (*corev1.Pod, erro
 	// claim's files and never the sandbox's token, credential or authority.
 	bare := spec
 	bare.Egress = driver.Egress{}
+	// Nor the volumes the sandbox mounts: a transfer reaches the
+	// workspace, and a volume attached to one node would hold the helper
+	// to that node or keep another sandbox from it.
+	bare.Volumes = nil
 	pod, err := d.pod(bare, d.opts.Now().UTC(), false)
 	if err != nil {
 		return nil, err

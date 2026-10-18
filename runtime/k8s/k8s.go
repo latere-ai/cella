@@ -123,6 +123,20 @@ type Options struct {
 	// namespace defaults to Namespace and its ports to the two doors'
 	// listen defaults; DNS defaults to kube-system, k8s-app=kube-dns, 53.
 	Gateway, DNS Peer
+	// FillImage is the image a volume's fill stages its program from: one
+	// whose entrypoint is cellad, which the release image of the same
+	// version is (spec 019). It has no default, as DisplayImage has none.
+	// Empty means this driver fills no volume from an image, so a volume
+	// that names one is refused at resolve.
+	FillImage string
+	// VolumeClass provisions each volume's claim; empty is StorageClass,
+	// the workspace's. A volume shared read-only by sandboxes on several
+	// nodes needs a class whose volumes attach to no single node.
+	VolumeClass string
+	// FillTimeout bounds one fill of a volume from an image, the pull and
+	// the copy together. It is a seam with DefaultFillTimeout behind it,
+	// and no variable sets it.
+	FillTimeout time.Duration
 	// TrustRoots are the public roots written into a sandbox's trust file
 	// ahead of the gateway's authority, as egress.LoadRoots read them from
 	// the process's own system bundle or SSL_CERT_FILE. No CELLA_ variable
@@ -175,6 +189,12 @@ func (o Options) withDefaults() Options {
 	}
 	if o.GracePeriod <= 0 {
 		o.GracePeriod = DefaultGracePeriod
+	}
+	if o.VolumeClass == "" {
+		o.VolumeClass = o.StorageClass
+	}
+	if o.FillTimeout <= 0 {
+		o.FillTimeout = DefaultFillTimeout
 	}
 	if o.Now == nil {
 		o.Now = func() time.Time { return time.Now().UTC() }
@@ -305,11 +325,15 @@ func (d *Driver) Isolation() string { return "container" }
 // of CPU always, because a limit above the request is a field of every Pod;
 // of memory once Preflight has found the resize subresource and the metrics
 // API served and granted, because raising a limit needs the first and
-// deciding to needs the second; of the workspace not yet. Resize, volumes and
-// snapshots each land with the slice that builds them.
+// deciding to needs the second; of the workspace not yet. Volumes always,
+// because a volume is a claim the driver writes like a workspace, and their
+// image source with the fill image, whose program copies an image's files
+// into a claim: with none configured no fill can run. Resize and snapshots
+// each land with the slice that builds them.
 func (d *Driver) Capabilities() driver.Capabilities {
 	desktop := d.opts.DisplayImage != ""
-	caps := driver.Capabilities{Files: true, Pool: true, Mesh: true, Attach: true, Dial: true, Display: desktop, Input: desktop}
+	caps := driver.Capabilities{Files: true, Pool: true, Mesh: true, Attach: true, Dial: true, Display: desktop, Input: desktop,
+		Volumes: true, VolumeImages: d.opts.FillImage != ""}
 	if d.confines() {
 		caps.Egress = slices.Clone(egressModes)
 	}
@@ -374,7 +398,10 @@ func (d *Driver) Preflight(ctx context.Context) error {
 	if len(missing) > 0 {
 		return fmt.Errorf("namespace %s: the service account may not %s", d.opts.Namespace, strings.Join(missing, ", "))
 	}
-	if class := d.opts.StorageClass; class != "" {
+	for _, class := range []string{d.opts.StorageClass, d.opts.VolumeClass} {
+		if class == "" {
+			continue
+		}
 		if _, err := d.cs.StorageV1().StorageClasses().Get(ctx, class, metav1.GetOptions{}); err != nil {
 			return fmt.Errorf("storage class %s: %w", class, err)
 		}

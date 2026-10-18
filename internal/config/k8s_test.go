@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 
 	driver "latere.ai/x/cella/runtime"
@@ -189,6 +190,63 @@ func TestLoadK8sDisplay(t *testing.T) {
 			}
 			if got := d.Capabilities(); got.Display != tc.desktop || got.Input != tc.desktop {
 				t.Fatalf("the driver declares Display %v Input %v, want %v", got.Display, got.Input, tc.desktop)
+			}
+		})
+	}
+}
+
+// TestLoadK8sVolumes: the fill image and the volume class reach the driver,
+// both empty by default, and the driver built from the loaded options fills a
+// volume from an image exactly when a fill image is named, and provisions
+// volumes from the workspace class when no volume class is.
+func TestLoadK8sVolumes(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		env          map[string]string
+		image, class string
+		images       bool
+		provisioned  string
+	}{
+		{"none", nil, "", "", false, ""},
+		{"workspace class", map[string]string{"CELLA_K8S_STORAGE_CLASS": "block"}, "", "", false, "block"},
+		{"image and class", map[string]string{
+			"CELLA_K8S_FILL_IMAGE":    " registry.example.com/cellad:v1 ",
+			"CELLA_K8S_VOLUME_CLASS":  " shared ",
+			"CELLA_K8S_STORAGE_CLASS": "block",
+		}, "registry.example.com/cellad:v1", "shared", true, "shared"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, err := Load(env(k8sEnv(t, tc.env)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if c.K8s.FillImage != tc.image || c.K8s.VolumeClass != tc.class {
+				t.Fatalf("fill image %q volume class %q, want %q %q", c.K8s.FillImage, c.K8s.VolumeClass, tc.image, tc.class)
+			}
+			opts := c.K8s
+			opts.Client = fake.NewClientset()
+			d, err := k8s.New(opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := d.Capabilities(); !got.Volumes || got.VolumeImages != tc.images {
+				t.Fatalf("the driver declares Volumes %v VolumeImages %v, want true %v", got.Volumes, got.VolumeImages, tc.images)
+			}
+			if _, err := d.CreateVolume(t.Context(), driver.VolumeSpec{
+				ID: "vol_config", Size: "1Gi", Access: driver.AccessSingle, Source: driver.VolumeSource{Kind: driver.SourceEmpty},
+			}); err != nil {
+				t.Fatal(err)
+			}
+			claims, err := opts.Client.CoreV1().PersistentVolumeClaims(opts.Namespace).List(t.Context(), metav1.ListOptions{})
+			if err != nil || len(claims.Items) != 1 {
+				t.Fatalf("claims %v %v", claims, err)
+			}
+			got := ""
+			if class := claims.Items[0].Spec.StorageClassName; class != nil {
+				got = *class
+			}
+			if got != tc.provisioned {
+				t.Fatalf("the volume is provisioned from %q, want %q", got, tc.provisioned)
 			}
 		})
 	}

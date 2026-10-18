@@ -49,6 +49,9 @@ var engines = map[string][]string{
 	"./runtime":         nil,
 	"./runtime/display": nil, // the desktop vocabulary: the standard library alone
 	"./runtime/native":  nil, // the native driver runs host processes: no client
+	// The program a volume's fill runs inside the source image: it copies
+	// files from one directory to another, with the standard library alone.
+	"./runtime/k8s/fill": nil,
 	// The podman driver speaks libpod over net/http, so it needs no client
 	// module; fileshell is the file programs it shares with the other
 	// container driver.

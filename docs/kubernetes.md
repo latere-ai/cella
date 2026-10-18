@@ -22,7 +22,8 @@ the Pod and keeps the claim, so the files survive a stop and a start.
 | Interactive terminal (`attach`, `cella exec -i` and `-t`) | yes, with the window's size carried through and the shell's exit code returned |
 | Egress boundaries: `none`, `allowlist`, `open` | yes, once the control plane is told which Pods are the egress gateway; without that, a boundary is recorded and not enforced |
 | Sizing inside a ceiling (`spec.resources.max`) | CPU always; memory on a cluster that [serves what it needs](#sizing-a-sandbox); the workspace not yet |
-| Changing `spec.resources` after create, volumes, snapshots | no |
+| Volumes (`spec.volumes` and the `Volume` kind) | yes: one claim per volume on `CELLA_K8S_VOLUME_CLASS`, the workspace class when unset; an image source only when the control plane is given a fill image (`CELLA_K8S_FILL_IMAGE`). A `shared-read` volume is shared by the sandboxes of one node on a class that attaches a volume to one node, and by every node on a class that needs no attaching, such as NFS or CephFS |
+| Changing `spec.resources` after create, snapshots | no |
 
 A capability the environment does not provide is refused before anything
 runs: the route answers `422` with `capability_unsupported`, and a manifest

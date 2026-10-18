@@ -77,6 +77,20 @@ the desktop container's limits, the driver's defaults when unset. Without
 the image the environment declares no desktop, and a manifest that asks
 for one is refused with the field named.
 
+A volume filled from an image is one ConfigMap key too. Set
+`CELLA_K8S_FILL_IMAGE` to the control plane's own image,
+`ghcr.io/<owner>/cellad:<tag>`, and a volume whose source is an image is
+filled by a short-lived Pod: its init container copies `cellad` out of that
+image, and its main container runs the volume's image with `cellad fill` as
+its command, copying that image's files into the volume's claim. The Pod
+runs under the sandboxes' baseline and placement and needs no verb the Role
+does not already grant. Without the key the environment declares no image
+source and such a volume is refused. `CELLA_K8S_VOLUME_CLASS` names the
+storage class volumes are provisioned from, the workspace class when unset;
+a volume that sandboxes on several nodes mount read-only at once needs a
+class whose volumes attach to no single node, such as an NFS or CephFS
+class.
+
 ## The Role
 
 `base/rbac.yaml` grants the accesses the Kubernetes driver uses and nothing

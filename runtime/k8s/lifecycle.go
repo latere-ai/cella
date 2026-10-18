@@ -38,6 +38,9 @@ func (d *Driver) Create(ctx context.Context, s driver.CreateSpec) (driver.Ref, e
 	if err := s.CheckPrewarm(); err != nil {
 		return driver.Ref{}, err
 	}
+	if err := d.checkAttachable(ctx, s.Volumes); err != nil {
+		return driver.Ref{}, err
+	}
 	now := d.opts.Now().UTC()
 	pvc, err := d.claim(s, now)
 	if err != nil {

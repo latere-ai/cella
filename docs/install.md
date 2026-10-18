@@ -307,6 +307,9 @@ alike, which the first form needs no rule for.
   the control plane, `ghcr.io/<owner>/cella-display:<tag>`, named in
   `CELLA_K8S_DISPLAY_IMAGE` of the `cellad` ConfigMap. A sandbox that
   asks for `display` then gets a screen, screenshots and input.
+- A volume filled from an image needs `CELLA_K8S_FILL_IMAGE` in the
+  `cellad` ConfigMap, set to the control plane's own image of the same
+  release, `ghcr.io/<owner>/cellad:<tag>`.
 - [Sandboxes on Kubernetes](kubernetes.md) is what a sandbox on this
   installation can do, and how to reach a server running inside one.
 - `deploy/examples/generic` is the same installation with desired state in

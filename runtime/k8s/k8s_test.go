@@ -35,10 +35,10 @@ func TestDeclarations(t *testing.T) {
 		t.Fatalf("Isolation = %q", h.Isolation())
 	}
 	got := h.Capabilities()
-	want := driver.Capabilities{Files: true, Pool: true, Mesh: true, Attach: true, Dial: true}
+	want := driver.Capabilities{Files: true, Pool: true, Mesh: true, Attach: true, Dial: true, Volumes: true}
 	want.Autosize.CPU = true
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("Capabilities = %+v, want Files, Pool, Mesh, Attach, Dial and the autosize of cpu", got)
+		t.Fatalf("Capabilities = %+v, want Files, Pool, Mesh, Attach, Dial, Volumes and the autosize of cpu", got)
 	}
 	// Attach and Dial are declared with their interfaces behind them.
 	var d driver.Driver = h.Driver
@@ -48,9 +48,12 @@ func TestDeclarations(t *testing.T) {
 	if _, ok := d.(driver.Dialer); !ok {
 		t.Fatal("the driver declares Dial and does not implement runtime.Dialer")
 	}
+	if _, ok := d.(driver.VolumeDriver); !ok {
+		t.Fatal("the driver declares Volumes and does not implement runtime.VolumeDriver")
+	}
 	// Every other capability with an optional interface behind it is
 	// undeclared, because none of them is implemented here.
-	if got.Display || got.Input || got.Volumes || got.Snapshots || got.Resize || got.Ingress || len(got.Egress) > 0 {
+	if got.Display || got.Input || got.VolumeImages || got.Snapshots || got.Resize || got.Ingress || len(got.Egress) > 0 {
 		t.Fatalf("a capability is declared without its behavior: %+v", got)
 	}
 }
@@ -72,6 +75,7 @@ func TestOptionDefaults(t *testing.T) {
 		{"DefaultDisk", o.DefaultDisk, DefaultDisk},
 		{"ReadyTimeout", o.ReadyTimeout, DefaultReadyTimeout},
 		{"GracePeriod", o.GracePeriod, DefaultGracePeriod},
+		{"FillTimeout", o.FillTimeout, DefaultFillTimeout},
 	} {
 		if !reflect.DeepEqual(row.got, row.want) {
 			t.Errorf("%s = %v, want %v", row.field, row.got, row.want)
@@ -82,7 +86,8 @@ func TestOptionDefaults(t *testing.T) {
 	}
 	// No default names a deployment: the cluster-shaped values stay empty
 	// until an operator fills them.
-	if o.StorageClass != "" || o.NodeSelector != nil || o.Tolerations != nil || o.ImagePullSecrets != nil || o.Kubeconfig != "" {
+	if o.StorageClass != "" || o.VolumeClass != "" || o.FillImage != "" || o.NodeSelector != nil || o.Tolerations != nil ||
+		o.ImagePullSecrets != nil || o.Kubeconfig != "" {
 		t.Errorf("a cluster-shaped default is set: %+v", o)
 	}
 }
