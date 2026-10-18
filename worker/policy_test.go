@@ -163,9 +163,10 @@ func TestBuiltInChecksIgnoreThePolicy(t *testing.T) {
 
 	ref, err := p.driver.Create(t.Context(), driver.CreateSpec{
 		ID: "sbx_inside", Name: "inside", Owner: "ops", Command: []string{"sleep", "30"},
-		Labels:    map[string]string{"session": "ses_1"},
-		Workspace: driver.Workspace{Path: "/home/dev/project/site", Host: "/home/dev/project/site"},
-		Egress:    driver.Egress{Mode: string(v1.EgressOpen)},
+		Labels:      map[string]string{"session": "ses_1"},
+		Annotations: map[string]string{"example.com/agent-name": "Site helper"},
+		Workspace:   driver.Workspace{Path: "/home/dev/project/site", Host: "/home/dev/project/site"},
+		Egress:      driver.Egress{Mode: string(v1.EgressOpen)},
 	})
 	if err != nil {
 		t.Fatalf("a create inside the grants failed: %v", err)
@@ -173,7 +174,8 @@ func TestBuiltInChecksIgnoreThePolicy(t *testing.T) {
 	creates, _ := allow.asked()
 	if len(creates) != 1 || creates[0].Sandbox.Spec.Workspace.Host != "/home/dev/project/site" ||
 		creates[0].Labels["session"] != "ses_1" || creates[0].Sandbox.Status.ID != "sbx_inside" ||
-		creates[0].Sandbox.Spec.Network.Egress.Mode != v1.EgressOpen {
+		creates[0].Sandbox.Spec.Network.Egress.Mode != v1.EgressOpen ||
+		creates[0].Sandbox.Metadata.Annotations["example.com/agent-name"] != "Site helper" {
 		t.Errorf("the policy was asked %+v", creates)
 	}
 	for _, path := range []string{"/home/dev/project/vendor/lib.go", "/home/dev/project/vendor"} {

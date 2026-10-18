@@ -361,7 +361,7 @@ func operationOf(opType string, req remote.Request) Operation {
 func createOf(spec runtime.CreateSpec) Create {
 	sb := v1.Sandbox{
 		APIVersion: v1.APIVersion, Kind: v1.KindSandbox,
-		Metadata: v1.Metadata{Name: spec.Name, Labels: maps.Clone(spec.Labels)},
+		Metadata: v1.Metadata{Name: spec.Name, Labels: maps.Clone(spec.Labels), Annotations: maps.Clone(spec.Annotations)},
 		Spec: v1.SandboxSpec{
 			Image: spec.Image, Command: slices.Clone(spec.Command), Args: slices.Clone(spec.Args),
 			Workdir:   spec.Workdir,

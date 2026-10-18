@@ -199,10 +199,14 @@ type CreateSpec struct {
 	Isolation     string `json:"isolation,omitempty"`
 	Command, Args []string
 	Env, Labels   map[string]string
-	Lifecycle     Lifecycle
-	User          string
-	Resources     Resources
-	Workspace     Workspace
+	// Annotations are the manifest's own, carried so a worker's host policy
+	// can show a person what the caller wrote for people, such as an agent's
+	// display name (spec 082). A driver keeps nothing of them.
+	Annotations map[string]string `json:"annotations,omitempty"`
+	Lifecycle   Lifecycle
+	User        string
+	Resources   Resources
+	Workspace   Workspace
 	// Volumes are the volumes the sandbox mounts, each Available on this
 	// driver before the create (spec 019). A driver that declares no
 	// Volumes capability refuses a spec that carries one with
