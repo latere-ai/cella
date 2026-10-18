@@ -188,6 +188,12 @@ func (c *Controller) Reap(ctx context.Context) (int, error) {
 	if err := c.sweepRevocations(ctx, c.clock.Now()); err != nil {
 		failed = errors.Join(failed, fmt.Errorf("reaper: %w", err))
 	}
+	// A volume the driver lost is Lost, read once a tick over every
+	// environment, since a volume is the control plane's whichever
+	// environment holds it (spec 019).
+	if err := c.observeVolumes(ctx); err != nil {
+		failed = errors.Join(failed, fmt.Errorf("reaper: %w", err))
+	}
 	// Retention is the store's own sweep and runs once a tick for the same
 	// reason: its rows belong to the control plane, whichever environment
 	// wrote them (spec 010).

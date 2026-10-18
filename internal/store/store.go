@@ -25,6 +25,7 @@ const (
 	KindSandbox     = "Sandbox"
 	KindSecret      = "Secret"
 	KindEnvironment = "Environment"
+	KindVolume      = "Volume"
 )
 
 // PhaseDeleting is the one phase the count ceiling of design 007 excludes: a

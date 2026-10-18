@@ -43,6 +43,7 @@ func (r *records) Emit(_ context.Context, a controller.Act) {
 }
 func (r *records) EmitSecret(context.Context, controller.SecretAct)           {}
 func (r *records) EmitEnvironment(context.Context, controller.EnvironmentAct) {}
+func (r *records) EmitVolume(context.Context, controller.VolumeAct)           {}
 
 func (r *records) resized() []controller.ResizedData {
 	r.mu.Lock()

@@ -63,7 +63,7 @@ var (
 	// Leases are the loops that run under one, by kind. The refill loop's
 	// lease is keyed by environment and its kind is "pool", because an
 	// environment per series would make the label unbounded.
-	Leases = []string{LeaseWriter, LeaseReaper, LeaseJournal, LeasePool, LeaseEnvironments, LeaseScheduler, LeaseAutosize}
+	Leases = []string{LeaseWriter, LeaseReaper, LeaseJournal, LeasePool, LeaseEnvironments, LeaseScheduler, LeaseAutosize, LeaseVolumes}
 	// ForwardOutcomes are what one request a standby forwarded to the
 	// writer ended with (spec 076).
 	ForwardOutcomes = []string{ForwardForwarded, ForwardNoWriter, ForwardFailed}
@@ -118,6 +118,7 @@ const (
 	LeaseEnvironments = "environments"
 	LeaseScheduler    = "scheduler"
 	LeaseAutosize     = "autosize"
+	LeaseVolumes      = "volumes"
 
 	DoorProxy   = "proxy"
 	DoorReverse = "reverse"

@@ -483,6 +483,7 @@ func TestVocabulariesAgree(t *testing.T) {
 		{controller.MetricLeaseReaper, metrics.LeaseReaper},
 		{controller.MetricLeasePool, metrics.LeasePool},
 		{controller.MetricLeaseScheduler, metrics.LeaseScheduler},
+		{controller.MetricLeaseVolumes, metrics.LeaseVolumes},
 		{events.MetricLeaseJournal, metrics.LeaseJournal},
 		{events.MetricAcknowledged, metrics.OutcomeAcknowledged},
 		{events.MetricDeferred, metrics.OutcomeDeferred},

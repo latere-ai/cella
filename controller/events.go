@@ -30,6 +30,9 @@ type Events interface {
 	// EmitEnvironment records one act on an Environment, which is the third
 	// kind of design 009's vocabulary.
 	EmitEnvironment(ctx context.Context, a EnvironmentAct)
+	// EmitVolume records one act on a Volume, an attach and a detach
+	// included.
+	EmitVolume(ctx context.Context, a VolumeAct)
 }
 
 // Act is one thing the controller did to one sandbox: design 009's type, and

@@ -329,6 +329,7 @@ func (r *recorded) Emit(_ context.Context, a Act) {
 }
 func (r *recorded) EmitSecret(context.Context, SecretAct)           {}
 func (r *recorded) EmitEnvironment(context.Context, EnvironmentAct) {}
+func (r *recorded) EmitVolume(context.Context, VolumeAct)           {}
 
 // of is the payload of every record of one type, in order.
 func (r *recorded) of(kind string) []any {

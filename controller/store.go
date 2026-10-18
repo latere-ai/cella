@@ -109,6 +109,9 @@ type fileStore struct {
 	// environments is the Environment kind in the snapshot, one row per
 	// environment with the version an If-Match is compared against.
 	environments map[string]environmentRow
+	// volumes is the Volume kind in the snapshot, the object as a read
+	// returns it less what is derived at read.
+	volumes map[string]v1.Volume
 }
 
 // environmentRow is one Environment in the snapshot: the object and the row
@@ -134,6 +137,7 @@ type snapshot struct {
 	Secrets      map[string]secretRow      `json:"secrets,omitempty"`
 	Ledger       map[string]int            `json:"ledger,omitempty"`
 	Environments map[string]environmentRow `json:"environments,omitempty"`
+	Volumes      map[string]v1.Volume      `json:"volumes,omitempty"`
 }
 
 // OpenFileStore opens a provisional local desired-state snapshot, taking an
@@ -162,7 +166,8 @@ func OpenSealedFileStore(dir string, sealer Sealer) (Store, error) {
 	}
 	return &fileStore{dir: dir, lock: lock, sealer: sealer,
 		objects: map[string]v1.Sandbox{}, secrets: map[string]secretRow{},
-		ledger: map[string]int{}, environments: map[string]environmentRow{}}, nil
+		ledger: map[string]int{}, environments: map[string]environmentRow{},
+		volumes: map[string]v1.Volume{}}, nil
 }
 func (s *fileStore) Load() (map[string]v1.Sandbox, error) {
 	s.mu.Lock()
@@ -193,6 +198,10 @@ func (s *fileStore) Load() (map[string]v1.Sandbox, error) {
 	s.environments = data.Environments
 	if s.environments == nil {
 		s.environments = map[string]environmentRow{}
+	}
+	s.volumes = data.Volumes
+	if s.volumes == nil {
+		s.volumes = map[string]v1.Volume{}
 	}
 	return maps.Clone(data.Objects), nil
 }
@@ -318,7 +327,7 @@ func (s *fileStore) Save(objects map[string]v1.Sandbox) error {
 // The caller holds s.mu.
 func (s *fileStore) write() error {
 	b, err := json.Marshal(snapshot{Version: 1, Objects: s.objects, Secrets: s.secrets,
-		Ledger: s.ledger, Environments: s.environments})
+		Ledger: s.ledger, Environments: s.environments, Volumes: s.volumes})
 	if err != nil {
 		return err
 	}
@@ -424,7 +433,58 @@ var (
 	_ SecretUses   = (*fileStore)(nil)
 	_ Spawner      = (*fileStore)(nil)
 	_ Environments = (*fileStore)(nil)
+	_ Volumes      = (*fileStore)(nil)
 )
+
+// LoadVolumes is the Volume half of Load. The snapshot was read by Load,
+// which the controller calls first.
+func (s *fileStore) LoadVolumes() (map[string]v1.Volume, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make(map[string]v1.Volume, len(s.volumes))
+	maps.Copy(out, s.volumes)
+	return out, nil
+}
+
+// WriteVolume stores one Volume and rewrites the snapshot. The journal is not
+// this store's: it keeps desired state and nothing else, and the controller's
+// emitter takes the record.
+func (s *fileStore) WriteVolume(_ context.Context, act VolumeAct) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	id := act.Object.Status.ID
+	previous, held := s.volumes[id]
+	obj := act.Object
+	obj.Status.AttachedTo = nil
+	s.volumes[id] = obj
+	if err := s.write(); err != nil {
+		s.restoreVolume(id, previous, held)
+		return err
+	}
+	return nil
+}
+
+// RemoveVolume drops one Volume from the snapshot.
+func (s *fileStore) RemoveVolume(_ context.Context, act VolumeAct) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	id := act.Object.Status.ID
+	previous, held := s.volumes[id]
+	delete(s.volumes, id)
+	if err := s.write(); err != nil {
+		s.restoreVolume(id, previous, held)
+		return err
+	}
+	return nil
+}
+
+func (s *fileStore) restoreVolume(id string, previous v1.Volume, held bool) {
+	if held {
+		s.volumes[id] = previous
+		return
+	}
+	delete(s.volumes, id)
+}
 
 // LoadEnvironments is the Environment half of Load. The snapshot was read by
 // Load, which the controller calls first.

@@ -587,6 +587,10 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 			// ceiling uses, once an interval, and its size raised inside
 			// the ceiling when the workload needs it.
 			loops.Go(func() { control.RunAutosize(loopCtx) })
+			// The volume loop of spec 019: each volume filled from its
+			// source once, and each delete the driver did not finish
+			// finished.
+			loops.Go(func() { control.RunVolumes(loopCtx) })
 			loops.Wait()
 		}()
 		stop := sync.OnceFunc(func() { cancelLoops(); <-loopsDone })

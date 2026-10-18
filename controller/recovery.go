@@ -143,8 +143,8 @@ func (c *Controller) graceLocked(ctx context.Context, obj v1.Sandbox, now time.T
 // name, labels, annotations and lifecycle.
 //
 // The annotations and the labels never left: they are the desired state this
-// recreation is made from. The map, the token and the volumes of the create
-// order's steps 3 to 5 are slices 039, 045 and design 019.
+// recreation is made from, and so are the volumes it was bound to, which the
+// recreation mounts again.
 func (c *Controller) recoverLocked(ctx context.Context, obj v1.Sandbox, now time.Time) (bool, error) {
 	id := obj.Status.ID
 	if next, waiting := c.retry[id]; waiting && now.Before(next) {
@@ -164,6 +164,19 @@ func (c *Controller) recoverLocked(ctx context.Context, obj v1.Sandbox, now time
 		obj.Status.Reason = ReasonRecoveryExhausted
 		c.log.WarnContext(ctx, "recovery exhausted", "sandbox", id, "attempts", c.recoveryAttempts)
 		c.metrics.RecoveryAttempt(MetricExhausted)
+		delete(c.retry, id)
+		delete(c.attempts, id)
+		delete(c.lost, id)
+		return true, c.persist(ctx, obj, MutationFailed)
+	}
+	// A volume the sandbox is bound to that is gone, failed or lost took
+	// its content with it, so the sandbox is not recreated without it: it
+	// fails with VolumeMissing and the volume is named (spec 005).
+	if _, err := c.volumesReadyLocked(obj); err != nil {
+		obj.Status.Phase = PhaseFailed
+		obj.Status.Reason = ReasonVolumeMissing
+		obj.Status.Conditions = setCondition(obj.Status.Conditions, volumesUnavailable(err, now))
+		c.log.WarnContext(ctx, "recovery found a volume missing", "sandbox", id, "err", err)
 		delete(c.retry, id)
 		delete(c.attempts, id)
 		delete(c.lost, id)

@@ -22,6 +22,7 @@ type actRecorder struct {
 	mu           sync.Mutex
 	acts         []Act
 	environments []EnvironmentAct
+	volumes      []VolumeAct
 }
 
 func (r *actRecorder) Emit(_ context.Context, a Act) {
@@ -36,6 +37,12 @@ func (r *actRecorder) EmitEnvironment(_ context.Context, a EnvironmentAct) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.environments = append(r.environments, a)
+}
+
+func (r *actRecorder) EmitVolume(_ context.Context, a VolumeAct) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.volumes = append(r.volumes, a)
 }
 
 // environmentsOf returns every environment act of one type, in the order they

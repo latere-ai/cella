@@ -110,6 +110,8 @@ var Types = []Type{
 	TypeEnvironmentCreated, TypeEnvironmentUpdated, TypeEnvironmentRegistered,
 	TypeEnvironmentOffline, TypeEnvironmentKeyed, TypeEnvironmentKeyRevoked,
 	TypeEnvironmentDeleted,
+	TypeVolumeCreated, TypeVolumeUpdated, TypeVolumeAttached, TypeVolumeDetached,
+	TypeVolumeFailed, TypeVolumeDeleted,
 }
 
 // Deliverable reports whether a journal row's type is one the sink receives.
@@ -148,6 +150,9 @@ const (
 	ReasonCreateFailed      Reason = "CreateFailed"
 	ReasonDriverFailed      Reason = "DriverFailed"
 	ReasonRecoveryExhausted Reason = "RecoveryExhausted"
+	// ReasonVolumeMissing is a lost sandbox recovery would not recreate,
+	// because a volume it mounts is gone (spec 019).
+	ReasonVolumeMissing Reason = "VolumeMissing"
 	// The scheduler's reasons (design 020): a sandbox stopped to place a
 	// higher priority one, a create a direct environment could not fit,
 	// and a sandbox that waited in its queue past its start deadline.
@@ -161,8 +166,9 @@ const (
 var Reasons = []Reason{
 	ReasonRequest, ReasonAutoStop, ReasonAutoDelete, ReasonExpired,
 	ReasonParent, ReasonExited, ReasonLost, ReasonCreateFailed,
-	ReasonDriverFailed, ReasonRecoveryExhausted,
+	ReasonDriverFailed, ReasonRecoveryExhausted, ReasonVolumeMissing,
 	ReasonPreempted, ReasonNoCapacity, ReasonStartDeadline,
+	ReasonSourceUnreachable, ReasonSourceTooLarge, ReasonSourceUnsupported,
 }
 
 // ReasonOf maps a status reason to the closed enum. A driver names failures

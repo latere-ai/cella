@@ -166,6 +166,10 @@ type Options struct {
 	// for what it uses (spec 078). Zero takes autosize.DefaultInterval;
 	// CELLA_AUTOSIZE_INTERVAL sets it.
 	AutosizeInterval time.Duration
+	// VolumeInterval is how often the volume loop passes over the volumes
+	// being filled and deleted when nothing wakes it (spec 019). Zero takes
+	// DefaultVolumeInterval.
+	VolumeInterval time.Duration
 }
 type Controller struct {
 	mu          sync.Mutex
@@ -216,6 +220,16 @@ type Controller struct {
 	// secretUses is the store's seam for status.lastUsedAt, where it has
 	// one: a store without it serves every Secret and stamps no use.
 	secretUses SecretUses
+	// volumes is the Volume kind's store and volumeObjects this process's
+	// copy of the collection (spec 019). filling is every volume the volume
+	// loop has in its driver's hands with the controller's lock released,
+	// fillWork waits for them, and volumeWake asks the loop for a pass now.
+	volumes        Volumes
+	volumeObjects  map[string]v1.Volume
+	filling        map[string]struct{}
+	fillWork       sync.WaitGroup
+	volumeWake     chan struct{}
+	volumeInterval time.Duration
 	// spawner is the spawn ledger of design 022 and journaller the seam a
 	// record with a payload of its own is appended through. Both are the
 	// store's, taken where it has them: a store that counts no budget
@@ -330,7 +344,9 @@ func Open(ctx context.Context, o Options) (*Controller, error) {
 		egress: o.Egress, gateway: o.Gateway, gatewayGrace: o.GatewayGrace,
 		events: o.Events, tokens: o.Tokens, retention: o.Retention, metrics: cmp.Or(o.Metrics, Metrics(nopMetrics{})),
 		secretObjects: map[string]v1.Secret{},
-		pool:          o.Pool, capacity: o.Capacity,
+		volumeObjects: map[string]v1.Volume{}, filling: map[string]struct{}{},
+		volumeWake: make(chan struct{}, 1), volumeInterval: cmp.Or(o.VolumeInterval, DefaultVolumeInterval),
+		pool: o.Pool, capacity: o.Capacity,
 		poolInFlight: o.PoolInFlight, poolGrace: o.PoolGrace,
 		scheduleInterval: cmp.Or(o.ScheduleInterval, DefaultScheduleInterval), wake: make(chan struct{}, 1), maxPreemptions: cmp.Or(o.MaxPreemptions, DefaultMaxPreemptions),
 		newDriver: o.NewDriver, releaseDriver: o.ReleaseDriver, registrations: o.Registrations,
@@ -373,6 +389,18 @@ func Open(ctx context.Context, o Options) (*Controller, error) {
 		}
 		if c.secretObjects == nil {
 			c.secretObjects = map[string]v1.Secret{}
+		}
+	}
+	// A store that holds the Volume kind is what makes /v1/volumes and a
+	// sandbox's mounts possible; one that does not serves everything else.
+	if v, ok := store.(Volumes); ok {
+		c.volumes = v
+		if c.volumeObjects, err = v.LoadVolumes(); err != nil {
+			_ = store.Close()
+			return nil, err
+		}
+		if c.volumeObjects == nil {
+			c.volumeObjects = map[string]v1.Volume{}
 		}
 	}
 	if c.clock == nil {
@@ -595,6 +623,12 @@ func (c *Controller) create(ctx context.Context, obj v1.Sandbox, owner string, m
 	if parent != nil || obj.Spec.Mesh.Enabled {
 		entry = nil
 	}
+	// A pool entry was made with no volume mounted, and a container's
+	// mounts are fixed when it is made, so a sandbox that mounts one takes
+	// the slow path as well.
+	if len(obj.Spec.Volumes) > 0 {
+		entry = nil
+	}
 	// A pool entry is taken only by a create placed at once: one that would
 	// wait behind others in its queue does not pass them by adopting.
 	if c.waiting(environment, obj.Spec.Scheduling.Queue) > 0 {
@@ -626,7 +660,7 @@ func (c *Controller) create(ctx context.Context, obj v1.Sandbox, owner string, m
 // already spent, or a boundary no connected gateway can hold.
 func refused(err error) bool {
 	return errors.Is(err, ErrQuota) || errors.Is(err, ErrNameTaken) || errors.Is(err, ErrBudgetExhausted) ||
-		errors.Is(err, ErrNoGateway)
+		errors.Is(err, ErrNoGateway) || errors.Is(err, ErrVolumeBusy)
 }
 
 // holdsSlot reports whether a sandbox in this phase takes a slot of its
@@ -748,6 +782,12 @@ func (c *Controller) createLocked(ctx context.Context, obj v1.Sandbox, owner str
 		obj.Status.Phase = PhaseQueued
 		obj.Status.Conditions = setCondition(obj.Status.Conditions, waitingCondition(v1.ReasonQueued, now))
 	}
+	// The mounts are bound before the row is written, under this lock,
+	// which is the authoritative attach of spec 019: a single volume another
+	// sandbox holds is refused here with nothing written.
+	if err := c.bindVolumesLocked(&obj); err != nil {
+		return obj, err
+	}
 	// The tree position is written before the object is: a child's parent,
 	// root and mesh are what the debit, the boundary and the driver all read.
 	if err := c.spawnStatus(&obj, parent); err != nil {
@@ -865,6 +905,16 @@ func (c *Controller) realize(ctx context.Context, id string) error {
 	if _, busy := c.realizing[id]; !held || busy || !placed(obj) {
 		return nil
 	}
+	// Every attach waits on Available (spec 019). A sandbox bound to a
+	// volume still being filled stays placed, with the request that placed
+	// it kept for the pass that takes it, and the volume loop wakes this
+	// loop when the fill settles. One bound to a volume that failed or is
+	// gone cannot wait it out and fails below, before anything is pushed
+	// or minted for it.
+	ready, unavailable := c.volumesReadyLocked(obj)
+	if unavailable == nil && !ready {
+		return nil
+	}
 	d, err := c.driverFor(obj.Status.Environment)
 	if err != nil {
 		return err
@@ -889,6 +939,10 @@ func (c *Controller) realize(ctx context.Context, id string) error {
 	// A row a previous run wrote carries the identity that run minted. It
 	// is replaced below and ended once this run has settled.
 	previous := obj.Status.TokenState
+	if unavailable != nil {
+		obj.Status.Conditions = setCondition(obj.Status.Conditions, volumesUnavailable(unavailable, now))
+		return errors.Join(unavailable, c.failCreate(settle, obj, parent, previous))
+	}
 	boundary, err := c.pushEgress(ctx, &obj)
 	if err != nil && c.gatewayGraceHolds(err) {
 		// No gateway is connected yet to a writer that was just promoted.
@@ -1032,7 +1086,12 @@ func (c *Controller) settleCreate(ctx context.Context, id string, d driver.Drive
 		// what it is.
 		read = nil
 	}
+	// The driver made the sandbox with every volume it is bound to.
+	markAttached(&cur, c.clock.Now())
 	err := errors.Join(read, c.persist(ctx, cur, phaseMutation(cur.Status.Phase)))
+	if err == nil {
+		c.recordAttachments(ctx, cur, MutationVolumeAttached)
+	}
 	if parent != nil {
 		err = errors.Join(err, c.spawned(ctx, cur, parent.Status.ID))
 	}
@@ -1081,6 +1140,7 @@ func specOf(obj v1.Sandbox, lifecycle driver.Lifecycle, boundary driver.Egress, 
 		Workdir: obj.Spec.Workdir, Labels: obj.Metadata.Labels, User: obj.Spec.User,
 		Resources: sizeFor(obj),
 		Workspace: driver.Workspace{Path: obj.Spec.Workspace.Path},
+		Volumes:   mountsOf(obj),
 		Lifecycle: lifecycle,
 		Egress:    boundary,
 		Display:   geometryOf(obj.Spec.Display),
@@ -1450,7 +1510,13 @@ func (c *Controller) deleteOne(ctx context.Context, obj *v1.Sandbox) error {
 	if c.spawner != nil {
 		forgotten = c.spawner.ForgetSpawns(ctx, id)
 	}
-	return errors.Join(revoked, forgotten, c.forget(ctx, id, MutationDeleted))
+	if err := c.forget(ctx, id, MutationDeleted); err != nil {
+		return errors.Join(revoked, forgotten, err)
+	}
+	// The volumes are released once the row is gone, so a volume that does
+	// not retain is deleted with its last sandbox and with no other.
+	c.releaseVolumesLocked(ctx, *obj)
+	return errors.Join(revoked, forgotten)
 }
 
 // cascade deletes every descendant of one sandbox, deepest generation first,
