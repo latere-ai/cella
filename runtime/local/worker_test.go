@@ -99,7 +99,7 @@ func (p *stubPlane) serve(t *testing.T, o worker.Options) (stop func() error) {
 		return result
 	}
 	t.Cleanup(func() { _ = stop() })
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	for {
 		if workers := p.hub.Workers("env_laptop"); len(workers) == 1 && workers[0].Connected {
 			return stop

@@ -203,7 +203,10 @@ func TestLogsReadTheMainStage(t *testing.T) {
 		t.Errorf("negative tail lines answered %v", err)
 	}
 	sandbox(t, d, driver.CreateSpec{ID: "sbx_talks", Command: []string{"/bin/sh", "-c", "printf 'one\\ntwo\\n'; sleep 30"}})
-	deadline := time.Now().Add(5 * time.Second)
+	// The poll ends as soon as the line is there; the deadline only bounds a
+	// stage that never writes, and a loaded suite under the race detector can
+	// take seconds to start one.
+	deadline := time.Now().Add(30 * time.Second)
 	for {
 		r, err := d.Logs(context.Background(), "sbx_talks", driver.LogsRequest{TailLines: 1})
 		if err != nil {
