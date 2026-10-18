@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.16.0 - 2026-10-18
+
 ### Added
 
 - **Volumes, filled from nothing or from an image.** A `Volume` is
