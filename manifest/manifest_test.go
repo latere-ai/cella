@@ -87,6 +87,25 @@ func TestExecValidation(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// A sandbox whose workspace is a host folder bound in place, with its
+	// scratch directories, takes a workdir in any of them (spec 081).
+	host := v1.Sandbox{
+		Spec:   v1.SandboxSpec{Workspace: v1.Workspace{Path: "/Users/ada/code/site", Host: "/Users/ada/code/site"}},
+		Status: v1.SandboxStatus{Paths: &v1.SandboxPaths{Home: "/data/sbx/home", Tmp: "/data/sbx/tmp"}},
+	}
+	for _, cwd := range []string{"", "/workspace", "/Users/ada/code/site", "/Users/ada/code/site/sub", "/data/sbx/tmp/topos"} {
+		if err := ValidateExecFor(host, []string{"echo"}, nil, cwd); err != nil {
+			t.Errorf("workdir %q in the sandbox's own workspaces was refused: %v", cwd, err)
+		}
+	}
+	for _, cwd := range []string{"/Users/ada", "/Users/ada/code/site-other", "/Users/ada/code/site/../..", "/etc", "relative"} {
+		if err := ValidateExecFor(host, []string{"echo"}, nil, cwd); err == nil {
+			t.Errorf("workdir %q outside the sandbox's workspaces was admitted", cwd)
+		}
+	}
+	if err := ValidateExecFor(v1.Sandbox{}, []string{"echo"}, nil, "/etc"); err == nil || !strings.Contains(err.Error(), "absolute path in /workspace") {
+		t.Errorf("a sandbox with the default workspace answered %v", err)
+	}
 	if (&Error{Code: "code", Detail: "detail"}).Error() != "code: detail" {
 		t.Fatal("error formatting")
 	}

@@ -831,7 +831,7 @@ func (h *handler) exec(w http.ResponseWriter, r *http.Request, obj v1.Sandbox) {
 	if bounded && !acceptable(w, r) {
 		return
 	}
-	req, timeout, ok := h.execRequest(w, r)
+	req, timeout, ok := h.execRequest(w, r, obj)
 	if !ok {
 		return
 	}
@@ -846,7 +846,7 @@ func (h *handler) exec(w http.ResponseWriter, r *http.Request, obj v1.Sandbox) {
 // design 008's and are the same for both forms: one JSON object with no field
 // the schema does not know, a command the runtime contract accepts, and a
 // timeout that is positive and at most an hour.
-func (h *handler) execRequest(w http.ResponseWriter, r *http.Request) (execRequest, time.Duration, bool) {
+func (h *handler) execRequest(w http.ResponseWriter, r *http.Request, obj v1.Sandbox) (execRequest, time.Duration, bool) {
 	var req execRequest
 	body, err := h.readBody(w, r)
 	if err != nil {
@@ -865,7 +865,7 @@ func (h *handler) execRequest(w http.ResponseWriter, r *http.Request) (execReque
 		respondError(w, &manifest.Error{Code: "invalid_field", Detail: err.Error()})
 		return req, 0, false
 	}
-	if err = manifest.ValidateExec(req.Command, req.Env, req.Workdir); err != nil {
+	if err = manifest.ValidateExecFor(obj, req.Command, req.Env, req.Workdir); err != nil {
 		respondError(w, err)
 		return req, 0, false
 	}

@@ -203,7 +203,7 @@ func (h *handler) open(ctx context.Context, obj v1.Sandbox, req socketRequest, t
 	if len(command) == 0 {
 		command = []string{"sh"}
 	}
-	if err := manifest.ValidateExec(command, req.Env, req.Workdir); err != nil {
+	if err := manifest.ValidateExecFor(obj, command, req.Env, req.Workdir); err != nil {
 		return nil, err
 	}
 	if withTerminal {

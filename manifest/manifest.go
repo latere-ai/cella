@@ -76,8 +76,31 @@ func ReservedEnv(key string) bool {
 	return false
 }
 
-// ValidateExec validates command overrides before they reach a driver.
+// ValidateExec validates command overrides before they reach a driver, with
+// a workdir held to the default workspace.
 func ValidateExec(command []string, env map[string]string, workdir string) error {
+	return validateExec(command, env, workdir, DefaultWorkspacePath)
+}
+
+// ValidateExecFor validates command overrides for one sandbox: a workdir may
+// be in the default workspace, in the sandbox's own workspace path (a host
+// folder bound in place, spec 081), or in its scratch directories.
+func ValidateExecFor(obj v1.Sandbox, command []string, env map[string]string, workdir string) error {
+	roots := []string{DefaultWorkspacePath}
+	if ws := obj.Spec.Workspace.Path; ws != "" && ws != DefaultWorkspacePath {
+		roots = append(roots, ws)
+	}
+	if p := obj.Status.Paths; p != nil {
+		for _, dir := range []string{p.Home, p.Tmp} {
+			if dir != "" {
+				roots = append(roots, dir)
+			}
+		}
+	}
+	return validateExec(command, env, workdir, roots...)
+}
+
+func validateExec(command []string, env map[string]string, workdir string, roots ...string) error {
 	if len(command) == 0 || command[0] == "" {
 		return fail("invalid_field", "command must not be empty")
 	}
@@ -91,8 +114,18 @@ func ValidateExec(command []string, env map[string]string, workdir string) error
 			return fail("invalid_field", fmt.Sprintf("invalid exec environment variable %q", k))
 		}
 	}
-	if workdir != "" && (path.Clean(workdir) != workdir || workdir != DefaultWorkspacePath && !strings.HasPrefix(workdir, DefaultWorkspacePath+"/")) {
-		return fail("invalid_field", "workdir must be an absolute path in "+DefaultWorkspacePath)
+	if workdir == "" {
+		return nil
 	}
-	return nil
+	if path.Clean(workdir) == workdir {
+		for _, root := range roots {
+			if workdir == root || strings.HasPrefix(workdir, strings.TrimSuffix(root, "/")+"/") {
+				return nil
+			}
+		}
+	}
+	if len(roots) == 1 {
+		return fail("invalid_field", "workdir must be an absolute path in "+roots[0])
+	}
+	return fail("invalid_field", "workdir must be an absolute path in one of "+strings.Join(roots, ", "))
 }
