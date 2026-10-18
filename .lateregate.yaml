@@ -259,6 +259,30 @@ depcheck:
         github.com/cespare/xxhash: a hash the OpenTelemetry SDK's metric pipeline uses
         github.com/cenkalti/backoff: the OTLP exporters' retry
 
+    latere.ai/x/cella/worker:
+      decision: >-
+        the worker a program embeds (spec 082) reaches the runtime contract,
+        the manifest types, the exported client, the WebSocket library its
+        one outbound stream speaks, the tracing transport every outbound
+        client of this repository carries, and the standard library, and
+        never a store or an engine's client: a program outside this module
+        carries it, so every module in its build list is one that program
+        carries too
+      allow:
+        latere.ai/x/pkg: the error envelope of spec 008 through the exported client, and the tracing transport of latere.ai/x/pkg/otel
+        github.com/google/uuid: request ids in latere.ai/x/pkg/httpjson
+        github.com/gorilla/websocket: the transport of the worker's one outbound stream (spec 021)
+        go.opentelemetry.io: the OpenTelemetry SDK, reached through latere.ai/x/pkg/otel
+        google.golang.org/grpc: the OTLP exporters' transport, a dependency of the OpenTelemetry SDK
+        google.golang.org/protobuf: the OTLP wire format, a dependency of the OpenTelemetry SDK
+        google.golang.org/genproto: the OTLP status types, a dependency of the OpenTelemetry SDK
+        golang.org/x: the Go project's extended library, a dependency of the OpenTelemetry SDK and of the WebSocket library's proxy dialer
+        github.com/grpc-ecosystem/grpc-gateway: the OTLP HTTP exporters' dependency
+        github.com/go-logr: the OpenTelemetry SDK's logging seam
+        github.com/felixge/httpsnoop: the response recorder of the SDK's HTTP instrumentation
+        github.com/cespare/xxhash: a hash the OpenTelemetry SDK's metric pipeline uses
+        github.com/cenkalti/backoff: the OTLP exporters' retry
+
 # Spec 010's store reads one operator-supplied URL, CELLA_DB_URL, on a direct
 # endpoint or a session-mode pooler: a migration holds a session-scoped lock
 # across its statements, which a transaction-mode pooler loses between

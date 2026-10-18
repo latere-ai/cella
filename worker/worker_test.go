@@ -19,10 +19,10 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"latere.ai/x/cella/internal/worker"
 	driver "latere.ai/x/cella/runtime"
 	"latere.ai/x/cella/runtime/native"
 	"latere.ai/x/cella/runtime/remote"
+	"latere.ai/x/cella/worker"
 )
 
 // plane is a control plane's half of the worker seam over loopback: the
@@ -44,6 +44,10 @@ type plane struct {
 	// drop ends every stream right after the upgrade, which is a control
 	// plane that accepted the worker and then went away.
 	drop atomic.Bool
+	// closeWith, where set, ends every stream right after the upgrade with
+	// the policy close code and this reason, which is a control plane that
+	// refuses to go on serving the worker.
+	closeWith atomic.Pointer[string]
 }
 
 func newPlane(t *testing.T) *plane {
@@ -93,6 +97,12 @@ func newPlaneUnder(t *testing.T, base string) *plane {
 			_ = conn.Close()
 			return
 		}
+		if reason := p.closeWith.Load(); reason != nil {
+			_ = conn.WriteControl(websocket.CloseMessage,
+				websocket.FormatCloseMessage(remote.ClosePolicy, *reason), time.Now().Add(time.Second))
+			_ = conn.Close()
+			return
+		}
 		_ = p.hub.Serve(r.Context(), "env_test", worker.NewSocket(conn))
 	})
 	var served http.Handler = mux
@@ -119,7 +129,7 @@ func newPlaneUnder(t *testing.T, base string) *plane {
 func (p *plane) start(t *testing.T, host driver.Driver) (*worker.Worker, func()) {
 	t.Helper()
 	w, err := worker.New(worker.Options{
-		URL: p.url, Key: "an-environment-key", Driver: host, Version: "test",
+		URL: p.url, Key: key("an-environment-key"), Driver: host, Version: "test",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -140,6 +150,40 @@ func (p *plane) start(t *testing.T, host driver.Driver) (*worker.Worker, func())
 	})
 	t.Cleanup(stop)
 	return w, stop
+}
+
+// key is a key source that always answers the one key.
+func key(value string) func(context.Context) (string, error) {
+	return func(context.Context) (string, error) { return value, nil }
+}
+
+// startWith runs one worker with the options a case sets, beside the plane's
+// URL and key, and returns the stop that ends it and reports what Run
+// returned. done is closed when Run returns on its own.
+func (p *plane) startWith(t *testing.T, o worker.Options) (stop func() error, done <-chan struct{}) {
+	t.Helper()
+	o.URL, o.Key = p.url, key("an-environment-key")
+	if o.Version == "" {
+		o.Version = "test"
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	ended := make(chan struct{})
+	var err error
+	go func() {
+		defer close(ended)
+		err = worker.Run(ctx, o)
+	}()
+	stop = sync.OnceValue(func() error {
+		cancel()
+		select {
+		case <-ended:
+		case <-time.After(20 * time.Second):
+			t.Error("the worker did not stop inside the deadline")
+		}
+		return err
+	})
+	t.Cleanup(func() { _ = stop() })
+	return stop, ended
 }
 
 func nativeDriver(t *testing.T) driver.Driver {
@@ -361,7 +405,7 @@ func (r *waitRecorder) taken() []time.Duration {
 func TestAnAcceptedStreamResetsTheWorkersBackoff(t *testing.T) {
 	p := newPlane(t)
 	p.drop.Store(true)
-	w, err := worker.New(worker.Options{URL: p.url, Key: "an-environment-key", Driver: nativeDriver(t), Version: "test"})
+	w, err := worker.New(worker.Options{URL: p.url, Key: key("an-environment-key"), Driver: nativeDriver(t), Version: "test"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -436,9 +480,9 @@ func TestWorkerRefusals(t *testing.T) {
 		name string
 		o    worker.Options
 	}{
-		{"no control plane URL", worker.Options{Key: "k", Driver: host}},
+		{"no control plane URL", worker.Options{Key: key("k"), Driver: host}},
 		{"no environment key", worker.Options{URL: "https://control.example.test", Driver: host}},
-		{"no driver", worker.Options{URL: "https://control.example.test", Key: "k"}},
+		{"no driver", worker.Options{URL: "https://control.example.test", Key: key("k")}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := worker.New(tc.o); err == nil {
@@ -447,7 +491,7 @@ func TestWorkerRefusals(t *testing.T) {
 		})
 	}
 	w, err := worker.New(worker.Options{
-		URL: "https://control.example.test", Key: "k", Driver: refusingDriver{Driver: host},
+		URL: "https://control.example.test", Key: key("k"), Driver: refusingDriver{Driver: host},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -519,7 +563,7 @@ func TestWorkerRefusesAControlPlaneThatDoesNotSpeakTheProtocol(t *testing.T) {
 	}))
 	t.Cleanup(mute.Close)
 
-	w, err := worker.New(worker.Options{URL: mute.URL, Key: "k", Driver: nativeDriver(t)})
+	w, err := worker.New(worker.Options{URL: mute.URL, Key: key("k"), Driver: nativeDriver(t)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -557,7 +601,7 @@ func TestWorkerRefusesAnAnswerItCannotRead(t *testing.T) {
 				_, _ = w.Write([]byte(tc.body))
 			}))
 			t.Cleanup(server.Close)
-			w, err := worker.New(worker.Options{URL: server.URL, Key: "k", Driver: nativeDriver(t)})
+			w, err := worker.New(worker.Options{URL: server.URL, Key: key("k"), Driver: nativeDriver(t)})
 			if err != nil {
 				t.Fatal(err)
 			}

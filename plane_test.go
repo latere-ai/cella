@@ -70,6 +70,36 @@ func TestExamplePlaneBuilds(t *testing.T) {
 	}
 }
 
+// exampleWorker is the program of docs/workers.md that embeds the worker.
+const exampleWorker = "examples/worker"
+
+// TestExampleWorkerBuilds compiles the embedding example and holds it to
+// what it shows: a program outside this module embeds the worker through
+// the exported worker package, so it imports nothing under internal/.
+func TestExampleWorkerBuilds(t *testing.T) {
+	goBin, err := exec.LookPath("go")
+	if err != nil {
+		t.Fatalf("the Go toolchain is not on PATH, so the example cannot be built: %v", err)
+	}
+	cmd := exec.CommandContext(context.Background(), goBin, "build",
+		"-o", filepath.Join(t.TempDir(), "worker"), "./"+exampleWorker)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("building %s: %v\n%s", exampleWorker, err, out)
+	}
+	embeds := false
+	for path, imports := range sourceImports(t, exampleWorker) {
+		for _, imported := range imports {
+			if strings.HasPrefix(imported, module+"/internal/") {
+				t.Errorf("%s imports %s: a program outside this module cannot", path, imported)
+			}
+			embeds = embeds || imported == module+"/worker"
+		}
+	}
+	if !embeds {
+		t.Fatal("the example does not embed the worker package")
+	}
+}
+
 // sourceImports is the import paths of every non-test Go file of dir, by
 // file.
 func sourceImports(t *testing.T, dir string) map[string][]string {

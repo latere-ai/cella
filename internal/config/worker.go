@@ -11,9 +11,11 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	v1 "latere.ai/x/cella/manifest/v1"
 	"latere.ai/x/cella/runtime/k8s"
+	"latere.ai/x/cella/worker"
 )
 
 // WorkerConfig is the worker role's own configuration. It reads none of the
@@ -46,6 +48,9 @@ type WorkerConfig struct {
 	// Insecure admits a control plane URL that is http:// on a host other
 	// than loopback. The stubs set it; nothing else should.
 	Insecure bool
+	// HostAdmitTimeout is how long a create may wait on the host's policy
+	// before it is refused with host_timeout (spec 082).
+	HostAdmitTimeout time.Duration
 }
 
 // LoadWorker reads the worker role's configuration, or returns one error
@@ -94,6 +99,7 @@ func LoadWorker(getenv Getenv) (WorkerConfig, error) {
 	if c.Runtime == RuntimeNative && !c.AllowUnsafeNative {
 		problems = append(problems, "CELLA_RUNTIME=native requires CELLA_ALLOW_UNSAFE_NATIVE=true; native execution has no isolation")
 	}
+	c.HostAdmitTimeout = duration(getenv, "CELLA_HOST_ADMIT_TIMEOUT", worker.DefaultAdmitTimeout, &problems)
 	c.Capacity = workerCapacity(getenv, &problems)
 	c.Labels = workerLabels(getenv, &problems)
 	if len(problems) > 0 {

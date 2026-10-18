@@ -94,6 +94,33 @@ func TestRootPackagesDialNothing(t *testing.T) {
 	}
 }
 
+// TestTheWorkerReachesNoStore holds the worker a program embeds (spec 082) to
+// what a program outside this module can carry: its build list reaches no
+// package under internal/, no store and no driver of its own. It reaches the
+// runtime contract, the exported client, its WebSocket library and the
+// tracing transport every outbound client of this repository carries, which
+// the depcheck row of .lateregate.yaml lists by module.
+func TestTheWorkerReachesNoStore(t *testing.T) {
+	goBin, err := exec.LookPath("go")
+	if err != nil {
+		t.Fatalf("the Go toolchain is not on PATH, so the build list cannot be read: %v", err)
+	}
+	reached := deps(t, goBin, "./worker")
+	for _, dep := range reached {
+		switch {
+		case strings.HasPrefix(dep, module+"/internal/"):
+			t.Errorf("the worker reaches %s: a program outside this module cannot build a package under internal/", dep)
+		case strings.HasPrefix(dep, module+"/runtime/") && dep != module+"/runtime/remote" && dep != module+"/runtime/display":
+			t.Errorf("the worker reaches the driver %s: the driver is the embedding program's to choose", dep)
+		case strings.HasPrefix(dep, "github.com/jackc/"), strings.HasPrefix(dep, "k8s.io/"):
+			t.Errorf("the worker reaches %s, a store's or an engine's client", dep)
+		}
+	}
+	if !slices.Contains(reached, module+"/runtime/remote") {
+		t.Error("the worker no longer reaches the remote protocol; the check reads the wrong package")
+	}
+}
+
 // clientReaches is the client package's whole build list beyond the standard
 // library: the contract types it decodes into, and the error envelope of
 // design 008 with the one package that envelope reaches.

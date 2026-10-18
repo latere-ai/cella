@@ -44,7 +44,6 @@ import (
 	"latere.ai/x/cella/internal/store/memory"
 	"latere.ai/x/cella/internal/store/postgres"
 	"latere.ai/x/cella/internal/version"
-	"latere.ai/x/cella/internal/worker"
 	"latere.ai/x/cella/manifest"
 	v1 "latere.ai/x/cella/manifest/v1"
 	"latere.ai/x/cella/runtime"
@@ -52,6 +51,7 @@ import (
 	"latere.ai/x/cella/runtime/native"
 	"latere.ai/x/cella/runtime/podman"
 	"latere.ai/x/cella/runtime/remote"
+	"latere.ai/x/cella/worker"
 )
 
 // Shutdown timing of spec 002: readiness answers 503 at once, the drain
@@ -186,18 +186,19 @@ func workerRole(ctx context.Context, args []string, getenv config.Getenv, stdout
 		return fail(stderr, err)
 	}
 	defer func() { _ = closeRuntime() }()
-	w, err := worker.New(worker.Options{
-		URL: cfg.URL, Key: cfg.EnvironmentKey, Driver: runtimeDriver,
-		Capacity: remote.Registration{Capacity: cfg.Capacity, Labels: cfg.Labels},
-		Version:  version.Version,
-	})
-	if err != nil {
-		return fail(stderr, err)
-	}
 	_, _ = fmt.Fprintf(stdout, "cellad: %s worker driver=%s isolation=%s control-plane=%s\n",
 		version.Version, runtimeDriver.Name(), runtimeDriver.Isolation(), cfg.URL)
 	moveCredentials(ctx, runtimeDriver, slog.Default())
-	if err = w.Run(ctx); err != nil {
+	key := cfg.EnvironmentKey
+	// An operator's worker keeps its sandboxes running across a restart of
+	// the role, as it always has: the fleet is the operator's, and the
+	// control plane deletes what it no longer wants.
+	err = worker.Run(ctx, worker.Options{
+		URL: cfg.URL, Key: func(context.Context) (string, error) { return key, nil },
+		Driver: runtimeDriver, Capacity: cfg.Capacity, Labels: cfg.Labels,
+		Version: version.Version, KeepOnExit: true, AdmitTimeout: cfg.HostAdmitTimeout,
+	})
+	if err != nil {
 		return fail(stderr, err)
 	}
 	return 0
