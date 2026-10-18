@@ -197,8 +197,9 @@ deployment that sets one before its spec lands is not refused.
 | `CELLA_TOKEN_KEY` | yes, from 006 | none | one or two PEM-encoded RSA private keys of at least 2048 bits; the first signs workload tokens and environment keys, every block is in the key set, so rotation is prepending a key and later removing the old block; required in every mode |
 | `CELLA_AUTHORIZER_URL`, `CELLA_AUTHORIZER_TOKEN` | 006 | unset | the operator's authorization endpoint and the bearer cellad sends it; unset selects the built-in owner policy; the URL without the token is a start-up failure |
 | `CELLA_AUTHORIZER_TIMEOUT`, `CELLA_AUTHORIZER_CACHE` | 006 | `5s`, `60s` | one decision's deadline and how long an allow is cached per subject, action, and resource; the cache follows the answer's `ttl` bounded by this value, capped at `600s`, and a deny is held five seconds |
-| `CELLA_ENVIRONMENT_KEY_TTL` | 006 | `8760h` | the lifetime of an environment key from mint |
+| `CELLA_ENVIRONMENT_KEY_TTL` | 006 | `8760h` | the lifetime of an environment key from mint, and the longest a mint may ask for (083) |
 | `CELLA_ADMIN_SUBJECTS` | 006 | unset | comma separated subjects the built-in owner policy lets act on every sandbox; read and unused when an authorizer is set |
+| `CELLA_OWNED_ENVIRONMENTS` | 083 | unset | `worker` lets any subject under the owner policy create a worker environment and act on the ones it owns; read and unused when an authorizer is set |
 | `CELLA_ADMISSION_URL`, `CELLA_ADMISSION_TOKEN`, `CELLA_ADMISSION_TIMEOUT` | 007 | unset, unset, `3s` | the operator's admission endpoint, its bearer, and one call's deadline, between `100ms` and `30s`; the URL unset selects the built-in identity step; the URL without the token, or a non-loopback `http://` URL, is a start-up failure |
 | `CELLA_MAX_SANDBOXES_PER_SUBJECT` | 007 | `0` | the count ceiling per subject: every desired sandbox of the subject whose phase is not `Deleting`, a queued and a stopped one included; `0` is none |
 | `CELLA_DEFAULT_CPU`, `CELLA_DEFAULT_MEMORY`, `CELLA_DEFAULT_DISK` | 007 | unset | the resources a manifest gets when it names none |

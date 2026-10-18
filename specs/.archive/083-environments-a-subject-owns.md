@@ -1,6 +1,6 @@
 ---
 title: "Environments a subject owns: the owner policy and the authorizer deciding a subject's own worker environments on its owner, mode and worker limit, keys with a lifetime, `environment.serve` asked when a worker registers and again on a TTL, revoking a key or deleting an environment ending its live stream and its sandboxes, `spec.workers.max`, and a driver that enforces its own allowlist standing in for a gateway"
-status: drafted
+status: complete
 track: core
 depends_on:
   - specs/006-identity.md
@@ -208,3 +208,75 @@ mounts a Secret on such an environment is refused with
 8. The conformance suite (spec 015) covers `serve_refused`,
    `worker_limit`, `worker_replaced` and `key_revoked`, and `docs/api.md`'s
    code table lists them.
+
+## Outcome
+
+Built on 2026-10-18. Every criterion has its named test: criteria 1 to 7
+end to end in `cmd/cellad` (`TestOwnedEnvironmentUnderOwnerPolicy`,
+`TestAuthorizerSeesModeWorkersAndTTL`, `TestServeRefusedAtRegistration`,
+`TestServeRefusedOnRecheck`, `TestRevokedKeyClosesItsStream`,
+`TestDeleteWorkerEnvironmentWithSandboxes`, `TestWorkersMax`,
+`TestEgressLocalNeedsNoGateway`), with the policy, the hub and the
+controller each held by unit tests of their own. Criterion 8 is
+conformance case `case083WorkerRefusals`, which this repository's own run
+passes against `cellad serve`, under a base path too, now that the run
+carries an administrator; `docs/api.md`'s code table lists the four codes.
+
+Where the code diverges from the design:
+
+- **The worker's facts ride in the resource.** `environment.serve`'s
+  resource is the environment with a member `registration`, `{driver,
+  isolation, host}`, the way an update carries `proposed`, since the
+  shared envelope has no member of its own for them.
+- **No decision on a recheck is no refusal.** A recheck that gets no
+  decision keeps the stream one more TTL; a second in a row closes it with
+  1013, try again later, and the reason `authorizer_unavailable`, not
+  `serve_refused`. A worker stops and deletes everything on
+  `serve_refused`, and an outage of the authorizer must not do that; on
+  1013 it reconnects and its registration is decided anew.
+- **Revocation closes the stream at once.** Every request, a key's
+  revocation and a worker's stream included, is served by the writer
+  (spec 076), so the hub closes the stream of the revoked `jti` in the
+  same request, well inside the heartbeat interval, and polls nothing.
+- **An administrator may serve.** The owner policy lets an administrator
+  do everything, `environment.serve` included; any other person's token is
+  refused it with `worker_key`. A key is allowed it on its own
+  environment.
+- **A revocation is checked against the environment.** With owners
+  revoking their own keys, `DELETE .../keys/{jti}` reads the key's record
+  and answers `not_found` for a key of another environment. A `jti` with
+  no record, a key minted before the registry kept one, is revoked as
+  before. The key registry gained `Get`, in both stores.
+- **A longer key is refused, not shortened.** The mint takes `{"ttl":
+  "720h"}`; one beyond `CELLA_ENVIRONMENT_KEY_TTL` answers
+  `ceiling_exceeded`, a malformed or non-positive one `invalid_field`.
+- **Every worker environment is deleted with its sandboxes,** whoever owns
+  it. The API revokes its keys, journaling each, before the controller
+  drops the sandboxes' records with the reason `EnvironmentDeleted` and
+  releases the environment, which closes its streams with
+  `serve_refused`. The controller checks a placed sandbox before the
+  reserved name, so the control plane's own environment holding a sandbox
+  answers `phase_conflict` and an empty one `reserved_prefix`.
+- **A registration without a stream holds a place for 45 seconds.**
+  Against `spec.workers.max` a worker counts while it holds a stream in
+  the offline window, and for the lease after it registered while its
+  stream has not opened, so two registrations racing for one place do not
+  both take it; a stream that would still pass the limit is closed with
+  `worker_limit`. A same-key registration replaces or is refused only when
+  the limit is reached, and `environment.worker_replaced` carries
+  `previous`, `next` and `outcome`, `replaced` or `refused`.
+  `spec.workers.max` is refused below zero and on an in-process
+  environment.
+- **No gateway serves another environment, whatever its driver.** A
+  sandbox on an environment other than the control plane's own gets no
+  projection, its map goes to no gateway and is not in the seed a
+  connecting gateway receives, and a boundary there that needs a gateway
+  is refused with `egress_gateway_unavailable` even while the default
+  environment's gateway is connected. That is the design's rule; it means
+  a worker environment that enforced egress through the default gateway
+  before now refuses such a boundary. An environment whose driver
+  declares `EgressLocal` needs no `spec.gateway`.
+- **Codes for the close reasons.** `key_revoked` (401) and
+  `worker_replaced` (409) are close reasons on the stream rather than
+  answers a route gives, and still have their rows, status and fixed
+  sentence, so a reader of the table finds them.

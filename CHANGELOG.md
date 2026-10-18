@@ -40,8 +40,51 @@ refused before it is pushed.
   warning naming what the sandbox got, rather than refused for a mode the
   environment does not declare.
 
+- **A subject can own a worker environment.** With
+  `CELLA_OWNED_ENVIRONMENTS=worker`, the owner policy lets any subject
+  create a `mode: worker` environment and read, change, delete, use and
+  key the ones it owns, and list its own; in-process environments stay an
+  administrator's. With an authorization endpoint these are its decisions,
+  and every `environment.*` question now carries the environment's `mode`
+  and `workers`, the value of the new `spec.workers.max`, 0 when unset.
+- **Keys with a lifetime.** `POST /v1/environments/{id}/keys` takes an
+  optional `{"ttl": "720h"}`, at most `CELLA_ENVIRONMENT_KEY_TTL`; a longer
+  one is `ceiling_exceeded`. The `environment.key` question carries the
+  lifetime as `ttl` in seconds.
+- **`environment.serve`.** A worker's registration asks the authorizer the
+  new action with the key's own subject and the worker's driver,
+  isolation and host as `registration`; a refusal is `serve_refused`
+  (403). It is asked again on every decision's TTL, at most five minutes
+  apart, and a refusal closes the stream with 1008 `serve_refused`. The
+  owner policy allows a key to serve its own environment. An
+  authorization endpoint must answer this action before a worker can
+  register.
+- **`spec.workers.max`.** A registration beyond the limit is
+  `worker_limit` (409). One with a live worker's key from the same host
+  replaces that worker, whose stream closes with `worker_replaced`; from
+  another host it is refused. Both are recorded as
+  `environment.worker_replaced`.
+- **A driver that enforces its own allow list.** A driver declaring
+  `egressLocal` needs no gateway for a sandbox asking for `none` or an
+  allow list on its worker environment; the sandbox reports
+  `EgressEnforced` `True` with `DriverEnforced`.
+
 ### Changed
 
+- **Revoking a key, or deleting a worker environment, reaches its live
+  stream.** A revoked key's stream closes at once with 1008 `key_revoked`.
+  Deleting a worker environment no longer waits for its sandboxes to go:
+  its keys are revoked, its streams close with `serve_refused`, its
+  sandboxes' records are dropped with the reason `EnvironmentDeleted`, and
+  each worker stops and deletes what it ran. A key is revoked only through
+  its own environment; another environment's key answers `not_found`.
+- **No gateway reaches a worker's environment.** A sandbox on an
+  environment other than the control plane's own is no longer pointed at
+  the default environment's gateway: no proxy, reverse address, gateway
+  credential or authority is projected, and a boundary there that needs a
+  gateway is refused with `egress_gateway_unavailable`. The gateway serves
+  the default environment alone, so such a boundary was not held there
+  anyway.
 - **A worker stops its sandboxes when it stops.** `worker.Run` stops every
   sandbox its driver lists when its context ends, unless
   `Options.KeepOnExit` is set, and stops and deletes them when the control

@@ -48,7 +48,8 @@ Who may call, and what `cellad` signs. The first three are required.
 | `CELLA_AUTHORIZER_TIMEOUT` | `5s` | the deadline of one decision. A decision that does not arrive refuses the request |
 | `CELLA_AUTHORIZER_CACHE` | `60s` | how long an allow is kept when the answer names no `ttl`. An answer's own `ttl` is capped at `600s`, and a deny is kept for five seconds |
 | `CELLA_ADMIN_SUBJECTS` | unset | subjects, written `<issuer>|<sub>`, that the owner policy lets act on everything and alone lets create environments. Unused when an authorization endpoint is set |
-| `CELLA_ENVIRONMENT_KEY_TTL` | `8760h` | how long an environment key, which a worker or a gateway authenticates with, lives from mint |
+| `CELLA_OWNED_ENVIRONMENTS` | unset | `worker` lets any subject under the owner policy create a worker environment of its own, and act on the ones it owns: read, change, delete, use and key them. In-process environments stay administrators'. Unused when an authorization endpoint is set |
+| `CELLA_ENVIRONMENT_KEY_TTL` | `8760h` | how long an environment key, which a worker or a gateway authenticates with, lives from mint, and the longest a mint may ask for |
 | `CELLA_DEFAULT_ENVIRONMENT` | `default` | the name of the environment this control plane drives itself, and the one a manifest that names none runs on |
 
 ## Admission

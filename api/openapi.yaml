@@ -1674,6 +1674,8 @@ paths:
                   cpu: "8"
                   memory: 16Gi
                   sandboxes: 10
+                workers:
+                  max: 2
       responses:
         "201":
           description: The environment as recorded.
@@ -1688,6 +1690,8 @@ paths:
                   isolation: none
                   capacity: *environmentCapacity
                   scheduling: *environmentScheduling
+                  workers:
+                    max: 2
                 status:
                   id: eu-gpu
                   owner: "https://issuer.example.com|admin"
@@ -1790,9 +1794,11 @@ paths:
       operationId: deleteEnvironment
       summary: Delete an environment
       description: >-
-        Delete an environment no sandbox is placed on. The environment this
-        control plane drives itself is not deletable. Authorized as
-        `environment.delete`.
+        Delete an environment. A worker environment goes with its sandboxes'
+        records: its keys are revoked and its workers' streams are closed
+        with `serve_refused`. Any other environment a sandbox is placed on is
+        refused with `phase_conflict`, and the environment this control plane
+        drives itself is not deletable. Authorized as `environment.delete`.
       responses:
         "204":
           description: Deleted.
@@ -1810,7 +1816,17 @@ paths:
       operationId: mintEnvironmentKey
       summary: Mint an environment key
       description: >-
-        Mint an environment key, shown once. Authorized as `environment.key`.
+        Mint an environment key, shown once. The body is optional: `ttl`
+        asks for a lifetime shorter than `CELLA_ENVIRONMENT_KEY_TTL`, which is
+        the longest, and a longer one is refused with `ceiling_exceeded`. The
+        question carries the lifetime the key gets as `ttl` in seconds.
+        Authorized as `environment.key`.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            example:
+              ttl: 720h
       responses:
         "201":
           description: The key. No later answer carries its token.
@@ -1931,8 +1947,11 @@ paths:
       summary: Register a worker
       description: >-
         Register a worker for an environment; environment key only. A worker
-        whose driver reports the machine it runs on carries it as `host`.
-        Authorized as `none beyond the key`.
+        whose driver reports the machine it runs on carries it as `host`. The
+        authorizer is asked `environment.serve` with the key's subject, and a
+        refusal is `serve_refused`; a registration beyond `spec.workers.max`
+        is `worker_limit`, except one with a live worker's key from the same
+        host, which replaces that worker. Authorized as `none beyond the key`.
       requestBody:
         required: true
         content:
@@ -1976,7 +1995,11 @@ paths:
       description: >-
         Open the worker operations WebSocket; environment key only. Once
         upgraded, subprotocol `cella.worker.v1`, every frame is a binary frame
-        of that protocol, at most 1 MiB. Authorized as `none beyond the key`.
+        of that protocol, at most 1 MiB. The control plane closes it with
+        1008 and the reason `serve_refused`, `key_revoked`, `worker_replaced`
+        or `worker_limit` when it will not go on serving the worker, and
+        `environment.serve` is asked again on every decision's TTL, at most
+        five minutes apart. Authorized as `none beyond the key`.
       responses:
         "101":
           description: The socket is open.

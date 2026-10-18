@@ -108,8 +108,10 @@ code in the `X-Cella-Error` trailer.
 | Code | Status | Means |
 |---|---|---|
 | `unauthenticated` | 401 | no bearer, or one that did not verify |
+| `key_revoked` | 401 | the key a worker's stream registered with was revoked; the stream is closed with it, and the worker stops |
 | `forbidden` | 403 | the authorizer refused the route's action |
 | `host_refused` | 403 | the host a worker serves the environment from refused the operation, with its reason in `detail` |
+| `serve_refused` | 403 | the environment may not be served by this worker any longer: the authorizer refused `environment.serve`, or the environment was deleted. A live stream is closed with it, and the worker stops and deletes what it ran |
 | `not_found` | 404 | no such object, or one a manifest names that you may not use |
 | `bad_request` | 400 | the request could not be read |
 | `invalid_field` | 400 | a field has a value it cannot take |
@@ -128,6 +130,8 @@ code in the `X-Cella-Error` trailer.
 | `immutable_field` | 409 | the field cannot change after creation |
 | `boundary_widened` | 409 | a sandbox tried to widen its own boundary |
 | `secret_host_conflict` | 409 | two mounted secrets apply to the same host |
+| `worker_limit` | 409 | the environment already has as many live workers as its `spec.workers.max` takes |
+| `worker_replaced` | 409 | a registration with the same key from the same host took this worker's place; its stream is closed with it |
 | `volume_busy` | 409 | the volume is attached in a way that excludes this: a write to a shared read-only volume, a second writer, or a delete while a sandbox mounts it |
 | `cursor_expired` | 410 | the feed no longer holds the records after that cursor |
 | `body_too_large` | 413 | the body is over `CELLA_MAX_BODY_BYTES` or `CELLA_MAX_UPLOAD_BYTES` |
@@ -307,7 +311,8 @@ waits for the fill before it starts.
 
 An environment is where sandboxes run: the control plane's own runtime,
 or a runtime a worker serves. Under the owner policy only an
-administrator creates one.
+administrator creates one, unless `CELLA_OWNED_ENVIRONMENTS=worker` lets
+any subject create a worker environment of its own and act on it.
 
 | Route | Action | What it does |
 |---|---|---|
@@ -315,10 +320,10 @@ administrator creates one.
 | `POST /v1/environments` | `environment.create` | create one from a manifest; its name is its id |
 | `GET /v1/environments/{id}` | `environment.read` | read one with its phase and capabilities |
 | `PUT /v1/environments/{id}` | `environment.create` or `environment.update` | apply by name, with `If-Match` against a concurrent edit |
-| `DELETE /v1/environments/{id}` | `environment.delete` | delete one no sandbox is placed on; the control plane's own environment is not deletable |
-| `POST /v1/environments/{id}/keys` | `environment.key` | mint an environment key, shown once |
+| `DELETE /v1/environments/{id}` | `environment.delete` | delete one. A worker environment goes with its sandboxes' records: its keys are revoked, its workers' streams close with `serve_refused`, and each worker stops and deletes what it ran. Any other environment a sandbox is placed on answers `phase_conflict`, and the control plane's own environment is not deletable |
+| `POST /v1/environments/{id}/keys` | `environment.key` | mint an environment key, shown once. An optional body `{"ttl": "720h"}` asks for a shorter lifetime than `CELLA_ENVIRONMENT_KEY_TTL`, which is the longest; the question carries the lifetime as `ttl` in seconds |
 | `GET /v1/environments/{id}/keys` | `environment.key` | the keys minted for the environment, oldest first: each jti, when it was minted and by whom, when it expires, and whether it was revoked; never the token |
-| `DELETE /v1/environments/{id}/keys/{jti}` | `environment.key` | revoke one key |
+| `DELETE /v1/environments/{id}/keys/{jti}` | `environment.key` | revoke one key of this environment; a stream it registered closes at once with `key_revoked` |
 
 ### Workers and gateways
 
@@ -327,7 +332,7 @@ called by `cellad worker` and `cellad egress`, not by a person.
 
 | Route | What it does |
 |---|---|
-| `POST /v1/environments/{id}/workers` | register a worker |
+| `POST /v1/environments/{id}/workers` | register a worker. Asks `environment.serve` with the key, and again on every decision's TTL, at most five minutes apart, while its stream lives |
 | `GET /v1/environments/{id}/operations` | the WebSocket a worker receives its operations on |
 | `GET /v1/environments/{id}/egress` | the WebSocket a gateway receives its environment's boundaries on |
 

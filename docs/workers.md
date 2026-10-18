@@ -65,6 +65,17 @@ The answer carries an `ETag`. Send it back as `If-Match` on the next apply
 and a write that raced yours is refused with `version_conflict` rather
 than overwriting what moved.
 
+`spec.workers.max` limits how many workers may serve the environment at
+once; unset, any number may. A registration beyond it is refused with
+`worker_limit`. A worker reconnecting with the same key from the same
+host, before the control plane has noticed its old stream is gone,
+replaces that stream rather than waiting out the lease: the old one is
+closed with `worker_replaced`. The same key from a host that reports
+other facts is refused while the live stream lasts, so a copied key used
+from another machine cannot displace the one serving. Each meeting is an
+`environment.worker_replaced` record, with both registrations and whether
+the new one replaced the old or was refused.
+
 The environment is `Pending` until a worker registers on it. Nothing is
 placed there until it is `Ready`. What happens to a create it cannot fit,
 and how to make it wait in a queue instead, is in
@@ -96,6 +107,12 @@ curl -sS -X POST \
 The key is shown **once**. The control plane keeps a record of every key
 it mints, and never the key itself, so a key that is lost is replaced
 rather than retrieved. The `jti` is what ends a key.
+
+A key lives `CELLA_ENVIRONMENT_KEY_TTL`, a year by default. A mint may
+ask for less with a body such as `{"ttl": "720h"}`; asking for more is
+refused with `ceiling_exceeded`. The authorizer's `environment.key`
+question carries the lifetime as `ttl` in seconds, so a policy can refuse
+a long one.
 
 An environment holds several keys, so each worker and each gateway
 carries its own and one is revoked without ending the others.
@@ -137,7 +154,55 @@ curl -sS -X DELETE \
   https://cella.example.com/v1/environments/eu-gpu/keys/01JBQ7...
 ```
 
-The key stops working at once, on its next request and on its next frame.
+The key stops working at once, on its next request and on its next frame,
+and a stream it opened is closed with `key_revoked`. A key is revoked
+through the environment it was minted for; another environment's key
+answers `not_found`.
+
+## Who may serve
+
+A registration asks the authorizer `environment.serve` with the key's own
+subject, `environment:<id>`, about the environment, with the worker's
+driver, isolation class and host as the resource's `registration`. A
+refusal answers `serve_refused`. While the stream lives the question is
+asked again on every decision's TTL, at most five minutes apart, and a
+refusal closes the stream with `serve_refused`. A recheck that gets no
+decision keeps the stream one more TTL and then closes it with 1013, try
+again later, so the worker reconnects and is decided anew. The owner
+policy allows a key that is not revoked to serve its own environment.
+
+A worker stops on `serve_refused` and `key_revoked`: it stops and deletes
+every sandbox its driver holds and does not reconnect.
+
+## Environments a subject owns
+
+Under the owner policy environments are an administrator's. With
+`CELLA_OWNED_ENVIRONMENTS=worker`, any subject may create a `mode: worker`
+environment and act on the ones it owns, as it acts on its sandboxes:
+read, change, delete, use and key them, and list its own. In-process
+environments stay an administrator's. With an authorization endpoint,
+these are its decisions, and every `environment.*` question carries the
+environment's `mode` and `workers`, the value of `spec.workers.max`, 0
+when unset.
+
+Deleting a worker environment deletes it with whatever runs on it: its
+keys are revoked, its workers' streams close with `serve_refused`, the
+records of its sandboxes go, and each worker stops and deletes what it
+ran. Any other environment a sandbox is placed on answers
+`phase_conflict`.
+
+## A driver that enforces its own allow list
+
+The egress gateway serves the control plane's own environment, so a
+sandbox on a worker's environment is pointed at no gateway: no proxy
+variable, reverse address, gateway credential or authority is projected
+into it. A boundary there that a gateway must hold, such as a mounted
+secret, is refused with `egress_gateway_unavailable`. A driver that
+declares `egressLocal` in its capabilities enforces an allow list itself,
+with its own proxy as the only route out: a sandbox asking for `none` or
+an allow list on its environment needs no gateway, is created, and reports
+`EgressEnforced` `True` with the reason `DriverEnforced`. Such an
+environment needs no `spec.gateway`.
 
 ## Run the worker
 

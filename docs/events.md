@@ -105,7 +105,7 @@ value, a secret's value or a token. These are the types:
 | Sandbox | `sandbox.created`, `sandbox.updated`, `sandbox.started`, `sandbox.stopped`, `sandbox.failed`, `sandbox.lost`, `sandbox.recovering`, `sandbox.recovered`, `sandbox.deleted`, `sandbox.resized` and `sandbox.at_ceiling` for a sandbox [sized inside a ceiling](manifest.md#sizing-inside-a-ceiling), `sandbox.host_pending` when the worker serving it holds its create while the host decides ([workers](workers.md#what-the-host-decides)), and `sandbox.spawned`, on the parent, when it creates a child |
 | An operation on a sandbox | `sandbox.exec`, `sandbox.files`, `sandbox.dial`, `sandbox.screenshot`, `sandbox.input`, `sandbox.screen` |
 | Secret | `secret.created`, `secret.updated`, `secret.deleted` |
-| Environment | `environment.created`, `environment.updated`, `environment.registered`, `environment.offline`, `environment.keyed`, `environment.key_revoked`, `environment.deleted` |
+| Environment | `environment.created`, `environment.updated`, `environment.registered`, `environment.offline`, `environment.keyed`, `environment.key_revoked`, `environment.deleted`, and `environment.worker_replaced` when a registration meets a live worker holding the same key on an environment at its worker limit, with `previous` and `next`, each `{driver, isolation, host}`, and `outcome`, `replaced` or `refused` ([workers](workers.md#apply-the-environment)) |
 
 `sandbox.started`, `sandbox.stopped`, `sandbox.failed`, `sandbox.lost` and
 `sandbox.deleted` carry a `reason`, such as `Request`, `AutoStop`,
