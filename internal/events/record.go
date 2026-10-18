@@ -112,7 +112,7 @@ var Types = []Type{
 	TypeSecretCreated, TypeSecretUpdated, TypeSecretDeleted,
 	TypeEnvironmentCreated, TypeEnvironmentUpdated, TypeEnvironmentRegistered,
 	TypeEnvironmentOffline, TypeEnvironmentKeyed, TypeEnvironmentKeyRevoked,
-	TypeEnvironmentDeleted,
+	TypeEnvironmentDeleted, TypeEnvironmentWorkerReplaced,
 	TypeVolumeCreated, TypeVolumeUpdated, TypeVolumeAttached, TypeVolumeDetached,
 	TypeVolumeFailed, TypeVolumeDeleted,
 }

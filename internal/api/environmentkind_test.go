@@ -277,12 +277,15 @@ func TestEnvironmentRefusals(t *testing.T) {
 		strings.Replace(inprocess, "eu-gpu", "us-east", 1), nil, http.StatusBadRequest)
 	k.send(http.MethodDelete, "/v1/environments/default", k.alice, "", nil, http.StatusBadRequest)
 
-	// An environment holding a sandbox is not deleted: the sandboxes would
-	// be left with nothing driving them.
+	// The control plane's own environment holding a sandbox is refused as
+	// in use, the nearer refusal: the sandbox would be left with nothing
+	// driving it. A worker environment's are deleted with it (spec 083).
 	created := `{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox",` +
 		`"metadata":{"name":"there"},"spec":{"environment":"eu-gpu"}}`
 	k.send(http.MethodPost, "/v1/sandboxes?wait=1", k.alice, created, nil, http.StatusCreated)
-	k.send(http.MethodDelete, "/v1/environments/eu-gpu", k.alice, "", nil, http.StatusConflict)
+	here := `{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox","metadata":{"name":"here"},"spec":{}}`
+	k.send(http.MethodPost, "/v1/sandboxes?wait=1", k.alice, here, nil, http.StatusCreated)
+	k.send(http.MethodDelete, "/v1/environments/default", k.alice, "", nil, http.StatusConflict)
 
 	// Every field rule of spec 021's table is the resolver's, and the route
 	// answers it with the code the table names.

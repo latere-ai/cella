@@ -259,7 +259,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if route, ok := workerPath(r); ok {
-			h.serveWorkerRoute(w, r, route, environment)
+			h.serveWorkerRoute(w, r, route, caller)
 			return
 		}
 		respondError(w, &auth.Error{Code: auth.CodeForbidden, Detail: "environment keys authorize data plane streams only"})
@@ -994,6 +994,8 @@ func errorEnvelope(err error, requestID string) (int, httpjson.Error) {
 		code = "version_conflict"
 	case errors.Is(err, controller.ErrEnvironmentReserved):
 		code = "reserved_prefix"
+	case errors.Is(err, remote.ErrWorkerLimit):
+		code = "worker_limit"
 	case errors.Is(err, driver.ErrWorkspaceNotGranted):
 		code = "workspace_not_granted"
 	case errors.Is(err, driver.ErrHostTimeout):
@@ -1061,6 +1063,18 @@ func errorEnvelope(err error, requestID string) (int, httpjson.Error) {
 	case "environment_mismatch":
 		status = 422
 		message = "This worker does not match the environment it registered on."
+	case "serve_refused":
+		status = 403
+		message = "This environment may not be served by this worker."
+	case "worker_limit":
+		status = 409
+		message = "This environment already has as many workers as it takes."
+	case "worker_replaced":
+		status = 409
+		message = "Another worker with the same key took this worker's place."
+	case "key_revoked":
+		status = 401
+		message = "The key this worker connected with was revoked."
 	case "host_refused":
 		status = 403
 		message = "The host this environment runs on refused this; its reason is in the details."

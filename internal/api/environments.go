@@ -4,7 +4,10 @@
 package api
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -27,13 +30,19 @@ import (
 // plane roles of an installation like that carry a key an operator minted
 // elsewhere.
 type EnvironmentKeys interface {
+	// Lifetime is the lifetime a mint asking for ttl gives the key: ttl,
+	// the configured lifetime for zero, and auth.ErrKeyTTL beyond it.
+	Lifetime(ttl time.Duration) (time.Duration, error)
 	// Mint signs one key for the environment on behalf of the subject that
-	// asked, which the registry records as the key's minter.
-	Mint(ctx context.Context, environment, subject string) (auth.Token, error)
+	// asked, with the lifetime asked for, which the registry records with
+	// the key's minter.
+	Mint(ctx context.Context, environment, subject string, ttl time.Duration) (auth.Token, error)
 	Revoke(ctx context.Context, jti string) error
 	// List is one page of the environment's keys, oldest first, and the
 	// cursor of the next page.
 	List(ctx context.Context, environment, cursor string, limit int) ([]auth.KeyRecord, string, error)
+	// Find is one key's record by its jti, and false where none is kept.
+	Find(ctx context.Context, jti string) (auth.KeyRecord, bool, error)
 }
 
 // environmentItem answers or deletes one environment by name. A name this
@@ -54,6 +63,16 @@ func (h *handler) environmentItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method == http.MethodDelete {
+		// A worker environment's keys end with it, before the object goes,
+		// so no worker registers on a name that is about to be free; its
+		// streams close with serve_refused as the controller releases it
+		// (spec 083).
+		if obj.Spec.Mode == v1.EnvironmentWorker {
+			if err = h.revokeAll(r, obj); err != nil {
+				respondError(w, err)
+				return
+			}
+		}
 		if err = h.Controller.DeleteEnvironment(r.Context(), obj.Metadata.Name); err != nil {
 			respondError(w, err)
 			return
@@ -263,11 +282,19 @@ func (h *handler) environmentKeyMint(w http.ResponseWriter, r *http.Request) {
 		respondError(w, err)
 		return
 	}
-	if _, err = h.decide(r, authorizer.ActionEnvironmentKey, environmentResource(obj)); err != nil {
+	asked, err := h.keyLifetime(w, r)
+	if err != nil {
 		respondError(w, err)
 		return
 	}
-	token, err := h.Keys.Mint(r.Context(), environmentSubject(obj), caller(r).Subject)
+	// The question carries the lifetime the key will get, so an authorizer
+	// can refuse a long one (spec 083).
+	resource := environmentResourceWith(obj, func(e *auth.Environment) { e.TTL = int64(asked / time.Second) })
+	if _, err = h.decide(r, authorizer.ActionEnvironmentKey, resource); err != nil {
+		respondError(w, err)
+		return
+	}
+	token, err := h.Keys.Mint(r.Context(), environmentSubject(obj), caller(r).Subject, asked)
 	if err != nil {
 		respondError(w, err)
 		return
@@ -359,9 +386,26 @@ func (h *handler) environmentKeyRevoke(w http.ResponseWriter, r *http.Request) {
 		respondError(w, &manifest.Error{Code: "invalid_field", Path: "jti", Detail: "a revocation names the jti the mint returned"})
 		return
 	}
+	// A key recorded for another environment is not this one's to revoke,
+	// which matters once a subject that owns an environment revokes its
+	// keys. A jti with no record is a key minted before its record could
+	// be kept, and is revoked as before.
+	record, held, err := h.Keys.Find(r.Context(), jti)
+	if err != nil {
+		respondError(w, err)
+		return
+	}
+	if held && record.Environment != environmentSubject(obj) {
+		respondError(w, &manifest.Error{Code: "not_found", Path: "jti", Detail: "the key belongs to another environment"})
+		return
+	}
 	if err = h.Keys.Revoke(r.Context(), jti); err != nil {
 		respondError(w, err)
 		return
+	}
+	// The stream the key opened closes at once with key_revoked.
+	if h.Workers != nil {
+		h.Workers.Revoke(jti)
 	}
 	h.journal(r, obj, events.TypeEnvironmentKeyRevoked, events.Environment{JTI: jti})
 	w.WriteHeader(http.StatusNoContent)
@@ -385,10 +429,87 @@ func environmentSubject(obj v1.Environment) string {
 }
 
 func environmentResource(obj v1.Environment) authz.Resource {
-	return (auth.Environment{
+	return environmentResourceWith(obj, nil)
+}
+
+// environmentResourceWith is the environment as the envelope carries it,
+// with what one question adds: a key's lifetime, a worker's registration.
+func environmentResourceWith(obj v1.Environment, add func(*auth.Environment)) authz.Resource {
+	e := auth.Environment{
 		ID: environmentSubject(obj), Name: obj.Metadata.Name,
-		Owner: obj.Status.Owner, Isolation: obj.Spec.Isolation, Labels: obj.Metadata.Labels,
-	}).Resource()
+		Owner: obj.Status.Owner, Isolation: obj.Spec.Isolation, Mode: obj.Spec.Mode,
+		Workers: obj.Spec.Workers.Max, Labels: obj.Metadata.Labels,
+	}
+	if add != nil {
+		add(&e)
+	}
+	return e.Resource()
+}
+
+// keyRequest is a key mint's optional body: the lifetime it asks for, a
+// duration such as 720h.
+type keyRequest struct {
+	TTL string `json:"ttl"`
+}
+
+// keyLifetime reads the lifetime a key mint asks for: the body's optional
+// ttl, a duration such as 720h, held to CELLA_ENVIRONMENT_KEY_TTL. An empty
+// body asks for the configured lifetime, which is what the answer is.
+func (h *handler) keyLifetime(w http.ResponseWriter, r *http.Request) (time.Duration, error) {
+	body, err := h.readBody(w, r)
+	if err != nil {
+		return 0, err
+	}
+	var asked time.Duration
+	if strings.TrimSpace(string(body)) != "" {
+		var request keyRequest
+		decoder := json.NewDecoder(bytes.NewReader(body))
+		decoder.DisallowUnknownFields()
+		if err = decoder.Decode(&request); err != nil {
+			return 0, &manifest.Error{Code: "bad_request", Detail: err.Error()}
+		}
+		if request.TTL != "" {
+			if asked, err = time.ParseDuration(request.TTL); err != nil {
+				return 0, &manifest.Error{Code: "invalid_field", Path: "ttl", Detail: "a ttl is a duration such as 720h: " + err.Error()}
+			}
+			if asked <= 0 {
+				return 0, &manifest.Error{Code: "invalid_field", Path: "ttl", Detail: "a ttl is positive"}
+			}
+		}
+	}
+	lifetime, err := h.Keys.Lifetime(asked)
+	if errors.Is(err, auth.ErrKeyTTL) {
+		return 0, &manifest.Error{Code: "ceiling_exceeded", Path: "ttl", Detail: err.Error()}
+	}
+	return lifetime, err
+}
+
+// revokeAll revokes every key an environment holds that is not revoked yet,
+// a page at a time.
+func (h *handler) revokeAll(r *http.Request, obj v1.Environment) error {
+	if h.Keys == nil {
+		return nil
+	}
+	cursor := ""
+	for {
+		records, next, err := h.Keys.List(r.Context(), environmentSubject(obj), cursor, maxPageLimit)
+		if err != nil {
+			return err
+		}
+		for _, k := range records {
+			if !k.RevokedAt.IsZero() {
+				continue
+			}
+			if err = h.Keys.Revoke(r.Context(), k.JTI); err != nil {
+				return err
+			}
+			h.journal(r, obj, events.TypeEnvironmentKeyRevoked, events.Environment{JTI: k.JTI})
+		}
+		if next == "" {
+			return nil
+		}
+		cursor = next
+	}
 }
 
 // journal records one act on an environment. A control plane with no emitter

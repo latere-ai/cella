@@ -14,6 +14,9 @@ import (
 	"latere.ai/x/cella/manifest"
 )
 
+// maxPageLimit is the most items one page of a list holds.
+const maxPageLimit = 200
+
 // pageLimit reads the limit of one page of a list: 1 to 200, 50 when the
 // request names none, and anything else invalid_field.
 func pageLimit(r *http.Request) (int, error) {
@@ -22,7 +25,7 @@ func pageLimit(r *http.Request) (int, error) {
 		return 50, nil
 	}
 	limit, err := strconv.Atoi(raw)
-	if err != nil || limit < 1 || limit > 200 {
+	if err != nil || limit < 1 || limit > maxPageLimit {
 		return 0, &manifest.Error{Code: "invalid_field", Path: "limit", Detail: "limit must be between 1 and 200"}
 	}
 	return limit, nil

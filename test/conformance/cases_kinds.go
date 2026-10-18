@@ -29,7 +29,10 @@ func setCases() []Case {
 }
 
 func environmentCases() []Case {
-	return []Case{{"environments", "case021EnvironmentRead", case021EnvironmentRead}}
+	return []Case{
+		{"environments", "case021EnvironmentRead", case021EnvironmentRead},
+		{"environments", "case083WorkerRefusals", case083WorkerRefusals},
+	}
 }
 
 func spawnCases() []Case {

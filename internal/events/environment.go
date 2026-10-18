@@ -29,6 +29,11 @@ const (
 	TypeEnvironmentKeyed      Type = "environment.keyed"
 	TypeEnvironmentKeyRevoked Type = "environment.key_revoked"
 	TypeEnvironmentDeleted    Type = "environment.deleted"
+	// TypeEnvironmentWorkerReplaced is a registration that named the key
+	// of a live worker on an environment holding as many as it takes:
+	// replaced when the two report the same host, refused when they do
+	// not (spec 083).
+	TypeEnvironmentWorkerReplaced Type = "environment.worker_replaced"
 )
 
 // EnvironmentTypes is every type an Environment produces, in the order design
@@ -36,7 +41,7 @@ const (
 var EnvironmentTypes = []Type{
 	TypeEnvironmentCreated, TypeEnvironmentUpdated, TypeEnvironmentRegistered,
 	TypeEnvironmentOffline, TypeEnvironmentKeyed, TypeEnvironmentKeyRevoked,
-	TypeEnvironmentDeleted,
+	TypeEnvironmentDeleted, TypeEnvironmentWorkerReplaced,
 }
 
 // OfEnvironment is the record object for one environment: its identity and
@@ -65,7 +70,26 @@ type Environment struct {
 	Reason  string `json:"reason,omitempty"`
 	JTI     string `json:"jti,omitempty"`
 	Worker  string `json:"worker,omitempty"`
+	// Previous and Next are the two registrations a worker_replaced record
+	// is about, and Outcome is replaced or refused.
+	Previous *WorkerFacts `json:"previous,omitempty"`
+	Next     *WorkerFacts `json:"next,omitempty"`
+	Outcome  string       `json:"outcome,omitempty"`
 }
+
+// WorkerFacts is what one registration declared, as a worker_replaced record
+// carries it: the driver, the isolation class and the host. It holds no key.
+type WorkerFacts struct {
+	Driver    string       `json:"driver"`
+	Isolation string       `json:"isolation"`
+	Host      *v1.HostInfo `json:"host,omitempty"`
+}
+
+// The outcomes a worker_replaced record carries.
+const (
+	OutcomeReplaced = "replaced"
+	OutcomeRefused  = "refused"
+)
 
 // EnvironmentMutation is the record for one act on one Environment. An
 // environment's transitions carry no reason of design 009's enum: the reason

@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -14,9 +15,14 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"latere.ai/x/pkg/authz"
+
+	"latere.ai/x/cella/authorizer"
 	"latere.ai/x/cella/controller"
 	"latere.ai/x/cella/internal/auth"
+	"latere.ai/x/cella/internal/events"
 	"latere.ai/x/cella/manifest"
+	v1 "latere.ai/x/cella/manifest/v1"
 	"latere.ai/x/cella/runtime/remote"
 )
 
@@ -100,7 +106,8 @@ func workerPath(r *http.Request) (workerRoute, bool) {
 // serveWorkerRoute answers one of the worker routes for a caller holding an
 // environment key. The key names the environment; a path naming another one
 // is refused, which is the rule the gateway stream applies as well.
-func (h *handler) serveWorkerRoute(w http.ResponseWriter, r *http.Request, route workerRoute, environment string) {
+func (h *handler) serveWorkerRoute(w http.ResponseWriter, r *http.Request, route workerRoute, key auth.Caller) {
+	environment, _ := key.Environment()
 	if route.environment != "self" && route.environment != environment {
 		respondError(w, &auth.Error{Code: auth.CodeForbidden, Detail: ErrWorkerEnvironment.Error()})
 		return
@@ -111,16 +118,55 @@ func (h *handler) serveWorkerRoute(w http.ResponseWriter, r *http.Request, route
 		return
 	}
 	if route.register {
-		h.registerWorker(w, r, environment)
+		h.registerWorker(w, r, key, environment)
 		return
 	}
-	h.workerStream(w, r, environment)
+	h.workerStream(w, r, key, environment)
+}
+
+// keyID is the jti of the key a caller authenticated with.
+func keyID(key auth.Caller) string {
+	jti, _ := key.Claims["jti"].(string)
+	return jti
+}
+
+// serveResource is environment.serve's resource: the environment and the
+// registration the worker declared, its host rendered as the registration
+// carried it on the wire.
+func serveResource(obj v1.Environment, r remote.Registration) authz.Resource {
+	return environmentResourceWith(obj, func(e *auth.Environment) {
+		registration := &auth.Registration{Driver: r.Driver, Isolation: r.Isolation}
+		if r.Host != nil {
+			if raw, err := json.Marshal(r.Host); err == nil {
+				var host map[string]any
+				if json.Unmarshal(raw, &host) == nil {
+					registration.Host = host
+				}
+			}
+		}
+		e.Registration = registration
+	})
+}
+
+// decideServe asks environment.serve for one worker of one environment. A
+// refusal, and an environment that no longer exists, is ErrServeRefused; a
+// question that produced no decision is the authorizer's error.
+func (h *handler) decideServe(ctx context.Context, r *http.Request, key auth.Caller, environment string, reg remote.Registration) (auth.Decision, v1.Environment, error) {
+	obj, err := h.Controller.GetEnvironment(environment)
+	if err != nil {
+		return auth.Decision{}, obj, fmt.Errorf("%w: the environment %s is gone", remote.ErrServeRefused, environment)
+	}
+	d, err := h.Authorizer.Decide(ctx, key, requestInfo(r), authorizer.ActionEnvironmentServe, serveResource(obj, reg))
+	if auth.CodeOf(err) == auth.CodeForbidden {
+		return d, obj, fmt.Errorf("%w: %w", remote.ErrServeRefused, err)
+	}
+	return d, obj, err
 }
 
 // registerWorker records one worker and its driver and answers with the id it
 // claims under. A worker that restarts registers again and its old claims
 // lapse, so nothing is held by an id nobody answers for.
-func (h *handler) registerWorker(w http.ResponseWriter, r *http.Request, environment string) {
+func (h *handler) registerWorker(w http.ResponseWriter, r *http.Request, key auth.Caller, environment string) {
 	body, err := h.readBody(w, r)
 	if err != nil {
 		respondError(w, &manifest.Error{Code: "body_too_large", Detail: err.Error()})
@@ -136,23 +182,58 @@ func (h *handler) registerWorker(w http.ResponseWriter, r *http.Request, environ
 	// The id is the control plane's to mint, so a worker cannot claim
 	// another worker's operations by naming it.
 	registration.Worker = ""
-	registered, err := h.Workers.Register(environment, registration)
+	// The authorizer decides whether this key may serve the environment now
+	// (spec 083): a removed environment or a closed account is refused here.
+	d, obj, err := h.decideServe(r.Context(), r, key, environment, registration)
+	if errors.Is(err, remote.ErrServeRefused) {
+		respondError(w, &manifest.Error{Code: "serve_refused", Detail: err.Error()})
+		return
+	}
 	if err != nil {
-		if errors.Is(err, remote.ErrRegistrationMismatch) {
+		respondError(w, err)
+		return
+	}
+	registered, replacement, err := h.Workers.RegisterWith(environment, registration, remote.Admission{
+		JTI: keyID(key), MaxWorkers: obj.Spec.Workers.Max, TTL: d.TTL,
+	})
+	if replacement != nil {
+		h.recordReplacement(r, obj, replacement)
+	}
+	if err != nil {
+		switch {
+		case errors.Is(err, remote.ErrRegistrationMismatch):
 			respondError(w, &manifest.Error{Code: "environment_mismatch", Detail: err.Error()})
-			return
+		case errors.Is(err, remote.ErrWorkerLimit):
+			respondError(w, &manifest.Error{Code: "worker_limit", Detail: err.Error()})
+		default:
+			respondError(w, &manifest.Error{Code: "invalid_field", Detail: err.Error()})
 		}
-		respondError(w, &manifest.Error{Code: "invalid_field", Detail: err.Error()})
 		return
 	}
 	registered.Environment = environment
 	respond(w, http.StatusCreated, registered)
 }
 
+// recordReplacement journals a registration that met a live worker holding
+// the same key: environment.worker_replaced, with both declarations and
+// whether it replaced that worker or was refused.
+func (h *handler) recordReplacement(r *http.Request, obj v1.Environment, rep *remote.Replacement) {
+	facts := func(reg remote.Registration) *events.WorkerFacts {
+		return &events.WorkerFacts{Driver: reg.Driver, Isolation: reg.Isolation, Host: reg.Host}
+	}
+	outcome := events.OutcomeRefused
+	if rep.Replaced {
+		outcome = events.OutcomeReplaced
+	}
+	h.journal(r, obj, events.TypeEnvironmentWorkerReplaced, events.Environment{
+		Worker: rep.Worker, Previous: facts(rep.Previous), Next: facts(rep.Next), Outcome: outcome,
+	})
+}
+
 // workerStream runs one worker's stream: the frames of spec 021 over one
 // WebSocket the worker opened. The control plane never dials a worker, so
 // everything it hands one travels here.
-func (h *handler) workerStream(w http.ResponseWriter, r *http.Request, environment string) {
+func (h *handler) workerStream(w http.ResponseWriter, r *http.Request, key auth.Caller, environment string) {
 	conn, err := workerUpgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return // Upgrade has answered
@@ -165,7 +246,14 @@ func (h *handler) workerStream(w http.ResponseWriter, r *http.Request, environme
 		return
 	}
 	defer h.goingAway(conn)()
-	_ = h.Workers.Serve(r.Context(), environment, newWorkerSocket(conn))
+	// environment.serve is asked again on every decision TTL while the
+	// stream lives, so a removed environment or a closed account stops the
+	// worker within one TTL even with a copied key (spec 083).
+	recheck := func(ctx context.Context, reg remote.Registration) (time.Duration, error) {
+		d, _, err := h.decideServe(ctx, r, key, environment, reg)
+		return d.TTL, err
+	}
+	_ = h.Workers.ServeWith(r.Context(), environment, newWorkerSocket(conn), remote.ServeOptions{Recheck: recheck})
 }
 
 // workerSocket is the worker protocol's frames over one WebSocket, the

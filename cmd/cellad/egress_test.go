@@ -324,8 +324,11 @@ type plane struct {
 	// and the probes are served.
 	internal string
 	bearer   string
-	signer   *auth.Signer
-	stop     func() int
+	// mint signs a bearer for another subject of the plane's issuer, which
+	// the cases with two subjects use.
+	mint   func(sub string) string
+	signer *auth.Signer
+	stop   func() int
 	// dataDir is where this control plane writes its state, and out and
 	// errOut are everything it printed. A canary test reads all three.
 	dataDir string
@@ -368,7 +371,10 @@ func startPlaneWith(t *testing.T, proxyAddr, reverseAddr string, extra map[strin
 	codec := make(chan int, 1)
 	go func() { codec <- run(ctx, nil, env(e), &out, &errOut) }()
 	p := &plane{
-		bearer:  issuer.Mint(issuertest.Claims{Sub: "alice", Aud: issuertest.StringList{"cella"}}),
+		bearer: issuer.Mint(issuertest.Claims{Sub: "alice", Aud: issuertest.StringList{"cella"}}),
+		mint: func(sub string) string {
+			return issuer.Mint(issuertest.Claims{Sub: sub, Aud: issuertest.StringList{"cella"}})
+		},
 		signer:  newSigner(t, key, e["CELLA_PUBLIC_URL"]),
 		dataDir: dataDir, out: &out, errOut: &errOut,
 		stop: func() int {
@@ -554,11 +560,17 @@ func (p *plane) get(t *testing.T, path string) string {
 // names under the plane's base.
 func (p *plane) do(t *testing.T, method, path string, body io.Reader) (int, string) {
 	t.Helper()
+	return p.doAs(t, p.bearer, method, path, body)
+}
+
+// doAs is do with another bearer.
+func (p *plane) doAs(t *testing.T, bearer, method, path string, body io.Reader) (int, string) {
+	t.Helper()
 	req, err := http.NewRequestWithContext(t.Context(), method, p.origin+client.Route(p.base, path), body)
 	if err != nil {
 		t.Fatal(err)
 	}
-	req.Header.Set("Authorization", "Bearer "+p.bearer)
+	req.Header.Set("Authorization", "Bearer "+bearer)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}

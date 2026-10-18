@@ -177,18 +177,19 @@ var answers = map[string]func() any{
 // operationId: the manifest decoders for the three kinds, and a strict decode
 // into the handler's own type for the rest.
 var requests = map[string]func([]byte) error{
-	"createSandbox":     func(b []byte) error { _, err := manifest.Decode(b, jsonMedia); return err },
-	"applySandbox":      func(b []byte) error { _, err := manifest.Decode(b, jsonMedia); return err },
-	"createSecret":      func(b []byte) error { _, err := manifest.DecodeSecret(b, jsonMedia); return err },
-	"applySecret":       func(b []byte) error { _, err := manifest.DecodeSecret(b, jsonMedia); return err },
-	"applyVolume":       func(b []byte) error { _, err := manifest.DecodeVolume(b, jsonMedia); return err },
-	"createEnvironment": func(b []byte) error { _, err := manifest.DecodeEnvironment(b, jsonMedia); return err },
-	"applyEnvironment":  func(b []byte) error { _, err := manifest.DecodeEnvironment(b, jsonMedia); return err },
-	"execSandbox":       func(b []byte) error { return strict(b, new(execRequest)) },
-	"makeDirectory":     func(b []byte) error { return strict(b, new(pathRequest)) },
-	"moveFile":          func(b []byte) error { return strict(b, new(moveRequest)) },
-	"sandboxInput":      func(b []byte) error { return strict(b, new(inputBatch)) },
-	"registerWorker":    func(b []byte) error { return strict(b, new(remote.Registration)) },
+	"createSandbox":      func(b []byte) error { _, err := manifest.Decode(b, jsonMedia); return err },
+	"applySandbox":       func(b []byte) error { _, err := manifest.Decode(b, jsonMedia); return err },
+	"createSecret":       func(b []byte) error { _, err := manifest.DecodeSecret(b, jsonMedia); return err },
+	"applySecret":        func(b []byte) error { _, err := manifest.DecodeSecret(b, jsonMedia); return err },
+	"applyVolume":        func(b []byte) error { _, err := manifest.DecodeVolume(b, jsonMedia); return err },
+	"createEnvironment":  func(b []byte) error { _, err := manifest.DecodeEnvironment(b, jsonMedia); return err },
+	"applyEnvironment":   func(b []byte) error { _, err := manifest.DecodeEnvironment(b, jsonMedia); return err },
+	"execSandbox":        func(b []byte) error { return strict(b, new(execRequest)) },
+	"makeDirectory":      func(b []byte) error { return strict(b, new(pathRequest)) },
+	"moveFile":           func(b []byte) error { return strict(b, new(moveRequest)) },
+	"sandboxInput":       func(b []byte) error { return strict(b, new(inputBatch)) },
+	"registerWorker":     func(b []byte) error { return strict(b, new(remote.Registration)) },
+	"mintEnvironmentKey": func(b []byte) error { return strict(b, new(keyRequest)) },
 }
 
 // strict decodes one JSON document and refuses a field the type does not

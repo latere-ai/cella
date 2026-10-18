@@ -127,10 +127,16 @@ func (s *stack) suite(t *testing.T) conformance.Config {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The administrator is CELLA_ADMIN_SUBJECTS's subject, so the cases
+	// that apply, key and serve an environment run against this node.
+	admin, err := s.mint(t.Context(), "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
 	return conformance.Config{
 		URL:               s.url,
 		Token:             s.mint,
-		Admin:             "",
+		Admin:             admin,
 		Capabilities:      s.capabilities,
 		AuthorizerControl: s.authorizer.URL,
 		AdmissionControl:  s.admission.URL,
