@@ -27,7 +27,15 @@ type ServerOptions struct {
 	// Window is the credit this worker grants per sub-stream, which its hello
 	// announces. Zero takes DefaultWindow.
 	Window int
-	Log    *slog.Logger
+	// Admit is asked before each operation reaches the driver, with a hold
+	// that sends the held frame for it. A non-nil error answers the
+	// operation with that error, and the driver is not called. Nil admits
+	// every operation.
+	Admit func(ctx context.Context, opType string, req Request, hold func() error) error
+	// Answered is told of each operation once its answer is sent: what was
+	// asked and how it ended. Nil is told nothing.
+	Answered func(opType string, req Request, res Response, err error)
+	Log      *slog.Logger
 }
 
 // Server is the worker's side of one stream: every operation the control
@@ -177,7 +185,7 @@ func (s *Server) start(operation string, m Message) {
 			case <-ctx.Done():
 			}
 		}()
-		res, err := Execute(ctx, s.options.Driver, opType, req, channel)
+		res, err := s.admitThenExecute(ctx, opType, req, channel)
 		// The report goes up before the answer, on the one writer both
 		// share, so a caller that reads the sandbox the instant its
 		// operation returns reads what the operation did and not what was
@@ -188,7 +196,38 @@ func (s *Server) start(operation string, m Message) {
 		if sendErr := channel.Answer(res, err); sendErr != nil && !errors.Is(sendErr, ErrLinkClosed) {
 			s.options.Log.Warn("the worker could not answer an operation", "operation", operation, "err", sendErr)
 		}
+		if s.options.Answered != nil {
+			s.options.Answered(opType, req, res, err)
+		}
 	})
+}
+
+// admitThenExecute asks Admit, where one is set, and runs the operation with
+// the driver once it admits. A refusal of an operation whose caller waits to
+// learn the driver call was created is also sent as that answer, or the
+// caller would wait on a start that never comes.
+func (s *Server) admitThenExecute(ctx context.Context, opType string, req Request, channel *Channel) (Response, error) {
+	if s.options.Admit != nil {
+		if err := s.options.Admit(ctx, opType, req, channel.Hold); err != nil {
+			if acceptsFirst(opType) {
+				if acceptErr := channel.Accept(err); acceptErr != nil {
+					return Response{}, acceptErr
+				}
+			}
+			return Response{}, err
+		}
+	}
+	return Execute(ctx, s.options.Driver, opType, req, channel)
+}
+
+// acceptsFirst reports whether an operation's caller waits for the started
+// message before it reads the answer: the operations Execute calls Accept on.
+func acceptsFirst(opType string) bool {
+	switch opType {
+	case OpExec, OpLogs, OpExportTar, OpAttach, OpWatch:
+		return true
+	}
+	return false
 }
 
 // changes reports whether an operation can have altered what the driver

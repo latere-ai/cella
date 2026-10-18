@@ -300,7 +300,12 @@ func (l *Link) Shutdown(err error) {
 		}
 		l.failure.Store(&err)
 		close(l.done)
-		_ = l.conn.Close()
+		var refusal *CloseError
+		if closer, ok := l.conn.(Closer); ok && errors.As(err, &refusal) {
+			_ = closer.CloseWith(refusal.Code, refusal.Reason)
+		} else {
+			_ = l.conn.Close()
+		}
 		l.mu.Lock()
 		channels := make([]*Channel, 0, len(l.channels))
 		for _, c := range l.channels {
@@ -439,6 +444,12 @@ func (c *Channel) resize(cols, rows int) {
 		default:
 		}
 	}
+}
+
+// Hold says the host has not decided the operation yet and the worker holds
+// it while the host asks. It is the worker's call, on a create.
+func (c *Channel) Hold() error {
+	return c.link.Send(c.operation, Message{Type: MessageHeld, Operation: c.operation})
 }
 
 // Event sends one change the worker's driver observed, on the Watch

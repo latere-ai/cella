@@ -70,6 +70,18 @@ type Hub struct {
 
 	mu           sync.Mutex
 	environments map[string]*environment
+	// creates is every create in flight by its operation id, so a worker
+	// that holds one is matched to the sandbox the control plane sent it
+	// for, and never to one the worker names.
+	creates map[string]pendingCreate
+	// onHeld is told of every create a worker holds while its host decides.
+	onHeld func(environment, sandbox string)
+}
+
+// pendingCreate is one create the hub sent and has not seen answered.
+type pendingCreate struct {
+	environment string
+	sandbox     string
 }
 
 // environment is one registered data plane: what its workers declared, the
@@ -94,13 +106,16 @@ type worker struct {
 	replica       string
 	lastHeartbeat time.Time
 	link          *Link
+	// host is the machine the worker reported, nil where its driver
+	// reports none.
+	host *v1.HostInfo
 }
 
 // NewHub returns a hub holding no environment and no connection.
 func NewHub(o HubOptions) *Hub {
 	h := &Hub{
 		offline: o.Offline, newID: o.NewID, now: o.Now, queue: o.Queue, window: o.Window, log: o.Log,
-		environments: map[string]*environment{},
+		environments: map[string]*environment{}, creates: map[string]pendingCreate{},
 	}
 	if h.offline <= 0 {
 		h.offline = DefaultOffline
@@ -159,7 +174,12 @@ func (h *Hub) Register(environmentID string, r Registration) (Registered, error)
 	if id == "" {
 		id = "wrk_" + h.newID()
 	}
-	env.workers[id] = &worker{id: id, replica: r.Version, lastHeartbeat: h.now()}
+	w := &worker{id: id, replica: r.Version, lastHeartbeat: h.now()}
+	if r.Host != nil {
+		host := cloneHost(*r.Host)
+		w.host = &host
+	}
+	env.workers[id] = w
 	return Registered{
 		Worker: id, Environment: environmentID,
 		HeartbeatInterval: v1.Duration(HeartbeatInterval.String()), Lease: v1.Duration(HeartbeatTimeout.String()),
@@ -235,7 +255,7 @@ func (c *connection) release() {
 // onMessage takes what a worker sends that the link did not route itself: the
 // hello that binds the connection, the heartbeats, the state its driver
 // observes, and the events its driver's Watch reports.
-func (c *connection) onMessage(_ string, m Message) {
+func (c *connection) onMessage(operation string, m Message) {
 	switch m.Type {
 	case MessageHello:
 		if err := c.hello(m); err != nil {
@@ -248,6 +268,9 @@ func (c *connection) onMessage(_ string, m Message) {
 	case MessageState:
 		c.hub.stamp(c.environment, c.workerID())
 		c.hub.observe(c.environment, m)
+	case MessageHeld:
+		c.hub.stamp(c.environment, c.workerID())
+		c.hub.held(c.environment, operation)
 	case MessageEvent:
 		c.hub.stamp(c.environment, c.workerID())
 		if err := c.event(m); err != nil {
@@ -548,9 +571,12 @@ func (h *Hub) Workers(environmentID string) []WorkerState {
 	}
 	out := make([]WorkerState, 0, len(env.workers))
 	for _, w := range env.workers {
-		out = append(out, WorkerState{
-			Worker: w.id, LastHeartbeat: w.lastHeartbeat, Connected: w.link != nil,
-		})
+		state := WorkerState{Worker: w.id, LastHeartbeat: w.lastHeartbeat, Connected: w.link != nil}
+		if w.host != nil {
+			host := cloneHost(*w.host)
+			state.Host = &host
+		}
+		out = append(out, state)
 	}
 	slices.SortFunc(out, func(a, b WorkerState) int { return strings.Compare(a.Worker, b.Worker) })
 	return out
@@ -558,9 +584,43 @@ func (h *Hub) Workers(environmentID string) []WorkerState {
 
 // WorkerState is one worker as the control plane sees it.
 type WorkerState struct {
-	Worker        string    `json:"worker"`
-	LastHeartbeat time.Time `json:"lastHeartbeat"`
-	Connected     bool      `json:"connected"`
+	Worker        string       `json:"worker"`
+	LastHeartbeat time.Time    `json:"lastHeartbeat"`
+	Connected     bool         `json:"connected"`
+	Host          *v1.HostInfo `json:"host,omitempty"`
+}
+
+// OnHeld sets what the hub tells of a create a worker holds while its host
+// decides: the environment and the sandbox the create is for. The control
+// plane's API sets it once it has a controller to tell, and replaces it when
+// a new one is built; nil tells nothing.
+func (h *Hub) OnHeld(f func(environment, sandbox string)) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.onHeld = f
+}
+
+// held passes on one held frame. The sandbox is the one this hub sent the
+// operation for, read from its own record, so a worker cannot name another
+// sandbox, and a frame for an operation that is not a create in flight on
+// this environment is dropped.
+func (h *Hub) held(environmentID, operation string) {
+	h.mu.Lock()
+	pending, ok := h.creates[operation]
+	f := h.onHeld
+	h.mu.Unlock()
+	if !ok || pending.environment != environmentID || f == nil {
+		return
+	}
+	f(pending.environment, pending.sandbox)
+}
+
+// cloneHost copies one host's lists, so a caller never writes through the
+// hub's own record.
+func cloneHost(h v1.HostInfo) v1.HostInfo {
+	h.Grants = slices.Clone(h.Grants)
+	h.Network.Hosts = slices.Clone(h.Network.Hosts)
+	return h
 }
 
 // Release drops everything one environment holds, which is what a delete of
@@ -724,9 +784,18 @@ func (t *transport) Open(ctx context.Context, opType string, req Request) (Strea
 		}
 	}
 	channel := link.Open(id, opType == OpAttach)
+	if opType == OpCreate {
+		t.hub.mu.Lock()
+		t.hub.creates[id] = pendingCreate{environment: t.environment, sandbox: req.ID}
+		if req.Spec != nil {
+			t.hub.creates[id] = pendingCreate{environment: t.environment, sandbox: req.Spec.ID}
+		}
+		t.hub.mu.Unlock()
+	}
 	message := Message{Type: MessageOperation, Operation: id, Request: &req}
 	if err = link.Send(id, withOperationType(message, opType)); err != nil {
 		link.Drop(id)
+		t.hub.forgetCreate(id)
 		return nil, ErrNoWorker
 	}
 	stream := &hubStream{hub: t.hub, channel: channel, id: id, opened: ctx}
@@ -769,7 +838,18 @@ type hubStream struct {
 func (s *hubStream) Down(stream byte) io.WriteCloser { return s.channel.Down(stream) }
 func (s *hubStream) Up(stream byte) io.Reader        { return s.channel.Up(stream) }
 func (s *hubStream) Resize(cols, rows int) error     { return s.channel.Resize(cols, rows) }
-func (s *hubStream) Close() error                    { return s.channel.Close() }
+func (s *hubStream) Close() error {
+	s.hub.forgetCreate(s.id)
+	return s.channel.Close()
+}
+
+// forgetCreate drops one create from the record of those in flight, once it
+// answered or its caller closed it.
+func (h *Hub) forgetCreate(operation string) {
+	h.mu.Lock()
+	delete(h.creates, operation)
+	h.mu.Unlock()
+}
 
 func (s *hubStream) Accepted(ctx context.Context) error {
 	err := s.channel.Accepted(ctx)
@@ -781,6 +861,7 @@ func (s *hubStream) Accepted(ctx context.Context) error {
 
 func (s *hubStream) Result(ctx context.Context) (Response, error) {
 	res, err := s.channel.Result(ctx)
+	s.hub.forgetCreate(s.id)
 	if opened := s.opened.Err(); opened != nil && err != nil {
 		err = opened
 	}
@@ -817,7 +898,8 @@ func intersect(a, b runtime.Capabilities) runtime.Capabilities {
 		Display: a.Display && b.Display, Input: a.Input && b.Input,
 		Resize: a.Resize && b.Resize, Pool: a.Pool && b.Pool,
 		Files: a.Files && b.Files, Detach: a.Detach && b.Detach,
-		Autosize: a.Autosize.And(b.Autosize),
+		HostWorkspace: a.HostWorkspace && b.HostWorkspace,
+		Autosize:      a.Autosize.And(b.Autosize),
 	}
 	for _, mode := range a.Egress {
 		if slices.Contains(b.Egress, mode) {

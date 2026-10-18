@@ -117,6 +117,10 @@ const (
 	// MessageEvent is one change the worker's driver observed, up, on the
 	// connection's Watch operation.
 	MessageEvent = "event"
+	// MessageHeld says the host has not decided a create yet and the worker
+	// holds it while the host asks, up, on the create's operation (spec
+	// 082). The control plane shows the sandbox as waiting for the host.
+	MessageHeld = "held"
 )
 
 // The operation types. Each is a Driver or optional-interface method name, so
@@ -159,6 +163,9 @@ type Registration struct {
 	Capacity     v1.Capacity          `json:"capacity,omitzero"`
 	Labels       map[string]string    `json:"labels,omitempty"`
 	Version      string               `json:"version,omitempty"`
+	// Host is the machine the worker runs on, as its driver reports it
+	// (spec 082), and nil for a driver that reports none.
+	Host *v1.HostInfo `json:"host,omitempty"`
 }
 
 // Registered is what the control plane answers a registration with: the id
@@ -242,6 +249,10 @@ const (
 	// seam so errors.Is holds on the side that set them.
 	KindDeadlineExceeded = "deadlineExceeded"
 	KindCanceled         = "canceled"
+	// The three a host's refusal carries (spec 082).
+	KindHostRefused         = "hostRefused"
+	KindHostTimeout         = "hostTimeout"
+	KindWorkspaceNotGranted = "workspaceNotGranted"
 )
 
 // sentinels pairs each kind with the error the contract declares. It is the
@@ -261,6 +272,49 @@ var sentinels = []struct {
 	{KindUnsupported, runtime.ErrUnsupported},
 	{KindTooLarge, runtime.ErrTooLarge},
 	{KindInvalid, runtime.ErrInvalid},
+	{KindHostRefused, runtime.ErrHostRefused},
+	{KindHostTimeout, runtime.ErrHostTimeout},
+	{KindWorkspaceNotGranted, runtime.ErrWorkspaceNotGranted},
+}
+
+// The reasons the control plane closes a worker's stream with, beside the
+// close code ClosePolicy, and the codes a refused registration answers with.
+// Each ends the worker's Run rather than a reconnect: another attempt would
+// meet the same answer (spec 083).
+const (
+	// ReasonServeRefused is an environment that may not be served any
+	// longer: the authorizer refused environment.serve, or the environment
+	// was deleted.
+	ReasonServeRefused = "serve_refused"
+	// ReasonKeyRevoked is the key the stream registered with, revoked.
+	ReasonKeyRevoked = "key_revoked"
+	// ReasonWorkerReplaced is a stream another registration with the same
+	// key and the same host replaced.
+	ReasonWorkerReplaced = "worker_replaced"
+	// ReasonWorkerLimit is a registration beyond spec.workers.max.
+	ReasonWorkerLimit = "worker_limit"
+)
+
+// ClosePolicy is the WebSocket close code the control plane ends a worker's
+// stream with when it refuses to go on serving it: 1008, policy violation.
+const ClosePolicy = 1008
+
+// CloseError is a refusal one side ends the stream with: the close code and
+// the reason the far side reads.
+type CloseError struct {
+	Code   int
+	Reason string
+}
+
+func (e *CloseError) Error() string {
+	return fmt.Sprintf("remote: the stream was closed with %d %s", e.Code, e.Reason)
+}
+
+// Closer is a FrameConn that can end the connection with a close code and a
+// reason, as a WebSocket does. A link shut down with a *CloseError closes a
+// Closer that way, and any other connection plainly.
+type Closer interface {
+	CloseWith(code int, reason string) error
 }
 
 // EncodeError renders one driver error for the wire. A nil error is nil.
