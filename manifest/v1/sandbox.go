@@ -163,6 +163,13 @@ type Workspace struct {
 	Host   string `json:"host,omitempty"`
 }
 
+// SandboxPaths are a sandbox's scratch directories as the host names them:
+// its home and its temporary directory, never inside a host folder.
+type SandboxPaths struct {
+	Home string `json:"home,omitempty"`
+	Tmp  string `json:"tmp,omitempty"`
+}
+
 // WorkspaceSourceEmpty is a workspace the sandbox starts with nothing in.
 const WorkspaceSourceEmpty = "empty"
 
@@ -193,6 +200,10 @@ type SandboxStatus struct {
 	// together.
 	Spawn      SpawnStatus `json:"spawn,omitzero"`
 	Conditions []Condition `json:"conditions,omitempty"`
+	// Paths are the host paths of the sandbox's own scratch directories,
+	// on a driver that cannot remap paths: a caller that places a file of
+	// its own, such as a helper program, writes it there (spec 081).
+	Paths *SandboxPaths `json:"paths,omitempty"`
 	// Ports is one entry per declared port with the driver's own probe of it
 	// at the last read.
 	Ports []PortStatus `json:"ports,omitempty"`

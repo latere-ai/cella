@@ -1276,6 +1276,12 @@ func observe(obj v1.Sandbox, state driver.State) v1.Sandbox {
 		obj.Status.Conditions = setCondition(obj.Status.Conditions, condition)
 	}
 	obj.Status.Ports = portStatusOf(state.Ports)
+	// The scratch directories a driver that cannot remap paths reports are
+	// where a caller places a file of its own (spec 081).
+	if state.Paths != nil {
+		paths := *state.Paths
+		obj.Status.Paths = &paths
+	}
 	obj.Status.StartedAt = state.StartedAt
 	obj.Status.StoppedAt = state.StoppedAt
 	obj.Status.LastActivityAt = state.LastActivityAt

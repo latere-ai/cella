@@ -319,6 +319,9 @@ type State struct {
 	// 078). A driver that reports no size leaves both empty.
 	Resources Resources `json:"resources,omitzero"`
 	Resize    *Resize   `json:"resize,omitempty"`
+	// Paths are the host paths of the sandbox's scratch directories, which
+	// a driver that cannot remap paths reports (spec 081).
+	Paths *v1.SandboxPaths `json:"paths,omitempty"`
 }
 type Filter struct {
 	Owner, Phase string

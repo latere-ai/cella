@@ -350,13 +350,16 @@ func execStreamsAndExits(t tb, open func() runtime.Driver, opts Options) {
 	wantErr(t, err, runtime.ErrInvalid, "empty Command")
 	_, err = d.Exec(ctx, "sbx_cnf_absent", runtime.ExecRequest{Command: opts.shell("true")})
 	wantErr(t, err, runtime.ErrNotFound, "Exec unknown id")
-	if d.Capabilities().Attach {
+	caps := d.Capabilities()
+	if caps.Attach || caps.ExecStdin {
 		out, _, code, err = run(t, d, id, runtime.ExecRequest{Command: []string{"cat"}, Stdin: strings.NewReader("ping")})
-		must(t, err, "Exec with Stdin under Attach")
-		expect(t, out == "ping" && code == 0, "Stdin under Attach: %q code %d", out, code)
+		must(t, err, "Exec with Stdin under Attach or ExecStdin")
+		expect(t, out == "ping" && code == 0, "Stdin under Attach or ExecStdin: %q code %d", out, code)
 	} else {
 		_, err = d.Exec(ctx, id, runtime.ExecRequest{Command: []string{"cat"}, Stdin: strings.NewReader("ping")})
 		wantErr(t, err, runtime.ErrUnsupported, "Stdin without Attach")
+	}
+	if !caps.Attach {
 		_, err = d.Exec(ctx, id, runtime.ExecRequest{Command: opts.shell("true"), TTY: true})
 		wantErr(t, err, runtime.ErrUnsupported, "TTY without Attach")
 	}
@@ -688,8 +691,8 @@ func attachCloseEndsTheStream(t tb, open func() runtime.Driver, opts Options) {
 
 func execStdin(t tb, open func() runtime.Driver, opts Options) {
 	d := open()
-	if !d.Capabilities().Attach {
-		t.Skipf("the driver declares no Attach, so Exec takes no Stdin")
+	if caps := d.Capabilities(); !caps.Attach && !caps.ExecStdin {
+		t.Skipf("the driver declares neither Attach nor ExecStdin, so Exec takes no Stdin")
 		return
 	}
 	const id = "sbx_cnf_execstdin"

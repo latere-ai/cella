@@ -44,6 +44,10 @@ type Capabilities struct {
 	// HostWorkspace says the driver binds a host folder a manifest names in
 	// spec.workspace.host as the sandbox's workspace (spec 081).
 	HostWorkspace bool `json:"hostWorkspace,omitempty"`
+	// ExecStdin says an exec with no terminal takes stdin on a driver that
+	// declares no Attach, as an attached command whose pipes the driver
+	// holds (spec 081). Attach implies it.
+	ExecStdin bool `json:"execStdin,omitempty"`
 	// EgressLocal says the driver enforces an allow list itself, with no
 	// gateway: its own proxy is the only route out, so a sandbox asking
 	// for none or an allow list needs no gateway (spec 083).
@@ -85,5 +89,5 @@ func (c Capabilities) Equal(other Capabilities) bool {
 		c.VolumeImages == other.VolumeImages && c.Snapshots == other.Snapshots && c.Attach == other.Attach && c.Dial == other.Dial &&
 		c.Display == other.Display && c.Input == other.Input && c.Resize == other.Resize &&
 		c.Pool == other.Pool && c.Files == other.Files && c.Detach == other.Detach &&
-		c.HostWorkspace == other.HostWorkspace && c.EgressLocal == other.EgressLocal && c.Autosize == other.Autosize
+		c.HostWorkspace == other.HostWorkspace && c.ExecStdin == other.ExecStdin && c.EgressLocal == other.EgressLocal && c.Autosize == other.Autosize
 }

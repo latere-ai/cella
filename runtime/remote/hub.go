@@ -1156,6 +1156,7 @@ func intersect(a, b runtime.Capabilities) runtime.Capabilities {
 		Files: a.Files && b.Files, Detach: a.Detach && b.Detach,
 		HostWorkspace: a.HostWorkspace && b.HostWorkspace,
 		EgressLocal:   a.EgressLocal && b.EgressLocal,
+		ExecStdin:     a.ExecStdin && b.ExecStdin,
 		Autosize:      a.Autosize.And(b.Autosize),
 	}
 	for _, mode := range a.Egress {
