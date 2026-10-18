@@ -43,6 +43,26 @@ func (r *KeyRegistry) Revoke(ctx context.Context, jti string, at, exp time.Time)
 	})
 }
 
+// Get is the record of one key, and false where none is kept.
+func (r *KeyRegistry) Get(ctx context.Context, jti string) (auth.KeyRecord, bool, error) {
+	var (
+		k    Key
+		held bool
+	)
+	err := r.store.Tx(ctx, func(tx Tx) error {
+		var err error
+		k, held, err = tx.Keys().Get(ctx, jti)
+		return err
+	})
+	if err != nil || !held {
+		return auth.KeyRecord{}, false, err
+	}
+	return auth.KeyRecord{
+		JTI: k.JTI, Environment: k.Environment, Subject: k.Subject,
+		MintedAt: k.MintedAt, ExpiresAt: k.ExpiresAt, RevokedAt: k.RevokedAt,
+	}, true, nil
+}
+
 // List is one page of an environment's keys in the order they were minted,
 // and the cursor of the next page.
 func (r *KeyRegistry) List(ctx context.Context, environment, cursor string, limit int) ([]auth.KeyRecord, string, error) {

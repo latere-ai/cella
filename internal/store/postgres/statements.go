@@ -880,6 +880,27 @@ func (x keys) List(ctx context.Context, environment string, p store.Page) ([]sto
 	return page, next, nil
 }
 
+func (x keys) Get(ctx context.Context, jti string) (store.Key, bool, error) {
+	var (
+		k       store.Key
+		revoked *time.Time
+	)
+	err := x.q.QueryRow(ctx, `select jti, environment, subject, minted_at, expires_at, revoked_at
+		from environment_keys where jti = $1`, jti).
+		Scan(&k.JTI, &k.Environment, &k.Subject, &k.MintedAt, &k.ExpiresAt, &revoked)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return store.Key{}, false, nil
+	}
+	if err != nil {
+		return store.Key{}, false, fmt.Errorf("store: reading the key %s: %w", jti, err)
+	}
+	if revoked != nil {
+		k.RevokedAt = revoked.UTC()
+	}
+	k.MintedAt, k.ExpiresAt = k.MintedAt.UTC(), k.ExpiresAt.UTC()
+	return k, true, nil
+}
+
 func (x keys) Forget(ctx context.Context, before time.Time) (int, error) {
 	tag, err := x.q.Exec(ctx, `delete from environment_keys where expires_at < $1`, before)
 	if err != nil {

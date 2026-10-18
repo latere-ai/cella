@@ -6,6 +6,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -35,7 +36,13 @@ type KeyLog interface {
 	// List is one page of an environment's keys in the order they were
 	// minted, and the cursor of the next page.
 	List(ctx context.Context, environment, cursor string, limit int) ([]KeyRecord, string, error)
+	// Get is the record of one key, and false where none is kept.
+	Get(ctx context.Context, jti string) (KeyRecord, bool, error)
 }
+
+// ErrKeyTTL is a key lifetime asked for beyond CELLA_ENVIRONMENT_KEY_TTL, or
+// one that is not positive.
+var ErrKeyTTL = errors.New("an environment key's lifetime is positive and at most CELLA_ENVIRONMENT_KEY_TTL")
 
 // EnvironmentKeys is the mint, the revocation and the listing of the
 // credential a data plane carries: the worker of spec 021 and the gateway of
@@ -69,12 +76,31 @@ func NewEnvironmentKeys(signer *Signer, log RevocationLog, keys KeyLog, ttl time
 	return &EnvironmentKeys{signer: signer, log: log, keys: keys, ttl: ttl}, nil
 }
 
+// Lifetime is the lifetime a mint that asked for ttl gives the key: ttl
+// itself, the configured lifetime when ttl is zero, and ErrKeyTTL for one
+// that is negative or beyond the configured lifetime (spec 083).
+func (e *EnvironmentKeys) Lifetime(ttl time.Duration) (time.Duration, error) {
+	switch {
+	case ttl == 0:
+		return e.ttl, nil
+	case ttl < 0 || ttl > e.ttl:
+		return 0, fmt.Errorf("%w: %s asked, %s allowed", ErrKeyTTL, ttl, e.ttl)
+	}
+	return ttl, nil
+}
+
 // Mint signs one key for one environment on behalf of the subject that asked,
-// records it, and reports the jti a revocation is keyed by. The value is
-// returned once and never stored. A key the registry could not record is not
-// handed out, so every key a caller holds is one a listing shows.
-func (e *EnvironmentKeys) Mint(ctx context.Context, environment, subject string) (Token, error) {
-	token, err := e.signer.MintEnvironmentKey(environment, e.ttl)
+// with the lifetime asked for, records it, and reports the jti a revocation
+// is keyed by. A zero ttl takes CELLA_ENVIRONMENT_KEY_TTL, and a longer one
+// is ErrKeyTTL. The value is returned once and never stored. A key the
+// registry could not record is not handed out, so every key a caller holds
+// is one a listing shows.
+func (e *EnvironmentKeys) Mint(ctx context.Context, environment, subject string, ttl time.Duration) (Token, error) {
+	lifetime, err := e.Lifetime(ttl)
+	if err != nil {
+		return Token{}, err
+	}
+	token, err := e.signer.MintEnvironmentKey(environment, lifetime)
 	if err != nil {
 		return Token{}, err
 	}
@@ -117,6 +143,16 @@ func (e *EnvironmentKeys) List(ctx context.Context, environment, cursor string, 
 		return nil, "", nil
 	}
 	return e.keys.List(ctx, environment, cursor, limit)
+}
+
+// Find is the record of one key by its jti, and false where the registry
+// keeps none: a key minted before its record could be kept, or a control
+// plane with no registry.
+func (e *EnvironmentKeys) Find(ctx context.Context, jti string) (KeyRecord, bool, error) {
+	if e.keys == nil {
+		return KeyRecord{}, false, nil
+	}
+	return e.keys.Get(ctx, jti)
 }
 
 // TTL is how long a key this mint signs lives, which a caller reports beside

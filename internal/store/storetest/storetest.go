@@ -1430,6 +1430,22 @@ func keys(t TB, open Opener) {
 		t.Errorf("another environment's keys are %v", jtis(other))
 	}
 
+	// One key is read by its jti alone, which is how a revocation learns
+	// whose key it names; a jti with no row is no key and no error.
+	with(t, s, func(tx store.Tx) error {
+		k, held, err := tx.Keys().Get(ctx, "01JKEY4")
+		if err != nil {
+			return err
+		}
+		if !held || k.Environment != "us-east" || !k.ExpiresAt.Equal(now.Add(time.Hour)) {
+			t.Errorf("the key reads back by its jti as %+v, %v", k, held)
+		}
+		if _, held, err = tx.Keys().Get(ctx, "01JNOROW"); err != nil || held {
+			t.Errorf("a jti with no row reads as held %v, %v", held, err)
+		}
+		return nil
+	})
+
 	// A revocation marks the row, and a revocation that retried keeps the
 	// instant of the first. A jti the registry holds no row for is no error.
 	with(t, s, func(tx store.Tx) error {

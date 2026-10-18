@@ -274,6 +274,9 @@ type stubKeys struct{}
 func (stubKeys) Record(context.Context, store.Key) error         { return nil }
 func (stubKeys) Revoke(context.Context, string, time.Time) error { return nil }
 func (stubKeys) Forget(context.Context, time.Time) (int, error)  { return 0, nil }
+func (stubKeys) Get(context.Context, string) (store.Key, bool, error) {
+	return store.Key{}, false, nil
+}
 func (stubKeys) List(context.Context, string, store.Page) ([]store.Key, string, error) {
 	return nil, "", nil
 }

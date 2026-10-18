@@ -390,6 +390,9 @@ type Keys interface {
 	// List returns one page of an environment's keys in jti order, which is
 	// the order they were minted in, and the cursor of the next page.
 	List(ctx context.Context, environment string, p Page) ([]Key, string, error)
+	// Get is the row of one key, and false where none is kept, which is a
+	// key minted before its row could be, or one past its expiry.
+	Get(ctx context.Context, jti string) (Key, bool, error)
 	// Forget drops the rows whose key has expired and reports how many went.
 	Forget(ctx context.Context, before time.Time) (int, error)
 }

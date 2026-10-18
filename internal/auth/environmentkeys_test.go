@@ -38,6 +38,18 @@ func (r *registry) Revoke(_ context.Context, jti string, at, exp time.Time) erro
 	return nil
 }
 
+func (r *registry) Get(_ context.Context, jti string) (auth.KeyRecord, bool, error) {
+	if r.err != nil {
+		return auth.KeyRecord{}, false, r.err
+	}
+	for _, k := range r.records {
+		if k.JTI == jti {
+			return k, true, nil
+		}
+	}
+	return auth.KeyRecord{}, false, nil
+}
+
 func (r *registry) List(_ context.Context, environment, cursor string, limit int) ([]auth.KeyRecord, string, error) {
 	if r.err != nil {
 		return nil, "", r.err
@@ -77,7 +89,7 @@ func TestEnvironmentKeysRecordAndList(t *testing.T) {
 	if keys.TTL() != ttl {
 		t.Errorf("the key lifetime is %v, want %v", keys.TTL(), ttl)
 	}
-	token, err := keys.Mint(ctx, "eu-gpu", "https://issuer.example|ops")
+	token, err := keys.Mint(ctx, "eu-gpu", "https://issuer.example|ops", 0)
 	if err != nil {
 		t.Fatalf("the mint failed: %v", err)
 	}
@@ -93,6 +105,23 @@ func TestEnvironmentKeysRecordAndList(t *testing.T) {
 	if err != nil || len(listed) != 1 || listed[0].JTI != token.JTI {
 		t.Errorf("the list is %+v, %v, want the key just minted", listed, err)
 	}
+	if found, held, err := keys.Find(ctx, token.JTI); err != nil || !held || found.Environment != "eu-gpu" {
+		t.Errorf("the key reads back by its jti as %+v, %v, %v", found, held, err)
+	}
+	if !token.ExpiresAt.Equal(token.IssuedAt.Add(ttl)) {
+		t.Errorf("a mint that asked for no lifetime lives %v", token.ExpiresAt.Sub(token.IssuedAt))
+	}
+	// A mint asks for a lifetime up to the configured one, and no longer.
+	short, err := keys.Mint(ctx, "eu-gpu", "https://issuer.example|ops", 10*time.Minute)
+	if err != nil || !short.ExpiresAt.Equal(short.IssuedAt.Add(10*time.Minute)) {
+		t.Errorf("a ten minute key lives %v, %v", short.ExpiresAt.Sub(short.IssuedAt), err)
+	}
+	for _, asked := range []time.Duration{ttl + time.Second, -time.Second} {
+		if _, err := keys.Mint(ctx, "eu-gpu", "https://issuer.example|ops", asked); !errors.Is(err, auth.ErrKeyTTL) {
+			t.Errorf("a key of %v was minted: %v", asked, err)
+		}
+	}
+	reg.records = reg.records[:1]
 
 	before := time.Now()
 	if err = keys.Revoke(ctx, token.JTI); err != nil {
@@ -114,7 +143,7 @@ func TestEnvironmentKeysRecordAndList(t *testing.T) {
 	// A key the registry could not keep is not handed out, so every key a
 	// caller holds is one the listing shows.
 	reg.err = errors.New("the store is unreachable")
-	if token, err = keys.Mint(ctx, "eu-gpu", "https://issuer.example|ops"); err == nil || token.Value != "" {
+	if token, err = keys.Mint(ctx, "eu-gpu", "https://issuer.example|ops", 0); err == nil || token.Value != "" {
 		t.Errorf("a key the registry refused was handed out: %q, %v", token.Value, err)
 	}
 
@@ -124,7 +153,7 @@ func TestEnvironmentKeysRecordAndList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	token, err = bare.Mint(ctx, "eu-gpu", "https://issuer.example|ops")
+	token, err = bare.Mint(ctx, "eu-gpu", "https://issuer.example|ops", 0)
 	if err != nil || token.Value == "" {
 		t.Fatalf("the mint without a registry failed: %v", err)
 	}
@@ -136,6 +165,9 @@ func TestEnvironmentKeysRecordAndList(t *testing.T) {
 	}
 	if listed, next, err := bare.List(ctx, "eu-gpu", "", 50); err != nil || len(listed) != 0 || next != "" {
 		t.Errorf("a half with no registry listed %+v, %q, %v", listed, next, err)
+	}
+	if _, held, err := bare.Find(ctx, token.JTI); held || err != nil {
+		t.Errorf("a half with no registry found a key: %v, %v", held, err)
 	}
 	unkept, err := auth.NewEnvironmentKeys(signer, nil, nil, ttl)
 	if err != nil {

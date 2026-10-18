@@ -865,6 +865,14 @@ func (x keys) List(ctx context.Context, environment string, p store.Page) ([]sto
 	return page, next, nil
 }
 
+func (x keys) Get(ctx context.Context, jti string) (store.Key, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return store.Key{}, false, err
+	}
+	k, held := x.d.keys[jti]
+	return k, held, nil
+}
+
 func (x keys) Forget(ctx context.Context, before time.Time) (int, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err
