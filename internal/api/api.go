@@ -168,6 +168,10 @@ func New(o Options) (http.Handler, error) {
 	h.handle("PUT /v1/secrets/{key}", h.applySecret)
 	h.handle("GET /v1/secrets/{key}", h.secretItem)
 	h.handle("DELETE /v1/secrets/{key}", h.secretItem)
+	h.handle("GET /v1/volumes", h.listVolumes)
+	h.handle("PUT /v1/volumes/{key}", h.applyVolume)
+	h.handle("GET /v1/volumes/{key}", h.volumeItem)
+	h.handle("DELETE /v1/volumes/{key}", h.volumeItem)
 	h.handle("GET /v1/environments", h.environmentList)
 	h.handle("POST /v1/environments", h.environmentCreate)
 	h.handle("GET /v1/environments/{id}", h.environmentItem)
@@ -339,7 +343,7 @@ func (h *handler) resolveOptions(w http.ResponseWriter, r *http.Request) (manife
 	// class and observed capabilities, and one that names an absent
 	// environment is not_found at spec.environment.
 	o := manifest.Options{
-		Lookup:    manifest.WithSecrets(h.Controller.Lookup(), h.secretLookup(r)),
+		Lookup:    manifest.WithVolumes(manifest.WithSecrets(h.Controller.Lookup(), h.secretLookup(r)), h.volumeLookup(r)),
 		Actor:     manifestActor(r),
 		Claims:    c.Claims,
 		Defaults:  h.Defaults,
@@ -968,8 +972,11 @@ func errorEnvelope(err error, requestID string) (int, httpjson.Error) {
 		code = "not_found"
 	case errors.Is(err, controller.ErrNameTaken), errors.Is(err, driver.ErrAlreadyExists):
 		code = "name_taken"
-	case errors.Is(err, controller.ErrNoSecretKey), errors.Is(err, controller.ErrNoEnvironmentStore):
+	case errors.Is(err, controller.ErrNoSecretKey), errors.Is(err, controller.ErrNoEnvironmentStore),
+		errors.Is(err, controller.ErrNoVolumeStore):
 		code = "capability_unsupported"
+	case errors.Is(err, controller.ErrVolumeBusy):
+		code = "volume_busy"
 	case errors.Is(err, controller.ErrQuota):
 		code = "quota_exceeded"
 	case errors.Is(err, controller.ErrBudgetExhausted):
@@ -1015,6 +1022,12 @@ func errorEnvelope(err error, requestID string) (int, httpjson.Error) {
 	case "phase_conflict":
 		status = 409
 		message = "The sandbox is not in a state that allows this."
+	case "volume_busy":
+		status = 409
+		message = "The volume is attached in a way that excludes this."
+	case "path_conflict":
+		status = 400
+		message = "Two mounts share a path."
 	case "version_conflict":
 		status = 409
 		message = "The object changed since you read it; read it again and retry."

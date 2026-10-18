@@ -115,6 +115,7 @@ code in the `X-Cella-Error` trailer.
 | `missing_field` | 400 | a required field is absent |
 | `unknown_field` | 400 | the manifest has a field the schema does not know |
 | `exclusive_fields` | 400 | two fields that cannot be set together are set |
+| `path_conflict` | 400 | two mounts share a path, or one sits inside another or inside the workspace |
 | `multi_document` | 400 | more than one manifest in one body |
 | `unsupported_version` | 400 | an `apiVersion` other than `cella.latere.ai/v1beta1` |
 | `unsupported_kind` | 400 | a kind this server does not serve |
@@ -126,6 +127,7 @@ code in the `X-Cella-Error` trailer.
 | `immutable_field` | 409 | the field cannot change after creation |
 | `boundary_widened` | 409 | a sandbox tried to widen its own boundary |
 | `secret_host_conflict` | 409 | two mounted secrets apply to the same host |
+| `volume_busy` | 409 | the volume is attached in a way that excludes this: a write to a shared read-only volume, a second writer, or a delete while a sandbox mounts it |
 | `cursor_expired` | 410 | the feed no longer holds the records after that cursor |
 | `body_too_large` | 413 | the body is over `CELLA_MAX_BODY_BYTES` or `CELLA_MAX_UPLOAD_BYTES` |
 | `unsupported_media_type` | 415 | the body is in a type this route does not take |
@@ -283,6 +285,20 @@ line, or authorization request carries it.
 | `PUT /v1/secrets/{name}` | `secret.create` or `secret.update` | apply by name; a second apply rotates the value in place, and running sandboxes use the new value on their next request |
 | `GET /v1/secrets/{name}` | `secret.read` | read one secret without its value |
 | `DELETE /v1/secrets/{name}` | `secret.delete` | delete it; a sandbox that mounted it reports the placeholder as not injectable |
+
+### Volumes
+
+A volume is storage that outlives a sandbox. It is filled once, from
+nothing or from an image, and a sandbox mounts it through
+`spec.volumes`. A sandbox created while its volume is still being filled
+waits for the fill before it starts.
+
+| Route | Action | What it does |
+|---|---|---|
+| `GET /v1/volumes` | `volume.list` | list your volumes; `owner` and `label` narrow the list as they do for sandboxes |
+| `PUT /v1/volumes/{name}` | `volume.create` and `environment.use`, or `volume.update` | apply by name. A create answers `201` with the volume `Pending`; it is `Available` once filled, or `Failed` with a reason. An image source must be pinned by digest, or be a name this server's admission step resolves to one, and is stored as that pinned reference. A second apply changes the labels, the annotations and `retain` |
+| `GET /v1/volumes/{name}` | `volume.read` | read one volume by name or `vol_` id; `status.attachedTo` names every sandbox that mounts it |
+| `DELETE /v1/volumes/{name}` | `volume.delete` | delete a volume no sandbox mounts; a mounted one, a stopped sandbox's included, is `volume_busy` |
 
 ### Environments
 

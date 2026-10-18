@@ -46,7 +46,6 @@ var pendingStates = []string{"not built", "open", "not implemented"}
 var pendingControls = []string{
 	"TestAdmissionCannotOpenABoundary",     // spec 007, a webhook that reopens a boundary
 	"TestArchiveFetchIsBounded",            // spec 019, the bounded archive fetch
-	"TestAttachByIdUnderTheAuthorizer",     // spec 019, attaching a volume by id
 	"TestBodiesAndTypes",                   // spec 008, the body caps and the content types
 	"TestClusterPodIsConfined",             // spec 004, the cluster tier's Pod baseline
 	"TestControlPlaneWriter",               // spec 019, the one writer of a volume

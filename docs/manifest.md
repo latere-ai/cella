@@ -1,6 +1,6 @@
 # Manifests
 
-Every field of the three kinds this release serves, what it means, and
+Every field of the four kinds this release serves, what it means, and
 what it takes when you leave it out. A manifest is JSON or YAML, one
 object per request, and always carries
 
@@ -99,6 +99,23 @@ it leaves verbatim. Where the secret goes in a header other than
 secrets that apply to the same host are refused. A sandbox that mounts a
 secret and declares no egress rule gets `allowlist`, with the secret's
 hosts on it.
+
+### Volumes
+
+| Field | Meaning |
+|---|---|
+| `spec.volumes[].name` | the mount's own name, a DNS label unique in the list |
+| `spec.volumes[].path` | where the volume appears, a clean absolute path. Two mounts may not share a path or sit one inside the other, and no mount may be at or inside the workspace or under `/run/cella`: `path_conflict` |
+| `spec.volumes[].volume` | a [`Volume`](#volume) by name among your own, or by `vol_` id. Asks `volume.attach` of your authorizer; one you may not use answers `not_found`. It must live in the sandbox's environment |
+| `spec.volumes[].readOnly` | `false` by default. A `shared-read` volume is mounted read-only only |
+
+A volume still being filled is accepted, and the sandbox waits in
+`Pending` until the fill is done; one whose fill failed makes the
+sandbox fail with `VolumesAttached` `False`. A `single` volume takes one
+read-write mount or any number of read-only ones, never both: a mount
+the volume's attachments exclude is `volume_busy`. The mounts are fixed
+when the sandbox is created. A spawned child mounts only volumes its
+parent mounts, and read-only where its parent's mount is.
 
 ### Network
 
@@ -376,6 +393,7 @@ The server writes `status`; it is ignored on the way in.
 | `parent`, `root`, `mesh`, `spawn` | where it sits in a spawn tree, its mesh, and its budget with how much is used |
 | `ports` | each declared port, `listening` or `closed` |
 | `secrets` | which placeholders are mounted, and which the gateway will not substitute |
+| `volumes` | one entry per mount: the `vol_` id it was bound to at create and whether it is attached |
 | `createdAt`, `startedAt`, `stoppedAt`, `lastActivityAt`, `expiresAt` | when each happened, and when the time to live ends |
 | `exitCode` | the main process's exit code once it has ended |
 | `preemptions` | how often it was stopped to make room |
@@ -420,6 +438,50 @@ minutes, so the last use is at or after it and normally less than 5
 minutes after. A secret without it has not been sent anywhere since it
 was created, which is how a secret nothing uses any more is told apart
 from one in use.
+
+## Volume
+
+A volume is storage that outlives a sandbox: filled once when it is
+created, mounted by a sandbox's `spec.volumes`, and kept when the
+sandbox ends.
+
+```json
+{
+  "apiVersion": "cella.latere.ai/v1beta1",
+  "kind": "Volume",
+  "metadata": {"name": "grader"},
+  "spec": {
+    "size": "1Gi",
+    "access": "shared-read",
+    "source": {"kind": "image", "image": "registry.example/grader@sha256:..."}
+  }
+}
+```
+
+| Field | Default | Meaning |
+|---|---|---|
+| `spec.environment` | `default` | where the volume lives. A volume never leaves its environment, and only a sandbox of that environment mounts it. Asks `environment.use` of your authorizer |
+| `spec.size` | required | the capacity, such as `1Gi`. For an image source, the most the image's files may hold. It cannot shrink, and this release does not grow it |
+| `spec.access` | `single` | `single`: one read-write mount or any number of read-only ones. `shared-read`: read-only mounts only, any number |
+| `spec.source.kind` | `empty` | `empty`, or `image` for the root file system of one image. `snapshot` and `archive` are refused with `capability_unsupported` in this release |
+| `spec.source.image` | required for `image` | the image, pinned by digest (`name@sha256:<64 hex digits>`), or a name your admission endpoint resolves to a pinned reference. The volume stores the pinned reference, so reading it back tells you exactly which image filled it |
+| `spec.retain` | `true` | `false` deletes the volume with the last sandbox that mounts it |
+| `spec.class` | none | refused in this release: the operator chooses the storage |
+
+An image source passes your admission endpoint the way a sandbox's image
+does, so an installation whose sandboxes run catalog images only fills
+volumes from catalog images only. An environment that keeps no volumes,
+or cannot fill one from an image, refuses with `capability_unsupported`;
+the native runtime keeps none.
+
+`status.phase` is `Pending` until the volume is filled, then `Available`,
+or `Failed` with `status.reason` (`SourceUnreachable`, `SourceTooLarge`,
+`SourceUnsupported`) and the runtime's own `status.message`. `Deleting`
+is a delete in flight, and `Lost` a volume its runtime no longer holds,
+which is never recreated. `status.attachedTo` names every sandbox that
+mounts it, a stopped one included; a volume that any sandbox mounts
+cannot be deleted (`volume_busy`). The labels, the annotations and
+`retain` change on a second apply; every other field is fixed.
 
 ## Environment
 

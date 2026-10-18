@@ -331,6 +331,9 @@ func actionsOf(o events.Object) (string, string, authz.Resource, bool) {
 	case events.KindEnvironment:
 		return authorizer.ActionEnvironmentList, authorizer.ActionEnvironmentRead,
 			(auth.Environment{ID: o.ID, Name: o.Name, Owner: o.Owner, Labels: o.Labels}).Resource(), true
+	case events.KindVolume:
+		return authorizer.ActionVolumeList, authorizer.ActionVolumeRead,
+			(auth.Volume{ID: o.ID, Name: o.Name, Owner: o.Owner, Labels: o.Labels}).Resource(), true
 	}
 	return "", "", authz.Resource{}, false
 }

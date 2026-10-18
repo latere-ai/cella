@@ -1437,6 +1437,163 @@ paths:
               example: *secret
         default:
           $ref: "#/components/responses/Error"
+  /v1/volumes:
+    get:
+      operationId: listVolumes
+      summary: List volumes
+      description: >-
+        List the caller's volumes. Answers `{"items": [...], "next": "..."}`.
+        `owner` and `label` are intersected with what the caller may read, so
+        a selector outside it is an empty page, never `forbidden`. Authorized
+        as `volume.list`.
+      parameters:
+        - $ref: "#/components/parameters/ListLabel"
+        - $ref: "#/components/parameters/ListOwner"
+        - $ref: "#/components/parameters/ListCursor"
+        - $ref: "#/components/parameters/ListLimit"
+      responses:
+        "200":
+          description: One page of volumes.
+          content:
+            application/json:
+              example:
+                items:
+                  - &volume
+                    apiVersion: cella.latere.ai/v1beta1
+                    kind: Volume
+                    metadata: &volumeMetadata
+                      name: grader
+                    spec: &volumeSpec
+                      environment: default
+                      size: 1Gi
+                      access: shared-read
+                      source:
+                        kind: image
+                        image: "registry.example.com/grader@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+                      retain: true
+                    status:
+                      id: vol_example
+                      owner: "https://issuer.example.com|alice"
+                      phase: Available
+                      attachedTo: []
+                      capacity: 1Gi
+                      createdAt: "2026-10-18T12:00:00Z"
+                      updatedAt: "2026-10-18T12:00:30Z"
+                next: ""
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Volume"
+                  next:
+                    type: string
+                    description: The cursor of the next page; empty on the last.
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/volumes/{name}:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        description: >-
+          The volume's name, which the apply takes as the object it writes, or
+          on a read and a delete its `vol_` id.
+        schema:
+          type: string
+    put:
+      operationId: applyVolume
+      summary: Apply a volume
+      description: >-
+        Apply a volume by name. A create answers 201 with the volume
+        `Pending` and fills it from its source; a read answers `Available`
+        once the fill is done, or `Failed` with a reason. An image source
+        passes this server's admission step as a sandbox's image does, and is
+        stored as the digest-pinned reference it resolved to. A second apply
+        changes the labels, the annotations and `retain`. Authorized as
+        `volume.create` with `environment.use`, or `volume.update`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            example:
+              apiVersion: cella.latere.ai/v1beta1
+              kind: Volume
+              metadata: *volumeMetadata
+              spec:
+                size: 1Gi
+                access: shared-read
+                source:
+                  kind: image
+                  image: "registry.example.com/grader@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+      responses:
+        "200":
+          description: The volume the update left.
+          content:
+            application/json:
+              example: *volume
+        "201":
+          description: The volume the create recorded, Pending until it is filled.
+          content:
+            application/json:
+              example:
+                apiVersion: cella.latere.ai/v1beta1
+                kind: Volume
+                metadata: *volumeMetadata
+                spec: *volumeSpec
+                status:
+                  id: vol_example
+                  owner: "https://issuer.example.com|alice"
+                  phase: Pending
+                  attachedTo: []
+                  createdAt: "2026-10-18T12:00:00Z"
+                  updatedAt: "2026-10-18T12:00:00Z"
+        default:
+          $ref: "#/components/responses/Error"
+    get:
+      operationId: readVolume
+      summary: Read a volume
+      description: >-
+        Read one volume, with `attachedTo` naming every sandbox that mounts
+        it. Authorized as `volume.read`.
+      responses:
+        "200":
+          description: The volume.
+          content:
+            application/json:
+              example: *volume
+              schema:
+                $ref: "#/components/schemas/Volume"
+        default:
+          $ref: "#/components/responses/Error"
+    delete:
+      operationId: deleteVolume
+      summary: Delete a volume
+      description: >-
+        Delete one volume that no sandbox mounts; one that a sandbox mounts,
+        a stopped one included, is `volume_busy`. Authorized as
+        `volume.delete`.
+      responses:
+        "200":
+          description: The volume as the delete found it, Deleting.
+          content:
+            application/json:
+              example:
+                apiVersion: cella.latere.ai/v1beta1
+                kind: Volume
+                metadata: *volumeMetadata
+                spec: *volumeSpec
+                status:
+                  id: vol_example
+                  owner: "https://issuer.example.com|alice"
+                  phase: Deleting
+                  attachedTo: []
+                  capacity: 1Gi
+                  createdAt: "2026-10-18T12:00:00Z"
+                  updatedAt: "2026-10-18T12:05:00Z"
+        default:
+          $ref: "#/components/responses/Error"
   /v1/environments:
     get:
       operationId: listEnvironments
@@ -1954,6 +2111,62 @@ components:
             the last substitution is at or after it and, unless a report was
             lost, less than 5 minutes after it. Absent on a secret no gateway
             has substituted.
+    Volume:
+      type: object
+      description: >-
+        A Volume as every answer carries it: storage with a life of its own,
+        filled once from its source and mounted by a sandbox's
+        `spec.volumes`. The manifest reference describes every field of
+        `spec`.
+      properties:
+        apiVersion:
+          type: string
+        kind:
+          type: string
+          enum: [Volume]
+        metadata:
+          type: object
+          description: The name and the labels the owner gave it.
+        spec:
+          type: object
+          description: >-
+            The environment, the size, the access, the source and retain. An
+            image source is the digest-pinned reference this server admitted.
+        status:
+          $ref: "#/components/schemas/VolumeStatus"
+    VolumeStatus:
+      type: object
+      required: [id, owner, phase, attachedTo, createdAt]
+      properties:
+        id:
+          type: string
+          description: The volume's identifier, `vol_` and a ULID; it addresses the volume in every route and in a mount.
+        owner:
+          type: string
+          description: The subject that created it, `<issuer>|<sub>`.
+        phase:
+          type: string
+          enum: [Pending, Available, Failed, Deleting, Lost]
+        reason:
+          type: string
+          description: Why the fill failed, on a Failed volume.
+        message:
+          type: string
+          description: The data plane's own sentence about a failed fill.
+        attachedTo:
+          type: array
+          items:
+            type: string
+          description: The id of every sandbox whose desired state mounts the volume, stopped ones included.
+        capacity:
+          type: string
+          description: The capacity the data plane granted, in quantity syntax.
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
     FileInfo:
       type: object
       required: [name, path, size, mode, modTime, isDir]

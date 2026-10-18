@@ -451,6 +451,8 @@ func TestTheRoutesOfEveryObjectCall(t *testing.T) {
 		switch {
 		case strings.HasPrefix(r.URL.Path, "/v1/secrets"):
 			_, _ = w.Write([]byte(`{"apiVersion":"` + v1.APIVersion + `","kind":"Secret","metadata":{"name":"api"},"spec":{"kind":"static"},"status":{"id":"sec_1","owner":"alice","version":2}}`))
+		case strings.HasPrefix(r.URL.Path, "/v1/volumes"):
+			_, _ = w.Write([]byte(`{"apiVersion":"` + v1.APIVersion + `","kind":"Volume","metadata":{"name":"grader"},"spec":{"size":"1Gi"},"status":{"id":"vol_1","owner":"alice","phase":"Available","attachedTo":[]}}`))
 		case strings.HasPrefix(r.URL.Path, "/v1/environments"):
 			_, _ = w.Write([]byte(`{"apiVersion":"` + v1.APIVersion + `","kind":"Environment","metadata":{"name":"gpu"},"spec":{"mode":"workers"},"status":{"id":"gpu","phase":"Ready"}}`))
 		default:
@@ -462,6 +464,7 @@ func TestTheRoutesOfEveryObjectCall(t *testing.T) {
 	sandbox := client.JSON([]byte(`{"apiVersion":"` + v1.APIVersion + `","kind":"Sandbox","metadata":{"name":"dev"},"spec":{}}`))
 	secret := client.YAML([]byte("apiVersion: " + v1.APIVersion + "\nkind: Secret\nmetadata:\n  name: api\n"))
 	environment := client.Manifest{Body: []byte(`{"kind":"Environment"}`)}
+	volume := client.YAML([]byte("apiVersion: " + v1.APIVersion + "\nkind: Volume\nmetadata:\n  name: grader\n"))
 	for _, tc := range []struct {
 		name         string
 		run          func() error
@@ -474,6 +477,9 @@ func TestTheRoutesOfEveryObjectCall(t *testing.T) {
 		{"apply a secret", func() error { _, _, err := c.ApplySecret(ctx, "api", secret); return err }, "PUT", "/v1/secrets/api", client.MediaYAML},
 		{"create an environment", func() error { _, _, err := c.CreateEnvironment(ctx, environment); return err }, "POST", "/v1/environments", client.MediaJSON},
 		{"apply an environment", func() error { _, _, err := c.ApplyEnvironment(ctx, "gpu", environment); return err }, "PUT", "/v1/environments/gpu", client.MediaJSON},
+		{"apply a volume", func() error { _, _, err := c.ApplyVolume(ctx, "grader", volume); return err }, "PUT", "/v1/volumes/grader", client.MediaYAML},
+		{"get a volume", func() error { _, _, err := c.GetVolume(ctx, "vol_1"); return err }, "GET", "/v1/volumes/vol_1", ""},
+		{"delete a volume", func() error { _, err := c.Delete(ctx, client.KindVolume, "grader"); return err }, "DELETE", "/v1/volumes/grader", ""},
 		{"get a sandbox", func() error { _, _, err := c.GetSandbox(ctx, "sbx_1"); return err }, "GET", "/v1/sandboxes/sbx_1", ""},
 		{"get a secret", func() error { _, _, err := c.GetSecret(ctx, "api"); return err }, "GET", "/v1/secrets/api", ""},
 		{"get an environment", func() error { _, _, err := c.GetEnvironment(ctx, "gpu"); return err }, "GET", "/v1/environments/gpu", ""},
@@ -735,6 +741,7 @@ func TestEveryKindNamesItsCollection(t *testing.T) {
 		{client.KindSandbox, "sandboxes", "/v1/sandboxes", "Sandbox"},
 		{client.KindSecret, "secrets", "/v1/secrets", "Secret"},
 		{client.KindEnvironment, "environments", "/v1/environments", "Environment"},
+		{client.KindVolume, "volumes", "/v1/volumes", "Volume"},
 	} {
 		if tc.kind.Plural() != tc.plural || tc.kind.Path() != tc.path || tc.kind.ManifestKind() != tc.manifestKind {
 			t.Errorf("%s names %q, %q and %q", tc.kind, tc.kind.Plural(), tc.kind.Path(), tc.kind.ManifestKind())
@@ -838,5 +845,28 @@ func TestCreateSandboxWait(t *testing.T) {
 	}
 	if got := f.last(); got.Query.Get("wait") != "1" || got.Query.Has("timeout") || got.Path != "/v1/sandboxes/dev" {
 		t.Fatalf("a held apply with the server's bound sent %s %v", got.Path, got.Query)
+	}
+}
+
+// TestVolumesListLikeSandboxesDo: the volume list sends the owner and label
+// selectors as the sandbox list does and decodes each volume with its phase
+// and pinned image.
+func TestVolumesListLikeSandboxesDo(t *testing.T) {
+	f := newFixture(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"items":[{"metadata":{"name":"grader"},"spec":{"size":"1Gi","source":{"kind":"image","image":"registry.example.com/grader@sha256:` +
+			strings.Repeat("0", 64) + `"}},"status":{"id":"vol_1","phase":"Available","attachedTo":[]}}],"next":""}`))
+	})
+	items, _, err := f.client(client.Config{}).ListVolumes(t.Context(), client.ListOptions{
+		Limit: 10, Owner: "issuer|alice", Labels: []string{"team=evals"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].Status.Phase != v1.VolumeAvailable || v1.ImageDigest(items[0].Spec.Source.Image) != "sha256:"+strings.Repeat("0", 64) {
+		t.Fatalf("the list holds %+v", items)
+	}
+	seen := f.last()
+	if seen.Path != "/v1/volumes" || seen.Query.Get("owner") != "issuer|alice" || seen.Query.Get("label") != "team=evals" {
+		t.Fatalf("the list called %s?%s", seen.Path, seen.Query.Encode())
 	}
 }

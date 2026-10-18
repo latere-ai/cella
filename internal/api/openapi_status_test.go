@@ -120,6 +120,15 @@ func TestTheDocumentNamesTheStatusesAnswered(t *testing.T) {
 	d.send(f, "readSecret", "GET", "/v1/secrets/api-key", f.alice, "", "")
 	d.send(f, "deleteSecret", "DELETE", "/v1/secrets/api-key", f.alice, "", "")
 
+	// Volumes, over a driver that keeps them in memory.
+	f, _ = setupVolumes(t, nil)
+	grader := volumeBody("grader", v1.VolumeAccessSharedRead, pinnedGrader)
+	d.send(f, "applyVolume", "PUT", "/v1/volumes/grader", f.alice, jsonMedia, grader)
+	d.send(f, "applyVolume", "PUT", "/v1/volumes/grader", f.alice, jsonMedia, grader)
+	d.send(f, "listVolumes", "GET", "/v1/volumes", f.alice, "", "")
+	d.send(f, "readVolume", "GET", "/v1/volumes/grader", f.alice, "", "")
+	d.send(f, "deleteVolume", "DELETE", "/v1/volumes/grader", f.alice, "", "")
+
 	// The dial socket, the port proxy and its redirect, over a driver that
 	// dials a server standing for the one inside.
 	f, _, obj, _ = proxyFixture(t)

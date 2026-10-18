@@ -79,7 +79,7 @@ other two figures the type carries, this release does not apply
 `requests_per_minute` with `capability_unsupported`, so leave both out.
 
 A list is decided in two steps. The list action (`sandbox.list`,
-`secret.list`, `environment.list`) answers an allow that may carry a
+`secret.list`, `volume.list`, `environment.list`) answers an allow that may carry a
 `filter` of `owners` and `labels`. The core holds every object to that
 filter, then asks the kind's read (`sandbox.read`, and so on) for each
 object the filter lets through, and leaves out the ones the read refuses.
@@ -95,8 +95,8 @@ narrow `environment.list` to the tenant and allow `environment.read` on the
 default for them; to hide the default from someone, deny that read, which
 hides it from a read by name as well.
 
-An update is decided on the change. `sandbox.update` and `secret.update`
-carry, under `resource.proposed`, the object the request would write: its
+An update is decided on the change. `sandbox.update`, `secret.update` and
+`volume.update` carry, under `resource.proposed`, the object the request would write: its
 `owner`, its `metadata` and its `spec`. Compare it with the object to refuse
 a change you do not allow, such as a label your tenancy is read from being
 dropped or rewritten. The proposal's labels are the ones the request sent,
@@ -129,6 +129,18 @@ resource the fixed size you gave it before. The ceiling you return is
 held to `spec.resources` and to the server's own ceilings like any other,
 and your meter reads `sandbox.resized` and `status.resources` for the size
 a sandbox held and when.
+
+Your catalog governs volumes too. A `Volume` whose source is an image is
+sent to the endpoint once, when it is created, as a `Sandbox` that names
+the volume's environment, its labels and `spec.image` set to the volume's
+image, and nothing else; the request's `volume` member carries the
+Volume, and is `null` on every sandbox's apply. The core reads only
+`spec.image` from your answer, so an endpoint that resolves names and
+refuses images outside a catalog does the same for volumes with no change,
+and one that reads `volume` can skip the rules that belong to a sandbox.
+The image you return must be pinned by digest, `name@sha256:...`: a
+catalog entry pinned by a tag is refused for a volume with
+`invalid_field`.
 
 ### What happened
 

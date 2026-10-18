@@ -72,9 +72,12 @@ server writes.
 
 ## What you get
 
-- **Three kinds.** `Sandbox`, `Secret`, and `Environment`, decoded
-  strictly from JSON or YAML, with server-side defaults and one error
-  code per refusal naming the field at fault.
+- **Four kinds.** `Sandbox`, `Secret`, `Volume`, and `Environment`,
+  decoded strictly from JSON or YAML, with server-side defaults and one
+  error code per refusal naming the field at fault.
+- **Volumes.** Storage that outlives a sandbox, filled once from nothing
+  or from an image pinned by digest, and mounted read-write by one
+  sandbox or read-only by any number, on Kubernetes and Podman.
 - **Runtimes.** Kubernetes (a claim and a Pod per sandbox), Podman (a
   container per sandbox), and a native runtime that runs host processes
   for trusted development. A `cellad worker` runs any of the three on
@@ -121,8 +124,11 @@ The design covers more than this release serves. A manifest that asks
 for one of these is refused with `capability_unsupported` or
 `unsupported_kind`, never accepted and ignored.
 
-- The `Volume` and `SandboxSet` kinds. The authorizer vocabulary names
-  their actions; the API does not serve them.
+- The `SandboxSet` kind. The authorizer vocabulary names its actions;
+  the API does not serve it.
+- A volume filled from a snapshot or an archive, a volume on a named
+  storage class, a volume that grows, and a change of a sandbox's mounts
+  after it is created.
 - A workspace filled from git or from a volume. `spec.workspace.source`
   takes `empty`.
 - A public endpoint for a port (`expose: public`). No runtime provides

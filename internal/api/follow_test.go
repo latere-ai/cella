@@ -486,7 +486,9 @@ func TestRecordGateDecidesEachRecord(t *testing.T) {
 		{"a label the filter does not name", object(events.KindSandbox, "sbx_b", "alice", "b"), false},
 		{"another owner", object(events.KindSandbox, "sbx_c", "bob", "a"), false},
 		{"a kind the caller may not list", object(events.KindSecret, "sec_a", "alice", "a"), false},
-		{"a kind the feed does not serve", object("Volume", "vol_a", "alice", "a"), false},
+		{"a volume the filter passes", object(events.KindVolume, "vol_a", "alice", "a"), true},
+		{"a volume of another owner", object(events.KindVolume, "vol_b", "bob", "a"), false},
+		{"a kind the feed does not serve", object("SandboxSet", "set_a", "alice", "a"), false},
 	} {
 		allowed, err := gate.allows(tc.record)
 		if err != nil || allowed != tc.allowed {

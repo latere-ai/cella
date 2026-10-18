@@ -25,10 +25,13 @@ const (
 	KindSandbox     Kind = "sandbox"
 	KindSecret      Kind = "secret"
 	KindEnvironment Kind = "environment"
+	KindVolume      Kind = "volume"
 )
 
 // plurals is each kind's collection, which is the segment of its routes.
-var plurals = map[Kind]string{KindSandbox: "sandboxes", KindSecret: "secrets", KindEnvironment: "environments"}
+var plurals = map[Kind]string{
+	KindSandbox: "sandboxes", KindSecret: "secrets", KindEnvironment: "environments", KindVolume: "volumes",
+}
 
 // Plural is the collection name of a kind.
 func (k Kind) Plural() string { return plurals[k] }
