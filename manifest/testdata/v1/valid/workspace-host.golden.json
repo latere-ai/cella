@@ -1,0 +1,36 @@
+{
+  "sandbox": {
+    "apiVersion": "cella.latere.ai/v1beta1",
+    "kind": "Sandbox",
+    "metadata": {
+      "name": "on-the-host"
+    },
+    "spec": {
+      "environment": "default",
+      "image": "registry.example/base:1",
+      "workdir": "/home/dev/project/site",
+      "resources": {
+        "cpu": "1",
+        "memory": "2Gi",
+        "disk": "10Gi"
+      },
+      "workspace": {
+        "path": "/home/dev/project/site",
+        "host": "/home/dev/project/site"
+      },
+      "network": {
+        "egress": {
+          "mode": "open"
+        }
+      },
+      "lifecycle": {
+        "autoStop": "15m",
+        "ttl": "24h",
+        "autoDelete": "72h"
+      },
+      "scheduling": {
+        "queue": "default"
+      }
+    }
+  }
+}

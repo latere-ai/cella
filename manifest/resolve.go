@@ -244,10 +244,16 @@ func defaulting(ctx context.Context, obj *v1.Sandbox, o Options) (*v1.Environmen
 	if obj.Spec.Image == "" && runsImages(env) {
 		obj.Spec.Image = o.Defaults.Image
 	}
+	// A host folder is bound in place, so the workspace path is the folder
+	// and every file route is checked against it; it is never filled from
+	// a source (spec 081).
+	if host := obj.Spec.Workspace.Host; host != "" {
+		obj.Spec.Workspace.Path = host
+	}
 	if obj.Spec.Workspace.Path == "" {
 		obj.Spec.Workspace.Path = DefaultWorkspacePath
 	}
-	if obj.Spec.Workspace.Source == "" {
+	if obj.Spec.Workspace.Source == "" && obj.Spec.Workspace.Host == "" {
 		obj.Spec.Workspace.Source = v1.WorkspaceSourceEmpty
 	}
 	if obj.Spec.Workdir == "" {
@@ -462,6 +468,7 @@ func immutable(existing, obj *v1.Sandbox) error {
 		{"spec.user", existing.Spec.User != obj.Spec.User},
 		{"spec.workspace.path", existing.Spec.Workspace.Path != obj.Spec.Workspace.Path},
 		{"spec.workspace.source", existing.Spec.Workspace.Source != obj.Spec.Workspace.Source},
+		{pathWorkspaceHost, existing.Spec.Workspace.Host != obj.Spec.Workspace.Host},
 		{"spec.env", !maps.Equal(existing.Spec.Env, obj.Spec.Env)},
 		{"spec.display", !displayEqual(existing.Spec.Display, obj.Spec.Display)},
 		{"spec.network.ports", !slices.Equal(existing.Spec.Network.Ports, obj.Spec.Network.Ports)},
@@ -504,8 +511,11 @@ func autoStopWithinTTL(l v1.Lifecycle) error {
 // returns a warning where the environment records a field instead of enforcing
 // it.
 func capabilities(obj *v1.Sandbox, env *v1.Environment, o Options) ([]string, error) {
-	if obj.Spec.Workspace.Source != v1.WorkspaceSourceEmpty {
+	if obj.Spec.Workspace.Host == "" && obj.Spec.Workspace.Source != v1.WorkspaceSourceEmpty {
 		return nil, failAt("capability_unsupported", "spec.workspace.source", "This server fills a workspace from "+v1.WorkspaceSourceEmpty+" only.")
+	}
+	if err := hostWorkspaceCapability(obj, env); err != nil {
+		return nil, err
 	}
 	// The amounts a sandbox starts at change under Resize, and its ceiling
 	// under the Autosize flag of each resource it names, so an update that
@@ -539,7 +549,7 @@ func capabilities(obj *v1.Sandbox, env *v1.Environment, o Options) ([]string, er
 	if err := portCapability(obj, env, meshMembershipAt(obj, o)); err != nil {
 		return nil, err
 	}
-	warnings, err := egressCapability(obj, env)
+	warnings, err := egressOnHost(obj, env)
 	if err != nil {
 		return nil, err
 	}

@@ -221,6 +221,9 @@ func validateWorkspace(w v1.Workspace) error {
 	default:
 		return failAt("invalid_field", "spec.workspace.source", "The workspace source is empty, git, or volume.")
 	}
+	if err := validateHostWorkspace(w); err != nil {
+		return err
+	}
 	if w.Path == "" {
 		return nil
 	}
@@ -229,6 +232,31 @@ func validateWorkspace(w v1.Workspace) error {
 	}
 	if w.Path == ReservedPathPrefix || strings.HasPrefix(w.Path, ReservedPathPrefix+"/") {
 		return failAt("invalid_field", "spec.workspace.path", "The workspace path cannot be under "+ReservedPathPrefix+", which the control plane owns.")
+	}
+	return nil
+}
+
+// pathWorkspaceHost is the field a host folder is named in (spec 081).
+const pathWorkspaceHost = "spec.workspace.host"
+
+// validateHostWorkspace holds spec.workspace.host to its shape: a clean
+// absolute path other than the root, with no source beside it, since the
+// folder is what the sandbox starts with, and no path other than itself,
+// since the folder is bound where it is.
+func validateHostWorkspace(w v1.Workspace) error {
+	if w.Host == "" {
+		return nil
+	}
+	if !absoluteCleanPath(w.Host) || w.Host == "/" {
+		return failAt("invalid_field", pathWorkspaceHost, "The host folder must be a clean absolute path below the root.")
+	}
+	if w.Source != "" {
+		return failPaths("exclusive_fields", "A host folder is what the sandbox starts with, so it takes no source.",
+			[]string{"spec.workspace.source", pathWorkspaceHost})
+	}
+	if w.Path != "" && w.Path != w.Host {
+		return failPaths("exclusive_fields", "A host folder is bound where it is, so the workspace path is the folder itself.",
+			[]string{"spec.workspace.path", pathWorkspaceHost})
 	}
 	return nil
 }

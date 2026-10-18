@@ -41,6 +41,9 @@ type Capabilities struct {
 	Pool         bool `json:"pool"`
 	Files        bool `json:"files"`
 	Detach       bool `json:"detach"`
+	// HostWorkspace says the driver binds a host folder a manifest names in
+	// spec.workspace.host as the sandbox's workspace (spec 081).
+	HostWorkspace bool `json:"hostWorkspace,omitempty"`
 	// Autosize says which resources the driver sizes inside a manifest's
 	// spec.resources.max. It is always on the wire, each flag false where
 	// the driver holds that resource fixed.
@@ -78,5 +81,5 @@ func (c Capabilities) Equal(other Capabilities) bool {
 		c.VolumeImages == other.VolumeImages && c.Snapshots == other.Snapshots && c.Attach == other.Attach && c.Dial == other.Dial &&
 		c.Display == other.Display && c.Input == other.Input && c.Resize == other.Resize &&
 		c.Pool == other.Pool && c.Files == other.Files && c.Detach == other.Detach &&
-		c.Autosize == other.Autosize
+		c.HostWorkspace == other.HostWorkspace && c.Autosize == other.Autosize
 }

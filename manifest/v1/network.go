@@ -91,6 +91,21 @@ const (
 	// condition: a read of one sandbox that cannot reach its driver is
 	// refused with driver_unavailable.
 	ConditionObserved = "Observed"
+	// ConditionHostApproval is the host's answer to a create on a worker
+	// whose embedder asks before it runs one (spec 082). It is Unknown with
+	// ReasonHostPending while the host has not answered, True once it
+	// allowed the create, and False with the reason the sandbox failed for
+	// when it refused or did not answer in time. A sandbox on a worker that
+	// answers at once carries none.
+	ConditionHostApproval = "HostApproval"
+)
+
+// The reasons the HostApproval condition carries.
+const (
+	ReasonHostPending  = "Pending"
+	ReasonHostApproved = "Approved"
+	ReasonHostRefused  = "HostRefused"
+	ReasonHostTimeout  = "HostTimeout"
 )
 
 // The values a condition's Status takes, spelled as Kubernetes spells them so

@@ -1,0 +1,8 @@
+{
+  "code": "exclusive_fields",
+  "path": "spec.workspace.source",
+  "paths": [
+    "spec.workspace.source",
+    "spec.workspace.host"
+  ]
+}

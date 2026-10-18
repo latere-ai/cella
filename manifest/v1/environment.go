@@ -221,9 +221,14 @@ type EnvironmentStatus struct {
 	Capabilities Capabilities `json:"capabilities,omitzero"`
 	// Workers and Gateways are how many of each hold a stream open, and
 	// LastHeartbeat when the most recent worker was last heard from.
-	Workers       int       `json:"workers,omitempty"`
-	Gateways      int       `json:"gateways,omitempty"`
-	LastHeartbeat time.Time `json:"lastHeartbeat,omitzero"`
+	Workers int `json:"workers,omitempty"`
+	// Hosts is one entry per live worker whose driver reports the machine
+	// it runs on: its operating system, architecture, grants and network
+	// (spec 082). A manifest's workspace.host and egress resolve against
+	// what every entry allows.
+	Hosts         []HostStatus `json:"hosts,omitempty"`
+	Gateways      int          `json:"gateways,omitempty"`
+	LastHeartbeat time.Time    `json:"lastHeartbeat,omitzero"`
 	// Used is what the environment's sandboxes hold of its capacity.
 	Used Capacity `json:"used,omitzero"`
 	// Version is the store row's version, which design 008's ETag carries

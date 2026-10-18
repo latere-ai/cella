@@ -71,8 +71,15 @@ func corpusEnvironment() v1.Environment {
 			Pool:         true,
 			Files:        true,
 			Detach:       true,
-			Autosize:     v1.Autosize{CPU: true, Memory: true, Disk: true},
+			// The corpus's host grants one folder and reports no network
+			// of its own, so a manifest naming the folder resolves and the
+			// egress rows still read the declared modes.
+			HostWorkspace: true,
+			Autosize:      v1.Autosize{CPU: true, Memory: true, Disk: true},
 		},
+		Hosts: []v1.HostStatus{{Worker: "wrk_corpus", Host: v1.HostInfo{
+			OS: "linux", Arch: "amd64", Grants: []v1.HostGrant{{Path: "/home/dev/project", Write: true}},
+		}}},
 	}
 	return env
 }

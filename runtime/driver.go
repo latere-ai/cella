@@ -22,6 +22,16 @@ var (
 	ErrNotRunning    = errors.New("environment is not running")
 	ErrUnsupported   = errors.New("operation is not supported")
 	ErrInvalid       = errors.New("invalid runtime request")
+	// ErrHostRefused is a host that refused an operation: its own policy
+	// said no, or the operation asked for something the host does not
+	// grant (spec 082). The error's text carries the host's reason.
+	ErrHostRefused = errors.New("the host refused the operation")
+	// ErrHostTimeout is a create the host did not answer within the time
+	// its worker holds one.
+	ErrHostTimeout = errors.New("the host did not answer in time")
+	// ErrWorkspaceNotGranted is a workspace.host the host does not grant,
+	// or a write to a folder it grants read-only.
+	ErrWorkspaceNotGranted = errors.New("the host does not grant this folder")
 )
 
 const (
@@ -127,9 +137,20 @@ type MemoryReader interface {
 	MemoryKills(ctx context.Context, id string) (MemoryKills, error)
 }
 
-// Workspace is where the sandbox's own files live inside it.
+// Workspace is where the sandbox's own files live inside it. Host is the
+// granted host folder a driver that declares HostWorkspace binds in place as
+// the workspace, and Path is then the same folder (spec 081).
 type Workspace struct {
 	Path string `json:"path,omitempty"`
+	Host string `json:"host,omitempty"`
+}
+
+// HostDescriber is a driver that reports the machine it runs on: its
+// operating system, architecture, granted folders and network. A worker
+// carries it in its registration, and the control plane resolves
+// workspace.host and egress against it (spec 082).
+type HostDescriber interface {
+	Host() v1.HostInfo
 }
 
 // Egress is the sandbox's network boundary as the driver receives it: the
@@ -172,12 +193,16 @@ func (e Egress) IsZero() bool {
 
 type CreateSpec struct {
 	ID, Name, Owner, Image, Workdir string
-	Command, Args                   []string
-	Env, Labels                     map[string]string
-	Lifecycle                       Lifecycle
-	User                            string
-	Resources                       Resources
-	Workspace                       Workspace
+	// Isolation is the class the sandbox resolved to, which a worker
+	// compares with its own driver's before it creates anything (spec 082).
+	// Empty asks for whatever the driver provides.
+	Isolation     string `json:"isolation,omitempty"`
+	Command, Args []string
+	Env, Labels   map[string]string
+	Lifecycle     Lifecycle
+	User          string
+	Resources     Resources
+	Workspace     Workspace
 	// Volumes are the volumes the sandbox mounts, each Available on this
 	// driver before the create (spec 019). A driver that declares no
 	// Volumes capability refuses a spec that carries one with

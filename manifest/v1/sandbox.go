@@ -154,9 +154,13 @@ type Usage struct {
 }
 
 // Workspace is the initial state and mount point of the sandbox's own files.
+// Host names a folder on the machine a worker runs on, which the sandbox
+// works in place: it is bound, never copied, and never deleted with the
+// sandbox (spec 081). It excludes Source, and resolve writes it to Path.
 type Workspace struct {
 	Path   string `json:"path,omitempty"`
 	Source string `json:"source,omitempty"`
+	Host   string `json:"host,omitempty"`
 }
 
 // WorkspaceSourceEmpty is a workspace the sandbox starts with nothing in.

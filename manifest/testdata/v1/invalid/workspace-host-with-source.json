@@ -1,0 +1,13 @@
+{
+  "apiVersion": "cella.latere.ai/v1beta1",
+  "kind": "Sandbox",
+  "metadata": {
+    "name": "host-and-source"
+  },
+  "spec": {
+    "workspace": {
+      "host": "/home/dev/project",
+      "source": "empty"
+    }
+  }
+}
