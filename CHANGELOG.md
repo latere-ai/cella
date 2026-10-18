@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.17.2 - 2026-10-18
+
 ### Added
 
 - **A volume create is decided on what it would store.** `volume.create`
