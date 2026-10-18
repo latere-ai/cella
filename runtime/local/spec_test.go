@@ -219,6 +219,28 @@ func TestLocalReadsOutsideGrantsAreRefused(t *testing.T) {
 	}
 }
 
+// TestLocalDataDirInsideHome: with the data directory inside the home
+// directory, as a program on a person's computer keeps it, a command that
+// stats its own output (cat) runs under the runtime. The runtime denies the
+// whole home but what a stage is granted, so the stage's own log file must
+// be among its grants.
+func TestLocalDataDirInsideHome(t *testing.T) {
+	shim(t)
+	h := newHost(t)
+	data := filepath.Join(h.home, "Library", "Caches", "latere", "devices", "dev-test")
+	if err := os.MkdirAll(data, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	real := underSRT(t, h, Options{DataDir: data})
+	sandbox(t, real, driver.CreateSpec{ID: "sbx_home_data"})
+	if _, err := real.Write(context.Background(), "sbx_home_data", driver.WriteRequest{Path: driver.DefaultWorkdir + "/inside.txt", Body: strings.NewReader("inside")}); err != nil {
+		t.Fatal(err)
+	}
+	if out, _, code, err := run(t, real, "sbx_home_data", driver.ExecRequest{Command: []string{"cat", "inside.txt"}}); err != nil || code != 0 || out != "inside" {
+		t.Fatalf("cat under a data directory inside home read %q with %d: %v", out, code, err)
+	}
+}
+
 // localEnvironment is a worker environment served by the driver: its
 // capabilities and its host as one live worker reports them.
 func localEnvironment(d *Driver) v1.Environment {

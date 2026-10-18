@@ -569,6 +569,12 @@ func (d *Driver) stage(r record, name string, argv []string, env map[string]stri
 		{Host: p.home, Access: hostsandbox.ReadWrite},
 		{Host: p.tmp, Access: hostsandbox.ReadWrite},
 		{Host: p.streams, Access: hostsandbox.ReadWrite},
+		// The stage's own output goes to a file here, which the runtime
+		// keeps it from writing; reading it is what lets a command stat its
+		// own stdout, which the OS sandbox checks by path even on the
+		// inherited descriptor. Without it, a data directory inside the home
+		// directory leaves cat and head failing on their own output.
+		{Host: p.logs, Access: hostsandbox.ReadOnly},
 		{Host: r.Root, Access: access},
 	}
 	if _, err := os.Stat(p.token); err == nil {
