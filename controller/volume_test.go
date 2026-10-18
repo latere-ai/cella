@@ -381,8 +381,8 @@ func TestRetainAndDelete(t *testing.T) {
 		t.Fatal("the driver still holds the volume")
 	}
 	deleted, err := c.DeleteVolume(t.Context(), kept.Status.ID)
-	if err != nil || deleted.Status.Phase != v1.VolumeDeleting {
-		t.Fatalf("the delete answered %+v, %v", deleted.Status, err)
+	if err != nil || deleted.Status.Phase != v1.VolumeDeleting || deleted.Status.AttachedTo == nil {
+		t.Fatalf("the delete answered %+v, %v, want Deleting with an empty attachedTo", deleted.Status, err)
 	}
 	if _, err := c.GetVolume(t.Context(), kept.Status.ID, "alice"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("a deleted volume reads %v", err)

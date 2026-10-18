@@ -194,7 +194,11 @@ func (c *Controller) DeleteVolume(ctx context.Context, id string) (v1.Volume, er
 		c.log.WarnContext(ctx, "the volume's delete is left to the volume loop", "volume", id, "err", err)
 		c.wakeVolumes()
 	}
-	return manifest.CloneVolume(held), nil
+	// The answer is the volume as the delete found it, which no sandbox
+	// holds, in the shape every other read has.
+	out := manifest.CloneVolume(held)
+	out.Status.AttachedTo = []string{}
+	return out, nil
 }
 
 // finishVolumeDelete asks the driver to remove the volume and then removes
