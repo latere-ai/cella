@@ -493,6 +493,39 @@ func TestAttachCapabilityGate(t *testing.T) {
 	}
 }
 
+// stdinDriver declares ExecStdin and no Attach, as the local driver does: a
+// command takes its input, and nothing opens a terminal.
+type stdinDriver struct{ runtime.Driver }
+
+func (stdinDriver) Capabilities() runtime.Capabilities {
+	return runtime.Capabilities{Files: true, ExecStdin: true}
+}
+
+// TestExecStdinCapabilityGate proves an environment that declares ExecStdin
+// and no Attach opens the exec socket for a command with input, and still
+// answers 422 on the attach socket, which is a terminal.
+func TestExecStdinCapabilityGate(t *testing.T) {
+	f := setupDriver(t, nil, func(d runtime.Driver) runtime.Driver { return stdinDriver{d} })
+	obj := f.sandbox("piped")
+	conn, res, err := f.open("/v1/sandboxes/"+obj.Status.ID+"/attach", f.alice)
+	if err == nil {
+		_ = conn.Close()
+		t.Fatal("the attach socket upgraded on an environment without Attach")
+	}
+	if res.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("the attach socket answered %d, want 422", res.StatusCode)
+	}
+	_ = res.Body.Close()
+	conn, r := f.attachTo("/v1/sandboxes/"+obj.Status.ID+"/exec", f.alice, `{"command":["sh","-c","read line; printf 'got:%s\\n' \"$line\""]}`)
+	if err = conn.WriteMessage(websocket.BinaryMessage, []byte("typed\n")); err != nil {
+		t.Fatal(err)
+	}
+	r.await(t, "got:typed")
+	if last, code := r.ended(t); last != `{"exit":0}` || code != websocket.CloseNormalClosure {
+		t.Fatalf("the session ended %q with %d", last, code)
+	}
+}
+
 // TestAttachAuthorization proves the sockets are read, authorized, and only
 // then upgraded, as every other item route is.
 func TestAttachAuthorization(t *testing.T) {

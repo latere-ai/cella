@@ -143,7 +143,7 @@ func (h *handler) files(w http.ResponseWriter, r *http.Request) {
 	}
 	paths := r.URL.Query()["path"]
 	for _, p := range paths {
-		if !validWorkspacePath(workspaceOf(obj), p) {
+		if !validWorkspacePath(workspaceOf(obj), p) && !inScratch(obj, p) {
 			respondError(w, &manifest.Error{Code: "invalid_field", Detail: "path must be an absolute path below the workspace, " + workspaceOf(obj)})
 			return
 		}

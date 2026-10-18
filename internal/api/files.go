@@ -101,10 +101,26 @@ func queryPath(r *http.Request, key string, obj v1.Sandbox) (string, error) {
 // 033, which the API applies before a driver is called at all. The half that
 // resolves symbolic links belongs where the filesystem is.
 func workspacePathError(obj v1.Sandbox, p string) error {
-	if root := workspaceOf(obj); !validWorkspacePath(root, p) {
+	if root := workspaceOf(obj); !validWorkspacePath(root, p) && !inScratch(obj, p) {
 		return &manifest.Error{Code: "invalid_field", Detail: "the path must be absolute and below the workspace, " + root}
 	}
 	return nil
+}
+
+// inScratch reports whether p is below one of the scratch directories a
+// driver that cannot remap paths reports in status.paths, where a caller
+// places a file of its own such as a helper program (spec 081). The driver
+// holds such a path to the same containment as the workspace.
+func inScratch(obj v1.Sandbox, p string) bool {
+	if obj.Status.Paths == nil {
+		return false
+	}
+	for _, dir := range []string{obj.Status.Paths.Home, obj.Status.Paths.Tmp} {
+		if dir != "" && p != dir && validWorkspacePath(dir, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // fileContent streams one file.

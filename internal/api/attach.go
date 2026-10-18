@@ -105,7 +105,12 @@ func (h *handler) socket(w http.ResponseWriter, r *http.Request, terminal bool) 
 		respondError(w, err)
 		return
 	}
-	if !h.Controller.CapabilitiesOf(obj.Status.Environment).Attach {
+	// A terminal needs Attach. A command with stdin and no terminal needs
+	// Attach or ExecStdin, which a driver that holds an attached command's
+	// pipes and has no terminal declares (spec 081); a terminal asked of
+	// such a driver is refused where the session opens.
+	caps := h.Controller.CapabilitiesOf(obj.Status.Environment)
+	if !caps.Attach && (terminal || !caps.ExecStdin) {
 		respondError(w, &manifest.Error{Code: "capability_unsupported", Detail: "the environment provides no terminal session"})
 		return
 	}
