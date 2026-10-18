@@ -8,7 +8,7 @@ depends_on:
 affects: [manifest/, internal/admission/, internal/api/, internal/config/, test/stubs/]
 effort: small
 created: 2026-09-12
-updated: 2026-10-05
+updated: 2026-10-18
 author: changkun
 ---
 
@@ -44,6 +44,8 @@ Built:
   `admission_unavailable` with no retry.
 - The image rule after stage 3, and `CELLA_DEFAULT_IMAGE` where the
   environment runs images.
+- The admission of a Volume's image source through the Sandbox shape,
+  with the envelope's `volume` member ([[084-image-volumes]]).
 - `Defaults` and `Ceilings` as options of `Resolve`, applied with and
   without a webhook, for an importer that sets them.
 - The count ceiling from the authorizer's `limits.max_sandboxes`,
@@ -97,12 +99,21 @@ type AdmitRequest struct {
 type AdmitFunc func(ctx context.Context, in *v1.Sandbox, req AdmitRequest) (*v1.Sandbox, []string, error)
 ```
 
-Admission runs for `Sandbox` applies only, including every replica of
-a `SandboxSet`, one call per replica as the scheduler admits it, with
-`Set` naming the index. `Secret`, `Volume`, `SandboxSet`, and
-`Environment` applies are governed by the authorizer alone
-([[006-identity]]). Admission output is a function of the manifest
-body and is never cached.
+Admission runs for `Sandbox` applies, including every replica of a
+`SandboxSet`, one call per replica as the scheduler admits it, with
+`Set` naming the index, and once for the image a `Volume` is filled
+from. A Volume whose source is an image is admitted at create as a
+`Sandbox` that names the volume's environment, its labels and
+`spec.image` set to the source, and nothing else, with `Volume` set on
+the request; only `spec.image` of the answer is read, and the digest
+rule of [[019-volumes]] runs after it. An image catalog therefore
+governs what a volume is filled from exactly as it governs what a
+sandbox runs, with no change to an endpoint, and an endpoint that knows
+volumes reads `volume` to tell the two calls apart and skip the rules
+that are a sandbox's own. `Secret`, `SandboxSet`, and `Environment`
+applies, and every other field of a `Volume`, are governed by the
+authorizer alone ([[006-identity]]). Admission output is a function of
+the manifest body and is never cached.
 
 ### Defaults and ceilings
 
@@ -154,9 +165,10 @@ image after the default and the webhook is `missing_field`.
 ### The webhook
 
 The body flattens `Actor` into `subject`, `issuer` and `sub`, and carries
-the request id under `request`. `workload`, `existing`, `parent` and `set`
-are present and `null` where they are absent, never omitted, so a webhook
-reads a fixed shape. `environment` is the summary below and not the whole
+the request id under `request`. `workload`, `existing`, `parent`, `set`
+and `volume` are present and `null` where they are absent, never
+omitted, so a webhook reads a fixed shape. `volume` is the Volume whose
+image the call admits, without its status. `environment` is the summary below and not the whole
 `Environment` object, and `request` carries the id alone: the peer address
 and the user agent belong to the authorizer's envelope
 ([[006-identity]]) and not to this one.
@@ -177,6 +189,7 @@ Content-Type: application/json
   "parent":      null,
   "environment": {"id": "env_01J9...", "name": "default", "isolation": "container", "capabilities": {...}},
   "set":         null,
+  "volume":      null,
   "manifest":    <the defaulted object>,
   "request":     {"id": "req_01J9..."}
 }
@@ -272,7 +285,7 @@ so every rule above is drivable.
 | A nil `AdmitFunc` is the identity; `Defaults` and `Ceilings` apply with and without a webhook | `TestDefaultsFillOnlyAbsentFields`, `TestCeilings` | partial: both apply with and without a step; the six `CELLA_DEFAULT_*` and four `CELLA_MAX_*` are loaded by nothing yet |
 | The environment's `defaultQueue` wins over `CELLA_DEFAULT_*`; a caller's value wins over both | `TestDefaultsPrecedence` | not built |
 | With no webhook, `Admit` returns its input unchanged | `TestAdmissionOutputIsValidated`, `TestServeWithoutAdmissionSaysBuiltin` | built |
-| The webhook receives every field of the request shape, `workload` and `parent` set for a spawn, `set` for a replica | `TestEnvelopeMatchesTheEndpoint`, `TestAdmitCarriesTheWorkloadAndTheExisting`, `TestCreatePassesTheCallerToAdmission` | partial: every member is sent and `workload` is set; `parent` is always `null` because `AdmitRequest` carries no parent although a spawn runs admission ([[022-mesh-and-spawn]]), and `set` waits on the `SandboxSet` kind of [[020-scheduling-and-sets]] |
+| The webhook receives every field of the request shape, `workload` and `parent` set for a spawn, `set` for a replica, `volume` for a Volume's image | `TestEnvelopeMatchesTheEndpoint`, `TestAdmitCarriesTheWorkloadAndTheExisting`, `TestCreatePassesTheCallerToAdmission`, `TestAVolumeImageIsAdmittedThroughTheSandboxShape` | partial: `volume` is sent, null on a Sandbox apply ([[084-image-volumes]]); every member is sent and `workload` is set; `parent` is always `null` because `AdmitRequest` carries no parent although a spawn runs admission ([[022-mesh-and-spawn]]), and `set` waits on the `SandboxSet` kind of [[020-scheduling-and-sets]] |
 | The webhook's returned manifest is what the driver gets; an absent `manifest` leaves the input unchanged; warnings land in `status.warnings` | `TestAllowMutationReachesTheCaller`, `TestAllowWithoutAManifestLeavesTheInput`, `TestServeWithAdmission` | built |
 | A webhook that returns an unknown field is `unknown_field`; one that changes `kind`, or `image` on update, is refused naming the path; one that pins `image` at create passes | `TestReturnedManifestIsDecodedStrictly`, `TestAdmissionOutputIsValidated`, `TestImageIsRequiredAfterAdmission` | built |
 | A webhook that widens a child's boundary is `boundary_exceeded` | `TestAdmissionCannotOpenABoundary` | not built |

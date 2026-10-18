@@ -1,6 +1,6 @@
 ---
 title: "Volumes: the Volume kind, access and attachment, sources and fill, snapshots, the managed workspace"
-status: validated
+status: in-progress
 track: core
 depends_on:
   - specs/003-manifest-contract.md
@@ -9,7 +9,7 @@ depends_on:
 affects: [manifest/v1/, runtime/, controller/, internal/api/, internal/store/, internal/config/]
 effort: medium
 created: 2026-09-12
-updated: 2026-09-13
+updated: 2026-10-18
 author: changkun
 ---
 
@@ -30,9 +30,20 @@ to keep files beyond a sandbox, and it is a `Volume`.
 
 ## Current state
 
-Not built. The hosted platform persisted a workspace by a tier field
-and had no caller-declarable attachment. This spec puts persistence
-where the caller can see and name it.
+[[084-image-volumes]] built the part an evaluation's check sandbox
+needs: the `Volume` kind with an `empty` and an `image` source, the
+fill and its loop, a sandbox's `spec.volumes` with the access table,
+retain and delete, the Lost rule and `VolumeMissing`, the events, the
+`/v1/volumes` routes, and the podman and k8s drivers. Its Outcome
+lists where the design below was amended while it was built.
+
+Not built: the `snapshot` and `archive` sources with `Snapshotter`,
+`CELLA_SOURCE_ALLOW` and `CELLA_MAX_SOURCE_BYTES`; a named `class`
+(refused with `capability_unsupported`); growth through `ResizeVolume`
+and `CELLA_MAX_VOLUME_SIZE`; the control plane's writer `Write`;
+`workspace.source: volume`; `Change.Volumes` on a stopped sandbox; and
+volumes on the native, local, vm and remote drivers. The managed
+workspace is the driver's, as below, and has no test of its own yet.
 
 ## Design
 
@@ -61,6 +72,7 @@ status:
   owner: https://login.example.com|alice
   phase: Available            # Pending | Available | Failed | Deleting | Lost
   reason: ""                  # for Failed: SourceUnreachable, SourceTooLarge, SourceDigestMismatch, SourceUnsupported, ClassUnavailable
+  message: ""                 # for Failed: the data plane's own sentence
   attachedTo: [sbx_01J9...]   # sandboxes whose desired state mounts it, Stopped included
   capacity: 20Gi
   snapshots: 2
@@ -71,14 +83,22 @@ status:
 |---|---|---|---|---|
 | `environment` | string | the default environment | no | an `Environment` the caller may use ([[006-identity]]); a volume never leaves it |
 | `size` | quantity | none, required | grow only | Kubernetes quantity syntax as [[003-manifest-contract]] parses it; a smaller value is `invalid_field`; growth needs the driver's `ResizeVolume` to succeed, else `capability_unsupported`; above `CELLA_MAX_VOLUME_SIZE` is `ceiling_exceeded` |
-| `class` | string | the environment's default | no | a storage class the environment's driver knows; unknown is `invalid_field` |
+| `class` | string | the environment's default | no | a storage class the environment's driver knows; unknown is `invalid_field`. Refused when set, `capability_unsupported`, until the drivers know classes: the operator chooses the storage, on k8s with `CELLA_K8S_VOLUME_CLASS` |
 | `access` | enum | `single` | no | who may attach and how, below |
 | `source.kind` | enum | `empty` | no | `empty`, `snapshot`, `image`, or `archive`; exactly the field for the kind is set, any other is `exclusive_fields` |
 | `source.snapshot` | string | none | no | a `snp_` id of a snapshot the caller may read, in the same environment; another environment is `invalid_field` |
-| `source.image` | string | none | no | an OCI reference; only on a driver whose source matrix below lists it, else `capability_unsupported` |
+| `source.image` | string | none | no | an OCI reference; only on an environment whose driver declares `volumeImages`, else `capability_unsupported`. It passes the admission step as a sandbox's image does (below), and after it is pinned by digest, `name@sha256:` and 64 hex digits, else `invalid_field`: the volume stores the pinned reference, so a reader verifies its content by digest |
 | `source.archive` | string | none | no | an `https://` URL whose host is on `CELLA_SOURCE_ALLOW` under the host rule; anything else is `invalid_field` |
 | `source.sha256` | string | none | no | 64 hex characters; with `archive` only |
 | `retain` | bool | `true` | yes | `false` deletes the volume with its last attached sandbox |
+
+An image source passes [[007-admission]]'s step once, at create, as a
+`Sandbox` that names the volume's environment, its labels and
+`spec.image` set to the source, and nothing else, with the Volume in
+the envelope's `volume` member. Only `spec.image` of the answer is
+read, and it becomes the stored source; a refusal is
+`admission_refused`. An endpoint that knows nothing of volumes decides
+on the image as it would for a sandbox, catalog rules included.
 
 The `status` fields are the controller's. `phase` moves `Pending` to
 `Available` when the driver reports the fill complete, to `Failed` with
@@ -104,13 +124,13 @@ A `Stopped` sandbox still holds its attachments, so moving a `single`
 volume under a new sandbox is a detach from the old one through
 `Change.Volumes` first ([[005-lifecycle-controller]]). An attach that
 either row refuses is `volume_busy`, in both directions: the code's
-sentence reads "The volume is attached in a way that excludes this
-attachment" ([[008-api]]). Resolve decides `volume_busy` from
-`Lookup.Volume` as of the lookup; the controller's attach at create is
-authoritative, and a race that turns busy between them ends the create
-in `Failed` with reason `VolumeBusy` after the undo of
-[[005-lifecycle-controller]]'s step 4, since the API has already
-answered 201.
+sentence reads "The volume is attached in a way that excludes this"
+([[008-api]]). Resolve decides `volume_busy` for a read-write mount of
+a `shared-read` volume; the controller's binding of the mounts at
+create, under its lock and before the sandbox's row is written or the
+create answered, is authoritative for the rest, so a create that loses
+a race for a `single` volume is refused `volume_busy` with nothing
+written.
 
 `volumes[].volume` and `workspace.volume` accept a name, resolved among
 the caller's own volumes, or a `vol_` id, so a volume another subject
@@ -131,13 +151,15 @@ into the directory.
 ### Sources and fill
 
 A volume is `Pending` from create until its source is applied, and
-every attach waits on `Available`. The driver fills it:
+every attach waits on `Available`: a sandbox bound to a `Pending`
+volume stays placed until the fill settles, and one bound to a volume
+that failed fails with `VolumesAttached` `False`. The driver fills it:
 
 | Source | k8s | podman | vm | local, native | Cap and check |
 |---|---|---|---|---|---|
 | `empty` | the class's empty volume | an empty named volume | an empty disk | an empty directory | none |
 | `snapshot` | a VolumeSnapshot clone | a copy | a disk clone | a copy | same environment only |
-| `image` | a helper Pod copies the image's root file system | the engine exports the image | a helper in the guest | `capability_unsupported` | the image's size against `size` |
+| `image` | a fill Pod runs the image with a static copier staged from `CELLA_K8S_FILL_IMAGE` (`cellad fill`) and copies its root file system; no fill image declares no `volumeImages` | the engine exports a never-started container's root file system into a second one that mounts the volume | a helper in the guest | `capability_unsupported` | the image's regular-file bytes against `size` |
 | `archive` | a helper Pod fetches and extracts | a helper container | a helper in the guest | the driver's own process | below |
 
 An archive fetch is the driver's, because the data plane holds the
@@ -203,7 +225,7 @@ export from a sandbox through the files route, apply a volume with an
 
 | Driver | A Volume is | `shared-read` | Snapshots |
 |---|---|---|---|
-| k8s | a PersistentVolumeClaim; `class` a StorageClass | a `ReadOnlyMany` class | the VolumeSnapshot API where the cluster has it |
+| k8s | a PersistentVolumeClaim, `ReadWriteOnce`, on `CELLA_K8S_VOLUME_CLASS` or the workspace class | read-only mounts of the claim; Pods of one node share it on a class that attaches to one node, and every node on a class with no node attach (NFS, CephFS) | the VolumeSnapshot API where the cluster has it |
 | podman | a named volume | the volume mounted read-only | by copy |
 | vm | a block device or a virtiofs share | read-only share | a disk clone |
 | local | a directory under `CELLA_DATA_DIR/volumes/<id>`, granted to the stage as a readable or writable path at its host path, with the rewrite and warning of [[004-runtime-contract]] | read-only grant | by copy |
@@ -231,18 +253,18 @@ that uses `Write` ([[020-scheduling-and-sets]]).
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| Every field rule in the table has a refusing case: shrink, unknown class, two source fields, a snapshot from another environment, an archive off the allow list or not `https://`, a bad digest, a size above the ceiling | `TestVolumeFieldRules`, table-driven | not built |
-| `single`: a second read-write attach, and a read-write attach while a read-only one exists, are `volume_busy`; read-only attaches stack; `shared-read` refuses read-write | `TestAccessModes` | not built |
-| A `Stopped` sandbox holds its attachment; after `Change.Volumes` detaches it, a new sandbox attaches read-write | `TestStoppedSandboxHoldsTheVolume` | not built |
-| A volume that turns busy between resolve and create ends the sandbox `Failed VolumeBusy` with no attachment left | `TestAttachRaceFailsClosed` | not built |
+| Every field rule in the table has a refusing case: shrink, unknown class, two source fields, a snapshot from another environment, an archive off the allow list or not `https://`, a bad digest, a size above the ceiling | `TestVolumeFieldRules`, table-driven | partial ([[084-image-volumes]]): shrink, two source fields, an image not pinned by digest, a named class (`capability_unsupported`), and the `snapshot` and `archive` sources refused whole; the snapshot environment, the archive host and digest, and the size ceiling wait on those features |
+| `single`: a second read-write attach, and a read-write attach while a read-only one exists, are `volume_busy`; read-only attaches stack; `shared-read` refuses read-write | `TestAccessModes` | built ([[084-image-volumes]]) |
+| A `Stopped` sandbox holds its attachment; after `Change.Volumes` detaches it, a new sandbox attaches read-write | `TestStoppedSandboxHoldsTheVolume` | partial ([[084-image-volumes]]): the stopped sandbox holds the volume against a delete and another writer, and a new writer attaches once it is deleted; `Change.Volumes` is not built |
+| A volume that turns busy between resolve and create ends the sandbox `Failed VolumeBusy` with no attachment left | `TestAccessModes` | built, diverged ([[084-image-volumes]]): the binding runs before the create answers, so the loser is refused `volume_busy` with nothing written rather than failed |
 | `Write` lands a tar under a path on a `shared-read` volume while sandboxes hold it read-only | `TestControlPlaneWriter` | not built |
-| A volume is `Pending` until filled and every attach waits; each source kind fills on each driver that lists it and is `capability_unsupported` where it does not; each failure reason is produced by its cause | `TestFillLifecycle`, table-driven | not built |
+| A volume is `Pending` until filled and every attach waits; each source kind fills on each driver that lists it and is `capability_unsupported` where it does not; each failure reason is produced by its cause | `TestFillLifecycle`, `TestAttachWaitsOnAvailable`, `TestVolumesOnARealEngine` | partial ([[084-image-volumes]]): `empty` and `image` on podman and k8s, `capability_unsupported` elsewhere; `SourceUnreachable`, `SourceTooLarge` and `SourceUnsupported` produced; `SourceDigestMismatch` and `ClassUnavailable` wait on the archive source and classes |
 | An archive fetch refuses a redirect to an unlisted host, stops at the byte cap, refuses a digest mismatch, and confines entries to the volume root | `TestArchiveFetchIsBounded` | not built |
 | The managed workspace is absent from `/v1/volumes` and `ListVolumes`, survives `Stop`, is removed at `Delete`, and is `Recreated` when the driver lost it | `TestManagedWorkspaceIsDriverInternal` | not built |
-| A sandbox deleted with a `retain: true` volume leaves it `Available`; with `retain: false` and no other attachment the volume is gone; `DELETE` of an attached volume is `volume_busy` | `TestRetainAndDelete` | not built |
+| A sandbox deleted with a `retain: true` volume leaves it `Available`; with `retain: false` and no other attachment the volume is gone; `DELETE` of an attached volume is `volume_busy` | `TestRetainAndDelete`, `TestASandboxMountsAVolume` | built ([[084-image-volumes]]) |
 | A sandbox recreated over a `workspace.source: volume` sees the files the previous one wrote, on every driver | `TestWorkspaceVolumeSurvivesTheSandbox` | not built |
 | A snapshot is listed, is a source for a new volume in its environment, is refused in another, is deleted with its volume, and has a `snp_` id | `TestSnapshots` | not built |
-| Growth succeeds where `ResizeVolume` does and is `capability_unsupported` where the class cannot expand; a shrink is `invalid_field` | `TestGrowOnly` | not built |
-| A `vol_` id in `volumes[].volume` attaches another subject's volume when the authorizer allows and is `not_found` when it does not | `TestAttachByIdUnderTheAuthorizer` | not built |
-| Every transition emits its event | `TestVolumeEvents` | not built |
-| The conformance cases `VolumeLifecycle`, `VolumeAttachDetachWhileStopped`, `AttachFailureIsClean`, and `SnapshotAndRestore` pass on every driver that declares the capability | `runtimetest` | not built |
+| Growth succeeds where `ResizeVolume` does and is `capability_unsupported` where the class cannot expand; a shrink is `invalid_field` | `TestVolumeUpdate` | partial ([[084-image-volumes]]): a shrink is `invalid_field` and a growth `capability_unsupported` on every driver, since none resizes yet |
+| A `vol_` id in `volumes[].volume` attaches another subject's volume when the authorizer allows and is `not_found` when it does not | `TestAttachByIdUnderTheAuthorizer` | built ([[084-image-volumes]]) |
+| Every transition emits its event | `TestVolumeEvents` | partial ([[084-image-volumes]]): created, updated, attached, detached, failed and deleted; snapshotted waits on snapshots |
+| The conformance cases `VolumeLifecycle`, `VolumeAttachDetachWhileStopped`, `AttachFailureIsClean`, and `SnapshotAndRestore` pass on every driver that declares the capability | `TestPodmanConformance`, `TestClusterConformance` | partial ([[084-image-volumes]]): `VolumeLifecycle` and `AttachFailureIsClean` run on every driver that declares `Volumes`; `VolumeAttachDetachWhileStopped` and `SnapshotAndRestore` wait on `Change.Volumes` and snapshots |

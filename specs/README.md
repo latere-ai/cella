@@ -65,7 +65,7 @@ every spec in its `depends_on` is at `testing` or later, not `complete`.
 | [016](016-building-a-plane.md) | Building a plane: how a platform composes the packages and the webhooks without a fork | small | in-progress | 001, 004, 006, 007, 015 |
 | [017](017-observability.md) | Observability: one metric table across three roles, traces across the seam, redacted logs, alert rules | small | in-progress | 002, 005, 006, 008, 009, 010, 018, 020, 021 |
 | [018](018-egress-and-secrets.md) | Egress and secrets: the Secret kind, placeholders, the gateway as a data plane component, sync and telemetry, the boundary a workload cannot widen | large | in-progress | 003, 004, 006, 010 |
-| [019](019-volumes.md) | Volumes: the Volume kind, access and attachment, sources and fill, snapshots, the managed workspace | medium | validated | 003, 004, 005 |
+| [019](019-volumes.md) | Volumes: the Volume kind, access and attachment, sources and fill, snapshots, the managed workspace | medium | in-progress | 003, 004, 005 |
 | [020](020-scheduling-and-sets.md) | Scheduling and sets: environment modes, capacity, the queue, preemption, pools, the SandboxSet kind for rollouts | large | in-progress | 003, 004, 005, 007, 010, 019 |
 | [021](021-data-plane-workers.md) | Data plane workers: the Environment kind, the default environment, registration, the worker stream and its operations | large | in-progress | 004, 006, 008, 018 |
 | [022](022-mesh-and-spawn.md) | Mesh and spawn: peers that reach each other, sandboxes that create sandboxes, a boundary that never moves | medium | in-progress | 003, 005, 006, 010, 018 |
@@ -105,6 +105,7 @@ every spec in its `depends_on` is at `testing` or later, not `complete`.
 | [081](081-local-driver.md) | The local driver: `process` isolation on a person's own computer through hostsandbox, a granted host folder bound in place as the workspace and never deleted, exec with stdin as an attached stage, files confined in the driver to the same grants, network from the host's own list | large | drafted | 003, 004, 013, 018, 021 |
 | [082](082-the-worker-as-a-library.md) | The worker as a library: an exported `worker` package, a host policy that admits, holds or refuses each create and checks every operation, built-in checks against the host's grants, a record of every operation, and the host's OS, architecture, grants and network in the registration | medium | drafted | 004, 013, 021, 081 |
 | [083](083-environments-a-subject-owns.md) | Environments a subject owns: a subject acting on its own worker environments, decided on owner, mode and worker limit, keys with a lifetime, `environment.serve` asked at registration and on a TTL, revocation and deletion ending live streams and sandboxes, `spec.workers.max`, and a driver's own allowlist standing in for a gateway | medium | drafted | 006, 018, 020, 021, 082 |
+| [084](.archive/084-image-volumes.md) | Image volumes: the Volume kind with an empty or an image source, filled once, attached by a sandbox's spec.volumes under spec 019's access rules, its image admitted as a sandbox's is, on the podman and k8s drivers | large | complete | 003, 004, 005, 007, 008, 009, 010, 019 |
 
 ## Dependency graph
 

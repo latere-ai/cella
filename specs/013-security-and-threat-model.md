@@ -20,7 +20,7 @@ depends_on:
 affects: [internal/auth/, internal/api/, internal/egressd/, internal/worker/, internal/store/, runtime/, egress/, controller/, manifest/, deploy/, test/e2e/, SECURITY.md]
 effort: medium
 created: 2026-09-12
-updated: 2026-10-14
+updated: 2026-10-18
 author: changkun
 ---
 
@@ -141,7 +141,7 @@ what a correctly configured control plane refuses.
 | secrets in events, logs, records, or status | events reduce the manifest to env keys and secret names and carry no value, placeholder, credential, token, output, frame, text, query, or header, with `RedactJSON` behind the structural strip; egress records carry no header, body, value, placeholder, or credential; logs redact env values and `Authorization` | 009, 018, 017 | `TestNoContentInEvents`, `TestRecordNormalize`, `TestLogsRedact` |
 | a workload widening its own boundary | the boundary fields narrow only after create for a workload actor; a child is a subset of its parent by nine rules; a parent cannot be narrowed below a live descendant; only a workload spawns and only within budget and depth | 003, 022 | `TestNarrowingIsForWorkloads`, `TestBoundaryCheck`, `TestParentCannotBeNarrowedBelowAChild`, `TestOnlyWorkloadsSpawn` |
 | a runaway spawn tree | the budget is debited in the desired-write transaction and never refunded on delete; depth decrements per generation; a child's `ttl` ends no later than its parent's; delete cascades deepest first | 005, 022 | `TestSpawnDebitIsAtomic`, `TestSpawnFieldsAndDepth`, `TestCascade` |
-| a volume as an escape | no host path on k8s; a volume attaches only where `volume.attach` allows; a read-only attachment stays read-only in a child; `Write` is the control plane's path and no sandbox has it | 019, 022 | `TestAttachByIdUnderTheAuthorizer`, `TestControlPlaneWriter` |
+| a volume as an escape | no host path on k8s; a volume attaches only where `volume.attach` allows; a read-only attachment stays read-only in a child; `Write` is the control plane's path and no sandbox has it | 019, 022 | `TestAttachByIdUnderTheAuthorizer`, `TestVolumeBoundary`, `TestControlPlaneWriter` |
 | a hostile archive source | the host is on `CELLA_SOURCE_ALLOW` and re-checked on every redirect; the download stops at `CELLA_MAX_SOURCE_BYTES`; the digest is compared before extraction; entries are confined to the volume root | 019 | `TestArchiveFetchIsBounded` |
 | a manifest body that exhausts memory | `CELLA_MAX_BODY_BYTES` on manifests, `CELLA_MAX_UPLOAD_BYTES` on tar, 1 MiB on input, the YAML alias and depth limits, the annotation cap | 003, 008 | `TestYAMLLimits`, `TestBodiesAndTypes` |
 | a flood | a token bucket per subject after authentication, the authorizer's override, and a bucket per client address before authentication | 008 | `TestRateLimits` |

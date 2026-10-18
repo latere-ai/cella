@@ -9,7 +9,7 @@ depends_on:
 affects: [internal/events/, internal/api/, internal/config/, test/stubs/]
 effort: small
 created: 2026-09-12
-updated: 2026-10-03
+updated: 2026-10-18
 author: changkun
 ---
 
@@ -60,14 +60,21 @@ Built:
 - `sandbox.resized` and `sandbox.at_ceiling`, each committed with the
   status write it explains and carrying the controller's own payload
   ([[078-self-sizing-sandboxes]]).
+- `volume.created`, `.updated`, `.attached` and `.detached` with the
+  sandbox in context and `{mode}`, `.failed` with its reason, and
+  `.deleted`, with the `Volume` kind; `SourceUnreachable`,
+  `SourceTooLarge`, `SourceUnsupported` and `VolumeMissing` in the
+  reason enum; the feed serving volume records under the volume
+  actions ([[084-image-volumes]]).
 
 Open:
 
 - Types in the table that nothing emits: `sandbox.attach`;
   `sandbox.port` and `sandbox.egress`, whose flags `CELLA_EVENTS_PORTS`
   and `CELLA_EVENTS_EGRESS` are not read; `sandbox.token`, whose route
-  is not served ([[006-identity]]); and every `volume.*` and `set.*` type,
-  whose kinds do not exist.
+  is not served ([[006-identity]]); `volume.snapshotted`, whose
+  snapshots do not exist; and every `set.*` type, whose kind does not
+  exist.
 - `TestEventTableMatchesTheSpecs`, which holds the table to the
   emission points the specs name.
 
