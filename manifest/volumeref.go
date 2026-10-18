@@ -104,6 +104,14 @@ func volumeReferences(ctx context.Context, obj *v1.Sandbox, env *v1.Environment,
 	if len(obj.Spec.Volumes) == 0 {
 		return nil, nil
 	}
+	// The mounts of a sandbox that exists were bound at its create, and an
+	// update that keeps them asks nothing of them again: a volume lost or
+	// failed since is the sandbox's own condition to report, not a reason to
+	// refuse a change of its labels or its lifecycle. An update that changes
+	// them is refused at stage 7.
+	if o.Existing != nil && slices.Equal(o.Existing.Spec.Volumes, obj.Spec.Volumes) {
+		return nil, nil
+	}
 	// An environment that keeps no volumes refuses the field before any
 	// volume is looked up, so the answer is the same whatever the caller
 	// holds.

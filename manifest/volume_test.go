@@ -424,6 +424,19 @@ func TestSandboxVolumeRules(t *testing.T) {
 	if _, err := Resolve(t.Context(), &existing, o); err != nil {
 		t.Fatalf("an update that keeps the mounts: %v", err)
 	}
+	// A volume that failed after the sandbox was created does not refuse an
+	// update that keeps the mounts, such as a change of labels.
+	failed := slices.Clone(volumes)
+	for i := range failed {
+		failed[i].Status.Phase = v1.VolumeLost
+	}
+	o = volumesOptions(failed...)
+	o.Existing = &existing
+	relabeled := existing
+	relabeled.Metadata.Labels = map[string]string{"team": "evals"}
+	if _, err := Resolve(t.Context(), &relabeled, o); err != nil {
+		t.Fatalf("an update of a sandbox whose volume was lost since: %v", err)
+	}
 }
 
 // TestVolumeBoundary is rule 4 of the boundary check: a child mounts only
