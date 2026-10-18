@@ -129,6 +129,10 @@ const (
 	// ReasonNoGateway is EgressEnforced false because no gateway of the
 	// environment holds the sandbox's map.
 	ReasonNoGateway = "NoGateway"
+	// ReasonDriverEnforced is EgressEnforced true on an environment whose
+	// driver enforces its own allow list with no gateway: its proxy is the
+	// only route out (spec 083).
+	ReasonDriverEnforced = "DriverEnforced"
 	// ReasonDriverUnavailable is Observed false because the driver of the
 	// sandbox's environment answered the read with an error.
 	ReasonDriverUnavailable = "DriverUnavailable"

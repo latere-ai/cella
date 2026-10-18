@@ -44,6 +44,10 @@ type Capabilities struct {
 	// HostWorkspace says the driver binds a host folder a manifest names in
 	// spec.workspace.host as the sandbox's workspace (spec 081).
 	HostWorkspace bool `json:"hostWorkspace,omitempty"`
+	// EgressLocal says the driver enforces an allow list itself, with no
+	// gateway: its own proxy is the only route out, so a sandbox asking
+	// for none or an allow list needs no gateway (spec 083).
+	EgressLocal bool `json:"egressLocal,omitempty"`
 	// Autosize says which resources the driver sizes inside a manifest's
 	// spec.resources.max. It is always on the wire, each flag false where
 	// the driver holds that resource fixed.
@@ -81,5 +85,5 @@ func (c Capabilities) Equal(other Capabilities) bool {
 		c.VolumeImages == other.VolumeImages && c.Snapshots == other.Snapshots && c.Attach == other.Attach && c.Dial == other.Dial &&
 		c.Display == other.Display && c.Input == other.Input && c.Resize == other.Resize &&
 		c.Pool == other.Pool && c.Files == other.Files && c.Detach == other.Detach &&
-		c.HostWorkspace == other.HostWorkspace && c.Autosize == other.Autosize
+		c.HostWorkspace == other.HostWorkspace && c.EgressLocal == other.EgressLocal && c.Autosize == other.Autosize
 }

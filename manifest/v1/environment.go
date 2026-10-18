@@ -53,8 +53,18 @@ type EnvironmentSpec struct {
 	WorkspaceClass string `json:"workspaceClass,omitempty"`
 	// Gateway is the host, or host:port, a sandbox of this environment
 	// reaches the egress gateway at. It is required where the driver
-	// enforces egress and empty where it enforces none.
+	// enforces egress through a gateway, and empty where it enforces none
+	// or enforces its own allow list.
 	Gateway string `json:"gateway,omitempty"`
+	// Workers limits the workers that may serve the environment at once
+	// (spec 083).
+	Workers WorkersSpec `json:"workers,omitzero"`
+}
+
+// WorkersSpec is the limit on an environment's live workers. Max zero sets
+// no limit.
+type WorkersSpec struct {
+	Max int `json:"max,omitempty"`
 }
 
 // The two modes of an environment. Inprocess is the driver cellad opened for

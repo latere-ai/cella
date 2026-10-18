@@ -18,15 +18,16 @@ import (
 // The JSON paths of the Environment's fields, named once so a refusal and a
 // test point at the same string.
 const (
-	pathEnvironmentMode      = "spec.mode"
-	pathEnvironmentIsolation = "spec.isolation"
-	pathEnvironmentCapacity  = "spec.capacity"
-	pathEnvironmentSchedule  = "spec.scheduling.mode"
-	pathEnvironmentQueues    = "spec.scheduling.queues"
-	pathEnvironmentDefaultQ  = "spec.scheduling.defaultQueue"
-	pathEnvironmentPoolSize  = "spec.pool.size"
-	pathEnvironmentPoolImage = "spec.pool.image"
-	pathEnvironmentGateway   = "spec.gateway"
+	pathEnvironmentMode       = "spec.mode"
+	pathEnvironmentIsolation  = "spec.isolation"
+	pathEnvironmentCapacity   = "spec.capacity"
+	pathEnvironmentSchedule   = "spec.scheduling.mode"
+	pathEnvironmentQueues     = "spec.scheduling.queues"
+	pathEnvironmentDefaultQ   = "spec.scheduling.defaultQueue"
+	pathEnvironmentPoolSize   = "spec.pool.size"
+	pathEnvironmentPoolImage  = "spec.pool.image"
+	pathEnvironmentGateway    = "spec.gateway"
+	pathEnvironmentWorkersMax = "spec.workers.max"
 )
 
 // MaxEnvironmentQueues bounds the named lines one environment declares. A
@@ -143,11 +144,17 @@ func ValidateEnvironmentSpec(s v1.EnvironmentSpec, caps v1.Capabilities) error {
 	if err := validateEnvironmentPool(s.Pool, caps); err != nil {
 		return err
 	}
+	if s.Workers.Max < 0 {
+		return failAt("invalid_field", pathEnvironmentWorkersMax, "The most workers an environment takes is zero, for no limit, or more.")
+	}
+	if s.Workers.Max > 0 && s.Mode != v1.EnvironmentWorker {
+		return failAt("invalid_field", pathEnvironmentWorkersMax, "Only an environment workers serve limits them.")
+	}
 	if s.Gateway != "" {
 		if err := validateGatewayAddr(s.Gateway); err != nil {
 			return err
 		}
-	} else if len(caps.Egress) > 0 {
+	} else if len(caps.Egress) > 0 && !caps.EgressLocal {
 		return failAt("missing_field", pathEnvironmentGateway,
 			"This environment's driver enforces egress, so it needs the address its sandboxes reach the gateway at.")
 	}
