@@ -6,6 +6,15 @@ refused before it is pushed.
 
 ## Unreleased
 
+### Fixed
+
+- **A command on the local runtime reads its own output with the data
+  directory inside the home directory.** Each stage is granted its sandbox's
+  logs directory read-only, so `cat`, `head` and anything that stats its
+  stdout no longer fail with "Operation not permitted" under the macOS
+  sandbox, where a program on a person's computer keeps its data in the
+  home directory.
+
 ## v0.17.0 - 2026-10-18
 
 ### Added
