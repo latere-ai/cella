@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.17.1 - 2026-10-18
+
 ### Fixed
 
 - **A command on the local runtime reads its own output with the data
