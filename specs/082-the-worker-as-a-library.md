@@ -292,10 +292,12 @@ Where the code diverges from the design:
   workload token is never in it. `CreateSpec` gains `Isolation`, the
   class the sandbox resolved to, so the worker can compare it with its
   driver's.
-- **The image, command and volume check is the driver's.** The runtime
-  contract has no way to ask a driver what it can honor short of creating,
-  and `CreateSpec` carries no volume, so a create the driver cannot honor
-  is refused by the driver's own `Create`, after the policy.
+- **The image and command check is the driver's.** A create mounting a
+  volume on a driver that declares no `Volumes` is refused with
+  `host_refused` before the policy. The runtime contract has no way to ask
+  a driver which image or command it can honor short of creating, so a
+  create the driver cannot honor that way is refused by the driver's own
+  `Create`, after the policy.
 - **`Operation` and `Record` carry `To`,** a move's destination, so a
   policy and a log see both ends of a move. `Options` also takes `Log`.
 - **An operation on a sandbox the driver does not hold answers

@@ -20,8 +20,9 @@ refused before it is pushed.
 - **The host has the last word on a worker.** Before a create runs, the
   worker refuses a `spec.workspace.host` outside the folders its driver
   grants, and a write into a folder it grants read-only, with
-  `workspace_not_granted`, and an isolation class other than its driver's
-  with `host_refused`, whatever the control plane resolved. A create the
+  `workspace_not_granted`, and an isolation class other than its driver's,
+  or a volume on a driver that keeps none, with `host_refused`, whatever
+  the control plane resolved. A create the
   host has not decided within a second shows on the sandbox as the
   `HostApproval` condition, `Unknown` with reason `Pending`, with a
   `sandbox.host_pending` record; a refusal fails it with the reason

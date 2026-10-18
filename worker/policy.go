@@ -190,6 +190,9 @@ func (g *gate) checkCreate(spec runtime.CreateSpec) error {
 		return fmt.Errorf("%w: the sandbox asks for %s isolation and this host provides %s",
 			runtime.ErrHostRefused, spec.Isolation, g.driver.Isolation())
 	}
+	if len(spec.Volumes) > 0 && !g.driver.Capabilities().Volumes {
+		return fmt.Errorf("%w: the sandbox mounts %d volumes and this host keeps none", runtime.ErrHostRefused, len(spec.Volumes))
+	}
 	folder := spec.Workspace.Host
 	if folder == "" {
 		return nil

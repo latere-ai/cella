@@ -357,7 +357,8 @@ must be able to say no. The host has the last word in three ways:
   outside every folder the host grants is refused with
   `workspace_not_granted`, and so is a write into a folder it grants
   read-only. A create asking for another isolation class than the
-  driver's is refused with `host_refused`. These hold whatever the
+  driver's, or mounting a volume on a driver that keeps none, is refused
+  with `host_refused`. These hold whatever the
   control plane resolved and whatever the policy says. The network is
   narrowed by the driver to the host's own list rather than refused.
 - **The policy.** `Options.Policy` is asked before each create, and may

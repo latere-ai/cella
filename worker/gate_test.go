@@ -111,6 +111,10 @@ func TestChecksOfAHostThatGrantsNothing(t *testing.T) {
 			t.Errorf("%s answered %v, want it passed through", opType, err)
 		}
 	}
+	volumes := runtime.CreateSpec{ID: "sbx_v", Volumes: []runtime.Mount{{Path: "/data"}}}
+	if err := g.checkCreate(volumes); !errors.Is(err, runtime.ErrHostRefused) {
+		t.Errorf("a create mounting a volume on a host that keeps none answered %v", err)
+	}
 	if err := g.admit(t.Context(), remote.OpCreate, remote.Request{}, nil); !errors.Is(err, runtime.ErrInvalid) {
 		t.Errorf("a create with no spec answered %v", err)
 	}
