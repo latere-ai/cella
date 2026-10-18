@@ -93,6 +93,13 @@ refused before it is pushed.
   allow list on its worker environment; the sandbox reports
   `EgressEnforced` `True` with `DriverEnforced`.
 
+- **A worker's host policy sees a sandbox's annotations.** The create the
+  control plane sends a worker carries `metadata.annotations`, so a host
+  that asks a person can show what the caller wrote for people, such as an
+  agent's display name.
+- **`client.MintEnvironmentKeyFor`** mints an environment key with a
+  lifetime, for an authorizer that refuses a long one.
+
 ### Changed
 
 - **Revoking a key, or deleting a worker environment, reaches its live
