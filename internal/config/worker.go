@@ -15,6 +15,7 @@ import (
 
 	v1 "latere.ai/x/cella/manifest/v1"
 	"latere.ai/x/cella/runtime/k8s"
+	"latere.ai/x/cella/runtime/local"
 	"latere.ai/x/cella/worker"
 )
 
@@ -36,6 +37,9 @@ type WorkerConfig struct {
 	DataDir      string
 	PodmanSocket string
 	K8s          k8s.Options
+	// Local is the local driver's host policy, read where CELLA_RUNTIME is
+	// local (spec 081).
+	Local local.Options
 	// AllowUnsafeNative is the explicit consent native execution needs,
 	// since it confines nothing.
 	AllowUnsafeNative bool
@@ -95,6 +99,9 @@ func LoadWorker(getenv Getenv) (WorkerConfig, error) {
 	}
 	if c.Runtime == RuntimeK8s {
 		c.K8s = loadK8s(getenv, &problems)
+	}
+	if c.Runtime == RuntimeLocal {
+		c.Local = loadLocal(getenv, &problems)
 	}
 	if c.Runtime == RuntimeNative && !c.AllowUnsafeNative {
 		problems = append(problems, "CELLA_RUNTIME=native requires CELLA_ALLOW_UNSAFE_NATIVE=true; native execution has no isolation")

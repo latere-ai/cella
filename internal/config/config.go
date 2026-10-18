@@ -23,6 +23,7 @@ import (
 	"latere.ai/x/cella/autosize"
 	"latere.ai/x/cella/internal/store"
 	"latere.ai/x/cella/runtime/k8s"
+	"latere.ai/x/cella/runtime/local"
 )
 
 // Defaults for the optional variables.
@@ -62,11 +63,12 @@ const (
 	RuntimeK8s    = "k8s"
 	RuntimePodman = "podman"
 	RuntimeNative = "native"
+	RuntimeLocal  = "local"
 )
 
 // Runtimes is every accepted CELLA_RUNTIME value, in the order the
 // problem message lists them.
-var Runtimes = []string{RuntimeK8s, RuntimePodman, RuntimeNative}
+var Runtimes = []string{RuntimeK8s, RuntimePodman, RuntimeNative, RuntimeLocal}
 
 // Getenv is the environment lookup Load reads through, so a test passes a
 // map and never touches the process environment.
@@ -123,6 +125,9 @@ type Config struct {
 	// when CELLA_RUNTIME selects that driver, so an installation that runs
 	// another backend carries no opinion about a cluster.
 	K8s k8s.Options
+	// Local is the local driver's host policy, read where CELLA_RUNTIME is
+	// local (spec 081). Its data directory is set where the driver opens.
+	Local local.Options
 	// Gateway is spec 018's half of the boundary: where sandboxes reach
 	// the egress gateway, how long a create waits for one to hold the
 	// sandbox's map, and how many connection records are kept.
@@ -203,6 +208,9 @@ func Load(getenv Getenv) (Config, error) {
 		if len(c.K8s.Gateway.Labels) > 0 && c.Gateway.ProxyAddr == "" {
 			problems = append(problems, "CELLA_K8S_GATEWAY_SELECTOR is set without CELLA_GATEWAY; a sandbox confined to the gateway is pointed at it by CELLA_GATEWAY")
 		}
+	}
+	if c.Runtime == RuntimeLocal {
+		c.Local = loadLocal(getenv, &problems)
 	}
 	c.DriftDefault = loadDriftDefault(getenv, c.Runtime, &problems)
 	if c.Runtime == RuntimeNative && !c.AllowUnsafeNative {

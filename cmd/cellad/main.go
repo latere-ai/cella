@@ -48,6 +48,7 @@ import (
 	v1 "latere.ai/x/cella/manifest/v1"
 	"latere.ai/x/cella/runtime"
 	"latere.ai/x/cella/runtime/k8s"
+	"latere.ai/x/cella/runtime/local"
 	"latere.ai/x/cella/runtime/native"
 	"latere.ai/x/cella/runtime/podman"
 	"latere.ai/x/cella/runtime/remote"
@@ -224,6 +225,8 @@ func openWorkerRuntime(cfg config.WorkerConfig, roots []byte) (runtime.Driver, f
 			return nil, noop, fmt.Errorf("runtime: %w", err)
 		}
 		return d, d.Close, nil
+	case config.RuntimeLocal:
+		return openLocal(cfg.Local, cfg.DataDir)
 	default:
 		d, err := native.New(filepath.Join(cfg.DataDir, "native"))
 		if err != nil {
@@ -898,6 +901,8 @@ func openRuntime(cfg config.Config, roots []byte) (runtime.Driver, func() error,
 			return nil, noop, fmt.Errorf("runtime: %w", err)
 		}
 		return driver, driver.Close, nil
+	case config.RuntimeLocal:
+		return openLocal(cfg.Local, cfg.DataDir)
 	default:
 		driver, err := native.New(filepath.Join(cfg.DataDir, "native"))
 		if err != nil {
@@ -906,6 +911,18 @@ func openRuntime(cfg config.Config, roots []byte) (runtime.Driver, func() error,
 		driver.SetTrustRoots(roots)
 		return driver, driver.Close, nil
 	}
+}
+
+// openLocal opens the local driver over its host policy, with its sandboxes
+// under the data directory (spec 081). It is preflighted with every other
+// driver, before anything registers or serves.
+func openLocal(o local.Options, dataDir string) (runtime.Driver, func() error, error) {
+	o.DataDir = filepath.Join(dataDir, "local")
+	d, err := local.New(o)
+	if err != nil {
+		return nil, func() error { return nil }, fmt.Errorf("runtime: %w", err)
+	}
+	return d, d.Close, nil
 }
 
 // credentialMover is a driver whose earlier versions stamped a sandbox's
