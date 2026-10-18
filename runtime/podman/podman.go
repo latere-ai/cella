@@ -177,9 +177,13 @@ func (d *Driver) Isolation() string { return v1.IsolationContainer }
 // Mesh, because one network per mesh carries the members and their aliases on
 // it. Display and Input, because the desktop runs as a second process in the
 // sandbox's own container and every operation on it is one exec session. Dial,
-// because every declared port is published on loopback at create.
+// because every declared port is published on loopback at create. Volumes and
+// VolumeImages, because a volume is a named volume the engine keeps beside
+// the sandboxes, and an image's root file system is what the engine exports
+// from a container made from it (volume.go).
 func (d *Driver) Capabilities() driver.Capabilities {
-	return driver.Capabilities{Files: true, Detach: true, Attach: true, Pool: true, Mesh: true, Display: true, Input: true, Dial: true}
+	return driver.Capabilities{Files: true, Detach: true, Attach: true, Pool: true, Mesh: true, Display: true, Input: true, Dial: true,
+		Volumes: true, VolumeImages: true}
 }
 
 // Socket is the socket the driver last found answering, for the start-up line.
@@ -723,6 +727,12 @@ func (d *Driver) Create(ctx context.Context, s driver.CreateSpec) (driver.Ref, e
 	if err != nil {
 		return driver.Ref{}, err
 	}
+	// The mounts are checked before anything is made, so a mount this
+	// engine cannot honor refuses the create with nothing left behind.
+	mounts, err := d.volumeMounts(ctx, root, s.Volumes)
+	if err != nil {
+		return driver.Ref{}, err
+	}
 	digest, err := d.imageDigest(ctx, s.Image)
 	if err != nil {
 		return driver.Ref{}, err
@@ -768,7 +778,7 @@ func (d *Driver) Create(ctx context.Context, s driver.CreateSpec) (driver.Ref, e
 		Image: s.Image, Name: containerName(s.ID), Command: command, Env: maps.Clone(env),
 		Labels: map[string]string{labelID: s.ID, labelKind: kindSandbox}, WorkDir: workdir,
 		User: s.User, RestartPolicy: "no", StopTimeout: &grace,
-		Volumes:        []namedVolume{{Name: workspaceVolume(s.ID), Dest: root, Options: []string{"rw"}}},
+		Volumes:        append([]namedVolume{{Name: workspaceVolume(s.ID), Dest: root, Options: []string{"rw"}}}, mounts...),
 		ResourceLimits: limits,
 		PortMappings:   publishedPorts(s.Ports),
 	}

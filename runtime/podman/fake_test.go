@@ -6,6 +6,7 @@ package podman
 import (
 	"archive/tar"
 	"bufio"
+	"bytes"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -52,9 +53,16 @@ type fake struct {
 	// special names a path the archive endpoint emits as a symbolic link, so
 	// the refusal of a file an export does not carry is reachable.
 	special string
+	// roots is the root file system a container's export streams, by
+	// image; an image with none exports defaultRoot. volumeData is what an
+	// archive extracted below a container's mount of a named volume left in
+	// that volume, by volume and then by path relative to its root.
+	roots      map[string][]byte
+	volumeData map[string]map[string]fakeFile
 }
 
 type fakeContainer struct {
+	image   string
 	labels  map[string]string
 	command []string
 	env     map[string]string
@@ -87,6 +95,9 @@ type fakeFile struct {
 	uid, gid int
 	body     []byte
 	dir      bool
+	// symlink and hardlink are the targets of a link entry an archive
+	// carried into a volume.
+	symlink, hardlink string
 }
 
 type fakeLine struct {
@@ -155,6 +166,8 @@ func newFake(t *testing.T) *fake {
 		execs:      map[string]*fakeExec{},
 		networks:   map[string]map[string][]string{},
 		faults:     map[string]*arranged{},
+		roots:      map[string][]byte{},
+		volumeData: map[string]map[string]fakeFile{},
 	}
 	ln, err := net.Listen("unix", f.socket)
 	if err != nil {
@@ -365,7 +378,20 @@ func (f *fake) oneVolume(w http.ResponseWriter, r *http.Request, rest string) {
 	}
 	switch r.Method {
 	case http.MethodDelete:
+		// Without force the engine refuses a volume a container mounts,
+		// as podman does, rather than taking it from under the container.
+		if r.URL.Query().Get("force") != "true" {
+			for cname, c := range f.containers {
+				for _, v := range c.volumes {
+					if v.Name == name {
+						refuse(w, http.StatusConflict, "volume "+name+" is being used by the following container(s): "+cname)
+						return
+					}
+				}
+			}
+		}
 		delete(f.volumes, name)
+		delete(f.volumeData, name)
 		w.WriteHeader(http.StatusNoContent)
 	default:
 		writeJSON(w, volumeInspect{Name: name, Labels: labels})
@@ -419,6 +445,7 @@ func (f *fake) createContainer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c := &fakeContainer{
+		image:  sg.Image,
 		labels: maps.Clone(sg.Labels), command: sg.Command, env: maps.Clone(sg.Env),
 		workdir: sg.WorkDir, user: sg.User, volumes: sg.Volumes, limits: sg.ResourceLimits,
 		netns: netnsOf(sg.Netns), state: "created", files: map[string]fakeFile{}, released: make(chan struct{}),
@@ -530,6 +557,14 @@ func (f *fake) oneContainer(w http.ResponseWriter, r *http.Request, rest string)
 	case strings.HasPrefix(verb, "logs"):
 		f.mu.Unlock()
 		f.logs(w, r, name)
+	case verb == "export":
+		root, ok := f.roots[c.image]
+		f.mu.Unlock()
+		if !ok {
+			root = defaultRoot()
+		}
+		w.Header().Set("Content-Type", "application/x-tar")
+		_, _ = w.Write(root)
 	case r.Method == http.MethodDelete:
 		c.unpublish()
 		delete(f.containers, name)
@@ -560,7 +595,7 @@ func (f *fake) image(w http.ResponseWriter, r *http.Request, rest string) {
 		f.mu.Lock()
 		f.pulls++
 		ref := r.URL.Query().Get("reference")
-		if ref != "unpullable" {
+		if !strings.HasPrefix(ref, "unpullable") {
 			f.images[ref] = "sha256:pulled"
 		}
 		f.mu.Unlock()
@@ -825,6 +860,10 @@ func (f *fake) archive(w http.ResponseWriter, r *http.Request, name string) {
 	case http.MethodPut:
 		f.mu.Lock()
 		defer f.mu.Unlock()
+		if volume := mountedAt(c, target); volume != "" {
+			f.extractIntoVolume(w, r, volume)
+			return
+		}
 		tr := tar.NewReader(r.Body)
 		for {
 			h, err := tr.Next()
@@ -886,6 +925,83 @@ func (f *fake) archive(w http.ResponseWriter, r *http.Request, name string) {
 	default:
 		refuse(w, http.StatusMethodNotAllowed, r.Method)
 	}
+}
+
+// mountedAt is the named volume a container mounts at exactly this path, or
+// the empty name where it mounts none there.
+func mountedAt(c *fakeContainer, target string) string {
+	for _, v := range c.volumes {
+		if v.Dest == target && v.Name != "" && strings.HasPrefix(v.Name, "cella-vol-") {
+			return v.Name
+		}
+	}
+	return ""
+}
+
+// extractIntoVolume writes an archive's entries into a named volume, which is
+// what an archive put below a stopped container's mount of the volume does
+// on a real engine. The caller holds f.mu.
+func (f *fake) extractIntoVolume(w http.ResponseWriter, r *http.Request, volume string) {
+	data := f.volumeData[volume]
+	if data == nil {
+		data = map[string]fakeFile{}
+		f.volumeData[volume] = data
+	}
+	tr := tar.NewReader(r.Body)
+	for {
+		h, err := tr.Next()
+		if errors.Is(err, io.EOF) {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		if err != nil {
+			refuse(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		name := strings.TrimSuffix(h.Name, "/")
+		switch h.Typeflag {
+		case tar.TypeDir:
+			data[name] = fakeFile{mode: h.Mode, dir: true}
+		case tar.TypeSymlink:
+			data[name] = fakeFile{mode: h.Mode, symlink: h.Linkname}
+		case tar.TypeLink:
+			data[name] = fakeFile{mode: h.Mode, hardlink: h.Linkname}
+		default:
+			body, err := io.ReadAll(tr)
+			if err != nil {
+				refuse(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			data[name] = fakeFile{mode: h.Mode, uid: h.Uid, gid: h.Gid, body: body}
+		}
+	}
+}
+
+// defaultRoot is the root file system an image the test names no root for
+// exports: a directory, a file, a symbolic link, a hard link, and the device
+// node and fifo a volume does not keep.
+func defaultRoot() []byte {
+	var b bytes.Buffer
+	tw := tar.NewWriter(&b)
+	for _, e := range []struct {
+		h    tar.Header
+		body string
+	}{
+		{tar.Header{Name: "./", Mode: 0o755, Typeflag: tar.TypeDir}, ""},
+		{tar.Header{Name: "bin/", Mode: 0o755, Typeflag: tar.TypeDir}, ""},
+		{tar.Header{Name: "bin/grade", Mode: 0o755, Typeflag: tar.TypeReg, Size: 5}, "grade"},
+		{tar.Header{Name: "bin/check", Mode: 0o777, Typeflag: tar.TypeSymlink, Linkname: "/bin/grade"}, ""},
+		{tar.Header{Name: "bin/score", Mode: 0o755, Typeflag: tar.TypeLink, Linkname: "bin/grade"}, ""},
+		{tar.Header{Name: "dev/", Mode: 0o755, Typeflag: tar.TypeDir}, ""},
+		{tar.Header{Name: "dev/null", Mode: 0o666, Typeflag: tar.TypeChar, Devmajor: 1, Devminor: 3}, ""},
+		{tar.Header{Name: "run/pipe", Mode: 0o600, Typeflag: tar.TypeFifo}, ""},
+	} {
+		h := e.h
+		_ = tw.WriteHeader(&h)
+		_, _ = tw.Write([]byte(e.body))
+	}
+	_ = tw.Close()
+	return b.Bytes()
 }
 
 // rootOf is where the container's workspace volume is mounted, which always
