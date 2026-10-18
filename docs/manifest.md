@@ -78,6 +78,7 @@ The same three fields on every kind.
 | `spec.resources.max.cpu`, `.memory`, `.disk` | none: the sandbox keeps the size above | a ceiling for that resource. The sandbox starts at the amount above and is [sized inside the ceiling](#sizing-inside-a-ceiling) |
 | `spec.workspace.path` | `/workspace` | where the workspace is mounted, a clean absolute path not under `/run/cella`. The native runtime keeps it at `/workspace` |
 | `spec.workspace.source` | `empty` | what the workspace starts with. This release fills it from `empty` only |
+| `spec.workspace.host` | none | a folder on the machine a worker runs on, bound in place as the workspace: never copied, and never deleted with the sandbox. It must be inside a folder every live worker of the environment grants, or the manifest is refused with `workspace_not_granted`, and only an environment whose driver binds host folders takes it. It takes no `source`, and the workspace path and the working directory become the folder itself ([what the host decides](workers.md#what-the-host-decides)) |
 
 The native runtime records resources and does not limit them, with a
 warning. The workspace survives a stop and a start, and is removed with
@@ -388,8 +389,8 @@ The server writes `status`; it is ignored on the way in.
 | `owner` | the subject that created it, `<issuer>|<sub>` |
 | `environment`, `driver`, `isolation` | where it runs and the boundary that runtime provides: `container`, `process`, or `none` |
 | `phase` | `Pending`, `Queued`, `Starting`, `Running`, `Stopping`, `Stopped`, `Failed`, `Lost`, `Recovering`, or `Deleting`. `Pending`, `Queued`, `Starting` and `Recovering` are on the way to `Running` without any act of yours; `Failed` stays until you act, and a start [brings back](#recovering-a-failed-sandbox) one whose process ended |
-| `reason` | why it is in that phase, such as `NoCapacity`, `StartDeadline`, `Preempted`, the lifecycle rule that stopped it, the runtime's word for how a failed sandbox's process ended (`Exited`, `Error`, `OOMKilled`), or `MemoryRaised` or `MemoryNotRaised` on one that is `Starting` because it is being [started again after a kill for memory](#what-a-client-can-rely-on), at a larger size or at the one it holds |
-| `conditions` | statements with a type, a status, a reason, and a time: `Scheduled`, `EgressEnforced`, `DisplayReady`, and others. A row of a list page whose environment did not answer carries `Observed` `False`: its status is the one last recorded, not a fresh read |
+| `reason` | why it is in that phase, such as `NoCapacity`, `StartDeadline`, `Preempted`, `HostRefused` or `HostTimeout` when the host a worker runs on refused the create or did not answer, the lifecycle rule that stopped it, the runtime's word for how a failed sandbox's process ended (`Exited`, `Error`, `OOMKilled`), or `MemoryRaised` or `MemoryNotRaised` on one that is `Starting` because it is being [started again after a kill for memory](#what-a-client-can-rely-on), at a larger size or at the one it holds |
+| `conditions` | statements with a type, a status, a reason, and a time: `Scheduled`, `EgressEnforced`, `DisplayReady`, `HostApproval` on a worker whose host decides each create, and others. A row of a list page whose environment did not answer carries `Observed` `False`: its status is the one last recorded, not a fresh read |
 | `parent`, `root`, `mesh`, `spawn` | where it sits in a spawn tree, its mesh, and its budget with how much is used |
 | `ports` | each declared port, `listening` or `closed` |
 | `secrets` | which placeholders are mounted, and which the gateway will not substitute |

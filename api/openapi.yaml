@@ -1709,8 +1709,11 @@ paths:
       operationId: readEnvironment
       summary: Read an environment
       description: >-
-        Read one environment with its capabilities. Authorized as
-        `environment.read`.
+        Read one environment with its capabilities. A live worker whose driver
+        reports the machine it runs on is listed in `status.hosts` with that
+        machine's operating system, architecture, granted folders and network,
+        which a manifest's `spec.workspace.host` and egress resolve against.
+        Authorized as `environment.read`.
       responses:
         "200":
           description: The answer this route serves.
@@ -1729,6 +1732,17 @@ paths:
                   isolation: none
                   capabilities: *environmentCapabilities
                   workers: 1
+                  hosts:
+                    - worker: wrk_example
+                      host:
+                        os: linux
+                        arch: amd64
+                        grants:
+                          - path: /home/dev/project
+                            write: true
+                        network:
+                          mode: allowlist
+                          hosts: [github.com, proxy.golang.org]
                   lastHeartbeat: "2026-09-22T12:30:00Z"
                   version: 1
                   createdAt: "2026-09-22T12:00:00Z"
@@ -1916,8 +1930,9 @@ paths:
       operationId: registerWorker
       summary: Register a worker
       description: >-
-        Register a worker for an environment; environment key only. Authorized
-        as `none beyond the key`.
+        Register a worker for an environment; environment key only. A worker
+        whose driver reports the machine it runs on carries it as `host`.
+        Authorized as `none beyond the key`.
       requestBody:
         required: true
         content:
@@ -1927,6 +1942,14 @@ paths:
               isolation: container
               capabilities:
                 files: true
+              host:
+                os: linux
+                arch: amd64
+                grants:
+                  - path: /srv/work
+                    write: true
+                network:
+                  mode: none
       responses:
         "201":
           description: The id the worker claims under and the two timings it keeps to.

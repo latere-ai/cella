@@ -6,6 +6,48 @@ refused before it is pushed.
 
 ## Unreleased
 
+### Added
+
+- **The worker is a package a program embeds.** `latere.ai/x/cella/worker`
+  serves an environment from the machine a program runs on, with
+  `worker.Run`: the program supplies its own key source, read once per
+  connection, its own `HostPolicy`, which is asked before each create and
+  each operation and may hold a create while it asks a person, and its own
+  `Record` callback, told of every operation without its content.
+  `cellad worker` runs on it. `examples/worker` is a complete program, and
+  [Self-hosting a data plane](docs/workers.md#embedding-the-worker)
+  documents it.
+- **The host has the last word on a worker.** Before a create runs, the
+  worker refuses a `spec.workspace.host` outside the folders its driver
+  grants, and a write into a folder it grants read-only, with
+  `workspace_not_granted`, and an isolation class other than its driver's
+  with `host_refused`, whatever the control plane resolved. A create the
+  host has not decided within a second shows on the sandbox as the
+  `HostApproval` condition, `Unknown` with reason `Pending`, with a
+  `sandbox.host_pending` record; a refusal fails it with the reason
+  `HostRefused` and the host's words, and no answer within
+  `CELLA_HOST_ADMIT_TIMEOUT` (ten minutes) fails it with `HostTimeout`.
+  An operation the host refuses answers `host_refused`, and one on a
+  sandbox the worker's driver does not hold answers `not_found`.
+- **A worker reports the machine it runs on.** A driver that implements
+  `runtime.HostDescriber` registers its operating system, architecture,
+  granted folders and network, and the environment lists each live
+  worker's in `status.hosts`. `spec.workspace.host` names a granted
+  folder as the workspace, bound in place; it resolves only inside a
+  folder every live worker grants. On an environment whose hosts report a
+  network, a manifest's egress is narrowed to what they allow, with a
+  warning naming what the sandbox got, rather than refused for a mode the
+  environment does not declare.
+
+### Changed
+
+- **A worker stops its sandboxes when it stops.** `worker.Run` stops every
+  sandbox its driver lists when its context ends, unless
+  `Options.KeepOnExit` is set, and stops and deletes them when the control
+  plane closes its stream with `serve_refused` or `key_revoked`. `cellad
+  worker` sets `KeepOnExit`, so an operator's worker behaves as before.
+- `internal/worker` is gone; import `latere.ai/x/cella/worker`.
+
 ## v0.16.0 - 2026-10-18
 
 ### Added

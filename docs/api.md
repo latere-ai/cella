@@ -109,6 +109,7 @@ code in the `X-Cella-Error` trailer.
 |---|---|---|
 | `unauthenticated` | 401 | no bearer, or one that did not verify |
 | `forbidden` | 403 | the authorizer refused the route's action |
+| `host_refused` | 403 | the host a worker serves the environment from refused the operation, with its reason in `detail` |
 | `not_found` | 404 | no such object, or one a manifest names that you may not use |
 | `bad_request` | 400 | the request could not be read |
 | `invalid_field` | 400 | a field has a value it cannot take |
@@ -139,6 +140,7 @@ code in the `X-Cella-Error` trailer.
 | `spawn_budget_exhausted` | 422 | the sandbox has no spawn budget left |
 | `secret_out_of_scope` | 422 | the secret does not cover the host it is used for |
 | `environment_mismatch` | 422 | a worker does not match the environment it registered on |
+| `workspace_not_granted` | 422 | `spec.workspace.host` is outside every folder the environment's hosts grant, or a write names a folder a host grants read-only |
 | `rate_limited` | 429 | too many requests; for the event feed, too many open feeds |
 | `upstream_unavailable` | 502 | nothing listens on the port, or the sandbox is not running |
 | `authorizer_unavailable` | 503 | the authorization endpoint gave no decision; nothing was allowed |
@@ -146,6 +148,7 @@ code in the `X-Cella-Error` trailer.
 | `egress_gateway_unavailable` | 503 | the manifest's egress boundary needs a gateway and none is connected; connect one, or set `spec.network.egress.mode` to `open` with no denied host and no mounted secret |
 | `control_plane_unavailable` | 503 | no replica of the control plane could take the request, which happens for a moment while one replica hands off to another; retry |
 | `driver_unavailable` | 503 | the environment's runtime did not answer |
+| `host_timeout` | 504 | the host did not decide a create within the time its worker holds one |
 
 ## Routes
 

@@ -246,6 +246,7 @@ outbound to a control plane somebody else operates.
 | `CELLA_DATA_DIR` | `/var/lib/cella` | local state, as for the control plane |
 | `CELLA_CAPACITY_CPU`, `CELLA_CAPACITY_MEMORY`, `CELLA_CAPACITY_DISK`, `CELLA_CAPACITY_SANDBOXES` | unset | what this one worker declares it can hold. Placement admits against it beside the environment's own capacity |
 | `CELLA_WORKER_LABELS` | unset | `key=value` pairs that describe this worker to an operator reading the fleet |
+| `CELLA_HOST_ADMIT_TIMEOUT` | `10m` | how long a create may wait on the host's own policy before it is refused with `host_timeout`. `cellad worker` runs no policy of its own, so this matters to a program that [embeds the worker](workers.md#embedding-the-worker) with the same configuration |
 | `SSL_CERT_FILE` | the system's bundle | the public roots the worker writes into the trust file of a sandbox behind a gateway, read as for the control plane. A worker that finds none refuses to start, since the control plane decides whether its sandboxes are pointed at a gateway |
 | `CELLA_INSECURE_CONTROL_PLANE` | unset | `true` admits an `http://` control plane on a host that is not loopback. For a test stack only |
 

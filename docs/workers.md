@@ -313,6 +313,90 @@ It keeps nothing of its own. Everything a worker knows is either in its
 driver's own records or arrives on the stream, so a replaced host loses
 nothing the control plane had.
 
+## Embedding the worker
+
+`cellad worker` is one program that runs the worker. Another program can
+run it in its own process, with its own key store, its own prompts and
+its own log, by importing `latere.ai/x/cella/worker`:
+
+```go
+err := worker.Run(ctx, worker.Options{
+	URL:    "https://api.example.com",
+	Key:    func(context.Context) (string, error) { return keychain.Read("environment-key") },
+	Driver: driver,     // any runtime.Driver; its Preflight must pass
+	Policy: myPolicy,   // asked before each create and each operation
+	Record: myLog,      // told of each operation once it is answered
+})
+```
+
+`Key` is read once per connection, so a key kept in the operating
+system's key store, or one rotated while the program runs, is read where
+it lives. `Run` reconnects with the backoff above and returns when `ctx`
+ends or when the control plane refuses the worker: a `*worker.Refusal`
+whose code is `serve_refused`, `key_revoked`, `worker_replaced`,
+`worker_limit` or `environment_mismatch`. It does not retry those, since
+another attempt would meet the same answer.
+
+When it returns, `Run` ends what it started. When `ctx` ends it stops
+every sandbox its driver lists, unless `KeepOnExit` is set; `cellad
+worker` sets it, because an operator's sandboxes outlive a restart of the
+role. On `serve_refused` or `key_revoked` it stops and deletes every
+sandbox whatever `KeepOnExit` says. On `worker_replaced` it touches
+nothing: another process holding the same key now serves those sandboxes.
+
+[`examples/worker`](../examples/worker) is a complete program that asks
+on its terminal before each create and prints a line per operation.
+
+## What the host decides
+
+A worker on a machine somebody owns, such as a person's own computer,
+must be able to say no. The host has the last word in three ways:
+
+- **Built-in checks.** Before anything else, the worker compares each
+  create with what its driver reports of the host. A `spec.workspace.host`
+  outside every folder the host grants is refused with
+  `workspace_not_granted`, and so is a write into a folder it grants
+  read-only. A create asking for another isolation class than the
+  driver's is refused with `host_refused`. These hold whatever the
+  control plane resolved and whatever the policy says. The network is
+  narrowed by the driver to the host's own list rather than refused.
+- **The policy.** `Options.Policy` is asked before each create, and may
+  take its time: a person may be asked. A create not answered within a
+  second shows on the sandbox as the `HostApproval` condition, status
+  `Unknown`, reason `Pending`, message "Waiting for the host", with a
+  `sandbox.host_pending` record. An allowed create runs and the condition
+  becomes `True`. A refused one fails the sandbox with the reason
+  `HostRefused` and the host's own words in the condition's message; one
+  not answered within `AdmitTimeout` (`CELLA_HOST_ADMIT_TIMEOUT`, ten
+  minutes by default) fails it with `HostTimeout`. The policy is also
+  asked before every other operation on a sandbox, and its refusal
+  answers `host_refused` with its reason.
+- **The record.** `Options.Record` is told of every operation once it is
+  answered: when, what, which sandbox and its labels, the command or the
+  path, and whether it ran, was refused, or failed. It carries no file
+  content, no stdin and no output.
+
+A worker also refuses any operation on a sandbox its driver does not
+hold.
+
+### The host in the registration
+
+A driver that reports the machine it runs on registers its operating
+system, architecture, granted folders and network. The environment shows
+one entry per live worker in `status.hosts`, beside the `status.workers`
+count:
+
+```json
+"hosts": [{"worker": "wrk_...", "host": {"os": "darwin", "arch": "arm64",
+  "grants": [{"path": "/Users/dev/site", "write": true}],
+  "network": {"mode": "allowlist", "hosts": ["github.com"]}}}]
+```
+
+A manifest's `spec.workspace.host` must be inside a folder every live
+worker grants, and its egress is narrowed to what every live worker's
+network allows, with a warning naming what the sandbox gets. A change on
+the host takes effect when its program starts the worker again.
+
 ## On Kubernetes
 
 Nothing here listens, so the workload needs no Service, no Ingress and no

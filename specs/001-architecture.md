@@ -173,8 +173,9 @@ conformance job runs ([[014-release-and-installation]]).
 | `cella` | a shell or an agent | the client of the API |
 | `cella-stubs` | tests, `make run`, and the release pipeline's conformance job; never an installation | the stub issuer, authorizer, admission endpoint, and sink |
 
-Each role is its own package under `internal/` (`internal/serve`,
-`internal/worker`, `internal/egressd`, `internal/check`), so the
+Each role is its own package (`internal/serve`, `internal/egressd`,
+`internal/check`, and the root package `worker`, which a program other
+than `cellad` embeds as well ([[082-the-worker-as-a-library]])), so the
 dependency gate holds one allow list per role even though one binary
 carries them: the egress role's build list reaches `pkg/egress` and the
 standard library and never the Postgres driver or the Kubernetes
@@ -198,7 +199,7 @@ The word for what turns a manifest into a running environment is
 | `egress` | compiling a sandbox's secrets and egress rules into the map the gateway consumes | none beyond the wire shape it shares with the `egress` role | [[018-egress-and-secrets]] |
 | `internal/api` | the `/v1` handlers, streams, the OpenAPI document | none | [[008-api]], [[023-computer-use-operations]] |
 | `internal/auth` | the OIDC verifier, workload and environment tokens, the authorizer client, the owner policy | none | [[006-identity]] |
-| `internal/serve`, `internal/worker`, `internal/egressd`, `internal/check` | the four roles of `cellad`, one package each with its own dependency allow list | none | [[002-repository-scaffold]], [[021-data-plane-workers]], [[018-egress-and-secrets]], [[014-release-and-installation]] |
+| `internal/serve`, `worker`, `internal/egressd`, `internal/check` | the four roles of `cellad`, one package each with its own dependency allow list; `worker` is a root package another program embeds ([[082-the-worker-as-a-library]]) | none | [[002-repository-scaffold]], [[021-data-plane-workers]], [[018-egress-and-secrets]], [[014-release-and-installation]] |
 | `client` | the typed `/v1` client: one method per route, the error envelope as one error type, the exec, attach and dial sockets | Go API additive within a module major; its build list is the standard library, `manifest/v1` and the error envelope, so an importer builds no part of the server | [[011-agent-client]] |
 | `internal/admission`, `internal/events`, `internal/store`, `internal/config`, `internal/version`, `internal/cellacli` | as their specs say | none | [[007-admission]], [[009-events]], [[010-state]], [[002-repository-scaffold]], [[011-agent-client]] |
 
@@ -350,8 +351,8 @@ The build list of `./cmd/cellad` reaches the standard library,
 API client for the podman driver, the Postgres driver for the store,
 and the OpenTelemetry SDK, and nothing else: no cloud SDK, no web
 framework, no ORM. `./internal/egressd` reaches `latere.ai/x/pkg/egress` and the standard
-library; `./internal/worker` reaches the drivers and never the Postgres
-driver; `./cmd/cella` reaches the standard library and the error
+library; `./worker` reaches the runtime contract, the exported client
+and its WebSocket library, and never a store or a driver of its own; `./cmd/cella` reaches the standard library and the error
 envelope. The `depcheck` gate holds each list, and a
 new entry is a row with a reason.
 

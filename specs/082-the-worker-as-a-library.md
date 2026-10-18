@@ -1,6 +1,6 @@
 ---
 title: "The worker as a library: an exported `worker` package a program embeds to serve an environment, a host policy that admits, holds or refuses each create and checks every operation, built-in checks against the host's own grants that the control plane cannot widen, a record of every operation for the host, and the host's OS, architecture, grants and network in the registration"
-status: drafted
+status: testing
 track: core
 depends_on:
   - specs/004-runtime-contract.md
@@ -243,3 +243,88 @@ embedder ends `Run` and starts it again.
    `worker_replaced` the stage and the sandbox are untouched.
 9. The depcheck row for `worker` holds, and `TestNoInboundToTheDataPlane`
    (spec 021) covers an embedded worker.
+
+## Outcome
+
+Built on 2026-10-18. `latere.ai/x/cella/worker` holds the loop, `cellad
+worker` calls `worker.Run`, and `internal/worker` is gone. Criteria 1, 2,
+3, 5, 6, 8 and 9 have their named tests (`TestWorkerHoldsACreate`,
+`TestWorkerRefusesACreate` and `TestWorkerAdmitTimeout` end to end in
+`cmd/cellad`; the rest in `worker/`), and `examples/worker` builds under
+`TestExampleWorkerBuilds`. The spec stays at testing until spec 081 adds
+the `local` variants of criteria 4 and 7.
+
+Where the code diverges from the design:
+
+- **Spec 081's types land here.** This spec ships before the local
+  driver, so `v1.HostInfo`, `HostGrant`, `HostNetwork`,
+  `runtime.HostDescriber`, `Capabilities.HostWorkspace`,
+  `spec.workspace.host` and the resolve rules for it and for the host
+  network (`workspace_not_granted`, narrowing with a warning) are built in
+  this spec's commits. Resolve writes `workspace.path` and the default
+  `workdir` as the host folder, so the file routes and the driver agree on
+  where the workspace is.
+- **Criteria 4 and 7 run against a test driver for now.**
+  `TestBuiltInChecksIgnoreThePolicy` and `TestRegistrationCarriesHost`
+  use the native driver behind a host it reports. Narrowing open egress
+  to the host's list is the driver's, so the half of criterion 4 that
+  reads the network is proved by the local driver's tests in spec 081.
+- **`HostApproval` Pending is status `Unknown` with reason `Pending`.**
+  Condition statuses are the three Kubernetes spells, so the waiting
+  state is `Unknown`, message "Waiting for the host.", and becomes `True`
+  with reason `Approved`, or `False` with `HostRefused` or `HostTimeout`
+  and the host's own words as the message.
+- **The sandbox's reason is `HostRefused` or `HostTimeout`.** Sandbox
+  reasons are CamelCase like `CreateFailed`; the snake case words are the
+  API's error codes, `host_refused` (403), `host_timeout` (504) and
+  `workspace_not_granted` (422), each with its fixed message in
+  `docs/api.md`.
+- **The held frame reaches the controller through the hub.** The hub
+  records each create it sends by operation id and calls the function the
+  API installs with `Hub.OnHeld`, which writes the condition and the
+  `sandbox.host_pending` record; a worker cannot name a sandbox of its
+  own choosing. The lease needs no change: heartbeats continue on the
+  stream while a create is held.
+- **`Create.Sandbox` is built from what the worker receives.** A worker
+  is sent a `runtime.CreateSpec`, not the manifest, so `Create.Sandbox`
+  carries the id, owner and isolation in its status, the name and labels,
+  and the image, command, workdir, workspace and egress in its spec. The
+  workload token is never in it. `CreateSpec` gains `Isolation`, the
+  class the sandbox resolved to, so the worker can compare it with its
+  driver's.
+- **The image, command and volume check is the driver's.** The runtime
+  contract has no way to ask a driver what it can honor short of creating,
+  and `CreateSpec` carries no volume, so a create the driver cannot honor
+  is refused by the driver's own `Create`, after the policy.
+- **`Operation` and `Record` carry `To`,** a move's destination, so a
+  policy and a log see both ends of a move. `Options` also takes `Log`.
+- **An operation on a sandbox the driver does not hold answers
+  `not_found`,** recorded as refused, so a control plane deleting a
+  sandbox its worker lost reads it as gone rather than failing the delete
+  forever.
+- **No separate reconcile at start.** A worker that crashed meets
+  `serve_refused` at its next registration when its environment was
+  deleted (spec 083), and the control plane retries the delete of a
+  single sandbox until the worker answers it, so nothing beyond the
+  existing paths is needed for the sandboxes the control plane no longer
+  wants.
+- **`cellad worker` sets `KeepOnExit`,** so an operator's worker keeps
+  its sandboxes across a restart of the role as it always did.
+- **The depcheck row admits more than the spec lists.** The worker
+  reaches `github.com/gorilla/websocket` (its one stream),
+  `latere.ai/x/pkg/httpjson` and `github.com/google/uuid` through the
+  exported client, and `latere.ai/x/pkg/otel` with the OpenTelemetry SDK,
+  because every outbound client of this repository carries the tracing
+  transport and the `otel-client` gate holds it. The engines table of
+  `arch_test.go` lists packages one by one, so the worker is held by
+  `TestTheWorkerReachesNoStore` instead: no package under `internal/`, no
+  driver, no store or engine client.
+- **A registration refused with 401 is retried.** A key revoked while its
+  worker was disconnected is refused at the verifier, before any code a
+  worker stops on is chosen, so that worker keeps trying with backoff;
+  a live stream is closed with `key_revoked` (spec 083).
+- **`TestNoInboundToTheDataPlane`** is the embedded worker opening no
+  listening socket across a sandbox's whole life, read from the process's
+  own descriptors; the control plane's half is
+  `TestRootPackagesDialNothing`. It leaves the threat model's pending
+  list.

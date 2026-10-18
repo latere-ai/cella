@@ -102,14 +102,14 @@ value, a secret's value or a token. These are the types:
 
 | Object | Types |
 |---|---|
-| Sandbox | `sandbox.created`, `sandbox.updated`, `sandbox.started`, `sandbox.stopped`, `sandbox.failed`, `sandbox.lost`, `sandbox.recovering`, `sandbox.recovered`, `sandbox.deleted`, `sandbox.resized` and `sandbox.at_ceiling` for a sandbox [sized inside a ceiling](manifest.md#sizing-inside-a-ceiling), and `sandbox.spawned`, on the parent, when it creates a child |
+| Sandbox | `sandbox.created`, `sandbox.updated`, `sandbox.started`, `sandbox.stopped`, `sandbox.failed`, `sandbox.lost`, `sandbox.recovering`, `sandbox.recovered`, `sandbox.deleted`, `sandbox.resized` and `sandbox.at_ceiling` for a sandbox [sized inside a ceiling](manifest.md#sizing-inside-a-ceiling), `sandbox.host_pending` when the worker serving it holds its create while the host decides ([workers](workers.md#what-the-host-decides)), and `sandbox.spawned`, on the parent, when it creates a child |
 | An operation on a sandbox | `sandbox.exec`, `sandbox.files`, `sandbox.dial`, `sandbox.screenshot`, `sandbox.input`, `sandbox.screen` |
 | Secret | `secret.created`, `secret.updated`, `secret.deleted` |
 | Environment | `environment.created`, `environment.updated`, `environment.registered`, `environment.offline`, `environment.keyed`, `environment.key_revoked`, `environment.deleted` |
 
 `sandbox.started`, `sandbox.stopped`, `sandbox.failed`, `sandbox.lost` and
 `sandbox.deleted` carry a `reason`, such as `Request`, `AutoStop`,
-`CreateFailed`, `NoCapacity` or `Preempted`. A gateway substituting a
+`CreateFailed`, `HostRefused`, `HostTimeout`, `NoCapacity` or `Preempted`. A gateway substituting a
 secret's value moves its `status.lastUsedAt` and writes no record. A start
 of a [failed sandbox](manifest.md#recovering-a-failed-sandbox) records
 `sandbox.started`, as a start of a stopped one does.

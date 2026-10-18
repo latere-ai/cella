@@ -86,7 +86,7 @@ held to the threat model and its tests.
 | `internal/auth` | token verification, the signer, the authorizer client, and the owner policy |
 | `internal/admission`, `internal/events` | the admission client, and the journal with signed delivery to a sink |
 | `internal/store` | the store contract, the memory and Postgres adapters, and the suite both pass |
-| `internal/worker`, `internal/egressd` | the `worker` and `egress` roles |
+| `worker`, `internal/egressd` | the worker a program embeds, which `cellad worker` runs, and the `egress` role |
 | `internal/config`, `internal/check` | configuration loading, and `cellad check` |
 | `examples/plane` | a server built from the packages, compiled on every push |
 | `deploy/` | the Kubernetes base, the bootstrap Secrets, and the overlays |
@@ -108,7 +108,8 @@ variable does.
 Three places, by who imports it:
 
 - The module root (`manifest/`, `runtime/`, `controller/`, `egress/`,
-  `authorizer/`) holds the packages a platform built on Cella imports. A
+  `authorizer/`, `worker/`) holds the packages a platform built on Cella
+  imports. A
   change there keeps existing call sites compiling or names the break in
   the CHANGELOG.
 - `internal/` holds what only `cellad` and `cella` need: the HTTP API,
