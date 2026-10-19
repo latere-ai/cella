@@ -28,6 +28,15 @@ refused before it is pushed.
   could show it `Pending` with no host. A registration now writes the status
   before it is answered, counting the worker until its stream opens, and the
   end of a stream writes it again, so a read right after either sees it.
+- **A missing file reads as a missing file.** A file operation on the local
+  runtime that finds nothing now answers `not found: AGENTS.md`, the path it
+  looked for, where it answered `environment not found: openat AGENTS.md: no
+  such file or directory`, which a worker's record and a host's activity log
+  showed as though the environment were gone. For a package importer: the
+  text of `runtime.ErrNotFound`, `ErrAlreadyExists` and `ErrNotRunning` is
+  now `not found`, `already exists` and `not running`, since each is said of
+  a sandbox, a file, a port or a volume alike. `errors.Is` matches as before
+  and the API's error codes are unchanged.
 - **A command with input does not outlive a killed worker on the local
   runtime.** Such a command runs attached to the worker, and a worker
   killed outright left it running where nothing could reach it, not even a

@@ -16,10 +16,14 @@ import (
 	v1 "latere.ai/x/cella/manifest/v1"
 )
 
+// The errors every driver answers with. ErrNotFound, ErrAlreadyExists and
+// ErrNotRunning are said of whatever a call names, a sandbox, a file, a port
+// or a volume, so their text names no kind and a driver wraps them with what
+// it was.
 var (
-	ErrNotFound      = errors.New("environment not found")
-	ErrAlreadyExists = errors.New("environment already exists")
-	ErrNotRunning    = errors.New("environment is not running")
+	ErrNotFound      = errors.New("not found")
+	ErrAlreadyExists = errors.New("already exists")
+	ErrNotRunning    = errors.New("not running")
 	ErrUnsupported   = errors.New("operation is not supported")
 	ErrInvalid       = errors.New("invalid runtime request")
 	// ErrHostRefused is a host that refused an operation: its own policy

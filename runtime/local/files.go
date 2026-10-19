@@ -402,13 +402,40 @@ func fileError(err error) error {
 	case err == nil:
 		return nil
 	case errors.Is(err, fs.ErrNotExist):
-		return fmt.Errorf("%w: %w", driver.ErrNotFound, err)
+		return missing(err)
 	case errors.Is(err, driver.ErrTooLarge), errors.Is(err, driver.ErrInvalid):
 		return err
 	case errors.Is(err, fs.ErrExist):
 		return fmt.Errorf("%w: %w", driver.ErrInvalid, err)
 	}
 	return err
+}
+
+// missingFile is a path a file operation did not find, worded by the path
+// alone, "not found: AGENTS.md", which is what the host's own record of the
+// operation shows. It is both the contract's ErrNotFound and the
+// filesystem's own error.
+type missingFile struct {
+	path string
+	err  error
+}
+
+func (e *missingFile) Error() string   { return driver.ErrNotFound.Error() + ": " + e.path }
+func (e *missingFile) Unwrap() []error { return []error{driver.ErrNotFound, e.err} }
+
+// missing words a path the filesystem did not find by the path it names,
+// relative to the area it was looked for in, and keeps the filesystem's text
+// where the error names no path.
+func missing(err error) error {
+	var pathErr *fs.PathError
+	var linkErr *os.LinkError
+	switch {
+	case errors.As(err, &pathErr):
+		return &missingFile{path: pathErr.Path, err: err}
+	case errors.As(err, &linkErr):
+		return &missingFile{path: linkErr.Old, err: err}
+	}
+	return fmt.Errorf("%w: %w", driver.ErrNotFound, err)
 }
 
 // contextReader ends a copy when its context does.
