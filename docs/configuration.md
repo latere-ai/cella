@@ -128,7 +128,7 @@ the host's own policy: no manifest widens them.
 | `CELLA_LOCAL_READ_PATHS` | unset | files or folders every command may read where they are, comma separated, such as `~/.gitconfig` or a toolchain like `~/.rustup`. The home directory, a system directory, and a path on the deny table are refused at start |
 | `CELLA_LOCAL_DENY` | unset | paths no command and no file route may read, comma separated, on top of the table the driver always denies (`~/.ssh`, `~/.env`, and the rest), such as a secret file inside a granted folder |
 | `CELLA_LOCAL_NETWORK` | `none` | `none` or `allowlist`. A sandbox's egress is narrowed to it and never widened: one asking for `open` on an `allowlist` host gets the host's list |
-| `CELLA_LOCAL_HOSTS` | unset | the hosts an `allowlist` network reaches, comma separated; a host alone is reached on ports 443 and 80, and `host:port` names another port |
+| `CELLA_LOCAL_HOSTS` | unset | the hosts an `allowlist` network reaches, comma separated; on macOS a host alone is reached on ports 443 and 80, and `host:port` names another port |
 
 ## Lifecycle
 

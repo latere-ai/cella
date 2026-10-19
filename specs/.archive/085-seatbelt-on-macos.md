@@ -34,8 +34,9 @@ times before release. A Mac then needs nothing installed. Linux keeps srt.
   launcher that is cellad started again, which serves the stage's proxy
   and never returns from `Main`.
 - **The network.** The allowlist is enforced by that proxy, which admits
-  a connection by its host and port and never decrypts it: a host named
-  alone is reached on 443 and 80, and `host:port` names another port. A
+  a connection by its host and port and never decrypts it: on macOS a
+  host named alone is reached on 443 and 80, and `host:port` names
+  another port. A
   destination on the machine itself or a link-local one is refused.
 - **Files that run code later.** Inside a writable grant, a stage cannot
   write shell startup files, `.envrc`, `.gitconfig`, `.gitmodules`,

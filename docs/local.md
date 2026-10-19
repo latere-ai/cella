@@ -124,10 +124,10 @@ Your computer narrows what a sandbox asks for and never widens it:
 
 A sandbox that asks for more than your computer allows is created with
 what it allows, and carries a warning naming what it got. There is no
-`open` network: only named hosts are reached. A host named alone is
-reached over HTTPS on port 443 and HTTP on port 80; another port is named
-with the host, as `github.com:22` for git over SSH. A proxy that runs
-beside each command is its only route out (on macOS it admits a
+`open` network: only named hosts are reached. On macOS a host named alone
+is reached over HTTPS on port 443 and HTTP on port 80, and another port
+is named with the host, as `github.com:22` for git over SSH. A proxy that
+runs beside each command is its only route out (on macOS it admits a
 connection by its host and port and never decrypts it), so an
 environment on the local runtime needs no egress gateway and reports
 `EgressEnforced` `True` with the reason `DriverEnforced`.
