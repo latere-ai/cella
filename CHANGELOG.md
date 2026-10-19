@@ -6,6 +6,22 @@ refused before it is pushed.
 
 ## Unreleased
 
+### Changed
+
+- **On macOS the local runtime needs nothing installed.** `cellad`
+  confines each command with Seatbelt, part of macOS, through hostsandbox's
+  native driver, in place of srt, Node.js and ripgrep. Linux keeps srt.
+- **A network allowlist reaches a host on ports 443 and 80;** name another
+  port as `host:port`, for example `github.com:22`.
+- **Inside a granted folder on macOS, a command cannot write the files
+  your own tools later run as code**: shell startup files, `.envrc`,
+  `.gitconfig`, `.gitmodules`, `.mcp.json`, `*.code-workspace`, the
+  `.claude`, `.cursor`, `.vscode` and `.idea` folders, and a repository's
+  config and hooks. Everyday git works; `git init`, `clone`, `config` and
+  `remote add` do not.
+- A program that embeds the worker calls `hostsandbox.Main()` first in its
+  `main` to use Seatbelt on macOS; without it srt stays.
+
 ## v0.18.0 - 2026-10-19
 
 ### Added
