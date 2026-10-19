@@ -169,8 +169,10 @@ type worker struct {
 	registered time.Time
 	ttl        time.Duration
 	// ended marks a registration whose stream was refused, which no longer
-	// holds a place while its pending window runs.
-	ended bool
+	// holds a place while its pending window runs, and streamed one whose
+	// stream has opened, which is never pending again.
+	ended    bool
+	streamed bool
 }
 
 // NewHub returns a hub holding no environment and no connection.
@@ -723,7 +725,7 @@ func (c *connection) bind(workerID string) (*worker, error) {
 			return nil, &CloseError{Code: ClosePolicy, Reason: ReasonWorkerLimit}
 		}
 	}
-	w.link, w.lastHeartbeat = c.link, c.hub.now()
+	w.link, w.lastHeartbeat, w.streamed = c.link, c.hub.now(), true
 	c.mu.Lock()
 	c.worker = w
 	c.mu.Unlock()
@@ -824,8 +826,12 @@ func (h *Hub) Workers(environmentID string) []WorkerState {
 		return nil
 	}
 	out := make([]WorkerState, 0, len(env.workers))
+	pendingSince := h.now().Add(-pendingWindow)
 	for _, w := range env.workers {
-		state := WorkerState{Worker: w.id, LastHeartbeat: w.lastHeartbeat, Connected: w.link != nil}
+		state := WorkerState{
+			Worker: w.id, LastHeartbeat: w.lastHeartbeat, Connected: w.link != nil,
+			Pending: !w.streamed && !w.ended && w.registered.After(pendingSince),
+		}
 		if w.host != nil {
 			host := cloneHost(*w.host)
 			state.Host = &host
@@ -836,11 +842,14 @@ func (h *Hub) Workers(environmentID string) []WorkerState {
 	return out
 }
 
-// WorkerState is one worker as the control plane sees it.
+// WorkerState is one worker as the control plane sees it. Pending is a
+// registration younger than the pending window whose stream has not opened
+// yet, and was not refused.
 type WorkerState struct {
 	Worker        string       `json:"worker"`
 	LastHeartbeat time.Time    `json:"lastHeartbeat"`
 	Connected     bool         `json:"connected"`
+	Pending       bool         `json:"pending,omitempty"`
 	Host          *v1.HostInfo `json:"host,omitempty"`
 }
 

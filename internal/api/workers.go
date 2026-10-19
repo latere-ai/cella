@@ -55,7 +55,7 @@ func WorkerRegistrations(hub *remote.Hub) func(string) []controller.Registration
 		for _, w := range states {
 			out = append(out, controller.Registration{
 				Worker: w.Worker, Driver: driverName,
-				LastHeartbeat: w.LastHeartbeat, Connected: w.Connected, Host: w.Host,
+				LastHeartbeat: w.LastHeartbeat, Connected: w.Connected, Pending: w.Pending, Host: w.Host,
 			})
 		}
 		return out
@@ -211,7 +211,20 @@ func (h *handler) registerWorker(w http.ResponseWriter, r *http.Request, key aut
 		return
 	}
 	registered.Environment = environment
+	// The environment reads Ready with this worker's host before the worker
+	// learns it registered, so whoever reads it next sees it.
+	h.observeEnvironment(r.Context(), environment)
 	respond(w, http.StatusCreated, registered)
+}
+
+// observeEnvironment writes an environment's status after one of its workers
+// registered or its stream ended, rather than at the phase loop's next tick.
+// A failure is logged and not answered: the registration or the stream's end
+// stands, and the next tick writes the status.
+func (h *handler) observeEnvironment(ctx context.Context, environment string) {
+	if err := h.Controller.ObserveEnvironment(ctx, environment); err != nil {
+		h.log.WarnContext(ctx, "the environment's status was not written at once", "environment", environment, "err", err)
+	}
 }
 
 // recordReplacement journals a registration that met a live worker holding
@@ -254,6 +267,8 @@ func (h *handler) workerStream(w http.ResponseWriter, r *http.Request, key auth.
 		return d.TTL, err
 	}
 	_ = h.Workers.ServeWith(r.Context(), environment, newWorkerSocket(conn), remote.ServeOptions{Recheck: recheck})
+	// The stream is gone, and the environment no longer counts its worker.
+	h.observeEnvironment(context.WithoutCancel(r.Context()), environment)
 }
 
 // workerSocket is the worker protocol's frames over one WebSocket, the

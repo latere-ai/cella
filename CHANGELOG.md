@@ -22,6 +22,12 @@ refused before it is pushed.
 
 ### Fixed
 
+- **An environment reads Ready as soon as its worker registers.** The
+  environment's status, its phase, `workers` and `hosts`, was written by the
+  phase loop every five seconds, so a read right after a worker connected
+  could show it `Pending` with no host. A registration now writes the status
+  before it is answered, counting the worker until its stream opens, and the
+  end of a stream writes it again, so a read right after either sees it.
 - **A command with input does not outlive a killed worker on the local
   runtime.** Such a command runs attached to the worker, and a worker
   killed outright left it running where nothing could reach it, not even a

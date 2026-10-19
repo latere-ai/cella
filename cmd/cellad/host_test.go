@@ -253,6 +253,44 @@ func TestRegistrationCarriesHost(t *testing.T) {
 	}
 }
 
+// TestAnEnvironmentReadsReadyOnceItsWorkerConnects: an embedder told that its
+// worker connected reads its environment Ready at once, with the worker
+// counted and its host in status.hosts, rather than Pending until the phase
+// loop's next tick.
+func TestAnEnvironmentReadsReadyOnceItsWorkerConnects(t *testing.T) {
+	p := startPlane(t, "", "")
+	if status, answer := applyAs(t, p, p.bearer, "fresh-laptop",
+		`{"mode":"worker","isolation":"none","capacity":{"sandboxes":4}}`); status != http.StatusCreated {
+		t.Fatalf("the apply answered %d: %s", status, answer)
+	}
+	key, _ := mintAs(t, p, p.bearer, "fresh-laptop", "")
+	host := v1.HostInfo{OS: "darwin", Arch: "arm64", Grants: []v1.HostGrant{{Path: "/Users/dev/site", Write: true}},
+		Network: v1.HostNetwork{Mode: "none"}}
+	connected := make(chan struct{}, 1)
+	runEmbedded(t, p, key, worker.Options{
+		Driver: hostNative{Driver: nativeHost(t), host: host},
+		State: func(s worker.State) {
+			if s.Connected {
+				select {
+				case connected <- struct{}{}:
+				default:
+				}
+			}
+		},
+	})
+	select {
+	case <-connected:
+	case <-time.After(20 * time.Second):
+		t.Fatal("the worker never connected")
+	}
+	obj := p.environmentNamed(t, "fresh-laptop")
+	if obj.Status.Phase != v1.EnvironmentReady || obj.Status.Workers != 1 || len(obj.Status.Hosts) != 1 ||
+		!obj.Status.Hosts[0].Host.Equal(host) {
+		t.Errorf("right after its worker connected the environment reads %s with %d workers and hosts %+v",
+			obj.Status.Phase, obj.Status.Workers, obj.Status.Hosts)
+	}
+}
+
 // TestNoInboundToTheDataPlane holds invariant 10 of spec 001 for a worker a
 // program embeds: across a sandbox's whole life on it (create, exec, a file
 // written and read, delete), the worker opens no listening socket, so there

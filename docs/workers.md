@@ -244,11 +244,14 @@ curl -sS -H "Authorization: Bearer $ADMIN_TOKEN" \
 }
 ```
 
-The phase follows the worker. It is `Ready` while one heartbeats,
-`Offline` with the reason `HeartbeatLost` once nothing has been heard for
-`CELLA_ENVIRONMENT_OFFLINE`, and `Ready` again when a worker returns. An
-environment below `Ready` refuses a new sandbox and leaves the ones it
-already holds running.
+The phase follows the worker. It is `Ready` from the moment a worker's
+registration is answered and while one heartbeats, `Offline` with the
+reason `HeartbeatLost` once nothing has been heard for
+`CELLA_ENVIRONMENT_OFFLINE`, and `Ready` again when a worker returns.
+`workers` and `hosts` count a worker from its registration and stop
+counting it when its stream ends, so a read right after either already
+says so. An environment below `Ready` refuses a new sandbox and leaves
+the ones it already holds running.
 
 ## Run sandboxes on it
 

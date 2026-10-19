@@ -81,6 +81,11 @@ type Registration struct {
 	Driver        string
 	LastHeartbeat time.Time
 	Connected     bool
+	// Pending is a worker whose registration was just taken and whose stream
+	// has not opened yet. It counts as a live worker, so the environment
+	// reads Ready with the worker's host from the registration on, not from
+	// the next tick after its stream opened.
+	Pending bool
 	// Host is the machine the worker runs on as its driver reports it, nil
 	// where the driver reports none (spec 082).
 	Host *v1.HostInfo
@@ -451,9 +456,28 @@ func (c *Controller) Phases(ctx context.Context) error {
 	return failed
 }
 
+// ObserveEnvironment writes one environment's observed half now, as a tick of
+// the phase loop would: a worker's registration and the end of its stream
+// change what the environment reports, and a reader right after either must
+// not wait for the next tick to see it. Like the loop, it writes only while
+// this replica holds the environments lease, and an environment this
+// control plane holds no object of is left as it is.
+func (c *Controller) ObserveEnvironment(ctx context.Context, name string) error {
+	held, err := c.lease.Acquire(ctx, EnvironmentsLease, LeaseTTL)
+	if err != nil {
+		return fmt.Errorf("the environments lease: %w", err)
+	}
+	if !held {
+		return nil
+	}
+	return c.phaseOf(ctx, name)
+}
+
 // phaseOf writes one environment's observed half: what its data plane
 // reports, the phase that follows, and the record of a transition.
 func (c *Controller) phaseOf(ctx context.Context, name string) error {
+	c.phaseMu.Lock()
+	defer c.phaseMu.Unlock()
 	obj, held := c.environmentOf(name)
 	if !held {
 		return nil
@@ -565,10 +589,10 @@ func (c *Controller) markAnswered(name string) {
 	c.answerMu.Unlock()
 }
 
-// registrationsOf is how many workers of one environment hold a stream open,
-// when the most recent was heard from, and the driver they run. A worker that
-// registered and dropped its stream is not counted: nothing can be placed
-// through it.
+// registrationsOf is how many workers of one environment hold a stream open
+// or have just registered to open one, when the most recent was heard from,
+// and the driver they run. A worker that registered and dropped its stream is
+// not counted: nothing can be placed through it.
 func (c *Controller) registrationsOf(name string) (int, time.Time, string) {
 	if c.registrations == nil {
 		return 0, time.Time{}, ""
@@ -577,7 +601,7 @@ func (c *Controller) registrationsOf(name string) (int, time.Time, string) {
 	var last time.Time
 	driverName := ""
 	for _, w := range c.registrations(name) {
-		if !w.Connected {
+		if !w.Connected && !w.Pending {
 			continue
 		}
 		count++
@@ -591,16 +615,16 @@ func (c *Controller) registrationsOf(name string) (int, time.Time, string) {
 	return count, last, driverName
 }
 
-// hostsOf is the host of every worker of one environment that holds a stream
-// open and reports one, in the order the registrations list them, which is
-// status.hosts (spec 082).
+// hostsOf is the host of every worker of one environment that registrationsOf
+// counts and that reports one, in the order the registrations list them,
+// which is status.hosts (spec 082).
 func (c *Controller) hostsOf(name string) []v1.HostStatus {
 	if c.registrations == nil {
 		return nil
 	}
 	var out []v1.HostStatus
 	for _, w := range c.registrations(name) {
-		if !w.Connected || w.Host == nil {
+		if (!w.Connected && !w.Pending) || w.Host == nil {
 			continue
 		}
 		out = append(out, v1.HostStatus{Worker: w.Worker, Host: cloneHost(*w.Host)})

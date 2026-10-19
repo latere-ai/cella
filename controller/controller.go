@@ -261,6 +261,10 @@ type Controller struct {
 	offline  time.Duration
 	answerMu sync.Mutex
 	answered map[string]time.Time
+	// phaseMu holds one environment's status write at a time, so the loop's
+	// tick and a registration that writes at once never interleave and an
+	// older reading never lands after a newer one.
+	phaseMu sync.Mutex
 	// realizing is every sandbox whose driver create the scheduler loop has
 	// in flight with the controller's lock released. A start, a stop or a
 	// re-minted identity for one of them is refused rather than crossing the
