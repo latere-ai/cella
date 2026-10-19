@@ -21,6 +21,9 @@
 // embedder's HostPolicy, which may hold the create while it asks a person.
 // Every other operation is checked against a sandbox the driver holds and
 // against the policy, and each one answered is handed to Options.Record.
+//
+// The embedder learns whether its machine is online from Options.State, which
+// is told when the worker connects and each time it stops being connected.
 package worker
 
 import (
@@ -93,6 +96,12 @@ type Options struct {
 	// Record is told of every operation once it is answered. Nil records
 	// nothing.
 	Record func(Record)
+	// State is told of every change of the worker's connection to the
+	// control plane: connected once a registration is taken and its stream
+	// is open, and not connected, with the reason, when a registration fails
+	// or the stream ends. It runs on Run's own goroutine, in order, and Run
+	// waits for it, so it should return promptly. Nil tells nothing.
+	State func(State)
 	// KeepOnExit leaves the driver's sandboxes running when ctx ends. An
 	// operator's fleet may want its sandboxes to outlive a worker restart;
 	// a person's computer does not, which is the default.
@@ -124,6 +133,48 @@ func (r *Refusal) Error() string {
 	return "worker: the control plane refused this worker: " + r.Code + ": " + r.Detail
 }
 
+// State is the worker's connection to the control plane at one change, as
+// Options.State is told of it.
+type State struct {
+	// Connected says the control plane took the registration and the stream
+	// is open, so operations reach this worker. Registered is the control
+	// plane's answer to that registration.
+	Connected  bool
+	Registered remote.Registered
+	// Err is why the worker is not connected: the registration that failed,
+	// a *RegistrationError where the control plane answered it with an
+	// error, or what ended the stream. When Run ends because its context
+	// ended, Err is the context's cause. It is nil while Connected.
+	Err error
+	// Reconnect says the worker registers again after RetryIn. It is false
+	// when Run is about to return.
+	Reconnect bool
+	RetryIn   time.Duration
+	// Refusal is the control plane's answer the worker stops on, when that
+	// is what ends Run. Err is then the same refusal.
+	Refusal *Refusal
+}
+
+// RegistrationError is a registration the control plane answered with an
+// error the worker does not stop on, such as a key it refused with 401 or a
+// control plane that is not ready. The worker registers again after its
+// backoff. Code is the error code the answer's body carried, empty where it
+// carried none.
+type RegistrationError struct {
+	StatusCode int
+	Status     string
+	Code       string
+	Body       string
+}
+
+func (e *RegistrationError) Error() string {
+	return "worker: the control plane refused the registration with " + e.Status + ": " + e.Body
+}
+
+// errStreamClosed is a stream that ended with no error of its own, which is
+// the control plane closing it.
+var errStreamClosed = errors.New("worker: the control plane closed the stream")
+
 // codeEnvironmentMismatch is the registration refusal of a worker whose
 // driver differs from the one the environment already recorded.
 const codeEnvironmentMismatch = "environment_mismatch"
@@ -154,6 +205,10 @@ func (r *Refusal) ends() bool {
 // refused serve it stops and deletes every one whatever KeepOnExit says; on
 // a replaced or refused registration it touches nothing, because another
 // process holding the key now serves the environment.
+//
+// Options.State is told when the worker connects and each time it stops
+// being connected, the last time with Reconnect false just before Run ends
+// the host's work and returns.
 func Run(ctx context.Context, o Options) error {
 	w, err := newWorker(o)
 	if err != nil {
@@ -170,9 +225,11 @@ type worker struct {
 	log     *slog.Logger
 	gate    *gate
 	// environment is the id the key named, learned from the registration,
-	// and id the worker id the control plane minted for this process.
+	// id the worker id the control plane minted for this process, and
+	// registered the whole answer, which Options.State is told.
 	environment string
 	id          string
+	registered  remote.Registered
 	// after is the reconnect's timer, time.After unless a test replaces it
 	// to read the waits the loop chose.
 	after func(time.Duration) <-chan time.Time
@@ -220,12 +277,14 @@ func (w *worker) run(ctx context.Context) error {
 		if ctx.Err() != nil {
 			// The worker was asked to stop. Whatever ended the connection is
 			// that request, not a failure of the worker's own act.
+			w.tell(State{Err: context.Cause(ctx)})
 			w.release(ctx, !w.options.KeepOnExit, false)
 			return nil //nolint:nilerr // the context ending is the caller stopping the worker
 		}
 		var refusal *Refusal
 		if errors.As(err, &refusal) {
 			w.log.WarnContext(ctx, "the control plane refused this worker", "code", refusal.Code, "detail", refusal.Detail)
+			w.tell(State{Err: refusal, Refusal: refusal})
 			if refusal.ends() {
 				w.release(ctx, true, true)
 			}
@@ -238,16 +297,26 @@ func (w *worker) run(ctx context.Context) error {
 		if accepted {
 			backoff = minBackoff
 		}
-		if err != nil {
-			w.log.WarnContext(ctx, "the worker's stream to the control plane ended", "err", err, "retryIn", backoff)
+		if err == nil {
+			err = errStreamClosed
 		}
+		w.log.WarnContext(ctx, "the worker's stream to the control plane ended", "err", err, "retryIn", backoff)
+		w.tell(State{Err: err, Reconnect: true, RetryIn: backoff})
 		select {
 		case <-ctx.Done():
+			w.tell(State{Err: context.Cause(ctx)})
 			w.release(ctx, !w.options.KeepOnExit, false)
 			return nil
 		case <-w.after(backoff):
 		}
 		backoff = min(backoff*2, maxBackoff)
+	}
+}
+
+// tell hands one change of the connection to Options.State.
+func (w *worker) tell(s State) {
+	if w.options.State != nil {
+		w.options.State(s)
 	}
 }
 
@@ -306,6 +375,7 @@ func (w *worker) connect(ctx context.Context) (bool, error) {
 		Worker: w.id, Driver: w.options.Driver, Log: w.log,
 		Admit: w.gate.admit, Answered: w.gate.answered,
 	})
+	w.tell(State{Connected: true, Registered: w.registered})
 	return true, closeRefusal(server.Run(ctx))
 }
 
@@ -358,11 +428,13 @@ func (w *worker) register(ctx context.Context, key string) error {
 		return fmt.Errorf("worker: registering: %w", err)
 	}
 	if res.StatusCode != http.StatusCreated && res.StatusCode != http.StatusOK {
-		if refusal, fatal := refusalOf(answer); fatal {
+		refusal, fatal := refusalOf(answer)
+		if fatal {
 			return &refusal
 		}
-		return fmt.Errorf("worker: the control plane refused the registration with %s: %s",
-			res.Status, strings.TrimSpace(string(answer)))
+		return &RegistrationError{
+			StatusCode: res.StatusCode, Status: res.Status, Code: refusal.Code, Body: strings.TrimSpace(string(answer)),
+		}
 	}
 	var registered remote.Registered
 	if err = json.Unmarshal(answer, &registered); err != nil {
@@ -371,7 +443,7 @@ func (w *worker) register(ctx context.Context, key string) error {
 	if registered.Worker == "" {
 		return errors.New("worker: the control plane accepted the registration and named no worker")
 	}
-	w.id, w.environment = registered.Worker, registered.Environment
+	w.id, w.environment, w.registered = registered.Worker, registered.Environment, registered
 	w.log.InfoContext(ctx, "the worker registered",
 		"environment", w.environment, "worker", w.id, "driver", registration.Driver)
 	return nil

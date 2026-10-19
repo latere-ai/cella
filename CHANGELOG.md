@@ -6,6 +6,20 @@ refused before it is pushed.
 
 ## Unreleased
 
+### Added
+
+- **A program embedding the worker is told when it connects.**
+  `worker.Options.State` is called with a `worker.State` each time the
+  worker's connection changes: `Connected`, with the registration's answer,
+  once a registration is taken and its stream is open; not connected, with
+  the reason in `Err` and whether and when it tries again, when a
+  registration fails or the stream ends; and a last time, with `Reconnect`
+  false and the refusal when there is one, before `Run` returns. A
+  registration the control plane answers with an error the worker retries
+  on is now a `*worker.RegistrationError` carrying the status and the
+  error code, so an embedder tells a refused key from a control plane that
+  is not ready. The error's text is unchanged.
+
 ## v0.17.2 - 2026-10-18
 
 ### Added

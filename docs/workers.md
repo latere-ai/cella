@@ -393,6 +393,7 @@ err := worker.Run(ctx, worker.Options{
 	Driver: driver,     // any runtime.Driver; its Preflight must pass
 	Policy: myPolicy,   // asked before each create and each operation
 	Record: myLog,      // told of each operation once it is answered
+	State:  myStatus,   // told when the worker connects and when it stops being connected
 })
 ```
 
@@ -403,6 +404,21 @@ ends or when the control plane refuses the worker: a `*worker.Refusal`
 whose code is `serve_refused`, `key_revoked`, `worker_replaced`,
 `worker_limit` or `environment_mismatch`. It does not retry those, since
 another attempt would meet the same answer.
+
+`State` is told of every change of the connection, so a program shows
+whether its machine is online without reading the worker's log. A
+`worker.State` is `Connected` once a registration is taken and its
+stream is open, with the control plane's answer to the registration in
+`Registered`. When a registration fails or the stream ends it is not
+connected, and `Err` says why: a `*worker.RegistrationError` carries the
+status and the error code of a registration the control plane answered
+with an error the worker retries on, such as a key it refused with 401.
+`Reconnect` and `RetryIn` say when the worker tries again. The last call
+before `Run` returns has `Reconnect` false, with the `*worker.Refusal`
+in `Refusal` when a refusal ended it, or the context's cause in `Err`
+when the context did. The calls arrive in order on `Run`'s own
+goroutine, which waits for each, so a `State` that blocks holds the
+worker.
 
 When it returns, `Run` ends what it started. When `ctx` ends it stops
 every sandbox its driver lists, unless `KeepOnExit` is set; `cellad
