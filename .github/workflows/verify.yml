@@ -46,6 +46,49 @@ jobs:
       # has to agree with the imports.
       - run: go mod tidy -diff
 
+  # The local runtime under the real sandbox on Linux: srt over bubblewrap,
+  # which confines every command a sandbox on a person's own computer runs.
+  # The gate's runners have no sandbox runtime, so each test that needs one
+  # skips there; this job installs it and fails on any such skip. Ubuntu's
+  # AppArmor blocks the unprivileged user namespaces bubblewrap needs until
+  # they are allowed.
+  e2e-local:
+    name: the local runtime under bubblewrap
+    if: "!startsWith(github.ref, 'refs/tags/')"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: The sandbox runtime and what it uses
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap socat ripgrep
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          npm install -g @anthropic-ai/sandbox-runtime
+          srt echo ok
+      # Every local runtime test, the ones the stand-in already runs in the
+      # gate among them. A test is skipped only where the sandbox runtime is
+      # missing, so a skip of one here is a runtime this job failed to
+      # install; a subtest skipped for a capability the runtime does not
+      # declare is indented and not matched.
+      - name: The local runtime's tests under the sandbox runtime
+        shell: bash
+        run: |
+          set -o pipefail
+          go test -count=1 -v -timeout 15m -run '^TestLocal' ./runtime/local ./cmd/cellad 2>&1 | tee local.txt
+          if grep -- '^--- SKIP' local.txt; then
+            echo "a local runtime test was skipped: the sandbox runtime is not usable here" >&2
+            exit 1
+          fi
+          for name in TestLocalConformanceUnderSRT TestLocalGrantsNeverReachTheDenyTable \
+            TestLocalReadsOutsideGrantsAreRefused TestLocalDataDirInsideHome \
+            TestLocalEndsAnOrphanedAttachedCommandUnderSRT TestLocalWorkerEndToEnd; do
+            grep -q -- "^--- PASS: ${name} " local.txt
+          done
+
   image:
     name: the developer image builds
     if: "!startsWith(github.ref, 'refs/tags/')"

@@ -334,7 +334,9 @@ where it is not: `TestLocalConformanceUnderSRT`, the confinement halves of
 `TestLocalGrantsNeverReachTheDenyTable` and
 `TestLocalReadsOutsideGrantsAreRefused`, and `TestLocalWorkerEndToEnd`.
 They ran on macOS under Seatbelt. Criterion 1's Linux half under
-bubblewrap is unrun until a machine with `srt` runs the suite.
+bubblewrap is unrun until a machine with `srt` runs the suite. Since
+2026-10-19 the verify workflow's `e2e-local` job runs every one of them
+under bubblewrap on each push, and fails on a skip.
 
 Where the code diverges from the design:
 

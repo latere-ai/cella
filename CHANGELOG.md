@@ -19,6 +19,10 @@ refused before it is pushed.
   on is now a `*worker.RegistrationError` carrying the status and the
   error code, so an embedder tells a refused key from a control plane that
   is not ready. The error's text is unchanged.
+- **The local runtime is tested under bubblewrap.** A pipeline job installs
+  the sandbox runtime on Linux and runs every local runtime test under it on
+  each push, so the confinement cases that ran only on macOS run on Linux
+  too.
 
 ### Fixed
 

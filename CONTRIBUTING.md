@@ -55,6 +55,7 @@ the exception is reviewable rather than invisible.
 |---|---|---|
 | unit | `make test` | nothing beyond Go. The Postgres store's cases start a container through Testcontainers and skip, saying so, where no container runtime answers |
 | Podman | `make tier-podman` | a rootless Podman engine; runs the Podman runtime's suite and skips where no socket answers |
+| local | `go test -v -run '^TestLocal' ./runtime/local ./cmd/cellad` | the sandbox runtime `srt` on `PATH`, with `bubblewrap`, `socat` and `ripgrep` on Linux; the cases that need it skip, saying what to install, where it is absent, and CI runs them under bubblewrap on every push |
 | kind | `make tier-kind` | kind and a container engine; brings up a cluster with the stubs beside `cellad` and drives the lifecycle through the API |
 | conformance | `go test -tags=e2e -run '^TestContract$' ./test/conformance -args -url <address> -token <bearer>` | a running server; the same suite an installation runs, described in [`docs/conformance.md`](docs/conformance.md) |
 | install | `tools/docs/run-blocks.sh docs/install.md` | a kind cluster and the `CELLA_INSTALL_*` inputs the page names; runs every shell block of the page in order, which CI does on every push and every tag |
