@@ -68,8 +68,17 @@ func holdAnAttachedCommand() int {
 // command in the sandbox, and returns once the command runs.
 func holdingWorker(t *testing.T, h host, data, standInPath, id string) *exec.Cmd {
 	t.Helper()
+	// The worker process is killed before it can remove what it keeps in
+	// its temporary directory, so it keeps it in one this case removes. The
+	// directory is short, since the sandbox runtime puts sockets in it.
+	tmp, err := os.MkdirTemp("", "holder")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(tmp) })
 	cmd := exec.Command(os.Args[0], "-test.run=^$") //nolint:gosec // the test binary itself
-	cmd.Env = append(os.Environ(), holderData+"="+data, holderHome+"="+h.home, holderStandIn+"="+standInPath, holderSandbox+"="+id)
+	cmd.Env = append(os.Environ(), "TMPDIR="+tmp,
+		holderData+"="+data, holderHome+"="+h.home, holderStandIn+"="+standInPath, holderSandbox+"="+id)
 	cmd.Stderr = os.Stderr
 	out, err := cmd.StdoutPipe()
 	if err != nil {
@@ -211,12 +220,12 @@ func TestAttachedCommandsThatCannotBeRecorded(t *testing.T) {
 	ctx := context.Background()
 	failing := func(after int) func() {
 		previous, calls := startTime, 0
-		startTime = func(ctx context.Context, pid int) (int64, error) {
+		startTime = func(pid int) (int64, error) {
 			calls++
 			if calls > after {
 				return 0, errors.New("ps is not there")
 			}
-			return previous(ctx, pid)
+			return previous(pid)
 		}
 		return func() { startTime = previous }
 	}
@@ -260,7 +269,7 @@ func TestAttachedCommandsThatCannotBeRecorded(t *testing.T) {
 		_ = other.Process.Kill()
 		_ = other.Wait()
 	})
-	leader, err := identify(ctx, other.Process.Pid)
+	leader, err := identify(other.Process.Pid)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,7 +278,7 @@ func TestAttachedCommandsThatCannotBeRecorded(t *testing.T) {
 		"a leader that is another process": {Name: "exec-other", Group: process{PID: leader.PID, Start: leader.Start - 60}},
 		"no process at all":                {Name: "exec-none"},
 	} {
-		if err := s.end(ctx); err != nil {
+		if err := s.end(); err != nil {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
@@ -318,11 +327,10 @@ func TestDriverStartsOverRecordsItCannotEnd(t *testing.T) {
 // TestStartTimeReadsPs: the start time of this process reads, and one of a
 // process that does not exist is an error.
 func TestStartTimeReadsPs(t *testing.T) {
-	ctx := context.Background()
-	if started, err := startTime(ctx, os.Getpid()); err != nil || started <= 0 || started > time.Now().Unix() {
+	if started, err := startTime(os.Getpid()); err != nil || started <= 0 || started > time.Now().Unix() {
 		t.Errorf("this process started at %d, %v", started, err)
 	}
-	if _, err := startTime(ctx, 999999); err == nil {
+	if _, err := startTime(999999); err == nil {
 		t.Error("a process that does not exist has a start time")
 	}
 }

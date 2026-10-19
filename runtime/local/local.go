@@ -191,7 +191,7 @@ func New(o Options) (*Driver, error) {
 	})
 	// A worker killed outright leaves its attached commands running, and
 	// this is the next worker over the same data directory starting.
-	if err = d.endOrphans(context.Background()); err != nil {
+	if err = d.endOrphans(); err != nil {
 		return nil, fmt.Errorf("local: reading the sandboxes: %w", err)
 	}
 	return d, nil

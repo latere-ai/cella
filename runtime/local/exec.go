@@ -257,7 +257,7 @@ func (f *follower) Read(p []byte) (int, error) {
 // this process is killed before it can. It runs under the driver's lock.
 func (d *Driver) attach(caller context.Context, r *record, spec hostsandbox.StageSpec, req driver.ExecRequest) (driver.Exec, error) {
 	id := r.State.ID
-	holder, err := d.holder(caller)
+	holder, err := d.holder()
 	if err != nil {
 		return nil, fmt.Errorf("local: naming this process for a command in %s: %w", id, err)
 	}
@@ -295,7 +295,7 @@ func (d *Driver) attach(caller context.Context, r *record, spec hostsandbox.Stag
 	// by the leader's id and start time before anything else can happen to
 	// it. A command that cannot be recorded is ended rather than left where
 	// nothing would find it.
-	group, err := identify(caller, cmd.Process.Pid)
+	group, err := identify(cmd.Process.Pid)
 	if err == nil {
 		r.Attached = append(r.Attached, attachedStage{Name: spec.Name, Group: group, Holder: holder})
 		err = d.save(*r)

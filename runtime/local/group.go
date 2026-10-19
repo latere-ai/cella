@@ -4,7 +4,6 @@
 package local
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -41,17 +40,17 @@ type process struct {
 
 // running reports whether the process is alive and is the one named: its id
 // answers a signal and it started when the record says.
-func (p process) running(ctx context.Context) bool {
+func (p process) running() bool {
 	if p.PID <= 0 || syscall.Kill(p.PID, 0) != nil {
 		return false
 	}
-	started, err := startTime(ctx, p.PID)
+	started, err := startTime(p.PID)
 	return err == nil && started == p.Start
 }
 
 // identify names a running process by its id and its start time.
-func identify(ctx context.Context, pid int) (process, error) {
-	started, err := startTime(ctx, pid)
+func identify(pid int) (process, error) {
+	started, err := startTime(pid)
 	if err != nil {
 		return process{}, err
 	}
@@ -62,8 +61,8 @@ func identify(ctx context.Context, pid int) (process, error) {
 // command's. A group whose leader has exited cannot be proven the command's,
 // since its id may have been handed to another process, and is left alone;
 // that leader is the sandbox runtime, which waits on the command.
-func (s attachedStage) end(ctx context.Context) error {
-	if !s.Group.running(ctx) {
+func (s attachedStage) end() error {
+	if !s.Group.running() {
 		return nil
 	}
 	if err := syscall.Kill(-s.Group.PID, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
@@ -78,9 +77,11 @@ const psStartLayout = "Mon Jan _2 15:04:05 2006"
 
 // startTime is a process's start time in Unix seconds, read through ps with
 // the locale pinned, which is how the sandbox runtime reads its own stages,
-// so one code path serves macOS and Linux. A test replaces it.
-var startTime = func(ctx context.Context, pid int) (int64, error) {
-	command := exec.CommandContext(ctx, "ps", "-p", strconv.Itoa(pid), "-o", "lstart=") //nolint:gosec // a fixed command over an integer pid
+// so one code path serves macOS and Linux. ps answers at once, and a stop or
+// a driver's start that reads it has no caller's context to end it by. A test
+// replaces it.
+var startTime = func(pid int) (int64, error) {
+	command := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "lstart=") //nolint:gosec,noctx // a fixed command over an integer pid
 	command.Env = append(os.Environ(), "LC_ALL=C")
 	output, err := command.Output()
 	if err != nil {
@@ -96,11 +97,11 @@ var startTime = func(ctx context.Context, pid int) (int64, error) {
 
 // holder is this process as an attached command's record names it, read the
 // first time and kept once read. It runs under the driver's lock.
-func (d *Driver) holder(ctx context.Context) (process, error) {
+func (d *Driver) holder() (process, error) {
 	if d.self.PID != 0 {
 		return d.self, nil
 	}
-	self, err := identify(ctx, os.Getpid())
+	self, err := identify(os.Getpid())
 	if err != nil {
 		return process{}, err
 	}
@@ -116,7 +117,7 @@ func (d *Driver) holder(ctx context.Context) (process, error) {
 // not write, or whose command could not be ended, keeps its entry, so its
 // next stop or delete ends the command or answers why it could not, and one
 // sandbox does not keep the driver from starting.
-func (d *Driver) endOrphans(ctx context.Context) error {
+func (d *Driver) endOrphans() error {
 	entries, err := os.ReadDir(filepath.Join(d.data, "sandboxes"))
 	if err != nil {
 		return err
@@ -131,7 +132,7 @@ func (d *Driver) endOrphans(ctx context.Context) error {
 		}
 		var kept []attachedStage
 		for _, s := range r.Attached {
-			if s.Holder.running(ctx) || s.end(ctx) != nil {
+			if s.Holder.running() || s.end() != nil {
 				kept = append(kept, s)
 			}
 		}
@@ -155,6 +156,11 @@ func (d *Driver) forgetAttached(id, name string) error {
 	if err != nil {
 		return err
 	}
-	r.Attached = slices.DeleteFunc(r.Attached, func(s attachedStage) bool { return s.Name == name })
+	kept := slices.DeleteFunc(slices.Clone(r.Attached), func(s attachedStage) bool { return s.Name == name })
+	if len(kept) == len(r.Attached) {
+		// A stop or a delete dropped it already.
+		return nil
+	}
+	r.Attached = kept
 	return d.save(r)
 }

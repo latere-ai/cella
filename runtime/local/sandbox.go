@@ -459,7 +459,7 @@ func (d *Driver) endAll(ctx context.Context, r *record) error {
 	}
 	for _, s := range r.Attached {
 		if !held[s.Name] {
-			failed = errors.Join(failed, s.end(ctx))
+			failed = errors.Join(failed, s.end())
 		}
 	}
 	r.Attached = nil
