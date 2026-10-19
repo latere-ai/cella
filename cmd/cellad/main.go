@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"latere.ai/x/pkg/health"
+	"latere.ai/x/pkg/hostsandbox"
 	"latere.ai/x/pkg/otel"
 
 	apidoc "latere.ai/x/cella/api"
@@ -64,6 +65,12 @@ const (
 )
 
 func main() {
+	// First, before anything else runs: when the local runtime starts a
+	// stage with a network allowlist under macOS's Seatbelt, it starts this
+	// binary again as the stage's launcher, which serves the stage's proxy
+	// and never returns from Main. Calling it is also what lets the local
+	// runtime pick Seatbelt on macOS; without it srt stays.
+	hostsandbox.Main()
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	os.Exit(run(ctx, os.Args[1:], os.Getenv, os.Stdout, os.Stderr))
