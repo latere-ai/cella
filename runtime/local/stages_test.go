@@ -25,6 +25,8 @@ func noRuntime(t *testing.T) {
 	t.Helper()
 	previous := newSandbox
 	newSandbox = func(c hostsandbox.Config) *hostsandbox.Driver {
+		// Missing programs are srt's, so the driver uses srt on every platform.
+		c.Isolation = hostsandbox.IsolationSRT
 		c.Look = func(string) (string, error) { return "", exec.ErrNotFound }
 		return hostsandbox.New(c)
 	}

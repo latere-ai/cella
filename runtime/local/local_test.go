@@ -8,6 +8,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -39,6 +40,8 @@ func shim(t *testing.T) string {
 // resolved to the stand-in at path.
 func standIn(path string) func(hostsandbox.Config) *hostsandbox.Driver {
 	return func(c hostsandbox.Config) *hostsandbox.Driver {
+		// The stand-in fakes srt, so the driver uses srt on every platform.
+		c.Isolation = hostsandbox.IsolationSRT
 		c.Look = func(name string) (string, error) {
 			if name == "srt" {
 				return path, nil
@@ -132,10 +135,11 @@ func TestLocalConformance(t *testing.T) {
 }
 
 // TestLocalConformanceUnderSRT is the same suite under the real sandbox
-// runtime, where one is installed: every command of every case runs inside
-// Seatbelt or bubblewrap. Where none is installed it is skipped with what to
-// install.
+// runtime srt, where it is installed: every command of every case runs
+// inside srt's Seatbelt profile or bubblewrap. Where it is not installed it
+// is skipped with what to install.
 func TestLocalConformanceUnderSRT(t *testing.T) {
+	withIsolation(t, hostsandbox.IsolationSRT)
 	probe, err := New(Options{DataDir: tempDir(t)})
 	if err != nil {
 		t.Fatal(err)
@@ -152,6 +156,45 @@ func TestLocalConformanceUnderSRT(t *testing.T) {
 		t.Cleanup(func() { _ = d.Close() })
 		return d
 	}, runtimetest.Options{})
+}
+
+// TestLocalConformanceUnderSeatbelt is the same suite under macOS's own
+// Seatbelt through hostsandbox's native driver, which needs nothing
+// installed: every command of every case runs inside a profile the driver
+// renders. It runs on macOS alone.
+func TestLocalConformanceUnderSeatbelt(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("Seatbelt is part of macOS")
+	}
+	withIsolation(t, hostsandbox.IsolationSeatbelt)
+	probe, err := New(Options{DataDir: tempDir(t)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := probe.Preflight(context.Background()); err != nil {
+		t.Fatalf("Seatbelt is not ready on this Mac: %v", err)
+	}
+	data := tempDir(t)
+	runtimetest.Run(t, func(t *testing.T) driver.Driver {
+		d, err := New(Options{DataDir: data})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = d.Close() })
+		return d
+	}, runtimetest.Options{})
+}
+
+// withIsolation builds every driver of the test with the isolation named,
+// rather than the one hostsandbox picks for this program.
+func withIsolation(t *testing.T, isolation hostsandbox.Isolation) {
+	t.Helper()
+	previous := newSandbox
+	newSandbox = func(c hostsandbox.Config) *hostsandbox.Driver {
+		c.Isolation = isolation
+		return hostsandbox.New(c)
+	}
+	t.Cleanup(func() { newSandbox = previous })
 }
 
 // TestLocalRefusesRoot: a driver running as root refuses to start, and one
