@@ -268,8 +268,16 @@ func (h *handler) workerStream(w http.ResponseWriter, r *http.Request, key auth.
 	}
 	_ = h.Workers.ServeWith(r.Context(), environment, newWorkerSocket(conn), remote.ServeOptions{Recheck: recheck})
 	// The stream is gone, and the environment no longer counts its worker.
-	h.observeEnvironment(context.WithoutCancel(r.Context()), environment)
+	// The request's context ended with the stream, so the write runs under
+	// one of its own.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), observeTimeout)
+	defer cancel()
+	h.observeEnvironment(ctx, environment)
 }
+
+// observeTimeout bounds the status write after a worker's stream ended,
+// which runs after the request that held the stream has ended.
+const observeTimeout = 10 * time.Second
 
 // workerSocket is the worker protocol's frames over one WebSocket, the
 // control plane's end. The link above it guarantees one writer; the mutex
