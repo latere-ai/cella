@@ -132,9 +132,12 @@ local runtime needs no egress gateway and reports `EgressEnforced`
 A command with no input runs detached: it keeps running if the worker's
 process ends unexpectedly, and a worker you stop on purpose stops it. A
 command with input runs attached to the worker, which holds its pipes;
-if the worker's process ends, the command ends with it and is reported
-with exit code `-1`. There is no terminal: a request for one is refused
-with `capability_unsupported`.
+if the worker stops, the command ends with it and is reported with exit
+code `-1`. A worker that is killed outright cannot end it, so the
+sandbox's record names each such command while it runs, and the next
+worker to start over the same data directory ends any it finds still
+running, as does a stop or a delete of its sandbox. There is no
+terminal: a request for one is refused with `capability_unsupported`.
 
 ## Files
 

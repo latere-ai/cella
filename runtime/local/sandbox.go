@@ -53,6 +53,10 @@ type record struct {
 	// detached commands started since, which a stop and a delete end.
 	Main   *hostsandbox.StageHandle  `json:",omitempty"`
 	Stages []hostsandbox.StageHandle `json:",omitempty"`
+	// Attached is every command with stdin running now, which a stop and a
+	// delete end, and a driver that starts after the process holding one was
+	// killed.
+	Attached []attachedStage `json:",omitempty"`
 	// Execs counts the commands run, which names each one's files.
 	Execs int
 }
@@ -434,7 +438,10 @@ func (d *Driver) Stop(ctx context.Context, id string) error {
 	return d.save(r)
 }
 
-// endAll stops every stage of a sandbox. It runs under the driver's lock.
+// endAll stops every stage of a sandbox: the main one, the detached commands,
+// the attached commands this driver holds, and the attached commands the
+// record names that another driver's process started. It runs under the
+// driver's lock.
 func (d *Driver) endAll(ctx context.Context, r *record) error {
 	var failed error
 	stages := slices.Clone(r.Stages)
@@ -445,9 +452,17 @@ func (d *Driver) endAll(ctx context.Context, r *record) error {
 		failed = errors.Join(failed, d.sandbox.Stop(ctx, h))
 	}
 	r.Stages = nil
+	held := map[string]bool{}
 	for e := range d.attached[r.State.ID] {
+		held[e.name] = true
 		e.end()
 	}
+	for _, s := range r.Attached {
+		if !held[s.Name] {
+			failed = errors.Join(failed, s.end(ctx))
+		}
+	}
+	r.Attached = nil
 	return failed
 }
 

@@ -23,14 +23,22 @@ import (
 // resolved to one that exists. What it proves is the driver's bookkeeping;
 // the isolation is the real runtime's, which the cases marked under srt run
 // where it is installed.
-func shim(t *testing.T) {
+func shim(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "srt")
 	if err := os.WriteFile(path, []byte("#!/bin/sh\nshift 3\nexec \"$@\"\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	previous := newSandbox
-	newSandbox = func(c hostsandbox.Config) *hostsandbox.Driver {
+	newSandbox = standIn(path)
+	t.Cleanup(func() { newSandbox = previous })
+	return path
+}
+
+// standIn builds the operating system's sandbox with the sandbox runtime
+// resolved to the stand-in at path.
+func standIn(path string) func(hostsandbox.Config) *hostsandbox.Driver {
+	return func(c hostsandbox.Config) *hostsandbox.Driver {
 		c.Look = func(name string) (string, error) {
 			if name == "srt" {
 				return path, nil
@@ -39,7 +47,6 @@ func shim(t *testing.T) {
 		}
 		return hostsandbox.New(c)
 	}
-	t.Cleanup(func() { newSandbox = previous })
 }
 
 // tempDir is a temporary directory with its links resolved, which is how the

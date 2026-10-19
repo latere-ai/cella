@@ -11,7 +11,7 @@ depends_on:
 affects: [runtime/local/ (new), manifest/v1/, manifest/, runtime/runtimetest/, cmd/cellad/, internal/config/, arch_test.go, docs/local.md (new), api/openapi.yaml, CHANGELOG.md]
 effort: large
 created: 2026-10-18
-updated: 2026-10-18
+updated: 2026-10-19
 author: changkun
 ---
 
@@ -392,7 +392,12 @@ Where the code diverges from the design:
   `SIGPIPE` on its next write. A command that does neither runs until it
   ends, and is not in the sandbox's record, so a later `Stop` does not
   reach it. Recording attached stages so a restarted driver ends them is
-  left for later.
+  left for later. Built on 2026-10-19: the record names each attached
+  stage by its process group, the start time of the group's leader and
+  the process holding its pipes, and a driver ends every one whose holder
+  is gone when it starts, and every one when it stops or deletes the
+  sandbox (`TestLocalEndsAnOrphanedAttachedCommand` and its `UnderSRT`
+  variant).
 - **Input reaches an attached command through its own pipe.** `os/exec`
   copies a reader given as `Stdin` in a goroutine `Wait` waits on, so a
   killed command whose input never ended would never report its exit.

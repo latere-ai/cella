@@ -20,6 +20,16 @@ refused before it is pushed.
   error code, so an embedder tells a refused key from a control plane that
   is not ready. The error's text is unchanged.
 
+### Fixed
+
+- **A command with input does not outlive a killed worker on the local
+  runtime.** Such a command runs attached to the worker, and a worker
+  killed outright left it running where nothing could reach it, not even a
+  stop of its sandbox. The sandbox's record now names each one while it
+  runs, by its process group and when that group's leader started, and the
+  next worker to start over the same data directory ends every one whose
+  worker is gone; a stop or a delete of the sandbox ends them too.
+
 ## v0.17.2 - 2026-10-18
 
 ### Added

@@ -126,6 +126,9 @@ type Driver struct {
 	// attached is every command with stdin running now, by sandbox, which a
 	// stop, a delete and Close end.
 	attached map[string]map[*attachedExec]struct{}
+	// self is this process as the record of an attached command names its
+	// holder, read by holder the first time it is needed.
+	self process
 }
 
 var (
@@ -186,6 +189,11 @@ func New(o Options) (*Driver, error) {
 		Home: home, Lookup: lookup,
 		Alternative: "Or run this worker with another runtime, such as CELLA_RUNTIME=podman.",
 	})
+	// A worker killed outright leaves its attached commands running, and
+	// this is the next worker over the same data directory starting.
+	if err = d.endOrphans(context.Background()); err != nil {
+		return nil, fmt.Errorf("local: reading the sandboxes: %w", err)
+	}
 	return d, nil
 }
 

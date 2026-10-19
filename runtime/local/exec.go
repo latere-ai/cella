@@ -70,10 +70,7 @@ func (d *Driver) Exec(ctx context.Context, id string, req driver.ExecRequest) (d
 	r.Execs++
 	name := execName(r.Execs)
 	if req.Stdin != nil {
-		if err = d.save(r); err != nil {
-			return nil, err
-		}
-		return d.attach(ctx, id, d.stage(r, name, req.Command, env, workdir), req)
+		return d.attach(ctx, &r, d.stage(r, name, req.Command, env, workdir), req)
 	}
 	errPath := filepath.Join(d.paths(id).streams, name+".err")
 	if err = os.WriteFile(errPath, nil, 0o600); err != nil {
@@ -255,8 +252,15 @@ func (f *follower) Read(p []byte) (int, error) {
 
 // attach starts an attached stage: the rendered command under os/exec, its
 // stdin the caller's and its outputs piped back, killed whole when it is
-// closed, when its timeout passes, or when this driver closes.
-func (d *Driver) attach(caller context.Context, id string, spec hostsandbox.StageSpec, req driver.ExecRequest) (driver.Exec, error) {
+// closed, when its timeout passes, or when this driver closes. The sandbox's
+// record names it while it runs, so a driver after this process ends it if
+// this process is killed before it can. It runs under the driver's lock.
+func (d *Driver) attach(caller context.Context, r *record, spec hostsandbox.StageSpec, req driver.ExecRequest) (driver.Exec, error) {
+	id := r.State.ID
+	holder, err := d.holder(caller)
+	if err != nil {
+		return nil, fmt.Errorf("local: naming this process for a command in %s: %w", id, err)
+	}
 	ctx, cancel := context.WithCancel(context.WithoutCancel(caller))
 	if req.Timeout > 0 {
 		ctx, cancel = context.WithTimeout(context.WithoutCancel(caller), req.Timeout)
@@ -287,11 +291,29 @@ func (d *Driver) attach(caller context.Context, id string, spec hostsandbox.Stag
 		cleanup()
 		return nil, fmt.Errorf("local: starting a command in %s: %w", id, err)
 	}
+	// The command leads a process group of its own, which the record names
+	// by the leader's id and start time before anything else can happen to
+	// it. A command that cannot be recorded is ended rather than left where
+	// nothing would find it.
+	group, err := identify(caller, cmd.Process.Pid)
+	if err == nil {
+		r.Attached = append(r.Attached, attachedStage{Name: spec.Name, Group: group, Holder: holder})
+		err = d.save(*r)
+	}
+	if err != nil {
+		cancel()
+		_ = outR.Close()
+		_ = errR.Close()
+		_ = cmd.Wait()
+		stop()
+		cleanup()
+		return nil, fmt.Errorf("local: recording a command in %s: %w", id, err)
+	}
 	go func() {
 		_, _ = io.Copy(in, req.Stdin)
 		_ = in.Close()
 	}()
-	e := &attachedExec{d: d, id: id, cancel: cancel, stdout: outR, stderr: errR, done: make(chan struct{})}
+	e := &attachedExec{d: d, id: id, name: spec.Name, cancel: cancel, stdout: outR, stderr: errR, done: make(chan struct{})}
 	if d.attached[id] == nil {
 		d.attached[id] = map[*attachedExec]struct{}{}
 	}
@@ -321,15 +343,21 @@ func (d *Driver) attach(caller context.Context, id string, spec hostsandbox.Stag
 		d.mu.Lock()
 		delete(d.attached[id], e)
 		d.mu.Unlock()
+		// An entry left in a record that could not be written names a
+		// group that has ended, which the next stop, delete or start of a
+		// driver finds not running and drops.
+		_ = d.forgetAttached(id, e.name)
 		close(e.done)
 	}()
 	return e, nil
 }
 
-// attachedExec is a command running as an attached stage.
+// attachedExec is a command running as an attached stage, named in its
+// sandbox's record as name.
 type attachedExec struct {
 	d      *Driver
 	id     string
+	name   string
 	cancel context.CancelFunc
 	stdout *io.PipeReader
 	stderr *io.PipeReader
