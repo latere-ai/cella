@@ -13,11 +13,13 @@ or Kubernetes runtime.
 ## What you need
 
 - macOS or Linux.
-- The sandbox runtime, `srt`, on `PATH`, and the programs it uses:
+- On macOS, nothing to install: `cellad` confines each command with
+  Seatbelt, which is part of macOS, through `/usr/bin/sandbox-exec`.
+- On Linux, the sandbox runtime, `srt`, on `PATH`, and the programs it
+  uses:
 
   ```sh
   npm install -g @anthropic-ai/sandbox-runtime
-  brew install ripgrep                      # macOS
   sudo apt-get install -y bubblewrap socat ripgrep   # Debian, Ubuntu
   srt echo ok
   ```
@@ -122,10 +124,27 @@ Your computer narrows what a sandbox asks for and never widens it:
 
 A sandbox that asks for more than your computer allows is created with
 what it allows, and carries a warning naming what it got. There is no
-`open` network: the sandbox runtime allows named hosts only. The sandbox
-runtime's own proxy is the only route out, so an environment on the
-local runtime needs no egress gateway and reports `EgressEnforced`
-`True` with the reason `DriverEnforced`.
+`open` network: only named hosts are reached. A host named alone is
+reached over HTTPS on port 443 and HTTP on port 80; another port is named
+with the host, as `github.com:22` for git over SSH. A proxy that runs
+beside each command is its only route out (on macOS it admits a
+connection by its host and port and never decrypts it), so an
+environment on the local runtime needs no egress gateway and reports
+`EgressEnforced` `True` with the reason `DriverEnforced`.
+
+## Files that run code later
+
+Inside a folder you grant with write access, on macOS a command cannot
+write the files your own tools later run as code: shell startup files
+(`.zshrc`, `.bashrc` and the others), `.envrc`, `.gitconfig`,
+`.gitmodules`, `.mcp.json`, `*.code-workspace`, and the whole of
+`.claude`, `.cursor`, `.vscode` and `.idea`. Inside a repository it
+writes only what everyday git writes (objects, refs, logs, the index,
+`HEAD` and the files of a merge or rebase in progress), never its
+config or hooks. So `git add`, `commit`, `checkout`, `merge`, `rebase`
+and `fetch` work in a granted folder, and `git init`, `clone`, `config`
+and `remote add` do not. On Linux the sandbox runtime applies its own
+list of such files.
 
 ## Commands
 
@@ -159,7 +178,11 @@ no desktop, and no Windows.
 
 A program that runs the worker itself, with its own prompts and its own
 key store ([Embedding the worker](workers.md#embedding-the-worker)),
-opens the local runtime with the same policy:
+opens the local runtime with the same policy. On macOS its `main`
+calls `hostsandbox.Main()` as its first statement (from
+`latere.ai/x/pkg/hostsandbox`): a command with a network allowlist runs
+under a launcher that is the program itself started again, and without
+that call the local runtime keeps `srt` on macOS too.
 
 ```go
 d, err := local.New(local.Options{
