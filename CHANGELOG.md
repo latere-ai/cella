@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.19.1 - 2026-10-20
+
 ### Fixed
 
 - **A worker the control plane refuses stops, every time.** When the
