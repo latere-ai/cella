@@ -200,3 +200,64 @@ err = worker.Run(ctx, worker.Options{URL: url, Key: readKey, Driver: d, Policy: 
 
 When the program runs as root, `worker.Run` returns an error that
 `errors.Is` matches to `local.ErrRunsAsRoot`.
+
+## A person's computer as one device
+
+`latere.ai/x/cella/device` is the whole of what serves a person's own
+computer, built on the worker and the local runtime: the host policy
+file the person edits, the environment key in the system keychain and
+its rotation, the person's approval of each session, a log of every
+operation, a lock that keeps one engine per computer, and a control
+socket through which another program on the same account watches and
+drives it. A command-line tool and a desktop application that both embed
+it, over the same files, serve the computer as one device: whichever
+started the engine, the other attaches through the socket.
+
+The package names no hosted plane. What a plane decides is yours to
+supply: the labels its sessions carry, the audience of its own token and
+how a token's claims read, and its part of connecting a computer (its
+labels on the environment, a sign-in's organization, the device's name,
+its removal, and the device limit) as a `device.Platform`.
+
+```go
+paths, err := device.DefaultPaths()
+if err != nil {
+	return err
+}
+lock, err := device.TakeLock(paths.LockFile())
+if err != nil {
+	return err // device_already_served: another program serves this computer
+}
+defer lock.Release()
+cella, err := client.New(client.Config{URL: cellaURL, Token: client.TokenFunc(personToken)})
+if err != nil {
+	return err
+}
+e := device.New(device.Config{
+	Paths: paths, URL: cellaURL, Keys: paths.Keys(), Version: version,
+	Account: device.NewCellaAccount(cella),
+	Enroll:  device.NewEnrollment(device.EnrollmentOptions{Paths: paths, Cella: cella, Platform: plane}),
+	Labels:  device.SessionLabels{Session: "example.com/session", Agent: "example.com/agent"},
+})
+ln, err := device.ListenControl(paths.Socket())
+if err != nil {
+	return err
+}
+serving, stop := context.WithCancel(ctx)
+defer stop()
+served := make(chan error, 1)
+go func() { served <- e.ServeControl(serving, ln) }()
+runErr := e.Run(ctx)
+stop()
+return errors.Join(runErr, <-served)
+```
+
+In the same process, `ProposeConnect` and `Connect` connect the computer
+with the person's consent to the facts the proposal lists, `Subscribe`
+and `Attach` hear each session that asks to start, `Answer` lets it in or
+refuses it, `PutPolicy` changes the name, folders or network, and
+`Remove` removes the device. The control socket answers the same over
+HTTP. A refusal is a `*device.Error` whose `Code` is stable; its sentence
+and hint are the latere command's words, so a program with its own
+surface shows its own words for each code, and for each connect fact by
+its `Kind`.
