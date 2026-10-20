@@ -28,7 +28,7 @@ type TokenClaims struct {
 	Expiry    time.Time
 	// Personal is whether the token is in its person's own context rather
 	// than an organization's; a device is personal. Context names the
-	// other context, for the refusal's detail.
+	// organization, for the refusal's detail.
 	Personal bool
 	Context  string
 }
@@ -335,7 +335,7 @@ func checkToken(audience string, t HeldToken, now time.Time, read TokenReader) (
 		return time.Time{}, "", &CredentialsError{Reason: "the " + audience + " token names no person"}
 	}
 	if !claims.Personal {
-		return time.Time{}, "", &CredentialsError{Code: CodeCredentialsOrg, Reason: "the " + audience + " token is in the context " + claims.Context + ", and a device is personal"}
+		return time.Time{}, "", &CredentialsError{Code: CodeCredentialsOrg, Reason: "the " + audience + " token is in the context of the organization " + claims.Context + ", and a device is personal"}
 	}
 	expiry := t.ExpiresAt
 	if !claims.Expiry.IsZero() && (expiry.IsZero() || claims.Expiry.Before(expiry)) {
