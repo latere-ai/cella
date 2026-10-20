@@ -65,7 +65,7 @@ jobs:
       - name: The sandbox runtime and what it uses
         run: |
           sudo apt-get update
-          sudo apt-get install -y bubblewrap socat ripgrep
+          sudo apt-get install -y bubblewrap socat ripgrep netcat-openbsd
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           npm install -g @anthropic-ai/sandbox-runtime
           srt echo ok
@@ -88,6 +88,21 @@ jobs:
             TestLocalEndsAnOrphanedAttachedCommandUnderSRT TestLocalWorkerEndToEnd; do
             grep -q -- "^--- PASS: ${name} " local.txt
           done
+      # The device engine serves a person's computer through the same
+      # runtime, so its tests run under the real sandbox too: the paths it
+      # denies a session (its own state, its keys) are proven here, where the
+      # gate's stand-in proves nothing. A skip fails the job for the same
+      # reason as above.
+      - name: The device engine's tests under the sandbox runtime
+        shell: bash
+        run: |
+          set -o pipefail
+          go test -count=1 -v -timeout 15m ./device 2>&1 | tee device.txt
+          if grep -E -- '^--- SKIP|under a stand-in' device.txt; then
+            echo "a device test skipped or ran under the stand-in, so the real sandbox did not run it" >&2
+            exit 1
+          fi
+          grep -q -- "^--- PASS: TestOwnPathsDenied " device.txt
 
   image:
     name: the developer image builds
