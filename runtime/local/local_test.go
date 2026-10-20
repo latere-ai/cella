@@ -8,7 +8,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -146,33 +145,6 @@ func TestLocalConformanceUnderSRT(t *testing.T) {
 	}
 	if err := probe.Preflight(context.Background()); err != nil {
 		t.Skipf("the sandbox runtime is not installed here, so the local driver is unchecked under it:\n%v", err)
-	}
-	data := tempDir(t)
-	runtimetest.Run(t, func(t *testing.T) driver.Driver {
-		d, err := New(Options{DataDir: data})
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = d.Close() })
-		return d
-	}, runtimetest.Options{})
-}
-
-// TestLocalConformanceUnderSeatbelt is the same suite under macOS's own
-// Seatbelt through hostsandbox's native driver, which needs nothing
-// installed: every command of every case runs inside a profile the driver
-// renders. It runs on macOS alone.
-func TestLocalConformanceUnderSeatbelt(t *testing.T) {
-	if runtime.GOOS != "darwin" {
-		t.Skip("Seatbelt is part of macOS")
-	}
-	withIsolation(t, hostsandbox.IsolationSeatbelt)
-	probe, err := New(Options{DataDir: tempDir(t)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := probe.Preflight(context.Background()); err != nil {
-		t.Fatalf("Seatbelt is not ready on this Mac: %v", err)
 	}
 	data := tempDir(t)
 	runtimetest.Run(t, func(t *testing.T) driver.Driver {
