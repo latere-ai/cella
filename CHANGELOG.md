@@ -6,6 +6,14 @@ refused before it is pushed.
 
 ## Unreleased
 
+### Fixed
+
+- **A worker the control plane refuses stops, every time.** When the
+  control plane closed a worker's stream with a refusal the worker stops
+  on, such as a revoked key, a write racing the close could be recorded as
+  the reason instead, and the worker reconnected and kept retrying. The
+  close's reason now always wins.
+
 ## v0.19.0 - 2026-10-20
 
 ### Changed
