@@ -47,7 +47,7 @@ func tokenFor(audience, sub, org string, exp time.Time) string {
 // tokensFor is a PUT /v1/credentials body for the person sub.
 func tokensFor(sub string) string {
 	exp := time.Now().Add(time.Hour)
-	return fmt.Sprintf(`{"cella":{"token":%q},"platform":{"token":%q}}`, tokenFor(AudienceCella, sub, "", exp), tokenFor(AudiencePlatform, sub, "", exp))
+	return fmt.Sprintf(`{"cella":{"token":%q},"platform":{"token":%q}}`, tokenFor(AudienceCella, sub, "", exp), tokenFor(testPlatformAudience, sub, "", exp))
 }
 
 // tokenAccount is the person's side of the control plane reached with a
@@ -76,7 +76,7 @@ func TestRenameLeavesRunningSessionsAlone(t *testing.T) {
 	p := newStubPlane(t)
 	var mu sync.Mutex
 	builds := 0
-	e := New(Config{Paths: paths, URL: p.url, Keys: keys, Account: &fakeAccount{exists: true}, Version: "test", Enroll: &fakeEnroller{paths: paths},
+	e := testEngine(Config{Paths: paths, URL: p.url, Keys: keys, Account: &fakeAccount{exists: true}, Version: "test", Enroll: &fakeEnroller{paths: paths},
 		NewDriver: func(o local.Options) (runtime.Driver, error) {
 			if !strings.Contains(o.DataDir, "check-") {
 				mu.Lock()
@@ -122,7 +122,7 @@ func TestRenameRunsOutsideTheFileLock(t *testing.T) {
 	connected(t, paths, keys)
 	p := newStubPlane(t)
 	enroll := &fakeEnroller{paths: paths, renameStarted: make(chan struct{}), renameGo: make(chan struct{})}
-	e := New(Config{Paths: paths, URL: p.url, Keys: keys, Account: &fakeAccount{exists: true}, Version: "test", Enroll: enroll})
+	e := testEngine(Config{Paths: paths, URL: p.url, Keys: keys, Account: &fakeAccount{exists: true}, Version: "test", Enroll: enroll})
 	running(t, e)
 	p.waitConnected(t)
 
@@ -158,7 +158,7 @@ func TestRenameRunsOutsideTheFileLock(t *testing.T) {
 func TestTokensAreTiedToTheDevicesOwner(t *testing.T) {
 	exp := time.Now().Add(time.Hour)
 	t.Run("a token in an organization's context is refused", func(t *testing.T) {
-		creds := NewCredentials(nil, 0)
+		creds := NewCredentials(testCredentials(0))
 		var ce *CredentialsError
 		err := creds.Put(map[string]HeldToken{AudienceCella: {Token: tokenFor(AudienceCella, "alice", "org_1", exp)}})
 		if !errors.As(err, &ce) || ce.Code != CodeCredentialsOrg {
@@ -166,10 +166,10 @@ func TestTokensAreTiedToTheDevicesOwner(t *testing.T) {
 		}
 	})
 	t.Run("tokens of two people handed together are refused", func(t *testing.T) {
-		creds := NewCredentials(nil, 0)
+		creds := NewCredentials(testCredentials(0))
 		err := creds.Put(map[string]HeldToken{
-			AudienceCella:    {Token: tokenFor(AudienceCella, "alice", "", exp)},
-			AudiencePlatform: {Token: tokenFor(AudiencePlatform, "bob", "", exp)},
+			AudienceCella:        {Token: tokenFor(AudienceCella, "alice", "", exp)},
+			testPlatformAudience: {Token: tokenFor(testPlatformAudience, "bob", "", exp)},
 		})
 		var ce *CredentialsError
 		if !errors.As(err, &ce) {
@@ -177,8 +177,8 @@ func TestTokensAreTiedToTheDevicesOwner(t *testing.T) {
 		}
 	})
 	t.Run("unbound, any person's tokens are taken, and another person's replace them", func(t *testing.T) {
-		creds := NewCredentials(nil, 0)
-		if err := creds.Put(map[string]HeldToken{AudienceCella: {Token: tokenFor(AudienceCella, "alice", "", exp)}, AudiencePlatform: {Token: tokenFor(AudiencePlatform, "alice", "", exp)}}); err != nil {
+		creds := NewCredentials(testCredentials(0))
+		if err := creds.Put(map[string]HeldToken{AudienceCella: {Token: tokenFor(AudienceCella, "alice", "", exp)}, testPlatformAudience: {Token: tokenFor(testPlatformAudience, "alice", "", exp)}}); err != nil {
 			t.Fatal(err)
 		}
 		if err := creds.Put(map[string]HeldToken{AudienceCella: {Token: tokenFor(AudienceCella, "bob", "", exp)}}); err != nil {
@@ -196,8 +196,8 @@ func TestTokensAreTiedToTheDevicesOwner(t *testing.T) {
 	if err := writeOwner(paths.OwnerFile(), testEnv, "alice"); err != nil {
 		t.Fatal(err)
 	}
-	creds := NewCredentials(nil, 200*time.Millisecond)
-	e := New(Config{Paths: paths, Keys: keys, Account: &fakeAccount{exists: true}, Version: "test", Enroll: &fakeEnroller{paths: paths}, Credentials: creds, WaitToConnect: true})
+	creds := NewCredentials(testCredentials(200 * time.Millisecond))
+	e := testEngine(Config{Paths: paths, Keys: keys, Account: &fakeAccount{exists: true}, Version: "test", Enroll: &fakeEnroller{paths: paths}, Credentials: creds, WaitToConnect: true})
 	c := controlOn(t, e, paths)
 
 	t.Run("another person's tokens are refused, and the device is not forgotten", func(t *testing.T) {
@@ -261,9 +261,9 @@ func TestAnUnconfirmedPersonNeverForgetsTheDevice(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := newStubPlane(t)
-	creds := NewCredentials(nil, 100*time.Millisecond)
+	creds := NewCredentials(testCredentials(100 * time.Millisecond))
 	account := ownedAccount{fakeAccount: &fakeAccount{exists: true}, creds: creds}
-	e := New(Config{Paths: paths, URL: p.url, Keys: keys, Account: account, Version: "test", Enroll: &fakeEnroller{paths: paths}, Credentials: creds, WaitToConnect: true})
+	e := testEngine(Config{Paths: paths, URL: p.url, Keys: keys, Account: account, Version: "test", Enroll: &fakeEnroller{paths: paths}, Credentials: creds, WaitToConnect: true})
 	c := controlOn(t, e, paths)
 	_, done := running(t, e)
 	waitFor(t, "the wait for the sign-in", func() bool { return e.Status().State == StateOffline })
@@ -314,9 +314,9 @@ func TestStopDuringTheRenewalWaitIsClean(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := newStubPlane(t)
-	creds := NewCredentials(nil, 100*time.Millisecond)
+	creds := NewCredentials(testCredentials(100 * time.Millisecond))
 	account := tokenAccount{fakeAccount: &fakeAccount{exists: true}, creds: creds}
-	e := New(Config{Paths: paths, URL: p.url, Keys: keys, Account: account, Version: "test", Credentials: creds, WaitToConnect: true})
+	e := testEngine(Config{Paths: paths, URL: p.url, Keys: keys, Account: account, Version: "test", Credentials: creds, WaitToConnect: true})
 	stop, _ := running(t, e)
 	p.waitConnected(t)
 	waitFor(t, "the renewal to wait", func() bool {
@@ -336,7 +336,7 @@ func TestSavedLoginIsRecordedAsTheOwner(t *testing.T) {
 	keys := OpenKeys(paths.KeyFile())
 	connected(t, paths, keys)
 	p := newStubPlane(t)
-	e := New(Config{Paths: paths, URL: p.url, Keys: keys, Account: &fakeAccount{exists: true}, Version: "test", LoginSubject: "alice"})
+	e := testEngine(Config{Paths: paths, URL: p.url, Keys: keys, Account: &fakeAccount{exists: true}, Version: "test", LoginSubject: "alice"})
 	running(t, e)
 	p.waitConnected(t)
 	waitFor(t, "the owner to be recorded", func() bool {
@@ -354,7 +354,7 @@ func TestRemovalKeepsAnotherDevicesOwnerRecord(t *testing.T) {
 	if err := writeOwner(paths.OwnerFile(), "dev-another", "alice"); err != nil {
 		t.Fatal(err)
 	}
-	e := New(Config{Paths: paths, Keys: keys, Account: &fakeAccount{}})
+	e := testEngine(Config{Paths: paths, Keys: keys, Account: &fakeAccount{}})
 	if err := e.forgetHere(testEnv); err != nil {
 		t.Fatal(err)
 	}
@@ -372,9 +372,9 @@ func TestClientModeWaitsForTheKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := newStubPlane(t)
-	creds := NewCredentials(nil, 100*time.Millisecond)
+	creds := NewCredentials(testCredentials(100 * time.Millisecond))
 	account := tokenAccount{fakeAccount: &fakeAccount{exists: true}, creds: creds}
-	e := New(Config{Paths: paths, URL: p.url, Keys: keys, Account: account, Version: "test", Credentials: creds, WaitToConnect: true})
+	e := testEngine(Config{Paths: paths, URL: p.url, Keys: keys, Account: account, Version: "test", Credentials: creds, WaitToConnect: true})
 	c := controlOn(t, e, paths)
 	_, done := running(t, e)
 	waitFor(t, "the engine to wait for the sign-in", func() bool { s := e.Status(); return s.State == StateOffline && strings.Contains(s.Detail, "sign-in") })
@@ -411,7 +411,7 @@ func TestConsentCoversWhatTheFileKept(t *testing.T) {
 	}
 	p := newStubPlane(t)
 	enroll := &fakeEnroller{paths: paths}
-	e := New(Config{Paths: paths, URL: p.url, Keys: keys, Account: &fakeAccount{exists: true}, Version: "test", Enroll: enroll, WaitToConnect: true})
+	e := testEngine(Config{Paths: paths, URL: p.url, Keys: keys, Account: &fakeAccount{exists: true}, Version: "test", Enroll: enroll, WaitToConnect: true})
 	c := controlOn(t, e, paths)
 	running(t, e)
 	waitFor(t, "the state not_connected", func() bool { return e.Status().State == StateNotConnected })
@@ -477,8 +477,8 @@ func TestConnectScreenUnchangedWithoutKeptGrants(t *testing.T) {
 
 func TestStatusCanBeFollowed(t *testing.T) {
 	paths := testPaths(t)
-	creds := NewCredentials(nil, 0)
-	e := New(Config{Paths: paths, Keys: OpenKeys(paths.KeyFile()), Account: &fakeAccount{}, Credentials: creds})
+	creds := NewCredentials(testCredentials(0))
+	e := testEngine(Config{Paths: paths, Keys: OpenKeys(paths.KeyFile()), Account: &fakeAccount{}, Credentials: creds})
 	c := controlOn(t, e, paths)
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://device/v1/status?follow=1", nil)
 	if err != nil {
@@ -522,7 +522,7 @@ func TestStatusCanBeFollowed(t *testing.T) {
 	// valid and then needed again. The expiry is whole seconds, so one second
 	// past the margin can round down into it on a slow runner and be refused.
 	exp := time.Now().Add(credentialsMargin + 3*time.Second)
-	body := fmt.Sprintf(`{"platform":{"token":%q}}`, tokenFor(AudiencePlatform, "alice", "", exp))
+	body := fmt.Sprintf(`{"platform":{"token":%q}}`, tokenFor(testPlatformAudience, "alice", "", exp))
 	if code, out := send(t, c, http.MethodPut, "/v1/credentials", body); code != http.StatusOK {
 		t.Fatalf("the token answered %d %s", code, out)
 	}
@@ -539,7 +539,7 @@ func TestConnectAnswersARefusedNameAndCleansIt(t *testing.T) {
 	}
 	p := newStubPlane(t)
 	enroll := &fakeEnroller{paths: paths, nameErr: errors.New("the name is taken")}
-	e := New(Config{Paths: paths, URL: p.url, Keys: keys, Account: &fakeAccount{exists: true}, Version: "test", Enroll: enroll, WaitToConnect: true})
+	e := testEngine(Config{Paths: paths, URL: p.url, Keys: keys, Account: &fakeAccount{exists: true}, Version: "test", Enroll: enroll, WaitToConnect: true})
 	c := controlOn(t, e, paths)
 	running(t, e)
 	waitFor(t, "the state not_connected", func() bool { return e.Status().State == StateNotConnected })
@@ -572,7 +572,7 @@ func TestAMissingTokenIsSaidSo(t *testing.T) {
 	p := newStubPlane(t)
 	needed := fmt.Errorf("the platform call: %w", ErrCredentialsNeeded)
 	enroll := &fakeEnroller{paths: paths, renameErr: needed, removeErr: needed}
-	e := New(Config{Paths: paths, URL: p.url, Keys: keys, Account: &fakeAccount{exists: true}, Version: "test", Enroll: enroll})
+	e := testEngine(Config{Paths: paths, URL: p.url, Keys: keys, Account: &fakeAccount{exists: true}, Version: "test", Enroll: enroll})
 	c := controlOn(t, e, paths)
 	running(t, e)
 	p.waitConnected(t)
@@ -598,7 +598,7 @@ func (c cwdEnroller) Propose(previous Policy, q ConnectQuery) (Policy, error) {
 
 func TestAProposalWithNoFolderAsksForOne(t *testing.T) {
 	paths := testPaths(t)
-	e := New(Config{Paths: paths, Keys: OpenKeys(paths.KeyFile()), Account: &fakeAccount{}, Enroll: cwdEnroller{&fakeEnroller{paths: paths}}, WaitToConnect: true})
+	e := testEngine(Config{Paths: paths, Keys: OpenKeys(paths.KeyFile()), Account: &fakeAccount{}, Enroll: cwdEnroller{&fakeEnroller{paths: paths}}, WaitToConnect: true})
 	c := controlOn(t, e, paths)
 	code, body := get(t, c, "/v1/connect?name=Test+computer")
 	var proposal Proposal
@@ -616,7 +616,7 @@ func TestRemovalWhilePausedDeletesTheSandboxes(t *testing.T) {
 	keys := OpenKeys(paths.KeyFile())
 	project := connected(t, paths, keys)
 	p := newStubPlane(t)
-	e := New(Config{Paths: paths, URL: p.url, Keys: keys, Account: &fakeAccount{exists: true}, Version: "test", Enroll: &fakeEnroller{paths: paths}, WaitToConnect: true})
+	e := testEngine(Config{Paths: paths, URL: p.url, Keys: keys, Account: &fakeAccount{exists: true}, Version: "test", Enroll: &fakeEnroller{paths: paths}, WaitToConnect: true})
 	answering(t, e, AnswerAllow)
 	c := controlOn(t, e, paths)
 	running(t, e)
@@ -645,7 +645,7 @@ func TestRemovalClearsTheKeyToRevoke(t *testing.T) {
 	keys := OpenKeys(paths.KeyFile())
 	connected(t, paths, keys)
 	p := newStubPlane(t)
-	e := New(Config{Paths: paths, URL: p.url, Keys: keys, Account: &fakeAccount{exists: true}, Version: "test", Enroll: &fakeEnroller{paths: paths}, WaitToConnect: true})
+	e := testEngine(Config{Paths: paths, URL: p.url, Keys: keys, Account: &fakeAccount{exists: true}, Version: "test", Enroll: &fakeEnroller{paths: paths}, WaitToConnect: true})
 	c := controlOn(t, e, paths)
 	running(t, e)
 	p.waitConnected(t)
@@ -674,7 +674,7 @@ func TestAStartAfterARemovalServesNothing(t *testing.T) {
 	}
 	account := &fakeAccount{exists: true}
 	p := newStubPlane(t)
-	e := New(Config{Paths: paths, URL: p.url, Keys: keys, Account: account, Version: "test", WaitToConnect: true})
+	e := testEngine(Config{Paths: paths, URL: p.url, Keys: keys, Account: account, Version: "test", WaitToConnect: true})
 	// A removal through the socket forgot the device after the run read the
 	// file and before it started.
 	if err := Forget(keys, paths.PolicyFile(), testEnv, true); err != nil {
@@ -704,7 +704,7 @@ func TestRemovalDeletesAFileTheWorkerAlreadyCleared(t *testing.T) {
 	if err := SavePolicy(paths.PolicyFile(), file); err != nil {
 		t.Fatal(err)
 	}
-	e := New(Config{Paths: paths, Keys: keys, Account: &fakeAccount{}})
+	e := testEngine(Config{Paths: paths, Keys: keys, Account: &fakeAccount{}})
 	if err := e.forgetHere(testEnv); err != nil {
 		t.Fatal(err)
 	}

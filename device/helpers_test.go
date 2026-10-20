@@ -7,6 +7,7 @@ package device
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -30,6 +31,65 @@ import (
 	"latere.ai/x/cella/runtime/remote"
 	"latere.ai/x/cella/worker"
 )
+
+// testLabels are the keys a test's plane names its sessions under on a
+// sandbox, as a hosted plane's would.
+var testLabels = SessionLabels{
+	Session: "example.com/session", Agent: "example.com/agent", AgentVersion: "example.com/agent-version",
+	Trigger: "example.com/trigger", TriggerFiresOn: "example.com/trigger-fires-on", AgentName: "example.com/agent-name",
+}
+
+// testPlatformAudience is the audience of a test's platform token.
+const testPlatformAudience = "api.example.com"
+
+// testEngine is New with the test's label keys when a test names none.
+func testEngine(c Config) *Engine {
+	if c.Labels == (SessionLabels{}) {
+		c.Labels = testLabels
+	}
+	return New(c)
+}
+
+// testCredentials are a store's options for a test: the wait given, the
+// test's platform audience, and readTestToken.
+func testCredentials(wait time.Duration) CredentialsOptions {
+	return CredentialsOptions{Wait: wait, PlatformAudience: testPlatformAudience, Read: readTestToken}
+}
+
+// readTestToken reads the claims of a test's unsigned JWT, the way an
+// embedder's reader reads its plane's: aud, sub, exp, and org_id for an
+// organization's context.
+func readTestToken(token string) (TokenClaims, error) {
+	parts := strings.Split(token, ".")
+	if len(parts) < 2 {
+		return TokenClaims{}, errors.New("not a JWT")
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return TokenClaims{}, err
+	}
+	var c struct {
+		Aud json.RawMessage `json:"aud"`
+		Exp int64           `json:"exp"`
+		Sub string          `json:"sub"`
+		Org string          `json:"org_id"`
+	}
+	if err = json.Unmarshal(raw, &c); err != nil {
+		return TokenClaims{}, err
+	}
+	var auds []string
+	var one string
+	if json.Unmarshal(c.Aud, &one) == nil {
+		auds = []string{one}
+	} else if err = json.Unmarshal(c.Aud, &auds); err != nil {
+		return TokenClaims{}, errors.New("no audience")
+	}
+	claims := TokenClaims{Audiences: auds, Subject: c.Sub, Personal: c.Org == "", Context: c.Org}
+	if c.Exp > 0 {
+		claims.Expiry = time.Unix(c.Exp, 0)
+	}
+	return claims, nil
+}
 
 // testEnv is the environment every engine test serves.
 const testEnv = "dev-abcdefghijklmnop"
@@ -406,7 +466,7 @@ func answering(t *testing.T, e *Engine, answer string) *asked {
 func deviceCreate(id, folder string, labels map[string]string) runtime.CreateSpec {
 	return runtime.CreateSpec{
 		ID: id, Name: id, Owner: "alice", Isolation: v1.IsolationProcess,
-		Labels: labels, Annotations: map[string]string{AnnotationAgent: "Site helper"},
+		Labels: labels, Annotations: map[string]string{testLabels.AgentName: "Site helper"},
 		Workspace: runtime.Workspace{Host: folder, Path: folder},
 	}
 }

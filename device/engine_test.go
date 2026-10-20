@@ -34,12 +34,12 @@ import (
 // engineOn builds an engine for paths against the plane, with the account
 // and the store given.
 func engineOn(paths Paths, p *stubPlane, account Account, keys KeyStore) *Engine {
-	return New(Config{Paths: paths, URL: p.url, Keys: keys, Account: account, Version: "test"})
+	return testEngine(Config{Paths: paths, URL: p.url, Keys: keys, Account: account, Version: "test"})
 }
 
 // sessionLabels are the labels Topos puts on a session's sandbox.
 func sessionLabels(session string) map[string]string {
-	return map[string]string{LabelSession: session, LabelAgent: "agt_1", LabelVersion: "4"}
+	return map[string]string{testLabels.Session: session, testLabels.Agent: "agt_1", testLabels.AgentVersion: "4"}
 }
 
 func TestActivityLogHasNoContent(t *testing.T) {
@@ -590,7 +590,7 @@ func TestEngineFollowsTheWorkerState(t *testing.T) {
 // one, as Run returns, leaves the state to whatever ended Run.
 func TestWorkerStateReads(t *testing.T) {
 	paths := testPaths(t)
-	e := New(Config{Paths: paths, Keys: OpenKeys(paths.KeyFile()), Account: &fakeAccount{}})
+	e := testEngine(Config{Paths: paths, Keys: OpenKeys(paths.KeyFile()), Account: &fakeAccount{}})
 	e.workerState(worker.State{Err: errors.New("dial tcp: connection refused"), Reconnect: true, RetryIn: time.Second})
 	if s := e.Status(); s.State != StateOffline || s.Detail != "the control plane could not be reached: dial tcp: connection refused" {
 		t.Errorf("a control plane never reached reads %+v", s)
@@ -617,17 +617,17 @@ func TestEngineAdmits(t *testing.T) {
 	paths := testPaths(t)
 	keys := OpenKeys(paths.KeyFile())
 	connected(t, paths, keys)
-	e := New(Config{Paths: paths, Keys: keys, Account: &fakeAccount{}})
+	e := testEngine(Config{Paths: paths, Keys: keys, Account: &fakeAccount{}})
 	e.policy.Device = testEnv
 	e.host = v1.HostInfo{Grants: []v1.HostGrant{{Path: filepath.Join(paths.Home, "project"), Write: true}}}
 	create := func(labels map[string]string) worker.Create {
 		return worker.Create{Labels: labels, Sandbox: v1.Sandbox{
-			Metadata: v1.Metadata{Labels: labels, Annotations: map[string]string{AnnotationAgent: "Site helper"}},
+			Metadata: v1.Metadata{Labels: labels, Annotations: map[string]string{testLabels.AgentName: "Site helper"}},
 			Spec:     v1.SandboxSpec{Workspace: v1.Workspace{Host: filepath.Join(paths.Home, "project")}},
 			Status:   v1.SandboxStatus{ID: "sbx_a"},
 		}}
 	}
-	scheduled := map[string]string{LabelSession: "ses_t", LabelAgent: "agt_1", LabelVersion: "4", LabelTrigger: "trg_1", LabelFiresOn: FiresOnSchedule}
+	scheduled := map[string]string{testLabels.Session: "ses_t", testLabels.Agent: "agt_1", testLabels.AgentVersion: "4", testLabels.Trigger: "trg_1", testLabels.TriggerFiresOn: FiresOnSchedule}
 
 	if v := e.Admit(t.Context(), create(sessionLabels("ses_1"))); v.Allow || v.Reason != ReasonNoOneHere {
 		t.Errorf("with no client attached a create reads %+v", v)
@@ -650,7 +650,7 @@ func TestEngineAdmits(t *testing.T) {
 	}
 	changed := map[string]string{}
 	maps.Copy(changed, scheduled)
-	changed[LabelVersion] = "5"
+	changed[testLabels.AgentVersion] = "5"
 	e.Admit(t.Context(), create(changed))
 	if len(seen.all()) != 2 {
 		t.Error("a remembered trigger whose agent changed was not asked")
@@ -745,17 +745,17 @@ func TestBrokerAnswers(t *testing.T) {
 func TestApprovalFacts(t *testing.T) {
 	host := v1.HostInfo{Grants: []v1.HostGrant{{Path: "/h/site", Write: true}, {Path: "/h/site/ro"}}}
 	c := worker.Create{Sandbox: v1.Sandbox{
-		Metadata: v1.Metadata{Labels: map[string]string{LabelAgent: "agt_9", LabelTrigger: "trg_9", LabelFiresOn: FiresOnEvents}},
+		Metadata: v1.Metadata{Labels: map[string]string{testLabels.Agent: "agt_9", testLabels.Trigger: "trg_9", testLabels.TriggerFiresOn: FiresOnEvents}},
 		Spec:     v1.SandboxSpec{Workspace: v1.Workspace{Host: "/h/site/ro/x"}},
 	}}
-	a := approvalOf(c, host, time.Now())
+	a := approvalOf(c, testLabels, host, time.Now())
 	if a.Agent != "agt_9" || a.Write || a.Rememberable || a.StartedBy() != "by trigger trg_9 (on delivered events)" {
 		t.Errorf("the facts read %+v, started %q", a, a.StartedBy())
 	}
 	if (Approval{}).StartedBy() != "by a person" || (Approval{Trigger: "t"}).StartedBy() != "by trigger t" {
 		t.Error("who started a session is misworded")
 	}
-	scheduled := approvalOf(worker.Create{Labels: map[string]string{LabelTrigger: "trg", LabelFiresOn: FiresOnSchedule}}, host, time.Now())
+	scheduled := approvalOf(worker.Create{Labels: map[string]string{testLabels.Trigger: "trg", testLabels.TriggerFiresOn: FiresOnSchedule}}, testLabels, host, time.Now())
 	if scheduled.Rememberable {
 		t.Error("a scheduled trigger with no agent version can be remembered")
 	}
@@ -843,7 +843,7 @@ func TestEnginePauseResumeReload(t *testing.T) {
 func TestEngineRefusals(t *testing.T) {
 	t.Run("not connected", func(t *testing.T) {
 		paths := testPaths(t)
-		e := New(Config{Paths: paths, Keys: OpenKeys(paths.KeyFile())})
+		e := testEngine(Config{Paths: paths, Keys: OpenKeys(paths.KeyFile())})
 		if err := e.Run(t.Context()); CodeOf(err) != CodeNotConnected {
 			t.Errorf("Run returned %v", err)
 		}
@@ -853,7 +853,7 @@ func TestEngineRefusals(t *testing.T) {
 		if err := SavePolicy(paths.PolicyFile(), Policy{Device: testEnv, Network: Network{Mode: "open"}}); err != nil {
 			t.Fatal(err)
 		}
-		e := New(Config{Paths: paths, Keys: OpenKeys(paths.KeyFile())})
+		e := testEngine(Config{Paths: paths, Keys: OpenKeys(paths.KeyFile())})
 		if err := e.Run(t.Context()); CodeOf(err) != CodePolicyInvalid {
 			t.Errorf("Run returned %v", err)
 		}
@@ -880,7 +880,7 @@ func TestEngineRefusals(t *testing.T) {
 		paths := testPaths(t)
 		keys := OpenKeys(paths.KeyFile())
 		connected(t, paths, keys)
-		e := New(Config{Paths: paths, Keys: keys, Account: &fakeAccount{}, NewDriver: func(local.Options) (runtime.Driver, error) {
+		e := testEngine(Config{Paths: paths, Keys: keys, Account: &fakeAccount{}, NewDriver: func(local.Options) (runtime.Driver, error) {
 			return nil, local.ErrRunsAsRoot
 		}})
 		if err := e.Run(t.Context()); CodeOf(err) != CodeRunsAsRoot {
@@ -895,7 +895,7 @@ func TestEngineAnnouncesAnUpgrade(t *testing.T) {
 	keys := OpenKeys(paths.KeyFile())
 	connected(t, paths, keys)
 	p := newStubPlane(t)
-	e := New(Config{Paths: paths, URL: p.url, Keys: keys, Account: &fakeAccount{exists: true}, Version: "v0.22.0",
+	e := testEngine(Config{Paths: paths, URL: p.url, Keys: keys, Account: &fakeAccount{exists: true}, Version: "v0.22.0",
 		Upgrade: func(context.Context) (string, bool) { return "v0.23.0", true }, UpgradeEvery: 50 * time.Millisecond})
 	events, stopEvents := e.Subscribe()
 	defer stopEvents()

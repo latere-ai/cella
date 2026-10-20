@@ -185,7 +185,7 @@ func TestServeWaitsNotConnected(t *testing.T) {
 	keys := OpenKeys(paths.KeyFile())
 	p := newStubPlane(t)
 	enroll := &fakeEnroller{paths: paths}
-	e := New(Config{Paths: paths, URL: p.url, Keys: keys, Account: &fakeAccount{exists: true}, Version: "test",
+	e := testEngine(Config{Paths: paths, URL: p.url, Keys: keys, Account: &fakeAccount{exists: true}, Version: "test",
 		Enroll: enroll, WaitToConnect: true})
 	c := controlOn(t, e, paths)
 	_, done := running(t, e)
@@ -213,7 +213,7 @@ func TestConnectThroughSocket(t *testing.T) {
 	}
 	p := newStubPlane(t)
 	enroll := &fakeEnroller{paths: paths}
-	e := New(Config{Paths: paths, URL: p.url, Keys: keys, Account: &fakeAccount{exists: true}, Version: "test",
+	e := testEngine(Config{Paths: paths, URL: p.url, Keys: keys, Account: &fakeAccount{exists: true}, Version: "test",
 		Enroll: enroll, WaitToConnect: true})
 	c := controlOn(t, e, paths)
 	running(t, e)
@@ -281,7 +281,7 @@ func TestRemoveThroughSocket(t *testing.T) {
 	}
 	p := newStubPlane(t)
 	enroll := &fakeEnroller{paths: paths}
-	e := New(Config{Paths: paths, URL: p.url, Keys: keys, Account: &fakeAccount{exists: true}, Version: "test",
+	e := testEngine(Config{Paths: paths, URL: p.url, Keys: keys, Account: &fakeAccount{exists: true}, Version: "test",
 		Enroll: enroll, WaitToConnect: true})
 	c := controlOn(t, e, paths)
 	_, done := running(t, e)
@@ -340,7 +340,7 @@ func TestPolicyThroughSocket(t *testing.T) {
 	enroll := &fakeEnroller{paths: paths}
 	var mu sync.Mutex
 	var built [][]local.Grant
-	e := New(Config{Paths: paths, URL: p.url, Keys: keys, Account: &fakeAccount{exists: true}, Version: "test", Enroll: enroll,
+	e := testEngine(Config{Paths: paths, URL: p.url, Keys: keys, Account: &fakeAccount{exists: true}, Version: "test", Enroll: enroll,
 		NewDriver: func(o local.Options) (runtime.Driver, error) {
 			if !strings.Contains(o.DataDir, "check-") {
 				mu.Lock()
@@ -440,7 +440,7 @@ func testToken(audience string, exp time.Time) string {
 
 func TestClientCredentials(t *testing.T) {
 	t.Run("a token is checked, kept, waited for, and needed again before it expires", func(t *testing.T) {
-		creds := NewCredentials(nil, 200*time.Millisecond)
+		creds := NewCredentials(testCredentials(200 * time.Millisecond))
 		if s := creds.State(); s.Cella != CredentialNeeded || s.Platform != CredentialNeeded {
 			t.Errorf("an empty store reads %+v", s)
 		}
@@ -461,11 +461,11 @@ func TestClientCredentials(t *testing.T) {
 		creds.notifyNeed(func() { needed <- struct{}{} })
 		waited := make(chan string, 1)
 		go func() {
-			token, _ := creds.Token(context.Background(), AudiencePlatform)
+			token, _ := creds.Token(context.Background(), testPlatformAudience)
 			waited <- token
 		}()
-		platform := testToken(AudiencePlatform, time.Now().Add(credentialsMargin+time.Second))
-		if err := creds.Put(map[string]HeldToken{AudienceCella: {Token: testToken(AudienceCella, time.Now().Add(time.Hour))}, AudiencePlatform: {Token: platform}}); err != nil {
+		platform := testToken(testPlatformAudience, time.Now().Add(credentialsMargin+time.Second))
+		if err := creds.Put(map[string]HeldToken{AudienceCella: {Token: testToken(AudienceCella, time.Now().Add(time.Hour))}, testPlatformAudience: {Token: platform}}); err != nil {
 			t.Fatal(err)
 		}
 		if got := <-waited; got != platform {
@@ -486,7 +486,7 @@ func TestClientCredentials(t *testing.T) {
 
 	t.Run("the socket takes tokens only on an engine that serves with a client's", func(t *testing.T) {
 		paths := testPaths(t)
-		saved := New(Config{Paths: paths, Keys: OpenKeys(paths.KeyFile()), Account: &fakeAccount{}})
+		saved := testEngine(Config{Paths: paths, Keys: OpenKeys(paths.KeyFile()), Account: &fakeAccount{}})
 		c := controlOn(t, saved, paths)
 		token := testToken(AudienceCella, time.Now().Add(time.Hour))
 		if code, body := send(t, c, http.MethodPut, "/v1/credentials", `{"cella":{"token":"`+token+`"}}`); code != http.StatusConflict || errorCode(body) != "credentials_not_taken" {
@@ -494,8 +494,8 @@ func TestClientCredentials(t *testing.T) {
 		}
 
 		paths2 := testPaths(t)
-		creds := NewCredentials(nil, 0)
-		client := New(Config{Paths: paths2, Keys: OpenKeys(paths2.KeyFile()), Account: &fakeAccount{}, Credentials: creds})
+		creds := NewCredentials(testCredentials(0))
+		client := testEngine(Config{Paths: paths2, Keys: OpenKeys(paths2.KeyFile()), Account: &fakeAccount{}, Credentials: creds})
 		c2 := controlOn(t, client, paths2)
 		if s := statusOf(t, c2); s.Credentials == nil || s.Credentials.Cella != CredentialNeeded {
 			t.Errorf("a client's engine with no token reads %+v", s.Credentials)

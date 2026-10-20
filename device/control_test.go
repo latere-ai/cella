@@ -144,7 +144,7 @@ func TestControlSocket(t *testing.T) {
 	paths := testPaths(t)
 	keys := OpenKeys(paths.KeyFile())
 	project := connected(t, paths, keys)
-	e := New(Config{Paths: paths, Keys: keys, Account: &fakeAccount{}, Version: "v-test"})
+	e := testEngine(Config{Paths: paths, Keys: keys, Account: &fakeAccount{}, Version: "v-test"})
 	e.policy = Policy{Device: testEnv, Name: "Test computer"}
 	e.host = v1.HostInfo{Grants: []v1.HostGrant{{Path: project, Write: true}}}
 	c := controlOn(t, e, paths)
