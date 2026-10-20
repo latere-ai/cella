@@ -13,6 +13,10 @@ refused before it is pushed.
   on, such as a revoked key, a write racing the close could be recorded as
   the reason instead, and the worker reconnected and kept retrying. The
   close's reason now always wins.
+- **Stopping `cellad` waits for an environment's status write.** A
+  worker's stream that ended just before shutdown could write the
+  environment's status after the store was closed; the write in flight now
+  finishes first, and one asked for later is refused.
 
 ## v0.19.0 - 2026-10-20
 
