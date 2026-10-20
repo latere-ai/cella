@@ -252,3 +252,22 @@ func TestAComputerNotConnectedRefusesChanges(t *testing.T) {
 		t.Errorf("PutCredentials for no audience = %v", err)
 	}
 }
+
+func TestTheContextStepKeepsThePlanesRefusal(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"the plane's own refusal", Fail(CodeNoSignIn, "no saved sign-in", nil), CodeNoSignIn},
+		{"a token not handed", ErrCredentialsNeeded, CodeCredentialsNeeded},
+		{"anything else", errors.New("the plane is down"), CodeRefused},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e, _ := enrollmentOn(t, &stubCella{}, &fakePlatform{contextErr: tc.err})
+			if _, err := e.Connect(t.Context(), Policy{Name: "Desk"}); CodeOf(err) != tc.want {
+				t.Errorf("Connect = %v, want %s", err, tc.want)
+			}
+		})
+	}
+}

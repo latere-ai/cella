@@ -119,6 +119,7 @@ type fakePlatform struct {
 	have, limit     int
 	devicesErr      error
 	contextReadOnce bool
+	contextErr      error
 }
 
 func (p *fakePlatform) Labels(context.Context) (map[string]string, error) {
@@ -129,7 +130,7 @@ func (p *fakePlatform) Context(context.Context) (string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.contextReadOnce = true
-	return p.org, nil
+	return p.org, p.contextErr
 }
 
 func (p *fakePlatform) Rename(_ context.Context, device, name string) error {

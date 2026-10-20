@@ -160,6 +160,10 @@ func (e *Enrollment) Propose(previous Policy, q ConnectQuery) (Policy, error) {
 func (e *Enrollment) Connect(ctx context.Context, p Policy) (Connected, error) {
 	org, err := e.platform.Context(ctx)
 	if err != nil {
+		// The plane's own refusal (no sign-in, a token not handed) is kept.
+		if _, ok := errors.AsType[*Error](err); ok {
+			return Connected{}, err
+		}
 		return Connected{}, credentialsOr(err, Fail(CodeRefused, "", err))
 	}
 	if org != "" {
