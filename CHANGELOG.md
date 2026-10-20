@@ -18,6 +18,11 @@ refused before it is pushed.
   decides (its session labels, its token's audience and claims, its part
   of connecting a computer) the embedder supplies. See
   [the local runtime](docs/local.md#a-persons-computer-as-one-device).
+- With `OTEL_EXPORTER_OTLP_ENDPOINT` set, `cellad` also exports the Go
+  runtime's metrics: memory, goroutines, GOGC, GOMAXPROCS and scheduling
+  latency, as `go.memory.*`, `go.goroutine.count`, `go.config.gogc`,
+  `go.processor.limit` and `go.schedule.duration`, through
+  `latere.ai/x/pkg` v0.106.0.
 
 ## v0.19.1 - 2026-10-20
 

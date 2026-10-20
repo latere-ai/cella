@@ -23,7 +23,7 @@ require (
 	k8s.io/apimachinery v0.35.4
 	k8s.io/client-go v0.35.4
 	latere.ai/x/ci-gate v0.54.0
-	latere.ai/x/pkg v0.103.0
+	latere.ai/x/pkg v0.106.0
 	sigs.k8s.io/yaml v1.6.0
 )
 
@@ -107,6 +107,7 @@ require (
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/bridges/otelslog v0.20.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.71.0 // indirect
+	go.opentelemetry.io/contrib/instrumentation/runtime v0.71.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp v0.22.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp v1.46.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.46.0 // indirect
