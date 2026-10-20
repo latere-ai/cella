@@ -25,4 +25,15 @@
 //
 // DefaultPaths are the files every embedder shares, so a computer
 // connected from one embedder and served by another is one device.
+//
+// The package names no hosted plane. The embedder supplies what one
+// decides: the label keys its sessions carry (Config.Labels), the audience
+// of its platform token and how a token's claims read
+// (CredentialsOptions), and the platform's part of a connect (Platform).
+//
+// The sentences and hints of an Error, and the facts a connect shows, are
+// the latere command's words, kept as defaults so a terminal reads the
+// same whichever embedder answers. An application that shows its own
+// words keys them on the Error's Code and on each Fact's Kind, which are
+// stable.
 package device
