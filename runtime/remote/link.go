@@ -10,6 +10,7 @@ import (
 	"io"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // FrameConn is the connection under the protocol, as either side holds it.
@@ -23,7 +24,10 @@ type FrameConn interface {
 	// never reuses the slice it returned.
 	ReadFrame() ([]byte, error)
 	// WriteFrame sends one whole frame. It is called by one writer only,
-	// which is the WebSocket contract and is what the link guarantees.
+	// which is the WebSocket contract and is what the link guarantees. A
+	// write refused because the peer's close is being answered returns an
+	// error wrapping ErrClosing, so the link takes the reason from the close
+	// the read pump reads rather than from the refused write.
 	WriteFrame([]byte) error
 	Close() error
 }
@@ -36,6 +40,17 @@ const outBuffer = 256
 
 // ErrLinkClosed is every call on a link whose connection ended.
 var ErrLinkClosed = errors.New("remote: the worker stream is closed")
+
+// ErrClosing is what a FrameConn's write wraps when it was refused because
+// the peer closed the connection and the close is being answered. The write
+// failing is a consequence of that close; the reason is in the close frame,
+// which the read pump reads next.
+var ErrClosing = errors.New("remote: the connection is closing")
+
+// closingGrace is how long the write pump waits, after a write refused by a
+// close, for the read pump to record the close's reason before recording the
+// refused write instead.
+const closingGrace = time.Second
 
 // LinkOptions configures one link.
 type LinkOptions struct {
@@ -342,10 +357,31 @@ func (l *Link) writePump(ctx context.Context) {
 			return
 		case raw := <-l.out:
 			if err := l.conn.WriteFrame(raw); err != nil {
+				if errors.Is(err, ErrClosing) {
+					l.awaitClose(ctx, err)
+					return
+				}
 				l.Shutdown(err)
 				return
 			}
 		}
+	}
+}
+
+// awaitClose ends the write pump after a write the peer's close refused. The
+// read pump reads that close next and records its reason, such as a refusal
+// a worker stops on; recording the refused write first would hide it. Only a
+// read pump that records nothing within closingGrace leaves the write's error
+// as the reason.
+func (l *Link) awaitClose(ctx context.Context, err error) {
+	timer := time.NewTimer(closingGrace)
+	defer timer.Stop()
+	select {
+	case <-l.done:
+	case <-ctx.Done():
+		l.Shutdown(ctx.Err())
+	case <-timer.C:
+		l.Shutdown(err)
 	}
 }
 

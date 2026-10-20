@@ -317,7 +317,12 @@ func (s *workerSocket) WriteFrame(raw []byte) error {
 	if err := s.conn.SetWriteDeadline(time.Now().Add(writeDeadline)); err != nil {
 		return err
 	}
-	return s.conn.WriteMessage(websocket.BinaryMessage, raw)
+	err := s.conn.WriteMessage(websocket.BinaryMessage, raw)
+	if errors.Is(err, websocket.ErrCloseSent) {
+		// The peer's close was answered: the link reads its reason next.
+		return fmt.Errorf("%w: %w", remote.ErrClosing, err)
+	}
+	return err
 }
 
 func (s *workerSocket) Close() error { return s.conn.Close() }
