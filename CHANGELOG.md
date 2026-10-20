@@ -6,6 +6,19 @@ refused before it is pushed.
 
 ## Unreleased
 
+### Added
+
+- **`latere.ai/x/cella/device` serves a person's own computer as one
+  device**, for a program to embed: the host policy file, the environment
+  key in the system keychain and its rotation, the person's approval of
+  each session, the activity log, the lock that keeps one engine per
+  computer, and the control socket. A command-line tool and a desktop
+  application that embed it over the same files serve one device, and
+  either attaches to an engine the other started. What a hosted plane
+  decides (its session labels, its token's audience and claims, its part
+  of connecting a computer) the embedder supplies. See
+  [the local runtime](docs/local.md#a-persons-computer-as-one-device).
+
 ## v0.19.1 - 2026-10-20
 
 ### Fixed

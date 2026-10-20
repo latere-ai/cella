@@ -107,6 +107,7 @@ every spec in its `depends_on` is at `testing` or later, not `complete`.
 | [083](.archive/083-environments-a-subject-owns.md) | Environments a subject owns: a subject acting on its own worker environments, decided on owner, mode and worker limit, keys with a lifetime, `environment.serve` asked at registration and on a TTL, revocation and deletion ending live streams and sandboxes, `spec.workers.max`, and a driver's own allowlist standing in for a gateway | medium | complete | 006, 018, 020, 021, 082 |
 | [084](.archive/084-image-volumes.md) | Image volumes: the Volume kind with an empty or an image source, filled once, attached by a sandbox's spec.volumes under spec 019's access rules, its image admitted as a sandbox's is, on the podman and k8s drivers | large | complete | 003, 004, 005, 007, 008, 009, 010, 019 |
 | [085](.archive/085-seatbelt-on-macos.md) | The local driver runs on macOS's own Seatbelt: nothing to install on a Mac, an allowlist held by a proxy beside each stage, files that run code later write-protected inside a grant, and cellad calling hostsandbox.Main | small | complete | 081, 082 |
+| [086](.archive/086-the-device-engine-as-a-library.md) | The device engine as a library: `latere.ai/x/cella/device` serves a person's own computer as one of their environments for any program that embeds it, unchanged on disk, with a hosted plane's labels, token and connect steps supplied by the embedder | large | complete | 081, 082, 083, 085 |
 
 ## Dependency graph
 
