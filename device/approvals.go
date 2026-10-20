@@ -72,9 +72,9 @@ type Approval struct {
 	Asked        time.Time `json:"asked"`
 }
 
-// startedWords is who started the session, as the line that says a session
-// started words it.
-func (a Approval) startedWords() string {
+// StartedWords is who started the session, as a line that says a session
+// started words it: "started by a person", or by which trigger.
+func (a Approval) StartedWords() string {
 	if a.Trigger == "" {
 		return "started by a person"
 	}
@@ -103,22 +103,22 @@ func (a Approval) StartedBy() string {
 
 // approvalOf reads the facts of a create. host is what the driver grants,
 // which decides whether the folder is read-write.
-func approvalOf(c worker.Create, host v1.HostInfo, now time.Time) Approval {
+func approvalOf(c worker.Create, keys SessionLabels, host v1.HostInfo, now time.Time) Approval {
 	labels := c.Labels
 	if labels == nil {
 		labels = c.Sandbox.Metadata.Labels
 	}
 	a := Approval{
 		Sandbox:      c.Sandbox.Status.ID,
-		AgentRef:     labels[LabelAgent],
-		AgentVersion: labels[LabelVersion],
-		Session:      labels[LabelSession],
-		Trigger:      labels[LabelTrigger],
-		FiresOn:      labels[LabelFiresOn],
+		AgentRef:     labelOf(labels, keys.Agent),
+		AgentVersion: labelOf(labels, keys.AgentVersion),
+		Session:      labelOf(labels, keys.Session),
+		Trigger:      labelOf(labels, keys.Trigger),
+		FiresOn:      labelOf(labels, keys.TriggerFiresOn),
 		Folder:       c.Sandbox.Spec.Workspace.Host,
 		Asked:        now.UTC(),
 	}
-	a.Agent = strings.TrimSpace(c.Sandbox.Metadata.Annotations[AnnotationAgent])
+	a.Agent = strings.TrimSpace(labelOf(c.Sandbox.Metadata.Annotations, keys.AgentName))
 	if a.Agent == "" {
 		a.Agent = a.AgentRef
 	}

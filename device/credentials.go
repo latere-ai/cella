@@ -5,8 +5,6 @@ package device
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -15,13 +13,43 @@ import (
 	"time"
 )
 
-// The audiences of the tokens a client hands an engine under
-// `serve --credentials client`: Cella's, for the environment's keys, and the
-// platform origin's, for the device's record.
-const (
-	AudienceCella    = "cella"
-	AudiencePlatform = "api.latere.ai"
-)
+// AudienceCella is the audience of the Cella token a client hands an engine
+// under the key "cella", for the environment's keys. The platform token's,
+// for the device's record, is the embedder's (CredentialsOptions).
+const AudienceCella = "cella"
+
+// TokenClaims are what the engine needs to know of a token a client hands:
+// whom it is addressed to, whom it names, when it expires, and whether it
+// is in that person's own context. The engine verifies no token: the
+// service a token is presented to does.
+type TokenClaims struct {
+	Audiences []string
+	Subject   string
+	Expiry    time.Time
+	// Personal is whether the token is in its person's own context rather
+	// than an organization's; a device is personal. Context names the
+	// other context, for the refusal's detail.
+	Personal bool
+	Context  string
+}
+
+// TokenReader reads the claims of a token a client hands. The embedder
+// supplies it, since how a plane's tokens carry a person and a context is
+// the plane's.
+type TokenReader func(token string) (TokenClaims, error)
+
+// CredentialsOptions build a store.
+type CredentialsOptions struct {
+	// Now is the clock; nil is time.Now. Wait is how long a call waits for
+	// a client to hand a token; zero is CredentialsWait.
+	Now  func() time.Time
+	Wait time.Duration
+	// PlatformAudience is the audience of the platform token a client hands
+	// under the key "platform"; empty takes none.
+	PlatformAudience string
+	// Read reads a handed token's claims; nil refuses every token.
+	Read TokenReader
+}
 
 // What a client reads for each audience in the status.
 const (
@@ -79,8 +107,10 @@ type CredentialsState struct {
 // Credentials holds the tokens a client handed the engine, in memory only:
 // never written to a file or the activity log.
 type Credentials struct {
-	now  func() time.Time
-	wait time.Duration
+	now      func() time.Time
+	wait     time.Duration
+	platform string
+	read     TokenReader
 
 	mu   sync.Mutex
 	held map[string]HeldToken
@@ -97,17 +127,23 @@ type Credentials struct {
 	onNeed func()
 }
 
-// NewCredentials builds an empty store. A nil now is time.Now, and a zero
-// wait is CredentialsWait.
-func NewCredentials(now func() time.Time, wait time.Duration) *Credentials {
-	if now == nil {
-		now = time.Now
+// NewCredentials builds an empty store.
+func NewCredentials(o CredentialsOptions) *Credentials {
+	if o.Now == nil {
+		o.Now = time.Now
 	}
-	if wait <= 0 {
-		wait = CredentialsWait
+	if o.Wait <= 0 {
+		o.Wait = CredentialsWait
 	}
-	return &Credentials{now: now, wait: wait, held: map[string]HeldToken{}, changed: make(chan struct{}), timers: map[string]*time.Timer{}}
+	return &Credentials{
+		now: o.Now, wait: o.Wait, platform: o.PlatformAudience, read: o.Read,
+		held: map[string]HeldToken{}, changed: make(chan struct{}), timers: map[string]*time.Timer{},
+	}
 }
+
+// PlatformAudience is the audience of the platform token, "" when the store
+// takes none.
+func (c *Credentials) PlatformAudience() string { return c.platform }
 
 // notifyNeed sets what is called each time a held token turns needed.
 func (c *Credentials) notifyNeed(f func()) {
@@ -175,7 +211,7 @@ func (c *Credentials) Put(tokens map[string]HeldToken) error {
 	checked := map[string]HeldToken{}
 	subject := ""
 	for audience, t := range tokens {
-		expiry, sub, err := checkToken(audience, t, now)
+		expiry, sub, err := checkToken(audience, t, now, c.read)
 		if err != nil {
 			return err
 		}
@@ -272,57 +308,38 @@ func (c *Credentials) State() CredentialsState {
 		}
 		return CredentialNeeded
 	}
-	return CredentialsState{Cella: state(AudienceCella), Platform: state(AudiencePlatform)}
+	return CredentialsState{Cella: state(AudienceCella), Platform: state(c.platform)}
 }
 
-// checkToken reads a handed token's claims without verifying its signature,
-// which the service it is presented to does: it must be addressed to the
-// audience, name a person, be in that person's own context rather than an
-// organization's (a device is personal), and expire more than a minute from
-// now. It answers its expiry, the earlier of its exp claim and the one the
-// client gave, and the person it names.
-func checkToken(audience string, t HeldToken, now time.Time) (time.Time, string, error) {
+// checkToken checks a handed token by the claims read reads, without
+// verifying its signature, which the service it is presented to does: it
+// must be addressed to the audience, name a person, be in that person's own
+// context rather than an organization's (a device is personal), and expire
+// more than a minute from now. It answers its expiry, the earlier of its
+// own and the one the client gave, and the person it names.
+func checkToken(audience string, t HeldToken, now time.Time, read TokenReader) (time.Time, string, error) {
 	if strings.TrimSpace(t.Token) == "" {
 		return time.Time{}, "", &CredentialsError{Reason: "the " + audience + " token is empty"}
 	}
-	parts := strings.Split(t.Token, ".")
-	if len(parts) < 2 {
-		return time.Time{}, "", &CredentialsError{Reason: "the " + audience + " token is not a JWT"}
+	if read == nil {
+		return time.Time{}, "", &CredentialsError{Reason: "this engine reads no token a client hands"}
 	}
-	raw, err := base64.RawURLEncoding.DecodeString(parts[1])
+	claims, err := read(t.Token)
 	if err != nil {
-		return time.Time{}, "", &CredentialsError{Reason: "the " + audience + " token's claims do not decode: " + err.Error()}
+		return time.Time{}, "", &CredentialsError{Reason: "the " + audience + " token does not read: " + err.Error()}
 	}
-	var claims struct {
-		Aud   json.RawMessage `json:"aud"`
-		Exp   int64           `json:"exp"`
-		Sub   string          `json:"sub"`
-		OrgID string          `json:"org_id"`
+	if !slices.Contains(claims.Audiences, audience) {
+		return time.Time{}, "", &CredentialsError{Reason: fmt.Sprintf("the %s token is addressed to %v, not to %s", audience, claims.Audiences, audience)}
 	}
-	if err = json.Unmarshal(raw, &claims); err != nil {
-		return time.Time{}, "", &CredentialsError{Reason: "the " + audience + " token's claims do not decode: " + err.Error()}
-	}
-	var auds []string
-	var one string
-	if json.Unmarshal(claims.Aud, &one) == nil {
-		auds = []string{one}
-	} else if err = json.Unmarshal(claims.Aud, &auds); err != nil {
-		return time.Time{}, "", &CredentialsError{Reason: "the " + audience + " token names no audience"}
-	}
-	if !slices.Contains(auds, audience) {
-		return time.Time{}, "", &CredentialsError{Reason: fmt.Sprintf("the %s token is addressed to %v, not to %s", audience, auds, audience)}
-	}
-	if strings.TrimSpace(claims.Sub) == "" {
+	if strings.TrimSpace(claims.Subject) == "" {
 		return time.Time{}, "", &CredentialsError{Reason: "the " + audience + " token names no person"}
 	}
-	if claims.OrgID != "" {
-		return time.Time{}, "", &CredentialsError{Code: CodeCredentialsOrg, Reason: "the " + audience + " token is in the context of the organization " + claims.OrgID + ", and a device is personal"}
+	if !claims.Personal {
+		return time.Time{}, "", &CredentialsError{Code: CodeCredentialsOrg, Reason: "the " + audience + " token is in the context " + claims.Context + ", and a device is personal"}
 	}
 	expiry := t.ExpiresAt
-	if claims.Exp > 0 {
-		if exp := time.Unix(claims.Exp, 0); expiry.IsZero() || exp.Before(expiry) {
-			expiry = exp
-		}
+	if !claims.Expiry.IsZero() && (expiry.IsZero() || claims.Expiry.Before(expiry)) {
+		expiry = claims.Expiry
 	}
 	if expiry.IsZero() {
 		return time.Time{}, "", &CredentialsError{Reason: "the " + audience + " token names no expiry"}
@@ -330,5 +347,5 @@ func checkToken(audience string, t HeldToken, now time.Time) (time.Time, string,
 	if !now.Add(credentialsMargin).Before(expiry) {
 		return time.Time{}, "", &CredentialsError{Reason: fmt.Sprintf("the %s token expires at %s, within a minute", audience, expiry.UTC().Format(time.RFC3339))}
 	}
-	return expiry.UTC(), claims.Sub, nil
+	return expiry.UTC(), claims.Subject, nil
 }

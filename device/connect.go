@@ -349,7 +349,8 @@ func (e *Engine) Connect(ctx context.Context, t Terms, consent string) (ConnectA
 }
 
 // PutCredentials is PUT /v1/credentials: the tokens a client hands an engine
-// under `serve --credentials client`, by "cella" and "platform".
+// that serves with a client's credentials (the latere command's `serve
+// --credentials client`), by "cella" and "platform".
 func (e *Engine) PutCredentials(tokens map[string]HeldToken) (Status, error) {
 	if e.cfg.Credentials == nil {
 		return Status{}, ErrNoClientCredentials
@@ -360,7 +361,11 @@ func (e *Engine) PutCredentials(tokens map[string]HeldToken) (Status, error) {
 		case "cella":
 			byAudience[AudienceCella] = t
 		case "platform":
-			byAudience[AudiencePlatform] = t
+			platform := e.cfg.Credentials.PlatformAudience()
+			if platform == "" {
+				return Status{}, &CredentialsError{Reason: "this engine takes no platform token"}
+			}
+			byAudience[platform] = t
 		default:
 			return Status{}, &CredentialsError{Reason: fmt.Sprintf("%q names no audience; hand cella and platform", key)}
 		}

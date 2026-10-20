@@ -32,16 +32,26 @@ const (
 // followPoll is how often a follower looks for new lines.
 var followPoll = 250 * time.Millisecond
 
-// The labels Topos sets on a device session's sandbox (Topos spec 080), and
-// the annotation that carries the agent's display name.
-const (
-	LabelSession    = "topos.latere.ai/session"
-	LabelAgent      = "topos.latere.ai/agent"
-	LabelVersion    = "topos.latere.ai/agent-version"
-	LabelTrigger    = "topos.latere.ai/trigger"
-	LabelFiresOn    = "topos.latere.ai/trigger-fires-on"
-	AnnotationAgent = "topos.latere.ai/agent-name"
-)
+// SessionLabels are the keys under which the plane that starts sessions on
+// this computer names them on a sandbox: the session, its agent and the
+// agent's version, the trigger that started it and what the trigger fires
+// on, and the annotation that carries the agent's display name. The engine
+// shows them in an approval and records them in the activity log, and
+// remembers a scheduled trigger by them. The keys are the plane's, so the
+// embedder names them; an empty key reads nothing.
+type SessionLabels struct {
+	Session, Agent, AgentVersion, Trigger, TriggerFiresOn string
+	// AgentName is an annotation key, not a label.
+	AgentName string
+}
+
+// labelOf is the value of key in m, "" for an empty key.
+func labelOf(m map[string]string, key string) string {
+	if key == "" {
+		return ""
+	}
+	return m[key]
+}
 
 // The type of an activity line that records an approval rather than an
 // operation.

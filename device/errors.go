@@ -8,9 +8,11 @@ import (
 	"strings"
 )
 
-// Error is a refusal of `latere devices`: one code to branch on, one fixed
+// Error is a refusal of the engine: one code to branch on, one fixed
 // sentence for the person, the next step when there is one, and the
-// developer detail of this occurrence.
+// developer detail of this occurrence. The sentences and next steps are
+// the latere command's words, the defaults; an embedder with its own
+// surface shows its own words for each code.
 type Error struct {
 	Code    string
 	Message string
@@ -20,7 +22,7 @@ type Error struct {
 	Err error
 }
 
-// Error renders the refusal as the CLI prints it: the code and the
+// Error renders the refusal as a terminal prints it: the code and the
 // sentence, the next step, and the detail on its own line.
 func (e *Error) Error() string {
 	var b strings.Builder
@@ -37,7 +39,7 @@ func (e *Error) Error() string {
 // Unwrap is the underlying failure.
 func (e *Error) Unwrap() error { return e.Err }
 
-// CodeOf is the code of a devices refusal, or "" for any other error.
+// CodeOf is the code of an engine refusal, or "" for any other error.
 func CodeOf(err error) string {
 	var e *Error
 	if errors.As(err, &e) {
@@ -49,7 +51,6 @@ func CodeOf(err error) string {
 // The codes, each with its fixed sentence and next step in refusals.
 const (
 	CodeRunsAsRoot         = "device_runs_as_root"
-	CodeUnverifiedBuild    = "device_unverified_build"
 	CodeAlreadyServed      = "device_already_served"
 	CodeOrgContext         = "device_org_context"
 	CodeNoSignIn           = "device_no_sign_in"
@@ -68,9 +69,7 @@ const (
 	CodeRefused            = "device_refused"
 	CodeUnsupported        = "device_unsupported"
 	CodeServeFailed        = "device_serve_failed"
-	CodeLogoutCancelled    = "device_logout_cancelled"
 	CodeRemoveFailed       = "device_remove_failed"
-	CodeLogoutBlocked      = "device_logout_blocked"
 	CodeRenameFailed       = "device_rename_failed"
 	CodeCredentialsNeeded  = "device_credentials_needed"
 
@@ -89,10 +88,6 @@ var refusals = map[string]struct{ message, hint string }{
 	CodeRunsAsRoot: {
 		"Devices refuse to run as root.",
 		"Run `latere devices connect` as the person whose folders this computer shares.",
-	},
-	CodeUnverifiedBuild: {
-		"This build of latere cannot verify its own upgrades, so it cannot connect this computer.",
-		"Install latere from https://latere.ai and connect again.",
 	},
 	CodeAlreadyServed: {
 		"This computer is already being served.",
@@ -166,17 +161,9 @@ var refusals = map[string]struct{ message, hint string }{
 		"This computer stopped serving.",
 		"",
 	},
-	CodeLogoutCancelled: {
-		"Nothing was changed: you are still signed in, and this computer is still connected.",
-		"",
-	},
 	CodeRemoveFailed: {
 		"The device could not be removed.",
 		"Try again, or remove it from the console.",
-	},
-	CodeLogoutBlocked: {
-		"This computer could not be removed from your devices, so you are still signed in.",
-		"Try again, or remove it with `latere devices remove` and then sign out.",
 	},
 	CodeCredentialsNeeded: {
 		"This computer needs your sign-in from the application that serves it.",

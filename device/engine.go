@@ -52,9 +52,12 @@ type Config struct {
 	URL     string
 	Keys    KeyStore
 	Account Account
-	// Version is the CLI's version, which the worker reports and
+	// Version is the embedder's version, which the worker reports and
 	// /v1/status shows.
 	Version string
+	// Labels are the keys the plane that starts sessions names them under
+	// on a sandbox. Empty keys show no session, agent or trigger.
+	Labels SessionLabels
 	// NewDriver builds the driver from the host policy. Nil is the local
 	// driver.
 	NewDriver func(local.Options) (runtime.Driver, error)
@@ -1029,7 +1032,7 @@ func errText(err error) string {
 func (e *Engine) record(r worker.Record) {
 	e.log(Entry{
 		Time: r.Time.UTC(), Type: r.Type, Sandbox: r.Sandbox,
-		Session: r.Labels[LabelSession], Agent: r.Labels[LabelAgent], Trigger: r.Labels[LabelTrigger],
+		Session: labelOf(r.Labels, e.cfg.Labels.Session), Agent: labelOf(r.Labels, e.cfg.Labels.Agent), Trigger: labelOf(r.Labels, e.cfg.Labels.Trigger),
 		Command: r.Command, Path: r.Path, To: r.To, Outcome: r.Outcome, Reason: r.Reason, ExitCode: r.ExitCode,
 	})
 	switch r.Type {
@@ -1071,7 +1074,7 @@ func (e *Engine) recount() {
 		if s.Phase != runtime.Running {
 			continue
 		}
-		id := s.Labels[LabelSession]
+		id := labelOf(s.Labels, e.cfg.Labels.Session)
 		if id == "" {
 			id = s.ID
 		}
@@ -1097,7 +1100,7 @@ func (e *Engine) Admit(ctx context.Context, c worker.Create) worker.Verdict {
 	host, env := e.host, e.policy.Device
 	e.mu.Unlock()
 	now := e.cfg.Now()
-	a := approvalOf(c, host, now)
+	a := approvalOf(c, e.cfg.Labels, host, now)
 	// The file as it is now, so a trigger forgotten or a switch to ask
 	// while the engine runs applies to this create. A file that cannot be
 	// read, or names another device, asks.
