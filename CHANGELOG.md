@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.20.0 - 2026-10-21
+
 ### Added
 
 - **`latere.ai/x/cella/device` serves a person's own computer as one
