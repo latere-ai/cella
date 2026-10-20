@@ -438,7 +438,7 @@ func (c *Controller) environmentTick(ctx context.Context) {
 	if !held {
 		return
 	}
-	if err := c.Phases(ctx); err != nil {
+	if err := c.Phases(ctx); err != nil && !errors.Is(err, ErrClosed) {
 		c.log.WarnContext(ctx, "environment phase tick incomplete", "err", err)
 	}
 }
@@ -447,6 +447,10 @@ func (c *Controller) environmentTick(ctx context.Context) {
 // of the loop, called directly by the tests that drive the machine under a
 // fake clock.
 func (c *Controller) Phases(ctx context.Context) error {
+	if !c.observe() {
+		return ErrClosed
+	}
+	defer c.observing.Done()
 	var failed error
 	for _, name := range c.environmentsHeld() {
 		if err := c.phaseOf(ctx, name); err != nil {
@@ -463,6 +467,10 @@ func (c *Controller) Phases(ctx context.Context) error {
 // this replica holds the environments lease, and an environment this
 // control plane holds no object of is left as it is.
 func (c *Controller) ObserveEnvironment(ctx context.Context, name string) error {
+	if !c.observe() {
+		return ErrClosed
+	}
+	defer c.observing.Done()
 	held, err := c.lease.Acquire(ctx, EnvironmentsLease, LeaseTTL)
 	if err != nil {
 		return fmt.Errorf("the environments lease: %w", err)
@@ -471,6 +479,19 @@ func (c *Controller) ObserveEnvironment(ctx context.Context, name string) error 
 		return nil
 	}
 	return c.phaseOf(ctx, name)
+}
+
+// observe admits one environment status write, or refuses it once Close has
+// begun. A write it admits is counted until the caller marks it done, and
+// Close waits for it.
+func (c *Controller) observe() bool {
+	c.lifeMu.Lock()
+	defer c.lifeMu.Unlock()
+	if c.closed {
+		return false
+	}
+	c.observing.Add(1)
+	return true
 }
 
 // phaseOf writes one environment's observed half: what its data plane

@@ -83,14 +83,31 @@ type fakeDriver struct {
 	// readyErr is what this driver answers its readiness probe with, which
 	// is what the phase of an in-process environment is computed from.
 	readyErr error
+	// onReady, where set, runs at the start of each readiness probe, outside
+	// the driver's lock, so a test holds an environment status write in
+	// flight.
+	onReady func()
 }
 
 // Ready answers what a test set, so a case drives the phase machine of spec
 // 021 without an environment that really failed.
 func (d *fakeDriver) Ready(context.Context) error {
 	d.mu.Lock()
+	hook := d.onReady
+	d.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
+	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.readyErr
+}
+
+// setOnReady sets what runs at the start of each readiness probe.
+func (d *fakeDriver) setOnReady(hook func()) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.onReady = hook
 }
 
 // failReady sets what the readiness probe answers from now on.

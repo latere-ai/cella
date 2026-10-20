@@ -16,6 +16,10 @@ import (
 // plane does not hold. Design 008 answers it not_found at spec.environment.
 var ErrNoEnvironment = errors.New("no environment of that name")
 
+// ErrClosed is an environment status write asked for after Close began: the
+// store it would write is closed or about to be.
+var ErrClosed = errors.New("the controller is closed")
+
 // driverFor is the one seam every call reaches a driver through: the driver
 // of the environment named, which is spec.environment while a sandbox is
 // being created and status.environment for every act after that.

@@ -457,6 +457,40 @@ func TestTheInProcessEnvironmentAnswersFromItsDriver(t *testing.T) {
 	}
 }
 
+// TestCloseWaitsForAStatusWriteAndRefusesTheNext: an environment status
+// write already running when Close begins finishes before Close closes the
+// store, and one asked for after Close is refused with ErrClosed, so nothing
+// writes into a store or a data directory the controller has closed.
+func TestCloseWaitsForAStatusWriteAndRefusesTheNext(t *testing.T) {
+	c, here, _, _ := twoEnvironments(t, Options{})
+	entered, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	here.setOnReady(func() { once.Do(func() { close(entered); <-release }) })
+	observed := make(chan error, 1)
+	go func() { observed <- c.ObserveEnvironment(context.Background(), "default") }()
+	<-entered
+	closed := make(chan error, 1)
+	go func() { closed <- c.Close() }()
+	select {
+	case err := <-closed:
+		t.Fatalf("Close returned %v while a status write was still running", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(release)
+	if err := <-observed; err != nil {
+		t.Fatalf("the status write in flight ended with %v", err)
+	}
+	if err := <-closed; err != nil {
+		t.Fatalf("Close returned %v", err)
+	}
+	if err := c.ObserveEnvironment(context.Background(), "default"); !errors.Is(err, ErrClosed) {
+		t.Errorf("a status write after Close returned %v, want ErrClosed", err)
+	}
+	if err := c.Phases(context.Background()); !errors.Is(err, ErrClosed) {
+		t.Errorf("a phase pass after Close returned %v, want ErrClosed", err)
+	}
+}
+
 // TestTheLoopRunsUnderItsLease holds the single-writer rule of design 010: a
 // replica that does not hold the environments lease computes no phase.
 func TestTheLoopRunsUnderItsLease(t *testing.T) {

@@ -265,6 +265,14 @@ type Controller struct {
 	// tick and a registration that writes at once never interleave and an
 	// older reading never lands after a newer one.
 	phaseMu sync.Mutex
+	// lifeMu guards closed, which Close sets before it closes the store, and
+	// observing counts the environment status writes in flight. A status
+	// write begun after Close is refused and one already running is waited
+	// for, so nothing writes into the store or the data directory after the
+	// controller closed them.
+	lifeMu    sync.Mutex
+	closed    bool
+	observing sync.WaitGroup
 	// realizing is every sandbox whose driver create the scheduler loop has
 	// in flight with the controller's lock released. A start, a stop or a
 	// re-minted identity for one of them is refused rather than crossing the
@@ -463,10 +471,15 @@ func Open(ctx context.Context, o Options) (*Controller, error) {
 func (c *Controller) Recovers() bool      { return c.recovers }
 func (c *Controller) Environment() string { return c.environment }
 
-// Close ends the work sizing left running, waits for it, and closes the
-// store. The wait comes before the lock, because that work takes the lock to
+// Close refuses environment status writes from here on and waits for those
+// in flight, ends the work sizing left running and waits for it, and closes
+// the store. The wait comes before the lock, because that work takes the lock to
 // write what it found.
 func (c *Controller) Close() error {
+	c.lifeMu.Lock()
+	c.closed = true
+	c.lifeMu.Unlock()
+	c.observing.Wait()
 	c.stopSizing()
 	c.mu.Lock()
 	defer c.mu.Unlock()

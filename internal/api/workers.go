@@ -222,7 +222,11 @@ func (h *handler) registerWorker(w http.ResponseWriter, r *http.Request, key aut
 // A failure is logged and not answered: the registration or the stream's end
 // stands, and the next tick writes the status.
 func (h *handler) observeEnvironment(ctx context.Context, environment string) {
-	if err := h.Controller.ObserveEnvironment(ctx, environment); err != nil {
+	err := h.Controller.ObserveEnvironment(ctx, environment)
+	if errors.Is(err, controller.ErrClosed) {
+		return // the control plane is shutting down; the next start observes afresh
+	}
+	if err != nil {
 		h.log.WarnContext(ctx, "the environment's status was not written at once", "environment", environment, "err", err)
 	}
 }
