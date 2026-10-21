@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.20.4 - 2026-10-21
+
 ### Fixed
 
 - `device.Forget` with `dropFile` deletes a host policy file that names no
