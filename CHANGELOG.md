@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.20.1 - 2026-10-21
+
 ### Added
 
 - `device.PathsFrom(lookup)` resolves the paths `device.DefaultPaths`
