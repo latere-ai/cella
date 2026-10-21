@@ -66,7 +66,7 @@ Built:
   `secret.update` carry `resource.proposed` (v0.10.0).
 - `volume.create` carries `resource.proposed`, the Volume the create
   would store, and its allow's `limits.max_volumes` is the owner's
-  volume ceiling, counted by the controller ([[019-volumes]], v0.18.0).
+  volume ceiling, counted by the controller ([[019-volumes]], v0.17.2).
 
 The `resource` builders live in `internal/auth` and not in the
 vocabulary package, because an object's fields are

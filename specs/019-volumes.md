@@ -38,7 +38,7 @@ retain and delete, the Lost rule and `VolumeMissing`, the events, the
 lists where the design below was amended while it was built. The
 authorizer's view of a create, the resolved Volume as `proposed`, and
 the owner's volume ceiling from `limits.max_volumes` followed in
-v0.18.0, below.
+v0.17.2, below.
 
 Not built: the `snapshot` and `archive` sources with `Snapshotter`,
 `CELLA_SOURCE_ALLOW` and `CELLA_MAX_SOURCE_BYTES`; a named `class`

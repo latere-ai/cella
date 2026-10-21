@@ -57,7 +57,7 @@ Built:
 - The volume ceiling from the authorizer's `limits.max_volumes` on the
   allow of `volume.create`, counted under the controller's lock over
   the subject's volumes that are not `Deleting` ([[019-volumes]],
-  v0.18.0).
+  v0.17.2).
 - The boundary check of stage 6 runs after admission in `Resolve`, so a
   webhook cannot open a child's boundary.
 
