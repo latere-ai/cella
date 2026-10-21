@@ -6,6 +6,13 @@ refused before it is pushed.
 
 ## Unreleased
 
+### Added
+
+- `device.PathsFrom(lookup)` resolves the paths `device.DefaultPaths`
+  does, with the XDG and `LATERE_*` variables read through `lookup`
+  instead of the process's environment, for an application the desktop
+  starts that reads them from the person's login shell.
+
 ### Fixed
 
 - **Built with Go 1.27.3,** which fixes GO-2026-6809, a flaw in the

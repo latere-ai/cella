@@ -164,6 +164,48 @@ func TestDefaultPathsFollowTheEnvironment(t *testing.T) {
 	}
 }
 
+// An application started from the desktop reads the person's variables
+// from their shell, not its own environment, and resolves the paths the
+// latere command in that shell resolves.
+func TestPathsFromALookup(t *testing.T) {
+	root := t.TempDir()
+	// The process's own variables point elsewhere and are not read.
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "process"))
+	t.Setenv(EnvKeysFile, filepath.Join(root, "process-keys.json"))
+	shell := map[string]string{
+		"XDG_CONFIG_HOME": filepath.Join(root, "config"),
+		"XDG_STATE_HOME":  filepath.Join(root, "state"),
+		"XDG_CACHE_HOME":  filepath.Join(root, "cache"),
+	}
+	p, err := PathsFrom(func(name string) (string, bool) {
+		v, ok := shell[name]
+		return v, ok
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Paths{
+		Home: p.Home, Config: filepath.Join(root, "config", "latere"), Token: filepath.Join(root, "config", "latere", "auth-token.json"),
+		State: filepath.Join(root, "state", "latere"), Cache: filepath.Join(root, "cache", "latere"),
+	}
+	if p != want {
+		t.Errorf("PathsFrom = %+v, want %+v", p, want)
+	}
+
+	none, err := PathsFrom(func(string) (string, bool) { return "", false })
+	if err != nil {
+		t.Fatal(err)
+	}
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if none.Config != filepath.Join(none.Home, ".config", "latere") || none.State != filepath.Join(none.Home, ".local", "state", "latere") ||
+		none.Cache != filepath.Join(cache, "latere") || none.KeysFile != "" {
+		t.Errorf("with no variables PathsFrom = %+v, want the platform's defaults", none)
+	}
+}
+
 func TestAnEngineWithoutAnEnrollerRefusesToConnect(t *testing.T) {
 	paths := testPaths(t)
 	e := testEngine(Config{Paths: paths, Keys: OpenKeys(paths.KeyFile()), Account: &fakeAccount{}})

@@ -42,27 +42,41 @@ const EnvKeysFile = "LATERE_DEVICE_KEYS_FILE"
 // application is one device: XDG_CONFIG_HOME, XDG_STATE_HOME and
 // XDG_CACHE_HOME when set, the platform's defaults otherwise, each with a
 // latere directory, the login token where the latere command keeps it, and
-// LATERE_DEVICE_KEYS_FILE.
-func DefaultPaths() (Paths, error) {
+// LATERE_DEVICE_KEYS_FILE. It reads them from this process's environment;
+// PathsFrom reads them from another.
+func DefaultPaths() (Paths, error) { return PathsFrom(os.LookupEnv) }
+
+// PathsFrom resolves the paths DefaultPaths does, with the variables read
+// through lookup rather than this process's environment. An application
+// started by the desktop rather than a shell does not inherit the
+// variables the person sets in their shell, where the latere command reads
+// them; it looks them up there, so both resolve one device. An unset or
+// empty variable is the platform's default. The home directory and the
+// operating system's cache directory are this process's.
+func PathsFrom(lookup func(string) (string, bool)) (Paths, error) {
+	get := func(name string) string {
+		v, _ := lookup(name)
+		return v
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return Paths{}, err
 	}
-	configDir := os.Getenv("XDG_CONFIG_HOME")
+	configDir := get("XDG_CONFIG_HOME")
 	if configDir == "" {
 		configDir = filepath.Join(home, ".config")
 	}
-	p := Paths{Home: home, Config: filepath.Join(configDir, "latere"), KeysFile: os.Getenv(EnvKeysFile)}
-	p.Token = os.Getenv(EnvAuthTokenFile)
+	p := Paths{Home: home, Config: filepath.Join(configDir, "latere"), KeysFile: get(EnvKeysFile)}
+	p.Token = get(EnvAuthTokenFile)
 	if p.Token == "" {
 		p.Token = filepath.Join(p.Config, "auth-token.json")
 	}
-	state := os.Getenv("XDG_STATE_HOME")
+	state := get("XDG_STATE_HOME")
 	if state == "" {
 		state = filepath.Join(home, ".local", "state")
 	}
 	p.State = filepath.Join(state, "latere")
-	cache := os.Getenv("XDG_CACHE_HOME")
+	cache := get("XDG_CACHE_HOME")
 	if cache == "" {
 		if cache, err = os.UserCacheDir(); err != nil {
 			return Paths{}, err

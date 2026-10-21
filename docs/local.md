@@ -257,7 +257,14 @@ with the person's consent to the facts the proposal lists, `Subscribe`
 and `Attach` hear each session that asks to start, `Answer` lets it in or
 refuses it, `PutPolicy` changes the name, folders or network, and
 `Remove` removes the device. The control socket answers the same over
-HTTP. A refusal is a `*device.Error` whose `Code` is stable; its sentence
+HTTP.
+
+`DefaultPaths` reads `XDG_CONFIG_HOME`, `XDG_STATE_HOME` and
+`XDG_CACHE_HOME` from your process's environment. An application the
+desktop starts does not inherit what the person sets in their shell, so
+it reads those variables from the person's login shell and resolves the
+paths with `device.PathsFrom(lookup)`; it then finds the files, the lock
+and the socket a terminal's `latere` uses. A refusal is a `*device.Error` whose `Code` is stable; its sentence
 and hint are the latere command's words, so a program with its own
 surface shows its own words for each code, and for each connect fact by
 its `Kind`.
