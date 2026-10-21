@@ -6,6 +6,11 @@ refused before it is pushed.
 
 ## Unreleased
 
+### Fixed
+
+- **Built with Go 1.27.3,** which fixes GO-2026-6809, a flaw in the
+  standard library's certificate verification that this code can reach.
+
 ## v0.20.0 - 2026-10-21
 
 ### Added

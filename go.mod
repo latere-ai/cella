@@ -2,7 +2,7 @@ module latere.ai/x/cella
 
 go 1.27.0
 
-toolchain go1.27.2
+toolchain go1.27.3
 
 tool latere.ai/x/ci-gate/cmd/lateregate
 
