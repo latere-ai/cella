@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.20.2 - 2026-10-21
+
 ### Fixed
 
 - **A worker replaced before its stream opened now stops.** On an
