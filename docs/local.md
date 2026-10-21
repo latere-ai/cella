@@ -259,6 +259,15 @@ refuses it, `PutPolicy` changes the name, folders or network, and
 `Remove` removes the device. The control socket answers the same over
 HTTP.
 
+Before it serves a writable grant of a folder above the person's home
+directory, the engine creates `~/.config` and `~/.docker` where they are
+missing, mode 0700. Each holds a path the sandbox always denies, and on
+macOS a command cannot create a missing folder on the way to a denied
+path, so without them no tool in a session could keep its settings
+there. A name already there, a link or a file included, is left as it
+is. A create that fails stops the engine with `device_home_folder_failed`,
+whose detail names the folder and the cause.
+
 `DefaultPaths` reads `XDG_CONFIG_HOME`, `XDG_STATE_HOME` and
 `XDG_CACHE_HOME` from your process's environment. An application the
 desktop starts does not inherit what the person sets in their shell, so

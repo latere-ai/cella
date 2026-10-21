@@ -72,6 +72,7 @@ const (
 	CodeRemoveFailed       = "device_remove_failed"
 	CodeRenameFailed       = "device_rename_failed"
 	CodeCredentialsNeeded  = "device_credentials_needed"
+	CodeHomeFolderFailed   = "device_home_folder_failed"
 
 	// The platform's own refusals of a device's create (platform spec 220),
 	// which reach the CLI as Cella's forbidden with the reason in its
@@ -168,6 +169,10 @@ var refusals = map[string]struct{ message, hint string }{
 	CodeCredentialsNeeded: {
 		"This computer needs your sign-in from the application that serves it.",
 		"The application hands it again on its own; if this goes on, sign in to the application again.",
+	},
+	CodeHomeFolderFailed: {
+		"A granted folder holds your home directory, and ~/.config or ~/.docker could not be created in it.",
+		"The detail names which one and why. Create it yourself, then run `latere devices connect` again.",
 	},
 	CodeRenameFailed: {
 		"The device could not be renamed, so its name is unchanged.",

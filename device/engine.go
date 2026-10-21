@@ -594,6 +594,11 @@ func (e *Engine) serveOnce(ctx context.Context) (bool, error) {
 			_ = c.Close()
 		}
 	}()
+	// After the driver accepted the grants, so a grant it refuses creates
+	// nothing in the home directory, and before any stage runs under them.
+	if err = createHomeFolders(o.Home, o.Grants); err != nil {
+		return false, err
+	}
 	var host v1.HostInfo
 	if describer, ok := d.(runtime.HostDescriber); ok {
 		host = describer.Host()

@@ -16,6 +16,19 @@ refused before it is pushed.
   missing, so it cannot plant a denied path under a name it controls. A
   granted folder with a long path, about 255 bytes or more, now runs
   commands; before, each one exited 65.
+- **A device creates `~/.config` and `~/.docker` before it serves a
+  folder above your home directory.** Each holds a path the sandbox
+  always denies, `~/.config/gcloud` and `~/.docker/config.json`, so under
+  the rule above a session granted that folder could not create either,
+  and a tool that keeps its settings in one would fail. The engine that
+  `latere devices` and an application embedding `latere.ai/x/cella/device`
+  run now creates each one that is missing, mode 0700, before it serves a
+  writable grant of a folder above your home directory. A name already
+  there, a link or a file included, is left as it is. A create that fails
+  stops the engine with the new code `device_home_folder_failed`, whose
+  detail names the folder and the cause; an embedder that shows its own
+  words adds a sentence for it. Your home directory itself is still
+  refused as a grant.
 
 ## v0.20.2 - 2026-10-21
 
