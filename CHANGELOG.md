@@ -6,6 +6,17 @@ refused before it is pushed.
 
 ## Unreleased
 
+### Fixed
+
+- **On macOS, a command cannot get around a denial through a folder.**
+  Through `latere.ai/x/pkg` v0.108.0, a command in a sandbox cannot clone
+  a folder, which would copy files it may not read into a copy it may;
+  cannot rename, swap or remove the folders between a granted folder and
+  a path denied inside it; and cannot create one of those folders that is
+  missing, so it cannot plant a denied path under a name it controls. A
+  granted folder with a long path, about 255 bytes or more, now runs
+  commands; before, each one exited 65.
+
 ## v0.20.2 - 2026-10-21
 
 ### Fixed
