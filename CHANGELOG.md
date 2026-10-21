@@ -6,6 +6,14 @@ refused before it is pushed.
 
 ## Unreleased
 
+### Fixed
+
+- `device.Forget` with `dropFile` deletes a host policy file that names no
+  device. When `latere devices remove` removed the computer while
+  `latere devices connect` was serving it, the serving engine saw the
+  removal first and cleared the device from the file, and the file then
+  stayed with its folders, though removing says it deletes the file.
+
 ## v0.20.3 - 2026-10-21
 
 ### Fixed

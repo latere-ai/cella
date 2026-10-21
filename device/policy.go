@@ -316,8 +316,11 @@ func CleanName(name string) string {
 // so does the host policy file at policyFile when dropFile is set;
 // otherwise the file keeps its folders and network and names no device, so
 // the next connect proposes them again. A file that names another device is
-// left as it is. `latere devices remove`, `latere logout` and the engine's
-// removal through the control socket share it.
+// left as it is. With dropFile, a file that names no device goes too: the
+// engine serving the device sees a removal at the platform first, and
+// clears the device from the file before the caller that removed it gets
+// here. `latere devices remove`, `latere logout` and the engine's removal
+// through the control socket share it.
 func Forget(keys KeyStore, policyFile, id string, dropFile bool) error {
 	var errs []error
 	if err := keys.Delete(id); err != nil {
@@ -327,7 +330,7 @@ func Forget(keys KeyStore, policyFile, id string, dropFile bool) error {
 	switch {
 	case err != nil:
 		errs = append(errs, err)
-	case !ok || policy.Device != id:
+	case !ok || (policy.Device != id && (!dropFile || policy.Device != "")):
 	case dropFile:
 		if err := os.Remove(policyFile); err != nil && !errors.Is(err, os.ErrNotExist) {
 			errs = append(errs, fmt.Errorf("delete the host policy file: %w", err))

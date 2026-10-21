@@ -87,6 +87,20 @@ func TestForget(t *testing.T) {
 			t.Error("the file outlived Forget with dropFile")
 		}
 	})
+	t.Run("drops the file the engine already cleared", func(t *testing.T) {
+		// The engine serving the device saw the removal at the platform
+		// first and cleared the device from the file (forgetDevice).
+		paths, keys := setup(t)
+		if err := Forget(keys, paths.PolicyFile(), testEnv, false); err != nil {
+			t.Fatal(err)
+		}
+		if err := Forget(keys, paths.PolicyFile(), testEnv, true); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok, _ := LoadPolicy(paths.PolicyFile()); ok {
+			t.Error("a file naming no device outlived Forget with dropFile")
+		}
+	})
 	t.Run("leaves another device's file alone", func(t *testing.T) {
 		paths, keys := setup(t)
 		if err := Forget(keys, paths.PolicyFile(), "dev-other", true); err != nil {

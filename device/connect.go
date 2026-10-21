@@ -12,7 +12,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"slices"
 	"strings"
 	"time"
@@ -575,14 +574,6 @@ func (e *Engine) forgetHere(env string) error {
 	path := e.cfg.Paths.PolicyFile()
 	e.policyMu.Lock()
 	err := Forget(e.cfg.Keys, path, env, true)
-	// The worker may have seen the removal at the platform first, which
-	// keeps the file and clears its device for the next connect; a removal
-	// through the socket deletes that file too.
-	if p, ok, lerr := LoadPolicy(path); lerr == nil && ok && p.Device == "" {
-		if rerr := os.Remove(path); rerr != nil && !errors.Is(rerr, os.ErrNotExist) {
-			err = errors.Join(err, fmt.Errorf("delete the host policy file: %w", rerr))
-		}
-	}
 	e.policyMu.Unlock()
 	e.unbindCredentials(env)
 	return err
