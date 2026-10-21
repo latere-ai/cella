@@ -10,8 +10,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sync"
 	"testing"
+	"time"
 
 	driver "latere.ai/x/cella/runtime"
 	"latere.ai/x/cella/worker"
@@ -48,14 +48,15 @@ func TestAMissingFileIsWordedByItsPath(t *testing.T) {
 	}
 
 	// The worker's record of the operation, which is the host's own log,
-	// carries the same words.
+	// carries the same words. The worker hands it over once the answer is
+	// sent, so it may arrive after the stat returns.
 	p := newStubPlane(t)
-	var mu sync.Mutex
-	var records []worker.Record
+	records := make(chan worker.Record, 16)
 	p.serve(t, worker.Options{Driver: d, Record: func(r worker.Record) {
-		mu.Lock()
-		defer mu.Unlock()
-		records = append(records, r)
+		select {
+		case records <- r:
+		default:
+		}
 	}})
 	files, ok := p.driver.(driver.FileStore)
 	if !ok {
@@ -64,12 +65,12 @@ func TestAMissingFileIsWordedByItsPath(t *testing.T) {
 	if _, err := files.Stat(ctx, "sbx_missing", filepath.Join(h.project, "AGENTS.md")); !errors.Is(err, driver.ErrNotFound) {
 		t.Fatalf("the stat across the stream answered %v", err)
 	}
-	mu.Lock()
-	defer mu.Unlock()
-	if len(records) == 0 {
+	select {
+	case rec := <-records:
+		if rec.Outcome != worker.OutcomeFailed || rec.Reason != "not found: AGENTS.md" {
+			t.Errorf("the host's record of a missing file reads %s %q", rec.Outcome, rec.Reason)
+		}
+	case <-time.After(10 * time.Second):
 		t.Fatal("the worker recorded nothing")
-	}
-	if last := records[len(records)-1]; last.Outcome != worker.OutcomeFailed || last.Reason != "not found: AGENTS.md" {
-		t.Errorf("the host's record of a missing file reads %s %q", last.Outcome, last.Reason)
 	}
 }
