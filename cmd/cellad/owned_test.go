@@ -88,6 +88,30 @@ func runEmbedded(t *testing.T, p *plane, key string, o worker.Options) (func(), 
 	return cancel, done
 }
 
+// runConnected is runEmbedded that returns once the worker's stream is open,
+// its upgrade authenticated, which is what a test of how that stream closes
+// acts on: a registration alone counts in status.workers before the stream
+// opens.
+func runConnected(t *testing.T, p *plane, key string, o worker.Options) <-chan error {
+	t.Helper()
+	connected := make(chan struct{})
+	var once sync.Once
+	o.State = func(s worker.State) {
+		if s.Connected {
+			once.Do(func() { close(connected) })
+		}
+	}
+	_, done := runEmbedded(t, p, key, o)
+	select {
+	case <-connected:
+	case err := <-done:
+		t.Fatalf("Run returned %v before its stream opened", err)
+	case <-time.After(20 * time.Second):
+		t.Fatal("the worker's stream never opened")
+	}
+	return done
+}
+
 // heldAnswer is a worker's transport that holds the answer to its
 // registration until release is closed, so a test acts after the control
 // plane took the registration and before the worker opens its stream.
@@ -348,15 +372,16 @@ func TestServeRefusedOnRecheck(t *testing.T) {
 
 // TestRevokedKeyClosesItsStream: revoking the key a worker's stream
 // registered with closes that stream with key_revoked, within the heartbeat
-// interval.
+// interval. A key revoked before the stream opens refuses the stream's
+// upgrade instead, which the worker retries, so the revocation waits for the
+// stream.
 func TestRevokedKeyClosesItsStream(t *testing.T) {
 	p := startPlane(t, "", "")
 	if status, answer := applyAs(t, p, p.bearer, "revoked", workerSpec); status != http.StatusCreated {
 		t.Fatalf("the apply answered %d: %s", status, answer)
 	}
 	key, jti := mintAs(t, p, p.bearer, "revoked", "")
-	_, done := runEmbedded(t, p, key, worker.Options{})
-	waitFor(t, "the environment to report the worker", func() bool { return p.environmentNamed(t, "revoked").Status.Workers == 1 })
+	done := runConnected(t, p, key, worker.Options{})
 	if status, _ := p.do(t, http.MethodDelete, "/v1/environments/revoked/keys/"+jti, nil); status != http.StatusNoContent {
 		t.Fatalf("the revocation answered %d", status)
 	}
@@ -421,8 +446,7 @@ func TestWorkersMax(t *testing.T) {
 	first, _ := mintAs(t, p, p.bearer, "one-only", "")
 	second, _ := mintAs(t, p, p.bearer, "one-only", "")
 	here := v1.HostInfo{OS: "linux", Arch: "amd64", Grants: []v1.HostGrant{{Path: "/home/dev", Write: true}}}
-	_, done := runEmbedded(t, p, first, worker.Options{Driver: hostNative{Driver: nativeHost(t), host: here}})
-	waitFor(t, "the environment to report the worker", func() bool { return p.environmentNamed(t, "one-only").Status.Workers == 1 })
+	done := runConnected(t, p, first, worker.Options{Driver: hostNative{Driver: nativeHost(t), host: here}})
 
 	if status, code := registerRaw(t, p, second, remote.Registration{Driver: "native", Isolation: "none"}); status != http.StatusConflict || code != remote.ReasonWorkerLimit {
 		t.Errorf("a second key's registration answered %d %s", status, code)
