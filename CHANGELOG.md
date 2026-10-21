@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.20.3 - 2026-10-21
+
 ### Fixed
 
 - **On macOS, a command cannot get around a denial through a folder.**
