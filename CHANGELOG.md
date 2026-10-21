@@ -6,6 +6,19 @@ refused before it is pushed.
 
 ## Unreleased
 
+### Fixed
+
+- **A worker replaced before its stream opened now stops.** On an
+  environment with `spec.workers.max`, a registration with the same key
+  from the same host that replaced a worker which had registered but not
+  yet opened its stream left that worker uninformed: its stream was
+  refused as one that never registered, so it registered again and took
+  the place back from its replacement. Its stream is now closed with
+  `worker_replaced` as soon as it opens, as a live worker's is, and `Run`
+  returns. A stream that opened before its key was revoked or its
+  environment deleted, and said hello after, is closed with `key_revoked`
+  or `serve_refused` the same way.
+
 ## v0.20.1 - 2026-10-21
 
 ### Added

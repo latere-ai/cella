@@ -71,11 +71,13 @@ once; unset, any number may. A registration beyond it is refused with
 `worker_limit`. A worker reconnecting with the same key from the same
 host, before the control plane has noticed its old stream is gone,
 replaces that stream rather than waiting out the lease: the old one is
-closed with `worker_replaced`. The same key from a host that reports
-other facts is refused while the live stream lasts, so a copied key used
-from another machine cannot displace the one serving. Each meeting is an
-`environment.worker_replaced` record, with both registrations and whether
-the new one replaced the old or was refused.
+closed with `worker_replaced`. An old worker that had registered and not
+yet opened its stream is told the same as soon as it opens one. The same
+key from a host that reports other facts is refused while the live stream
+lasts, so a copied key used from another machine cannot displace the one
+serving. Each meeting is an `environment.worker_replaced` record, with
+both registrations and whether the new one replaced the old or was
+refused.
 
 The environment is `Pending` until a worker registers on it. Nothing is
 placed there until it is `Ready`. What happens to a create it cannot fit,

@@ -88,6 +88,25 @@ func runEmbedded(t *testing.T, p *plane, key string, o worker.Options) (func(), 
 	return cancel, done
 }
 
+// heldAnswer is a worker's transport that holds the answer to its
+// registration until release is closed, so a test acts after the control
+// plane took the registration and before the worker opens its stream.
+type heldAnswer struct{ release <-chan struct{} }
+
+func (h heldAnswer) RoundTrip(r *http.Request) (*http.Response, error) {
+	res, err := http.DefaultTransport.RoundTrip(r)
+	if err != nil || r.Method != http.MethodPost || !strings.HasSuffix(r.URL.Path, "/workers") {
+		return res, err
+	}
+	select {
+	case <-h.release:
+		return res, nil
+	case <-r.Context().Done():
+		_ = res.Body.Close()
+		return nil, r.Context().Err()
+	}
+}
+
 // refusedWith waits for Run to return and reads the refusal it returned.
 func refusedWith(t *testing.T, done <-chan error, within time.Duration) string {
 	t.Helper()
@@ -426,6 +445,42 @@ func TestWorkersMax(t *testing.T) {
 	if replaced, refused := strings.Count(answer, `"outcome":"replaced"`), strings.Count(answer, `"outcome":"refused"`); replaced != 1 || refused != 1 ||
 		strings.Count(answer, "environment.worker_replaced") != 2 {
 		t.Errorf("the environment's records hold %d replaced and %d refused worker_replaced records: %s", replaced, refused, answer)
+	}
+}
+
+// TestWorkerReplacedBeforeItsStreamOpens: a registration with the same key
+// from the same host that replaces a worker whose stream has not opened yet
+// stops that worker with worker_replaced as soon as it opens its stream,
+// rather than letting it register again and take the place back.
+func TestWorkerReplacedBeforeItsStreamOpens(t *testing.T) {
+	p := startPlane(t, "", "")
+	if status, answer := applyAs(t, p, p.bearer, "one-only",
+		`{"mode":"worker","isolation":"none","capacity":{"sandboxes":4},"workers":{"max":1}}`); status != http.StatusCreated {
+		t.Fatalf("the apply answered %d: %s", status, answer)
+	}
+	first, _ := mintAs(t, p, p.bearer, "one-only", "")
+	here := v1.HostInfo{OS: "linux", Arch: "amd64", Grants: []v1.HostGrant{{Path: "/home/dev", Write: true}}}
+	release := make(chan struct{})
+	_, done := runEmbedded(t, p, first, worker.Options{
+		Driver:     hostNative{Driver: nativeHost(t), host: here},
+		HTTPClient: &http.Client{Transport: heldAnswer{release: release}},
+	})
+	// The control plane writes the environment's status before it answers
+	// a registration, so the worker counts while its answer is held.
+	waitFor(t, "the environment to report the worker", func() bool { return p.environmentNamed(t, "one-only").Status.Workers == 1 })
+	if status, code := registerRaw(t, p, first, remote.Registration{Driver: "native", Isolation: "none", Host: &here}); status != http.StatusCreated {
+		t.Fatalf("the same key from the same host answered %d %s", status, code)
+	}
+	close(release)
+	if code := refusedWith(t, done, 10*time.Second); code != remote.ReasonWorkerReplaced {
+		t.Errorf("the replaced worker stopped on %s", code)
+	}
+	status, answer := p.do(t, http.MethodGet, "/v1/events?object=one-only&limit=100", nil)
+	if status != http.StatusOK {
+		t.Fatalf("the feed answered %d: %s", status, answer)
+	}
+	if replaced := strings.Count(answer, `"outcome":"replaced"`); replaced != 1 {
+		t.Errorf("the environment's records hold %d replacements, want the one: %s", replaced, answer)
 	}
 }
 

@@ -170,8 +170,10 @@ type workerStream struct {
 }
 
 // openWorkerStream opens a worker's stream with its key, says hello as the
-// worker, and returns once the environment reports one worker holding a
-// stream, which is the hello having bound it.
+// worker, and returns once the environment reports one worker. The
+// registration alone already counts, so the hello may still be on its way
+// when the case acts; a server closes the stream with the reason whichever
+// arrives first.
 func (e *Env) openWorkerStream(ctx context.Context, environment, key, worker string) (*workerStream, error) {
 	path := "/v1/environments/self/operations"
 	resp, err := e.admin.open(ctx, http.MethodGet, path, request{Token: key, Header: map[string]string{
@@ -202,8 +204,8 @@ func (e *Env) openWorkerStream(ctx context.Context, environment, key, worker str
 	return s, nil
 }
 
-// awaitWorkers polls the environment until it reports n workers holding a
-// stream.
+// awaitWorkers polls the environment until it reports n workers: holding a
+// stream, or registered and yet to open one.
 func (e *Env) awaitWorkers(ctx context.Context, environment string, n int) error {
 	deadline := time.Now().Add(CaseTimeout / 2)
 	for {

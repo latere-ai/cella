@@ -126,12 +126,32 @@ type Hub struct {
 	creates map[string]pendingCreate
 	// onHeld is told of every create a worker holds while its host decides.
 	onHeld func(environment, sandbox string)
+	// unopened is every registration a replacement, a revocation or a
+	// delete ended before its stream opened, with the close reason that
+	// stream's hello is answered with. The hub never dials a worker, so
+	// one that has not opened its stream yet is told on the stream it
+	// opens; answered as one that never registered, it would register
+	// again and take back the place it lost.
+	unopened map[workerKey]endedBeforeStream
 }
 
 // pendingCreate is one create the hub sent and has not seen answered.
 type pendingCreate struct {
 	environment string
 	sandbox     string
+}
+
+// workerKey names one registration among every environment's.
+type workerKey struct {
+	environment string
+	worker      string
+}
+
+// endedBeforeStream is the close reason a registration ended before its
+// stream opened is told, and when it was ended.
+type endedBeforeStream struct {
+	reason string
+	at     time.Time
 }
 
 // environment is one registered data plane: what its workers declared, the
@@ -180,6 +200,7 @@ func NewHub(o HubOptions) *Hub {
 	h := &Hub{
 		offline: o.Offline, newID: o.NewID, now: o.Now, queue: o.Queue, window: o.Window, log: o.Log,
 		environments: map[string]*environment{}, creates: map[string]pendingCreate{},
+		unopened: map[workerKey]endedBeforeStream{},
 	}
 	if h.offline <= 0 {
 		h.offline = DefaultOffline
@@ -222,8 +243,10 @@ func (h *Hub) Register(environmentID string, r Registration) (Registered, error)
 // except one with the key of a live worker that reports the same host: it
 // replaces that worker, whose stream is closed with worker_replaced, because
 // a worker reconnecting after a dropped connection must not wait out the
-// lease. The Replacement says what met what, for the record the control
-// plane writes, whether it replaced the worker or was refused.
+// lease. A replaced worker that has not opened its stream yet is closed with
+// worker_replaced as soon as it does. The Replacement says what met what, for
+// the record the control plane writes, whether it replaced the worker or was
+// refused.
 func (h *Hub) RegisterWith(environmentID string, r Registration, a Admission) (Registered, *Replacement, error) {
 	if environmentID == "" || r.Driver == "" || r.Isolation == "" {
 		return Registered{}, nil, fmt.Errorf("%w: a registration names an environment, a driver and an isolation class", runtime.ErrInvalid)
@@ -246,7 +269,7 @@ func (h *Hub) registerLocked(environmentID string, r Registration, a Admission) 
 			ErrRegistrationMismatch, env.registration.Driver, env.registration.Isolation, r.Driver, r.Isolation)
 	}
 	env.maxWorkers = a.MaxWorkers
-	replacement, displaced, err := h.admitLocked(env, r, a)
+	replacement, displaced, err := h.admitLocked(environmentID, env, r, a)
 	if err != nil {
 		return Registered{}, replacement, nil, err
 	}
@@ -275,6 +298,9 @@ func (h *Hub) registerLocked(environmentID string, r Registration, a Admission) 
 		w.declared.Host = &host
 	}
 	env.workers[id] = w
+	// A registration that names its own id supersedes whatever an earlier
+	// one under that id was ended with.
+	delete(h.unopened, workerKey{environment: environmentID, worker: id})
 	return Registered{
 		Worker: id, Environment: environmentID,
 		HeartbeatInterval: v1.Duration(HeartbeatInterval.String()), Lease: v1.Duration(HeartbeatTimeout.String()),
@@ -284,8 +310,9 @@ func (h *Hub) registerLocked(environmentID string, r Registration, a Admission) 
 // admitLocked holds a registration to spec.workers.max. Below the limit, or
 // with no limit, it admits. At the limit it admits only a registration with
 // the key of a live worker reporting the same host, which replaces that
-// worker: its record is dropped here and its link returned to be shut.
-func (h *Hub) admitLocked(env *environment, r Registration, a Admission) (*Replacement, *Link, error) {
+// worker: its record is dropped here and its link returned to be shut, or,
+// where its stream has not opened yet, the stream it opens is refused.
+func (h *Hub) admitLocked(environmentID string, env *environment, r Registration, a Admission) (*Replacement, *Link, error) {
 	if a.MaxWorkers <= 0 {
 		return nil, nil, nil
 	}
@@ -303,9 +330,28 @@ func (h *Hub) admitLocked(env *environment, r Registration, a Admission) (*Repla
 		}
 		replacement.Replaced = true
 		delete(env.workers, w.id)
+		h.endBeforeStreamLocked(environmentID, w, ReasonWorkerReplaced)
 		return replacement, w.link, nil
 	}
 	return nil, nil, fmt.Errorf("%w: it takes %d", ErrWorkerLimit, a.MaxWorkers)
+}
+
+// endBeforeStreamLocked keeps the reason a registration was ended for its
+// stream's hello, where that stream has not opened yet. Records older than
+// the pending window are dropped first: a registration that has not opened
+// its stream within it no longer holds a place, and a stream it opens later
+// is answered as one that never registered.
+func (h *Hub) endBeforeStreamLocked(environmentID string, w *worker, reason string) {
+	if w.link != nil || w.streamed || w.ended {
+		return
+	}
+	now := h.now()
+	for key, ended := range h.unopened {
+		if ended.at.Before(now.Add(-pendingWindow)) {
+			delete(h.unopened, key)
+		}
+	}
+	h.unopened[workerKey{environment: environmentID, worker: w.id}] = endedBeforeStream{reason: reason, at: now}
 }
 
 // liveWorkersLocked is every worker of the environment that counts against
@@ -339,14 +385,16 @@ func sameHost(a, b *v1.HostInfo) bool {
 
 // Revoke closes every stream a key registered, with key_revoked, and drops
 // those workers' records, so a revoked key stops serving at once rather than
-// at its next request (spec 083). It reports how many streams it closed.
+// at its next request (spec 083). A stream authenticated before the
+// revocation whose hello arrives after it is closed with key_revoked too. It
+// reports how many streams it closed.
 func (h *Hub) Revoke(jti string) int {
 	if jti == "" {
 		return 0
 	}
 	h.mu.Lock()
 	var links []*Link
-	for _, env := range h.environments {
+	for environmentID, env := range h.environments {
 		for id, w := range env.workers {
 			if w.jti != jti {
 				continue
@@ -354,6 +402,7 @@ func (h *Hub) Revoke(jti string) int {
 			if w.link != nil {
 				links = append(links, w.link)
 			}
+			h.endBeforeStreamLocked(environmentID, w, ReasonKeyRevoked)
 			delete(env.workers, id)
 		}
 	}
@@ -695,7 +744,9 @@ func (c *connection) workerID() string {
 // bind attaches this connection to the registration its hello named. A second
 // hello on one connection is refused: one stream is one worker. A stream that
 // would hold one worker more than spec.workers.max takes is refused with
-// worker_limit, which catches two registrations that raced for one place.
+// worker_limit, which catches two registrations that raced for one place. A
+// registration replaced, revoked or deleted before its stream opened is
+// refused with that reason, once.
 func (c *connection) bind(workerID string) (*worker, error) {
 	if workerID == "" {
 		return nil, ErrUnknownWorker
@@ -705,6 +756,11 @@ func (c *connection) bind(workerID string) (*worker, error) {
 	}
 	c.hub.mu.Lock()
 	defer c.hub.mu.Unlock()
+	key := workerKey{environment: c.environment, worker: workerID}
+	if ended, was := c.hub.unopened[key]; was {
+		delete(c.hub.unopened, key)
+		return nil, &CloseError{Code: ClosePolicy, Reason: ended.reason}
+	}
 	env, held := c.hub.environments[c.environment]
 	if !held {
 		return nil, ErrUnknownWorker
@@ -902,6 +958,7 @@ func (h *Hub) Release(environmentID string) {
 			if w.link != nil {
 				links = append(links, w.link)
 			}
+			h.endBeforeStreamLocked(environmentID, w, ReasonServeRefused)
 		}
 		for s := range env.subscribers {
 			subscribers = append(subscribers, s)

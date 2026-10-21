@@ -116,6 +116,88 @@ func TestTheHubHoldsTheWorkerLimit(t *testing.T) {
 	}
 }
 
+// TestAWorkerEndedBeforeItsStreamOpensIsToldOnIt: a registration replaced,
+// revoked or deleted before its stream opened has that stream closed with the
+// reason as soon as its hello arrives, and only once, rather than refused as
+// a worker that never registered, which a worker answers by registering
+// again.
+func TestAWorkerEndedBeforeItsStreamOpensIsToldOnIt(t *testing.T) {
+	reg := remote.Registration{Driver: "native", Isolation: "none", Host: hostA}
+	for _, c := range []struct {
+		name, reason string
+		end          func(t *testing.T, hub *remote.Hub)
+	}{
+		{"replaced", remote.ReasonWorkerReplaced, func(t *testing.T, hub *remote.Hub) {
+			if _, rep, err := hub.RegisterWith("env_early", reg, remote.Admission{JTI: "key-a", MaxWorkers: 1}); err != nil || rep == nil || !rep.Replaced {
+				t.Fatalf("the same key from the same host answered %+v, %v", rep, err)
+			}
+		}},
+		{"revoked", remote.ReasonKeyRevoked, func(t *testing.T, hub *remote.Hub) {
+			if n := hub.Revoke("key-a"); n != 0 {
+				t.Errorf("the revocation closed %d streams before any opened", n)
+			}
+		}},
+		{"deleted", remote.ReasonServeRefused, func(_ *testing.T, hub *remote.Hub) { hub.Release("env_early") }},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			hub := remote.NewHub(remote.HubOptions{Offline: time.Minute})
+			first, _, err := hub.RegisterWith("env_early", reg, remote.Admission{JTI: "key-a", MaxWorkers: 1})
+			if err != nil {
+				t.Fatal(err)
+			}
+			c.end(t, hub)
+			if reason := openStream(t, hub, "env_early", first.Worker, remote.ServeOptions{}).closedWith(t); reason != c.reason {
+				t.Errorf("the stream of the ended registration closed with %q, want %q", reason, c.reason)
+			}
+			if reason := openStream(t, hub, "env_early", first.Worker, remote.ServeOptions{}).closedWith(t); reason != "" {
+				t.Errorf("a second stream of the ended registration closed with %q, want a plain close", reason)
+			}
+		})
+	}
+}
+
+// TestAnEndedRegistrationIsToldWithinThePendingWindow: what ended a
+// registration before its stream opened is kept for the pending window and
+// no longer, and a registration that names the ended one's id starts afresh.
+func TestAnEndedRegistrationIsToldWithinThePendingWindow(t *testing.T) {
+	var mu sync.Mutex
+	now := time.Now()
+	hub := remote.NewHub(remote.HubOptions{Offline: time.Minute, Now: func() time.Time {
+		mu.Lock()
+		defer mu.Unlock()
+		return now
+	}})
+	reg := remote.Registration{Driver: "native", Isolation: "none"}
+	stale, _, err := hub.RegisterWith("env_window", reg, remote.Admission{JTI: "key-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hub.Revoke("key-a")
+	mu.Lock()
+	now = now.Add(remote.HeartbeatTimeout + time.Second)
+	mu.Unlock()
+	// Ending another registration drops what is older than the window.
+	if _, _, err = hub.RegisterWith("env_window", reg, remote.Admission{JTI: "key-b"}); err != nil {
+		t.Fatal(err)
+	}
+	hub.Revoke("key-b")
+	if reason := openStream(t, hub, "env_window", stale.Worker, remote.ServeOptions{}).closedWith(t); reason != "" {
+		t.Errorf("a stream opened past the pending window closed with %q, want a plain close", reason)
+	}
+
+	named := reg
+	named.Worker = "wrk_named"
+	if _, _, err = hub.RegisterWith("env_window", named, remote.Admission{JTI: "key-c"}); err != nil {
+		t.Fatal(err)
+	}
+	hub.Revoke("key-c")
+	if _, _, err = hub.RegisterWith("env_window", named, remote.Admission{JTI: "key-d"}); err != nil {
+		t.Fatal(err)
+	}
+	openStream(t, hub, "env_window", "wrk_named", remote.ServeOptions{})
+	connected(t, hub, "env_window", 1)
+}
+
 // TestAStreamBeyondTheLimitIsRefused: two registrations that raced for one
 // place are both admitted while neither holds a stream, and the second
 // stream to open is closed with worker_limit.
