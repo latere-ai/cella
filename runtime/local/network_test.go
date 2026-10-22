@@ -191,3 +191,33 @@ func TestACommandGetsTheHostsNetworkNow(t *testing.T) {
 		t.Errorf("a command after the host allowed none renders %+v", got)
 	}
 }
+
+// TestNetworkAllow: allowing a host saves it as a person would have it: on
+// an allow list it joins the hosts; on any it lifts the host's block and
+// admits a port beyond the standard ones; none and a wildcard's block are
+// refused.
+func TestNetworkAllow(t *testing.T) {
+	list, err := Network{Mode: NetworkAllowlist, Hosts: []string{"github.com"}}.Allow("example.com:22")
+	if err != nil || !slices.Equal(list.Hosts, []string{"github.com", "example.com:22"}) {
+		t.Errorf("an allow list allowed %+v, %v", list, err)
+	}
+	anyHost := Network{Mode: NetworkAny, Hosts: []string{"gist.example.org:22"}, Blocked: []string{"pastebin.com", "gist.example.org", "*.example.net"}}
+	got, err := anyHost.Allow("pastebin.com")
+	if err != nil || !slices.Equal(got.Blocked, []string{"gist.example.org", "*.example.net"}) || !slices.Equal(got.Hosts, anyHost.Hosts) {
+		t.Errorf("any allowed a blocked host as %+v, %v", got, err)
+	}
+	got, err = anyHost.Allow("gist.example.org:8443")
+	if err != nil || !slices.Equal(got.Blocked, []string{"pastebin.com", "gist.example.org:443", "gist.example.org:80", "gist.example.org:22", "*.example.net"}) ||
+		!slices.Equal(got.Hosts, []string{"gist.example.org:22", "gist.example.org:8443"}) {
+		t.Errorf("any allowed one port of a host blocked on every port as %+v, %v", got, err)
+	}
+	if _, err := anyHost.Allow("a.example.net"); !errors.Is(err, driver.ErrInvalid) {
+		t.Errorf("a host a wildcard blocks was allowed: %v", err)
+	}
+	if _, err := anyHost.Allow("example.net"); err != nil {
+		t.Errorf("the host a wildcard does not cover was refused: %v", err)
+	}
+	if _, err := (Network{Mode: NetworkNone}).Allow("example.com"); !errors.Is(err, driver.ErrInvalid) {
+		t.Errorf("none allowed a host: %v", err)
+	}
+}

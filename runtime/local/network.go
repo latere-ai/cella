@@ -111,6 +111,48 @@ func numeric(label string) bool {
 	return strings.Trim(digits, base) == ""
 }
 
+// Allow is the network with entry allowed, an entry as HostEntry builds one,
+// as a person who allowed a refused host would have it saved: under an
+// allow list it joins Hosts; under any it lifts the network's own block of
+// its host by name, narrowing a block on every port to the ports still
+// refused, and one with a port beyond 443 and 80 joins Hosts. It refuses a
+// network of none, which reaches no host, and a host a wildcard entry
+// blocks, which only narrowing or removing that entry lifts.
+func (n Network) Allow(entry string) (Network, error) {
+	host, port := splitEntry(entry)
+	switch n.Mode {
+	case NetworkAllowlist:
+		n.Hosts = clean(append(slices.Clone(n.Hosts), entry))
+		return n, nil
+	case NetworkAny:
+		if wildcard, ok := wildcardBlocking(n.Blocked, host, port); ok {
+			return Network{}, fmt.Errorf("%w: %s is blocked by %s, which allowing one host does not lift; narrow or remove that entry", driver.ErrInvalid, entry, wildcard)
+		}
+		n.Blocked = unblock(n.Blocked, n.Blocked, n.Hosts, host, port)
+		if port != "" {
+			n.Hosts = clean(append(slices.Clone(n.Hosts), entry))
+		}
+		return n, nil
+	}
+	return Network{}, fmt.Errorf("%w: a network of %q reaches no host; a host is allowed on an allow list or on any", driver.ErrInvalid, n.Mode)
+}
+
+// wildcardBlocking is the "*." entry of a deny list that blocks host on
+// port, "" for the standard ports, and whether one does.
+func wildcardBlocking(blocked []string, host, port string) (string, bool) {
+	for _, entry := range blocked {
+		h, p := splitEntry(entry)
+		domain, ok := strings.CutPrefix(h, "*.")
+		if !ok || !strings.HasSuffix(host, "."+domain) {
+			continue
+		}
+		if p == "" || p == port || (port == "" && (p == tunnelPort || p == plainPort)) {
+			return entry, true
+		}
+	}
+	return "", false
+}
+
 // widen is a command's network with the entries the person allowed beyond
 // the host's own. Under an allow list each joins it. Under a deny list each
 // lifts the host's own block of its host by name (own is the host's deny
