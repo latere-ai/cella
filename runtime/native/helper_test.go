@@ -4,12 +4,14 @@
 package native
 
 import (
+	"context"
 	"fmt"
 	"io"
-	"net"
 	"os"
 	"strconv"
 	"testing"
+
+	"latere.ai/x/cella/internal/porttest"
 )
 
 // echoArg turns this test binary into the echo server a sandbox runs as its
@@ -40,8 +42,14 @@ func echoCommand(port int) []string {
 
 // serveEcho listens on the port and echoes every connection until the
 // process is killed, which is how the driver ends a sandbox's main process.
-func serveEcho(port string) error {
-	ln, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", port))
+// It binds beside the test's reservation of the port, which holds the port
+// from the test's pick until the test ends.
+func serveEcho(arg string) error {
+	port, err := strconv.Atoi(arg)
+	if err != nil {
+		return err
+	}
+	ln, err := porttest.Listen(context.Background(), port)
 	if err != nil {
 		return err
 	}

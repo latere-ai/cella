@@ -11,12 +11,16 @@ import (
 	"testing"
 	"time"
 
+	"latere.ai/x/cella/internal/porttest"
 	driver "latere.ai/x/cella/runtime"
 )
 
-// freePort is a loopback port nothing held a moment ago, for a sandbox to
-// serve. A fixed number would collide with whatever else the host runs.
-func freePort(t *testing.T) int {
+// closedPort is a loopback port nothing held a moment ago, for a dial that
+// is refused. A port a sandbox serves is reserved instead, so no other
+// process takes it before the sandbox binds it. This one is not: a reserved
+// port that nothing listens on is dropped unanswered by macOS rather than
+// refused, and Dial waits on its context alone.
+func closedPort(t *testing.T) int {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -60,7 +64,7 @@ func TestNativeDial(t *testing.T) {
 	if !d.Capabilities().Dial {
 		t.Fatal("the native driver declares no Dial")
 	}
-	port := freePort(t)
+	port := porttest.Reserve(t)
 	_, err := d.Create(ctx, driver.CreateSpec{ID: "sbx_dial", Name: "dial", Owner: "alice",
 		Command: echoCommand(port), Ports: []driver.Port{{Name: "echo", Port: port}}})
 	check(t, err)
@@ -97,7 +101,7 @@ func TestNativeDial(t *testing.T) {
 	}
 
 	t.Run("a port nothing holds", func(t *testing.T) {
-		conn, err := d.Dial(ctx, "sbx_dial", freePort(t))
+		conn, err := d.Dial(ctx, "sbx_dial", closedPort(t))
 		if conn != nil {
 			_ = conn.Close()
 		}
@@ -122,7 +126,7 @@ func TestNativeDial(t *testing.T) {
 func TestNativeProbesDeclaredPorts(t *testing.T) {
 	d, root := fresh(t)
 	ctx := t.Context()
-	bound, idle := freePort(t), freePort(t)
+	bound, idle := porttest.Reserve(t), closedPort(t)
 	_, err := d.Create(ctx, driver.CreateSpec{ID: "sbx_ports", Name: "ports", Owner: "alice",
 		Command: echoCommand(bound), Ports: []driver.Port{{Name: "bound", Port: bound}, {Name: "idle", Port: idle}}})
 	check(t, err)

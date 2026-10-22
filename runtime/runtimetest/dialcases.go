@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"latere.ai/x/cella/internal/porttest"
 	"latere.ai/x/cella/runtime"
 )
 
@@ -31,7 +32,7 @@ func dialReachesAPort(t tb, open func() runtime.Driver, opts Options) {
 		t.Skipf("Options.Echo is nil: this suite has no command that serves a port")
 	}
 	const id = "sbx_cnf_dial"
-	dialPort := freePorts(t, 1)[0]
+	dialPort := porttest.Reserve(t)
 	create(t, d, opts, runtime.CreateSpec{
 		ID: id, Name: "dial", Owner: "alice",
 		Command: opts.Echo(dialPort),
@@ -104,30 +105,19 @@ func (e *echoMismatch) Error() string {
 	return "sent " + e.sent + " and read back " + strings.TrimSpace(e.got)
 }
 
-// freePorts returns n distinct TCP ports free on loopback when asked. Each
-// case picks its own rather than naming a fixed one, because a driver whose
-// sandboxes share the host's network, as the native driver's do, meets every
-// other test the machine runs at once, and a port another run already holds
-// makes the sandbox's server exit before it binds. The listeners are held
-// until every port is chosen, so the n are distinct, and closed before the
-// sandbox starts, so the sandbox can bind them.
-func freePorts(t tb, n int) []int {
+// closedPort is a loopback port nothing listened on a moment ago, for a
+// port the probe reads closed. A port a sandbox's server binds is reserved
+// instead (Options.Listen), so no other process the machine runs takes it
+// before the server binds it. This one is not: a reserved port that nothing
+// listens on is dropped unanswered by macOS rather than refused, and the
+// probe would read it closed only once its own wait ran out.
+func closedPort(t tb) int {
 	t.Helper()
-	listeners := make([]net.Listener, 0, n)
-	defer func() {
-		for _, l := range listeners {
-			_ = l.Close()
-		}
-	}()
-	ports := make([]int, 0, n)
 	var lc net.ListenConfig
-	for range n {
-		l, err := lc.Listen(context.Background(), "tcp", "127.0.0.1:0")
-		must(t, err, "reserving a free port on loopback")
-		listeners = append(listeners, l)
-		addr, ok := l.Addr().(*net.TCPAddr)
-		need(t, ok, "a loopback listener reports %T, not a TCP address", l.Addr())
-		ports = append(ports, addr.Port)
-	}
-	return ports
+	l, err := lc.Listen(context.Background(), "tcp", "127.0.0.1:0")
+	must(t, err, "listening on loopback")
+	defer func() { _ = l.Close() }()
+	addr, ok := l.Addr().(*net.TCPAddr)
+	need(t, ok, "a loopback listener reports %T, not a TCP address", l.Addr())
+	return addr.Port
 }

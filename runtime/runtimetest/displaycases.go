@@ -13,6 +13,7 @@ import (
 	"slices"
 	"time"
 
+	"latere.ai/x/cella/internal/porttest"
 	v1 "latere.ai/x/cella/manifest/v1"
 	"latere.ai/x/cella/runtime"
 	"latere.ai/x/cella/runtime/display"
@@ -152,8 +153,7 @@ func portsReportListening(t tb, open func() runtime.Driver, opts Options) {
 		t.Skipf("Options.Listen is nil: this suite has no command that binds a port")
 	}
 	const id = "sbx_cnf_ports"
-	ports := freePorts(t, 2)
-	bound, idle := ports[0], ports[1]
+	bound, idle := porttest.Reserve(t), closedPort(t)
 	spec := runtime.CreateSpec{
 		ID: id, Name: "ports", Owner: "alice",
 		Command: opts.Listen(bound),

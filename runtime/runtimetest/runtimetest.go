@@ -39,11 +39,19 @@ type Options struct {
 	// Listen is the main command that binds one port inside a sandbox, for
 	// the port probe. Nil skips that case: what binds a port is the image's,
 	// not the contract's.
+	//
+	// The suite holds the port it names, from the moment it picks it until
+	// the case ends, on a loopback socket of the host that never listens, so
+	// that no other process the machine runs takes it first. Where a sandbox
+	// shares the host's network, as a native one does, the command binds the
+	// port with SO_REUSEPORT, which is the one bind the hold admits. Where a
+	// sandbox has a network of its own, the hold is on a port of the host's
+	// and the command binds as it likes.
 	Listen func(port int) []string
 	// Echo is the main command that serves one port inside a sandbox and
 	// writes back every byte each connection sends, to two connections at
 	// once, for the dial case. Nil skips that case: what serves a port is
-	// the image's, not the contract's.
+	// the image's, not the contract's. It binds the port as Listen does.
 	Echo func(port int) []string
 }
 

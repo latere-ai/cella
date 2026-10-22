@@ -15,6 +15,17 @@ refused before it is pushed.
   `cellad` bound to `out/run/cellad.addrs`, one role and its address per
   line, the way the stubs' go to `out/run/stubs.addrs`.
 
+### Changed
+
+- **The driver suite holds the ports it names.** `runtimetest` reserves
+  each port a case hands a sandbox's server, on a loopback socket of the
+  host that never listens, from the moment it picks the port until the
+  case ends, so no other process the machine runs takes it first. Where a
+  sandbox shares the host's network, as a native one does,
+  `Options.Echo` and `Options.Listen` bind the port with `SO_REUSEPORT`,
+  the one bind the reservation admits; a command that binds without it is
+  refused the port. A sandbox with a network of its own binds as before.
+
 ### Fixed
 
 - **`make run` no longer reads the last run's addresses.** A restart over
