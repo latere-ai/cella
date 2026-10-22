@@ -8,9 +8,13 @@ package porttest
 import (
 	"fmt"
 	"syscall"
+
+	"golang.org/x/sys/unix"
 )
 
 // The calls reserve makes, which a test replaces to make one of them fail.
+// The option is unix.SO_REUSEPORT because the syscall package leaves it
+// undefined on some Linux architectures, amd64 among them.
 var (
 	socket      = syscall.Socket
 	setsockopt  = syscall.SetsockoptInt
@@ -42,7 +46,7 @@ func reserve() (int, func(), error) {
 		_ = closeSocket(fd)
 		return 0, nil, fmt.Errorf("%s: %w", step, err)
 	}
-	if err := setsockopt(fd, syscall.SOL_SOCKET, syscall.SO_REUSEPORT, 1); err != nil {
+	if err := setsockopt(fd, syscall.SOL_SOCKET, unix.SO_REUSEPORT, 1); err != nil {
 		return fail("SO_REUSEPORT", err)
 	}
 	if err := bind(fd, &syscall.SockaddrInet4{Addr: [4]byte{127, 0, 0, 1}}); err != nil {
@@ -63,7 +67,7 @@ func reserve() (int, func(), error) {
 func reusePort(_, _ string, conn syscall.RawConn) error {
 	var set error
 	if err := conn.Control(func(fd uintptr) {
-		set = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_REUSEPORT, 1)
+		set = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, unix.SO_REUSEPORT, 1)
 	}); err != nil {
 		return err
 	}
