@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.21.1 - 2026-10-22
+
 ### Fixed
 
 - **A sandbox created right after its worker registers waits for the
