@@ -6,6 +6,73 @@ refused before it is pushed.
 
 ## Unreleased
 
+### Added
+
+- **A device's network can be `any`: any public host but those you
+  block.** Beside `allowlist` and `none`, the host policy of `latere
+  devices` takes `network.mode: any` with a `network.blocked` list of
+  hosts: a host, an address or `*.example.com` for the names below
+  `example.com` (not `example.com` itself, so block both), alone or as
+  `host:port`. With it, everything readable in a granted folder can be
+  sent to any public host, and the connect screen, its facts and a notice
+  at every start say so. Whatever a name resolves to, a command still
+  reaches nothing on your computer, its Wi-Fi and Ethernet networks, or
+  any address that is not public. `network.hosts` under `any` names a
+  port beyond 443 and 80 as `host:port`. `any` is never the default, and
+  `ProposePolicy` never proposes it: a connect query asking for it is
+  refused, and a file that had it proposes the allow list of the default
+  hosts again. It is enforced by macOS's own sandbox alone; elsewhere, and
+  in a program that does not call `hostsandbox.Main`, a connect, a change
+  or a start that names it is refused with the new code
+  `device_network_unenforceable`, never run as another network. `cellad`
+  takes the same as `CELLA_LOCAL_NETWORK=any` with `CELLA_LOCAL_BLOCKED`.
+- **A refused connection is told.** Each host a session's command is
+  refused, by this computer's network or the session's own, reaches every
+  subscriber of the engine as an `EventNetworkRefused` and the activity
+  log as a `network_refused` line, with the host and port and the session,
+  agent and sandbox it came from, never the request. A command repeating
+  a refusal is told once a minute. `latere devices` prints the line, and
+  `GET /v1/approvals?follow=1` carries the event.
+- **A refused host can be allowed for one session, or saved.**
+  `Engine.AllowSessionHost(ctx, session, host, port)` lets that session's later
+  commands reach the host, without changing the host policy file, until
+  the session's sandbox stops or is deleted, or the engine stops, pauses
+  or reloads. `Engine.SaveHost(host, port)` writes it into the policy, and
+  every session's next command reaches it at once, with no restart, so no
+  running session stops. A command that runs keeps the network it started
+  with: the host reaches the next one. Under `any`, an allowance lifts the
+  policy's own block of the host by name; a host a `*.` entry blocks is
+  refused with the new code `device_host_not_allowed`, as is a network of
+  `none`. The control socket answers both as `POST
+  /v1/sessions/{session}/hosts` and `POST /v1/policy/hosts` with `{"host",
+  "port"}`; an unknown session is `404 no_session`. Each allowance is a
+  `host_allowed` or `host_saved` line in the activity log.
+- **For embedders**: `local.Options` takes `OnRefused`, `Allowed` and
+  `Isolation`; `local.Network` takes `Blocked`; `local.HostEntry` builds
+  the entry a host and port are allowed as, and `local.Network.Allow`
+  saves one. An embedder that shows its own words keys the new connect
+  fact `network_ports`, and the codes above.
+- **The manifest's host network has an `open` mode.** A worker whose
+  computer admits any public host registers `{"mode": "open", "blocked":
+  [...]}` in `status.hosts`. A sandbox asking `open` there gets `open`
+  denying what it or the host blocks, one asking `allowlist` keeps the
+  hosts the host does not block, and a local driver that declares `open`
+  holds that deny list itself, with no gateway. The control plane must
+  run this release before a computer serves `any`: an older one narrows
+  every sandbox on such a computer to no network.
+
+### Changed
+
+- `latere.ai/x/pkg` v0.109.0. Under macOS's own sandbox every command now
+  starts from its launcher, one with no network included, so a program
+  embedding the engine or the local runtime calls `hostsandbox.Main` as
+  the first statement of `main` (`latere` and Latere Studio do), and a
+  test binary that uses Seatbelt calls it in `TestMain`.
+- A command started in a sandbox gets the computer's network as it is
+  now: a sandbox started again after its computer narrowed its network
+  gets the narrower one, where before it kept the network it was created
+  with.
+
 ## v0.20.4 - 2026-10-21
 
 ### Fixed
