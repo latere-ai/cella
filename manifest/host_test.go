@@ -5,6 +5,7 @@ package manifest
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
@@ -95,6 +96,16 @@ func TestEgressNarrowsToTheHost(t *testing.T) {
 	kept, err := resolveOn(t, hostEnvironment(host), hostSandbox(v1.Egress{Mode: v1.EgressAllowlist, AllowedHosts: []string{"github.com"}}, ""))
 	if err != nil || len(kept.Warnings) != 0 || kept.Sandbox.Spec.Network.Egress.Mode != v1.EgressAllowlist {
 		t.Errorf("an allow list inside the host's resolved to %+v %v, %v", kept.Sandbox.Spec.Network.Egress, kept.Warnings, err)
+	}
+	anyHost := hostEnvironment(v1.HostInfo{Network: v1.HostNetwork{Mode: "open", Blocked: []string{"pastebin.com"}}})
+	blocked, err := resolveOn(t, anyHost, hostSandbox(v1.Egress{Mode: v1.EgressOpen}, ""))
+	if e := blocked.Sandbox.Spec.Network.Egress; err != nil || e.Mode != v1.EgressOpen || !slices.Equal(e.DeniedHosts, []string{"pastebin.com"}) ||
+		len(blocked.Warnings) != 1 || !strings.HasSuffix(blocked.Warnings[0], " open except pastebin.com.") {
+		t.Errorf("open on an open host that blocks a host resolved to %+v %v, %v", e, blocked.Warnings, err)
+	}
+	unblocked, err := resolveOn(t, hostEnvironment(v1.HostInfo{Network: v1.HostNetwork{Mode: "open"}}), hostSandbox(v1.Egress{Mode: v1.EgressOpen}, ""))
+	if err != nil || len(unblocked.Warnings) != 0 || unblocked.Sandbox.Spec.Network.Egress.Mode != v1.EgressOpen {
+		t.Errorf("open on an open host that blocks nothing resolved to %+v %v, %v", unblocked.Sandbox.Spec.Network.Egress, unblocked.Warnings, err)
 	}
 	closed, err := resolveOn(t, hostEnvironment(v1.HostInfo{Network: v1.HostNetwork{Mode: "none"}}), hostSandbox(v1.Egress{Mode: v1.EgressOpen}, ""))
 	if err != nil || closed.Sandbox.Spec.Network.Egress.Mode != v1.EgressNone || !strings.HasSuffix(closed.Warnings[0], " none.") {

@@ -237,14 +237,30 @@ func (c *Controller) sandboxEnvironment(obj v1.Sandbox) string {
 
 // driverEnforced reports whether a boundary on one environment is held by
 // its driver alone: an environment other than the control plane's own whose
-// driver declares EgressLocal, a mode of none or an allow list, no denied
-// host and no mounted secret. Such a boundary needs no gateway, and none is
-// projected into it (spec 083).
+// driver declares EgressLocal, no mounted secret, and a mode of none or an
+// allow list with no denied host, or open where the driver declares open,
+// which a host that admits any public host but those it blocks does. Such a
+// boundary needs no gateway, and none is projected into it (spec 083).
 func (c *Controller) driverEnforced(environment string, spec v1.SandboxSpec) bool {
-	e := spec.Network.Egress
-	return environment != c.environment && c.CapabilitiesOf(environment).EgressLocal &&
-		(e.Mode == v1.EgressNone || e.Mode == v1.EgressAllowlist) &&
-		len(e.DeniedHosts) == 0 && len(spec.Secrets) == 0
+	caps := c.CapabilitiesOf(environment)
+	if environment == c.environment || !caps.EgressLocal || len(spec.Secrets) > 0 {
+		return false
+	}
+	return localHolds(caps, spec.Network.Egress.Mode, len(spec.Network.Egress.DeniedHosts))
+}
+
+// localHolds reports whether a driver that declares EgressLocal holds a
+// boundary of this mode and this many denied hosts with its own proxy: none
+// and an allow list, which deny nothing, and open, denying any hosts, where
+// the driver declares open.
+func localHolds(caps driver.Capabilities, mode v1.EgressMode, denied int) bool {
+	switch mode {
+	case v1.EgressNone, v1.EgressAllowlist:
+		return denied == 0
+	case v1.EgressOpen:
+		return slices.Contains(caps.Egress, v1.EgressOpen)
+	}
+	return false
 }
 
 // gatewayHolds reports whether a gateway can hold a boundary needing one on
@@ -371,8 +387,8 @@ func (c *Controller) egressCondition(environment string, m egress.Map, held bool
 		cond.Status = v1.ConditionFalse
 		cond.Reason = v1.ReasonNotEnforcedByDriver
 		cond.Message = "This environment records the boundary and does not confine the workload to it."
-	case environment != c.environment && caps.EgressLocal && m.Mode != v1.EgressOpen &&
-		len(m.Deny) == 0 && len(m.Entries) == 0 && len(m.NotInjectable) == 0:
+	case environment != c.environment && caps.EgressLocal && localHolds(caps, m.Mode, len(m.Deny)) &&
+		len(m.Entries) == 0 && len(m.NotInjectable) == 0:
 		// The driver's own proxy is the only route out, which stands in
 		// for a gateway (spec 083).
 		cond.Reason = v1.ReasonDriverEnforced

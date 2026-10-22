@@ -6,6 +6,7 @@ package controller
 import (
 	"errors"
 	"log/slog"
+	"slices"
 	"testing"
 
 	"latere.ai/x/cella/egress"
@@ -127,5 +128,60 @@ func TestNeedsGatewayOn(t *testing.T) {
 	}
 	if c.gatewayHolds("laptop") || !c.gatewayHolds("default") {
 		t.Error("a gateway holds the wrong environment")
+	}
+}
+
+// TestEgressLocalHoldsADenyListItDeclares: open with denied hosts on a
+// worker environment whose driver enforces its own network and declares
+// open, as a computer that admits any public host but those it blocks does,
+// needs no gateway, is EgressEnforced True with DriverEnforced, and reaches
+// the driver with its denied hosts; the same on a driver that does not
+// declare open still needs a gateway.
+func TestEgressLocalHoldsADenyListItDeclares(t *testing.T) {
+	clock := newClock()
+	anyHost := &gatewayDriver{modes: []v1.EgressMode{v1.EgressNone, v1.EgressAllowlist, v1.EgressOpen}, local: true}
+	listHost := &gatewayDriver{modes: []v1.EgressMode{v1.EgressNone, v1.EgressAllowlist}, local: true}
+	w := &worker{driver: newDriver(clock)}
+	c, err := Open(t.Context(), Options{
+		Driver: &gatewayDriver{modes: []v1.EgressMode{v1.EgressNone, v1.EgressAllowlist}}, Clock: clock, Environment: "default",
+		DataDir: t.TempDir(), Log: slog.New(slog.DiscardHandler), Egress: &gateway{},
+		NewDriver: func(obj v1.Environment) (driver.Driver, error) {
+			if obj.Metadata.Name == "any-host" {
+				return anyHost, nil
+			}
+			return listHost, nil
+		},
+		Registrations: func(string) []Registration { return w.live() },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+	for _, name := range []string{"any-host", "list-host"} {
+		applyWorker(t, c, name)
+		ready(t, c, w, name)
+	}
+	denying := func(name, environment string) v1.Sandbox {
+		obj := workspace()
+		obj.Metadata.Name = name
+		obj.Spec.Environment = environment
+		obj.Spec.Network.Egress = v1.Egress{Mode: v1.EgressOpen, DeniedHosts: []string{"pastebin.com"}}
+		return obj
+	}
+	created, err := realized(t.Context(), c, denying("on-any", "any-host"), "alice", 0)
+	if err != nil {
+		t.Fatalf("open with a denied host on a driver that holds a deny list was refused: %v", err)
+	}
+	if cond := conditionOf(created, v1.ConditionEgressEnforced); cond.Status != v1.ConditionTrue || cond.Reason != v1.ReasonDriverEnforced {
+		t.Errorf("EgressEnforced is %+v", cond)
+	}
+	if e := anyHost.created(t).Egress; e.Mode != string(v1.EgressOpen) || !slices.Equal(e.DeniedHosts, []string{"pastebin.com"}) || e.ProxyAddr != "" || e.Credential != "" {
+		t.Errorf("the driver was handed %+v", e)
+	}
+	if !c.driverEnforced("any-host", denying("x", "any-host").Spec) || c.driverEnforced("list-host", denying("x", "list-host").Spec) {
+		t.Error("a deny list's driver enforcement reads wrong per environment")
+	}
+	if _, err := realized(t.Context(), c, denying("on-list", "list-host"), "alice", 0); !errors.Is(err, ErrNoGateway) {
+		t.Errorf("open with a denied host on a driver that declares no open answered %v", err)
 	}
 }

@@ -63,13 +63,16 @@ func egressOnHost(obj *v1.Sandbox, env *v1.Environment) ([]string, error) {
 	}
 	asked := obj.Spec.Network.Egress
 	got := v1.NarrowEgress(asked, network)
-	if got.Mode == asked.Mode && slices.Equal(got.AllowedHosts, asked.AllowedHosts) && len(asked.DeniedHosts) == 0 {
+	if got.Mode == asked.Mode && slices.Equal(got.AllowedHosts, asked.AllowedHosts) && slices.Equal(got.DeniedHosts, asked.DeniedHosts) {
 		return nil, nil
 	}
 	obj.Spec.Network.Egress = got
 	warning := WarningEgressNarrowed + " " + string(got.Mode)
 	if len(got.AllowedHosts) > 0 {
 		warning += " to " + strings.Join(got.AllowedHosts, ", ")
+	}
+	if len(got.DeniedHosts) > 0 {
+		warning += " except " + strings.Join(got.DeniedHosts, ", ")
 	}
 	return []string{warning + "."}, nil
 }

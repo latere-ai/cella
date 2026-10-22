@@ -57,6 +57,58 @@ func TestHostNetworkOfIsWhatEveryHostAllows(t *testing.T) {
 	}
 }
 
+// TestHostNetworkOfWithAnOpenHost: open hosts together block what any of
+// them blocks and admit the ports every one of them admits; beside an allow
+// list they give the allow list less what they block; and beside a host
+// that allows none they give none.
+func TestHostNetworkOfWithAnOpenHost(t *testing.T) {
+	open := HostInfo{Network: HostNetwork{Mode: "open", Hosts: []string{"github.com:22", "gitlab.com:22"}, Blocked: []string{"pastebin.com"}}}
+	other := HostInfo{Network: HostNetwork{Mode: "open", Hosts: []string{"github.com:22"}, Blocked: []string{"*.example.com", "pastebin.com"}}}
+	list := HostInfo{Network: HostNetwork{Mode: "allowlist", Hosts: []string{"github.com", "pastebin.com", "*.example.com", "a.example.com"}}}
+	if got, ok := HostNetworkOf([]HostInfo{open}); !ok || got.Mode != "open" || !slices.Equal(got.Blocked, []string{"pastebin.com"}) ||
+		!slices.Equal(got.Hosts, open.Network.Hosts) {
+		t.Errorf("one open host gives %+v %v", got, ok)
+	}
+	if got, ok := HostNetworkOf([]HostInfo{open, other}); !ok || got.Mode != "open" ||
+		!slices.Equal(got.Blocked, []string{"pastebin.com", "*.example.com"}) || !slices.Equal(got.Hosts, []string{"github.com:22"}) {
+		t.Errorf("two open hosts give %+v %v", got, ok)
+	}
+	if got, ok := HostNetworkOf([]HostInfo{other, list}); !ok || got.Mode != "allowlist" || !slices.Equal(got.Hosts, []string{"github.com"}) {
+		t.Errorf("an open host and an allow list give %+v %v", got, ok)
+	}
+	if got, ok := HostNetworkOf([]HostInfo{open, {Network: HostNetwork{Mode: "none"}}}); !ok || got.Mode != "none" {
+		t.Errorf("an open host and none give %+v %v", got, ok)
+	}
+}
+
+// TestNarrowEgressOnAnOpenHost is the open row of the table: none stays
+// none, an allow list loses the hosts the host blocks, and open denies what
+// either the sandbox or the host does.
+func TestNarrowEgressOnAnOpenHost(t *testing.T) {
+	host := HostNetwork{Mode: "open", Hosts: []string{"github.com:22"}, Blocked: []string{"pastebin.com", "a.example.com"}}
+	for _, c := range []struct {
+		name  string
+		asked Egress
+		want  Egress
+	}{
+		{"none asked", Egress{Mode: EgressNone}, Egress{Mode: EgressNone}},
+		{"allowlist asked", Egress{Mode: EgressAllowlist, AllowedHosts: []string{"github.com", "pastebin.com", "*.example.com"}},
+			Egress{Mode: EgressAllowlist, AllowedHosts: []string{"github.com"}}},
+		{"allowlist asked of blocked hosts", Egress{Mode: EgressAllowlist, AllowedHosts: []string{"pastebin.com"}}, Egress{Mode: EgressNone}},
+		{"open asked", Egress{Mode: EgressOpen}, Egress{Mode: EgressOpen, DeniedHosts: []string{"pastebin.com", "a.example.com"}}},
+		{"open asked denying", Egress{Mode: EgressOpen, DeniedHosts: []string{"evil.example.org", "pastebin.com"}},
+			Egress{Mode: EgressOpen, DeniedHosts: []string{"evil.example.org", "pastebin.com", "a.example.com"}}},
+	} {
+		got := NarrowEgress(c.asked, host)
+		if got.Mode != c.want.Mode || !slices.Equal(got.AllowedHosts, c.want.AllowedHosts) || !slices.Equal(got.DeniedHosts, c.want.DeniedHosts) {
+			t.Errorf("%s: got %+v, want %+v", c.name, got, c.want)
+		}
+	}
+	if got := NarrowEgress(Egress{Mode: EgressOpen}, HostNetwork{Mode: "open"}); got.Mode != EgressOpen || len(got.DeniedHosts) != 0 {
+		t.Errorf("open on an open host that blocks nothing gives %+v", got)
+	}
+}
+
 // TestNarrowEgressFollowsTheTable is spec 081's network table as a function:
 // a host that allows none gives none whatever was asked; a host with an
 // allow list keeps the asked hosts it covers, gives its own list to open
@@ -100,6 +152,7 @@ func TestHostInfoEqual(t *testing.T) {
 		func(h *HostInfo) { h.Grants = []HostGrant{{Path: "/p"}} },
 		func(h *HostInfo) { h.Network.Mode = "none" },
 		func(h *HostInfo) { h.Network.Hosts = nil },
+		func(h *HostInfo) { h.Network.Blocked = []string{"pastebin.com"} },
 	} {
 		c := a
 		c.Grants = slices.Clone(a.Grants)
