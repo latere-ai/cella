@@ -704,12 +704,11 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	internal.Handle("GET /metrics", registry)
 	internal.Handle("/", probes)
 
-	var lc net.ListenConfig
-	publicLn, err := lc.Listen(ctx, "tcp", cfg.PublicAddr)
+	publicLn, err := listen(ctx, cfg.PublicAddr)
 	if err != nil {
 		return fail(stderr, fmt.Errorf("CELLA_PUBLIC_ADDR: %w", err))
 	}
-	internalLn, err := lc.Listen(ctx, "tcp", cfg.InternalAddr)
+	internalLn, err := listen(ctx, cfg.InternalAddr)
 	if err != nil {
 		_ = publicLn.Close()
 		return fail(stderr, fmt.Errorf("CELLA_INTERNAL_ADDR: %w", err))
@@ -848,6 +847,15 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		return fail(stderr, fmt.Errorf("runtime shutdown: %w", err))
 	}
 	return 0
+}
+
+// listen opens one of serve's two listeners. A test that runs serve in this
+// process replaces it to hand serve a listener the test already holds, so an
+// address the test names before serve starts, such as the URL a replica
+// advertises, is one no other process can take before serve listens on it.
+var listen = func(ctx context.Context, address string) (net.Listener, error) {
+	var lc net.ListenConfig
+	return lc.Listen(ctx, "tcp", address)
 }
 
 // handoffSteps are the acts of one handoff, in the order handoff runs them.

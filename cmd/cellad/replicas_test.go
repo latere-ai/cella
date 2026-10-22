@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	osexec "os/exec"
@@ -205,17 +206,19 @@ func (r *replica) exited(within time.Duration) (int, bool) {
 }
 
 // startReplica runs one serve over the shared database, advertising its own
-// public listener to the others.
+// public listener to the others. The public listener is handed over, since
+// its address is advertised before serve starts; the internal one is bound
+// on port 0 and read back from the start-up line.
 func startReplica(t *testing.T, shared map[string]string) *replica {
 	t.Helper()
-	public, internal := freePort(t), freePort(t)
+	public := handOver(t)
 	vars := identity(t, shared)
 	vars["CELLA_DATA_DIR"] = t.TempDir()
 	vars["CELLA_PUBLIC_ADDR"] = public
-	vars["CELLA_INTERNAL_ADDR"] = internal
+	vars["CELLA_INTERNAL_ADDR"] = "127.0.0.1:0"
 	vars["CELLA_ADVERTISE_URL"] = "http://" + public
 	ctx, cancel := context.WithCancel(context.Background())
-	r := &replica{public: "http://" + public, internal: "http://" + internal, stop: cancel, done: make(chan struct{}), errOut: &syncBuffer{}}
+	r := &replica{public: "http://" + public, stop: cancel, done: make(chan struct{}), errOut: &syncBuffer{}}
 	var out syncBuffer
 	go func() {
 		defer close(r.done)
@@ -228,7 +231,14 @@ func startReplica(t *testing.T, shared map[string]string) *replica {
 		}
 	})
 	deadline := time.Now().Add(60 * time.Second)
-	for !strings.Contains(out.String(), "listening public=") {
+	for {
+		if m := listening.FindStringSubmatch(out.String()); m != nil {
+			if m[1] != public {
+				t.Fatalf("a replica listens on %s, not on the address it was handed, %s", m[1], public)
+			}
+			r.internal = "http://" + m[2]
+			return r
+		}
 		if code, ok := r.exited(0); ok {
 			t.Fatalf("a replica exited %d before listening: %s", code, r.errOut.String())
 		}
@@ -237,7 +247,55 @@ func startReplica(t *testing.T, shared map[string]string) *replica {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	return r
+}
+
+// handed are the listeners handOver bound, by address, until serve takes
+// each one.
+var handed struct {
+	once sync.Once
+	sync.Mutex
+	listeners map[string]net.Listener
+}
+
+// handOver binds a loopback listener on a port the kernel picks and has the
+// next serve that names its address listen on it, in place of binding the
+// address itself. The address is held from here on, so it can be advertised
+// before serve starts with no other process taking it in between.
+func handOver(t *testing.T) string {
+	t.Helper()
+	handed.once.Do(func() {
+		handed.listeners = map[string]net.Listener{}
+		bind := listen
+		listen = func(ctx context.Context, address string) (net.Listener, error) {
+			handed.Lock()
+			ln, ok := handed.listeners[address]
+			delete(handed.listeners, address)
+			handed.Unlock()
+			if ok {
+				return ln, nil
+			}
+			return bind(ctx, address)
+		}
+	})
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	address := ln.Addr().String()
+	handed.Lock()
+	handed.listeners[address] = ln
+	handed.Unlock()
+	// Serve closes a listener it took; one it never took is closed here.
+	t.Cleanup(func() {
+		handed.Lock()
+		_, untaken := handed.listeners[address]
+		delete(handed.listeners, address)
+		handed.Unlock()
+		if untaken {
+			_ = ln.Close()
+		}
+	})
+	return address
 }
 
 // writerLeaseHeld reads whether a replica reports the writer lease held.
