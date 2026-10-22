@@ -13,9 +13,14 @@
 # secret are generated once, so a restart does not invalidate the tokens of
 # the last one. `make clean` removes it.
 #
-# Two clones run side by side by naming a port: CELLA_RUN_PORT=8090 make run.
-# The stubs bind whatever the kernel gives them and print it, so only the
-# control plane's own port is a choice.
+# Two clones run side by side by naming a port: CELLA_RUN_PORT=8090 make run
+# serves the API on 8090 and the probes on 8091. CELLA_RUN_PORT=0 leaves both
+# to the kernel, which is what a test wants: a port picked before cellad
+# starts can be taken by another process before cellad binds it, and one the
+# kernel hands cellad at the bind cannot. The stubs always bind whatever the
+# kernel gives them. Every process prints the addresses it bound, and this
+# script writes them to stubs.addrs and cellad.addrs in the state directory,
+# one role and its address per line.
 set -euo pipefail
 
 smoke=0
@@ -28,8 +33,16 @@ esac
 root=$(cd "$(dirname "$0")/../.." && pwd)
 out=${CELLA_RUN_DIR:-$root/out/run}
 port=${CELLA_RUN_PORT:-8080}
-internal=$((port + 1))
-url=http://127.0.0.1:$port
+if [ "$port" = 0 ]; then
+  public_addr=127.0.0.1:0 internal_addr=127.0.0.1:0
+  # CELLA_PUBLIC_URL is read before the port is known. It is the iss of the
+  # tokens cellad mints and nothing in this stack dials it, so the
+  # placeholder stands in for the address cellad reports below.
+  public_url=http://127.0.0.1:0
+else
+  public_addr=127.0.0.1:$port internal_addr=127.0.0.1:$((port + 1))
+  public_url=http://127.0.0.1:$port
+fi
 mkdir -p "$out"
 
 # 1. Both binaries, from this checkout.
@@ -53,7 +66,11 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-# 3. The stubs, on ports the kernel chooses, printed one role per line.
+# 3. The stubs, on ports the kernel chooses, printed one role per line. Each
+# file a process prints its addresses to is emptied here as well as by its
+# redirect, which runs in the child: a loop that read the file first would
+# find the last run's addresses.
+: > "$out/stubs.addrs"
 "$out/cella-stubs" -issuer 127.0.0.1:0 -authorizer 127.0.0.1:0 \
   -admission 127.0.0.1:0 -sink 127.0.0.1:0 \
   -sink-secret "$(cat "$out/events.secret")" > "$out/stubs.addrs" 2>"$out/stubs.log" &
@@ -81,24 +98,43 @@ done
 # 5. The control plane. The native backend needs no cluster and no
 # container engine, and it has no isolation, which is why spec 002 makes
 # the consent a variable of its own and why this line writes it out.
+: > "$out/cellad.out"
+rm -f "$out/cellad.addrs"
 CELLA_DATA_DIR="$out" \
 CELLA_RUNTIME=native CELLA_ALLOW_UNSAFE_NATIVE=true \
-CELLA_PUBLIC_ADDR=127.0.0.1:$port CELLA_INTERNAL_ADDR=127.0.0.1:$internal \
-CELLA_PUBLIC_URL="$url" \
+CELLA_PUBLIC_ADDR=$public_addr CELLA_INTERNAL_ADDR=$internal_addr \
+CELLA_PUBLIC_URL="$public_url" \
 CELLA_TOKEN_KEY="$(cat "$out/token.pem")" \
 CELLA_SECRET_KEY="$(cat "$out/secret.key")" \
 CELLA_OIDC_ISSUERS="$issuer" \
 CELLA_ADMIN_SUBJECTS="$issuer|dev" \
 CELLA_AUTHORIZER_URL="$authorizer" CELLA_AUTHORIZER_TOKEN=stub-authorizer-token \
 CELLA_EVENTS_URL="$sink" CELLA_EVENTS_SECRET="$(cat "$out/events.secret")" \
-  "$out/cellad" serve &
-pids+=($!)
+  "$out/cellad" serve > "$out/cellad.out" &
+cellad=$!
+pids+=("$cellad")
 
+# 6. Where cellad listens: the line it prints once both listeners are bound,
+# which names the addresses it holds and not the ones it was given.
+listening=
 for _ in $(seq 1 200); do
-  curl -fsS "http://127.0.0.1:$internal/readyz" > /dev/null 2>&1 && break
+  listening=$(sed -n 's/.* listening public=\([^ ]*\) internal=\([^ ]*\) .*/\1 \2/p' "$out/cellad.out")
+  [ -n "$listening" ] && break
+  kill -0 "$cellad" 2>/dev/null || break
   sleep 0.1
 done
-curl -fsS "http://127.0.0.1:$internal/readyz" > /dev/null || {
+[ -n "$listening" ] || { echo "cellad did not report its listeners" >&2; exit 1; }
+cat "$out/cellad.out"
+public=${listening% *}
+internal=${listening#* }
+url=http://$public
+printf 'public %s\ninternal %s\n' "$public" "$internal" > "$out/cellad.addrs"
+
+for _ in $(seq 1 200); do
+  curl -fsS "http://$internal/readyz" > /dev/null 2>&1 && break
+  sleep 0.1
+done
+curl -fsS "http://$internal/readyz" > /dev/null || {
   echo "cellad did not become ready" >&2; exit 1; }
 
 mint="curl -fsS -X POST $issuer/mint -H 'content-type: application/json' -d '{\"sub\":\"dev\"}' | sed -e 's/.*\"token\":\"//' -e 's/\".*//'"

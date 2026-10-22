@@ -159,7 +159,9 @@ that creates the first sandbox. Interrupt it to stop both. The signing
 key and the sink's secret are generated once under `out/run/` and kept,
 so a restart does not invalidate the token you are holding; `make clean`
 removes them. A second clone runs beside the first with
-`CELLA_RUN_PORT=8090 make run`.
+`CELLA_RUN_PORT=8090 make run`. `CELLA_RUN_PORT=0` lets the kernel pick
+the ports, and the stack writes the addresses it got to
+`out/run/cellad.addrs`.
 
 `cella-stubs` is a test binary. It answers what a flag tells it to
 answer, holds nothing across a restart, and belongs in no installation:

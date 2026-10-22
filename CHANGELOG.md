@@ -6,6 +6,22 @@ refused before it is pushed.
 
 ## Unreleased
 
+### Added
+
+- **`make run` can leave its ports to the kernel.** `CELLA_RUN_PORT=0
+  make run` starts `cellad` on two ports the kernel picks, so a script or
+  a test never chooses a port that another process takes before `cellad`
+  binds it. The stack prints the URL as before and writes the addresses
+  `cellad` bound to `out/run/cellad.addrs`, one role and its address per
+  line, the way the stubs' go to `out/run/stubs.addrs`.
+
+### Fixed
+
+- **`make run` no longer reads the last run's addresses.** A restart over
+  the kept state directory could read the stubs' addresses of the run
+  before, a moment before the new stubs wrote theirs, and start `cellad`
+  against an issuer that was gone.
+
 ## v0.21.1 - 2026-10-22
 
 ### Fixed

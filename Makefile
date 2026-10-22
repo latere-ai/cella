@@ -42,7 +42,9 @@ build:
 # roles. The bootstrap is tools/run/up.sh and this target is its name.
 #
 # The state lives under out/run/ and `make clean` removes it. A second
-# clone runs beside this one with CELLA_RUN_PORT=8090 make run.
+# clone runs beside this one with CELLA_RUN_PORT=8090 make run, and
+# CELLA_RUN_PORT=0 lets the kernel pick the ports and writes the addresses
+# cellad got to out/run/cellad.addrs.
 run:
 	@tools/run/up.sh
 

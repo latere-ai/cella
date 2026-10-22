@@ -8,11 +8,9 @@ package run_test
 import (
 	"bufio"
 	"context"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -38,7 +36,6 @@ func TestRunConformance(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	port := freePortPair(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "bash", filepath.Join("tools", "run", "up.sh"))
@@ -49,7 +46,10 @@ func TestRunConformance(t *testing.T) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Env = append(os.Environ(),
 		"CELLA_RUN_DIR="+dir,
-		"CELLA_RUN_PORT="+strconv.Itoa(port),
+		// cellad binds whatever the kernel gives it and the bootstrap
+		// writes down where, so no port is picked here that another
+		// process could take before cellad binds it.
+		"CELLA_RUN_PORT=0",
 		// The bootstrap supplies the issuer, so the developer's own is
 		// explicitly absent.
 		"CELLA_OIDC_ISSUERS=",
@@ -76,8 +76,8 @@ func TestRunConformance(t *testing.T) {
 			<-stopped
 		}
 	})
-	// The stack prints one line when everything it starts is up; the stub
-	// addresses are in the file it wrote for its own use. A bootstrap that
+	// The stack prints one line when everything it starts is up; the
+	// addresses are in the files it wrote for its own use. A bootstrap that
 	// ended before that line is a failure to report and not a wait.
 	up, ended := make(chan struct{}), make(chan struct{})
 	go func() {
@@ -99,8 +99,9 @@ func TestRunConformance(t *testing.T) {
 		t.Fatal("the development stack did not come up")
 	}
 
-	issuer := role(t, dir, "issuer")
-	sink := role(t, dir, "sink")
+	issuer := role(t, dir, "stubs.addrs", "issuer")
+	sink := role(t, dir, "stubs.addrs", "sink")
+	public := role(t, dir, "cellad.addrs", "public")
 	driver, err := native.New(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -124,7 +125,7 @@ func TestRunConformance(t *testing.T) {
 		t.Fatal(err)
 	}
 	report := conformance.Run(t, conformance.Config{
-		URL:          "http://127.0.0.1:" + strconv.Itoa(port),
+		URL:          "http://" + public,
 		Token:        conformance.Minter(issuer),
 		Capabilities: declared,
 		SinkControl:  sink,
@@ -135,28 +136,11 @@ func TestRunConformance(t *testing.T) {
 	}
 }
 
-// freePortPair is a port nothing holds whose neighbor is free as well: the
-// bootstrap binds the public listener on the port it is given and the
-// internal one on the next.
-func freePortPair(t *testing.T) int {
+// role reads one address out of a file the bootstrap wrote, where each line
+// is a role and the address its process bound.
+func role(t *testing.T, dir, file, name string) string {
 	t.Helper()
-	for range 20 {
-		port := freePort(t)
-		next, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(port+1))
-		if err != nil {
-			continue
-		}
-		_ = next.Close()
-		return port
-	}
-	t.Fatal("no pair of free ports")
-	return 0
-}
-
-// role reads one stub's address out of the file the bootstrap wrote.
-func role(t *testing.T, dir, name string) string {
-	t.Helper()
-	data, err := os.ReadFile(filepath.Join(dir, "stubs.addrs"))
+	data, err := os.ReadFile(filepath.Join(dir, file))
 	if err != nil {
 		t.Fatal(err)
 	}
