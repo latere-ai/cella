@@ -51,6 +51,14 @@ func standIn(path string) func(hostsandbox.Config) *hostsandbox.Driver {
 	}
 }
 
+// srtSandbox builds the operating system's sandbox under the real sandbox
+// runtime srt. This test binary calls hostsandbox.Main, so on macOS the
+// automatic choice would be Seatbelt.
+func srtSandbox(c hostsandbox.Config) *hostsandbox.Driver {
+	c.Isolation = hostsandbox.IsolationSRT
+	return hostsandbox.New(c)
+}
+
 // tempDir is a temporary directory with its links resolved, which is how the
 // operating system's sandbox names it.
 func tempDir(t *testing.T) string {

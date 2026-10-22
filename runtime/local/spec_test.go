@@ -14,8 +14,6 @@ import (
 	"testing"
 	"time"
 
-	"latere.ai/x/pkg/hostsandbox"
-
 	"latere.ai/x/cella/manifest"
 	v1 "latere.ai/x/cella/manifest/v1"
 	driver "latere.ai/x/cella/runtime"
@@ -47,7 +45,7 @@ func underSRT(t *testing.T, h host, o Options) *Driver {
 	// The stand-in a case installed for its other half is set aside: this
 	// driver runs the real runtime.
 	standIn := newSandbox
-	newSandbox = hostsandbox.New
+	newSandbox = srtSandbox
 	d := h.open(t, o)
 	newSandbox = standIn
 	if err := d.Preflight(context.Background()); err != nil {

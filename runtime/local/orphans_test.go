@@ -17,6 +17,8 @@ import (
 	"testing"
 	"time"
 
+	"latere.ai/x/pkg/hostsandbox"
+
 	driver "latere.ai/x/cella/runtime"
 )
 
@@ -35,6 +37,9 @@ const (
 var beatCommand = []string{"/bin/sh", "-c", `i=0; while :; do i=$((i+1)); echo $i > beat.tmp && mv beat.tmp beat; sleep 0.05; done`}
 
 func TestMain(m *testing.M) {
+	// The test binary is the launcher of every stage under Seatbelt, as an
+	// embedder's own binary is.
+	hostsandbox.Main()
 	if os.Getenv(holderData) != "" {
 		os.Exit(holdAnAttachedCommand())
 	}
@@ -46,6 +51,7 @@ func TestMain(m *testing.M) {
 // input that never ends in the sandbox it is given, says so, and waits to be
 // killed.
 func holdAnAttachedCommand() int {
+	newSandbox = srtSandbox
 	if path := os.Getenv(holderStandIn); path != "" {
 		newSandbox = standIn(path)
 	}
