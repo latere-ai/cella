@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.21.0 - 2026-10-22
+
 ### Added
 
 - **A device's network can be `any`: any public host but those you
