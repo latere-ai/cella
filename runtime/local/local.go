@@ -12,7 +12,8 @@
 // holds is a scratch directory under the driver's data directory, which is
 // all a delete removes. The home directory is denied to every command but for
 // what is granted, the always-deny table of credential paths holds even inside
-// a grant, and the network is the host's own allow list or none.
+// a grant, and the network is the host's own: an allow list, none, or any
+// public host but those it blocks, which macOS's own sandbox alone enforces.
 //
 // A command with no stdin runs as a detached stage, so it survives a crash of
 // the process that started it, and one with stdin as an attached stage whose
@@ -42,10 +43,14 @@ import (
 // Name is this driver's name.
 const Name = "local"
 
-// The two network modes a host allows.
+// The network modes a host allows. NetworkAny admits any public host but
+// those Network.Blocked names; it is enforced only under Seatbelt, in a
+// program whose main calls hostsandbox.Main, and New refuses it elsewhere
+// with ErrNetworkUnenforceable.
 const (
 	NetworkNone      = "none"
 	NetworkAllowlist = "allowlist"
+	NetworkAny       = "any"
 )
 
 // ErrRunsAsRoot is a driver started as root. It confines a person's own
@@ -54,6 +59,13 @@ const (
 // response carries it, and a program running the worker tests for it with
 // errors.Is.
 var ErrRunsAsRoot = errors.New("local_runs_as_root: the local driver refuses to run as root; run it as the person whose folders it grants")
+
+// ErrNetworkUnenforceable is NetworkAny where the operating system's sandbox
+// cannot enforce it: under srt, the sandbox runtime on Linux and in a program
+// that does not call hostsandbox.Main, which admits only the hosts it is
+// given. It wraps hostsandbox.ErrUnenforceableNetwork.
+var ErrNetworkUnenforceable = fmt.Errorf("%w: a network of any host is enforced only by macOS's own sandbox, in a program whose main calls hostsandbox.Main; srt admits only the hosts it is given",
+	hostsandbox.ErrUnenforceableNetwork)
 
 // ErrLost is an attached command that ended with the process that held its
 // pipes, which reports exit code -1.
@@ -83,6 +95,38 @@ type Options struct {
 	// inherits its allowlisted variables from, PATH among them. Nil is
 	// os.LookupEnv.
 	Lookup func(string) (string, bool)
+	// Isolation is the operating system's sandbox each command runs under.
+	// The zero value picks Seatbelt on macOS in a program whose main calls
+	// hostsandbox.Main, and srt otherwise.
+	Isolation hostsandbox.Isolation
+	// OnRefused, when set, hears of each connection a command's network
+	// refused by its host or its port, under Seatbelt: the host and port it
+	// asked for and the sandbox it ran in, never the request. A command
+	// with no network reports nothing. It is called from the driver's own
+	// goroutines, concurrently for commands that run at once, and a
+	// detached command reports for as long as this process runs.
+	OnRefused func(Refusal)
+	// Allowed, when set, names what a sandbox's next command may reach
+	// beyond the host's network, read as each command starts: entries as
+	// Network.Hosts names them, a host or host:port (HostEntry builds one).
+	// Under an allow list each joins it. Under NetworkAny each lifts the
+	// host's own block of that host by name, an entry naming it alone or
+	// with that port, and one with a port beyond 443 and 80 admits that
+	// port; a host a wildcard entry blocks stays refused. A sandbox with no
+	// network is not widened, and a command that runs keeps the network it
+	// started with. It is called under the driver's lock, so it calls no
+	// method of the driver.
+	Allowed func(sandbox string, labels map[string]string) []string
+}
+
+// Refusal is one connection a command was refused: the host it asked for,
+// as hostsandbox reports it, the port, and the sandbox it ran in with its
+// labels. It carries nothing of the request itself.
+type Refusal struct {
+	Sandbox string
+	Labels  map[string]string
+	Host    string
+	Port    int
 }
 
 // Grant is one host folder a sandbox may use: an absolute, clean path to an
@@ -92,10 +136,15 @@ type Grant struct {
 	Write bool
 }
 
-// Network is what the host allows: none, or an allow list of hosts.
+// Network is what the host allows: none, an allow list of Hosts, or any
+// public host but those Blocked names. Under NetworkAny, Hosts adds ports
+// beyond 443 and 80, each as host:port. A Blocked entry is a host, an
+// address or a "*." wildcard over a host, alone or as host:port, and the
+// wildcard does not cover the host itself.
 type Network struct {
-	Mode  string
-	Hosts []string
+	Mode    string
+	Hosts   []string
+	Blocked []string
 }
 
 // systemDirs are the directories no grant may be or be under, by operating
@@ -117,6 +166,9 @@ type Driver struct {
 	network Network
 	lookup  func(string) (string, bool)
 	sandbox *hostsandbox.Driver
+	// onRefused and allowed are Options.OnRefused and Options.Allowed.
+	onRefused func(Refusal)
+	allowed   func(string, map[string]string) []string
 	// goos and euid are the platform and the effective user, read once and
 	// replaced by tests that check the refusals of another platform.
 	goos string
@@ -163,7 +215,7 @@ func New(o Options) (*Driver, error) {
 	}
 	d := &Driver{
 		data: resolved(data), home: home, lookup: lookup, goos: goruntime.GOOS, euid: os.Geteuid(),
-		attached: map[string]map[*attachedExec]struct{}{},
+		onRefused: o.OnRefused, allowed: o.Allowed, attached: map[string]map[*attachedExec]struct{}{},
 	}
 	for _, p := range append(slices.Clone(hostsandbox.AlwaysDenyRead), o.Deny...) {
 		d.deny = append(d.deny, expand(home, p))
@@ -186,9 +238,12 @@ func New(o Options) (*Driver, error) {
 		return nil, err
 	}
 	d.sandbox = newSandbox(hostsandbox.Config{
-		Home: home, Lookup: lookup,
+		Home: home, Lookup: lookup, Isolation: o.Isolation,
 		Alternative: "Or run this worker with another runtime, such as CELLA_RUNTIME=podman.",
 	})
+	if d.network.Mode == NetworkAny && !d.sandbox.Capabilities().NetworkModes[hostsandbox.NetworkDenylist] {
+		return nil, ErrNetworkUnenforceable
+	}
 	// A worker killed outright leaves its attached commands running, and
 	// this is the next worker over the same data directory starting.
 	if err = d.endOrphans(); err != nil {
@@ -291,43 +346,78 @@ func (d *Driver) checkRead(p string) (string, error) {
 	return real, nil
 }
 
-// checkNetwork reads the host's network: none when unset, or an allow list of
-// hosts, lowercased.
+// checkNetwork reads the host's network: none when unset, an allow list of
+// hosts, or any host but a deny list, each list lowercased with its repeats
+// dropped. A deny list belongs to any alone, and each entry of it reads as
+// hostsandbox reads one, or the network is refused rather than block
+// nothing.
 func checkNetwork(n Network) (Network, error) {
+	if n.Mode != NetworkAny && len(clean(n.Blocked)) > 0 {
+		return Network{}, fmt.Errorf("%w: a network of %q blocks nothing; a deny list is a network of %q's", driver.ErrInvalid, n.Mode, NetworkAny)
+	}
 	switch n.Mode {
 	case "", NetworkNone:
 		return Network{Mode: NetworkNone}, nil
 	case NetworkAllowlist:
-		out := Network{Mode: NetworkAllowlist}
-		for _, h := range n.Hosts {
-			if h = strings.ToLower(strings.TrimSpace(h)); h != "" && !slices.Contains(out.Hosts, h) {
-				out.Hosts = append(out.Hosts, h)
+		return Network{Mode: NetworkAllowlist, Hosts: clean(n.Hosts)}, nil
+	case NetworkAny:
+		out := Network{Mode: NetworkAny, Hosts: clean(n.Hosts), Blocked: clean(n.Blocked)}
+		for _, entry := range out.Blocked {
+			if !validEntry(entry) {
+				return Network{}, fmt.Errorf("%w: the blocked entry %q is not a host, an address or a wildcard over a host, alone or with a port from 1 to 65535", driver.ErrInvalid, entry)
 			}
 		}
 		return out, nil
 	}
-	return Network{}, fmt.Errorf("%w: the network is none or allowlist, not %q", driver.ErrInvalid, n.Mode)
+	return Network{}, fmt.Errorf("%w: the network is none, allowlist or any, not %q", driver.ErrInvalid, n.Mode)
+}
+
+// clean is a list of hosts lowercased and trimmed, without empty entries or
+// repeats.
+func clean(hosts []string) []string {
+	var out []string
+	for _, h := range hosts {
+		if h = strings.ToLower(strings.TrimSpace(h)); h != "" && !slices.Contains(out, h) {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
+// hostNetwork is the host's network as a worker registers it and as a
+// sandbox's egress is narrowed to it: any is the manifest's open, blocking
+// what the host blocks.
+func (d *Driver) hostNetwork() v1.HostNetwork {
+	if d.network.Mode == NetworkAny {
+		return v1.HostNetwork{Mode: string(v1.EgressOpen), Hosts: slices.Clone(d.network.Hosts), Blocked: slices.Clone(d.network.Blocked)}
+	}
+	return v1.HostNetwork{Mode: d.network.Mode, Hosts: slices.Clone(d.network.Hosts)}
 }
 
 func (d *Driver) Name() string      { return Name }
 func (d *Driver) Isolation() string { return v1.IsolationProcess }
 
 // Capabilities declares what an operating system's sandbox around a host
-// process provides: the two egress modes its allow-only proxy enforces, with
-// no gateway; files; a stage that outlives this process; a granted host
+// process provides: the egress modes its own proxy enforces, with no
+// gateway, which are none and an allow list, and open on a host whose
+// network is any; files; a stage that outlives this process; a granted host
 // folder as the workspace; and stdin on an exec with no terminal. It declares
 // no attach, dial, display, input, resize, pool, mesh, ingress, volume or
 // snapshot.
 func (d *Driver) Capabilities() driver.Capabilities {
+	egress := []v1.EgressMode{v1.EgressNone, v1.EgressAllowlist}
+	if d.network.Mode == NetworkAny {
+		egress = append(egress, v1.EgressOpen)
+	}
 	return driver.Capabilities{
-		Egress: []v1.EgressMode{v1.EgressNone, v1.EgressAllowlist},
+		Egress: egress,
 		Files:  true, Detach: true, HostWorkspace: true, EgressLocal: true, ExecStdin: true,
 	}
 }
 
 // Host is the machine this driver runs on as a worker registers it.
 func (d *Driver) Host() v1.HostInfo {
-	host := v1.HostInfo{OS: d.goos, Arch: goruntime.GOARCH, Network: v1.HostNetwork{Mode: d.network.Mode, Hosts: slices.Clone(d.network.Hosts)}}
+	host := v1.HostInfo{OS: d.goos, Arch: goruntime.GOARCH, Network: d.hostNetwork()}
 	for _, g := range d.grants {
 		host.Grants = append(host.Grants, v1.HostGrant{Path: g.Path, Write: g.Write})
 	}

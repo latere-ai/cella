@@ -11,10 +11,11 @@ import (
 	"latere.ai/x/cella/runtime/local"
 )
 
-// TestLoadLocal: the five CELLA_LOCAL_* variables fill the local driver's
-// host policy in both roles, a grant ending in neither :rw nor :ro is
-// read-only, the network defaults to none, and a network the driver does
-// not offer stops the start. They are not read for another runtime.
+// TestLoadLocal: the CELLA_LOCAL_* variables fill the local driver's host
+// policy in both roles, a grant ending in neither :rw nor :ro is read-only,
+// the network defaults to none, a network the driver does not offer stops
+// the start, and so does a deny list on a network other than any. They are
+// not read for another runtime.
 func TestLoadLocal(t *testing.T) {
 	vars := map[string]string{
 		"CELLA_RUNTIME":          "local",
@@ -52,6 +53,17 @@ func TestLoadLocal(t *testing.T) {
 	if _, err = LoadWorker(workerEnv(map[string]string{"CELLA_RUNTIME": "local", "CELLA_LOCAL_NETWORK": "open"})); err == nil ||
 		!strings.Contains(err.Error(), "CELLA_LOCAL_NETWORK") {
 		t.Errorf("an open network answered %v", err)
+	}
+	anyHost, err := LoadWorker(workerEnv(map[string]string{
+		"CELLA_RUNTIME": "local", "CELLA_LOCAL_NETWORK": "any", "CELLA_LOCAL_HOSTS": "github.com:22", "CELLA_LOCAL_BLOCKED": "pastebin.com, *.example.net",
+	}))
+	if want := (local.Network{Mode: local.NetworkAny, Hosts: []string{"github.com:22"}, Blocked: []string{"pastebin.com", "*.example.net"}}); err != nil ||
+		!reflect.DeepEqual(anyHost.Local.Network, want) {
+		t.Errorf("a network of any host read %+v, %v", anyHost.Local.Network, err)
+	}
+	if _, err = LoadWorker(workerEnv(map[string]string{"CELLA_RUNTIME": "local", "CELLA_LOCAL_NETWORK": "allowlist", "CELLA_LOCAL_BLOCKED": "pastebin.com"})); err == nil ||
+		!strings.Contains(err.Error(), "CELLA_LOCAL_BLOCKED") {
+		t.Errorf("a deny list on an allow list answered %v", err)
 	}
 	other, err := LoadWorker(workerEnv(map[string]string{"CELLA_LOCAL_GRANTS": "/Users/dev/site:rw"}))
 	if err != nil || len(other.Local.Grants) != 0 {

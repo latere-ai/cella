@@ -127,8 +127,9 @@ the host's own policy: no manifest widens them.
 | `CELLA_LOCAL_GRANTS` | unset | the folders a sandbox may use as its workspace, comma separated, each ending in `:rw` for read and write or `:ro` for read only, read only where it names neither. The root, the home directory, a system directory, a folder another user owns, and a path on the deny table are refused at start |
 | `CELLA_LOCAL_READ_PATHS` | unset | files or folders every command may read where they are, comma separated, such as `~/.gitconfig` or a toolchain like `~/.rustup`. The home directory, a system directory, and a path on the deny table are refused at start |
 | `CELLA_LOCAL_DENY` | unset | paths no command and no file route may read, comma separated, on top of the table the driver always denies (`~/.ssh`, `~/.env`, and the rest), such as a secret file inside a granted folder |
-| `CELLA_LOCAL_NETWORK` | `none` | `none` or `allowlist`. A sandbox's egress is narrowed to it and never widened: one asking for `open` on an `allowlist` host gets the host's list |
-| `CELLA_LOCAL_HOSTS` | unset | the hosts an `allowlist` network reaches, comma separated; on macOS a host alone is reached on ports 443 and 80, and `host:port` names another port |
+| `CELLA_LOCAL_NETWORK` | `none` | `none`, `allowlist` or `any`. A sandbox's egress is narrowed to it and never widened: one asking for `open` on an `allowlist` host gets the host's list. `any` admits any public host but those `CELLA_LOCAL_BLOCKED` names, so everything readable in a granted folder can be sent to any public host. It is enforced on macOS alone, and refused at start elsewhere |
+| `CELLA_LOCAL_HOSTS` | unset | the hosts an `allowlist` network reaches, comma separated; on macOS a host alone is reached on ports 443 and 80, and `host:port` names another port. Under `any`, the `host:port` entries for ports beyond 443 and 80 |
+| `CELLA_LOCAL_BLOCKED` | unset | the hosts an `any` network refuses, comma separated: a host, an address or `*.example.com` for the names below it (not `example.com` itself), alone or as `host:port`. Set with another network, it stops the start |
 
 ## Lifecycle
 

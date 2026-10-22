@@ -481,9 +481,12 @@ count:
   "network": {"mode": "allowlist", "hosts": ["github.com"]}}}]
 ```
 
-A manifest's `spec.workspace.host` must be inside a folder every live
-worker grants, and its egress is narrowed to what every live worker's
-network allows, with a warning naming what the sandbox gets. A change on
+A host whose network admits any public host but those it blocks reports
+the mode `open`, its deny list as `blocked`, and the `host:port` entries
+for ports beyond 443 and 80 as `hosts`. A manifest's
+`spec.workspace.host` must be inside a folder every live worker grants,
+and its egress is narrowed to what every live worker's network allows,
+with a warning naming what the sandbox gets. A change on
 the host takes effect when its program starts the worker again.
 
 ## On Kubernetes

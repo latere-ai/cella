@@ -196,7 +196,7 @@ func (d *Driver) Create(ctx context.Context, s driver.CreateSpec) (driver.Ref, e
 	}
 	r.Egress = v1.NarrowEgress(v1.Egress{
 		Mode: v1.EgressMode(s.Egress.Mode), AllowedHosts: s.Egress.AllowedHosts, DeniedHosts: s.Egress.DeniedHosts,
-	}, v1.HostNetwork{Mode: d.network.Mode, Hosts: d.network.Hosts})
+	}, d.hostNetwork())
 	now := time.Now().UTC()
 	r.State = driver.State{
 		ID: s.ID, Name: s.Name, Owner: s.Owner, Phase: driver.Running, Isolation: v1.IsolationProcess,
@@ -573,7 +573,7 @@ func (d *Driver) pathDirs() []string {
 // stage is one command as the operating system's sandbox runs it: the
 // sandbox's scratch read-write, its workspace as its grant allows, the read
 // paths, the PATH directories, the token, the deny table, and the network the
-// sandbox got.
+// sandbox got, with what the person allowed it since.
 func (d *Driver) stage(r record, name string, argv []string, env map[string]string, workdir string) hostsandbox.StageSpec {
 	p := d.paths(r.State.ID)
 	access := hostsandbox.ReadOnly
@@ -601,10 +601,7 @@ func (d *Driver) stage(r record, name string, argv []string, env map[string]stri
 	for _, dir := range d.pathDirs() {
 		grants = append(grants, hostsandbox.Path{Host: dir, Access: hostsandbox.ReadOnly})
 	}
-	network := hostsandbox.Network{Mode: hostsandbox.NetworkNone}
-	if r.Egress.Mode == v1.EgressAllowlist {
-		network = hostsandbox.Network{Mode: hostsandbox.NetworkAllowlist, Domains: slices.Clone(r.Egress.AllowedHosts)}
-	}
+	network := d.stageNetwork(r)
 	// The sandbox runtime places its own sockets in TMPDIR, and a socket's
 	// path has a short bound, which a sandbox's temporary directory deep in
 	// the data directory passes. So the runtime keeps this process's TMPDIR,
@@ -615,10 +612,37 @@ func (d *Driver) stage(r record, name string, argv []string, env map[string]stri
 	if tmp != "" {
 		argv = append([]string{"/usr/bin/env", "TMPDIR=" + tmp}, argv...)
 	}
-	return hostsandbox.StageSpec{
+	spec := hostsandbox.StageSpec{
 		Name: name, Argv: argv, Env: stageEnv, Workdir: workdir, Paths: grants,
 		Denied: slices.Clone(d.deny), Network: network, LogPath: filepath.Join(p.logs, name+".log"),
 	}
+	if d.onRefused != nil && network.Mode != hostsandbox.NetworkNone {
+		id, labels, report := r.State.ID, maps.Clone(r.State.Labels), d.onRefused
+		spec.OnRefused = func(host string, port int) {
+			report(Refusal{Sandbox: id, Labels: maps.Clone(labels), Host: host, Port: port})
+		}
+	}
+	return spec
+}
+
+// stageNetwork is the network a command of the sandbox starts with: the
+// egress the sandbox got, narrowed again to the host's network now, so a
+// sandbox started again after its host narrowed gets the narrower one, and
+// widened by what the person allowed it.
+func (d *Driver) stageNetwork(r record) hostsandbox.Network {
+	var n hostsandbox.Network
+	switch egress := v1.NarrowEgress(r.Egress, d.hostNetwork()); egress.Mode {
+	case v1.EgressAllowlist:
+		n = hostsandbox.Network{Mode: hostsandbox.NetworkAllowlist, Domains: slices.Clone(egress.AllowedHosts)}
+	case v1.EgressOpen:
+		n = hostsandbox.Network{Mode: hostsandbox.NetworkDenylist, Domains: slices.Clone(d.network.Hosts), Blocked: slices.Clone(egress.DeniedHosts)}
+	default:
+		return hostsandbox.Network{Mode: hostsandbox.NetworkNone}
+	}
+	if d.allowed != nil {
+		n = widen(n, d.network.Blocked, d.allowed(r.State.ID, maps.Clone(r.State.Labels)))
+	}
+	return n
 }
 
 // execName is the name of the n-th command of a sandbox.

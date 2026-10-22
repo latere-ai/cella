@@ -121,16 +121,36 @@ Your computer narrows what a sandbox asks for and never widens it:
 |---|---|---|---|
 | `none` | no network | no network | no network |
 | `allowlist` | no network | the sandbox's hosts that are also on your list | your list |
+| `any` | no network | the sandbox's hosts that you do not block | any public host but those you or the sandbox block |
 
 A sandbox that asks for more than your computer allows is created with
-what it allows, and carries a warning naming what it got. There is no
-`open` network: only named hosts are reached. On macOS a host named alone
-is reached over HTTPS on port 443 and HTTP on port 80, and another port
-is named with the host, as `github.com:22` for git over SSH. A proxy that
-runs beside each command is its only route out (on macOS it admits a
-connection by its host and port and never decrypts it), so an
-environment on the local runtime needs no egress gateway and reports
-`EgressEnforced` `True` with the reason `DriverEnforced`.
+what it allows, and carries a warning naming what it got. On macOS a
+host named alone is reached over HTTPS on port 443 and HTTP on port 80,
+and another port is named with the host, as `github.com:22` for git over
+SSH. A proxy that runs beside each command is its only route out (on
+macOS it admits a connection by its host and port and never decrypts
+it), so an environment on the local runtime needs no egress gateway and
+reports `EgressEnforced` `True` with the reason `DriverEnforced`.
+
+`any` is the one network that names what is refused rather than what is
+reached: any public host on the internet, but those
+`CELLA_LOCAL_BLOCKED` names. With it, everything readable in a granted
+folder can be sent to any public host, so choose it only for folders
+whose contents you would be fine to see leave your computer. It is never
+the default. Whatever a name resolves to, a command still reaches
+nothing on your computer, on the networks of its Wi-Fi and Ethernet, or
+at a private, link-local or other address that is not public, the cloud
+metadata endpoint among them. A blocked `*.example.com` covers the names
+below `example.com` and not `example.com` itself, so block both. On a Mac
+whose proxy or VPN app answers names with fake addresses (from
+198.18.0.0/15), a command under `any` reaches nothing until that mode is
+off. Only macOS's own sandbox enforces `any`: on Linux, srt admits only
+the hosts it is given, so a worker with `any` refuses to start rather
+than run with another network.
+
+A command keeps the network it started with: nothing widens or narrows
+the network of a command that runs, and a change reaches the commands
+that start after it.
 
 ## Files that run code later
 
