@@ -365,8 +365,7 @@ func issuerOf(t *testing.T, token string) string {
 // is the public URL of a control plane mounted under a base register, hold
 // their stream, and serve the sandboxes placed on them.
 func TestWorkerAndGatewayUnderABasePath(t *testing.T) {
-	proxyAddr, reverseAddr := freePort(t), freePort(t)
-	p := startPlaneWith(t, proxyAddr, reverseAddr, map[string]string{
+	p := startPlaneWith(t, gatewayAt, gatewayReverseAt, map[string]string{
 		"CELLA_BASE_PATH":  basePath,
 		"CELLA_PUBLIC_URL": "https://control.example.com" + basePath,
 	})
@@ -385,8 +384,8 @@ func TestWorkerAndGatewayUnderABasePath(t *testing.T) {
 		codec <- run(ctx, []string{"egress"}, env(map[string]string{
 			"CELLA_URL":                 p.url,
 			"CELLA_ENVIRONMENT_KEY":     key,
-			"CELLA_EGRESS_PROXY_ADDR":   proxyAddr,
-			"CELLA_EGRESS_REVERSE_ADDR": reverseAddr,
+			"CELLA_EGRESS_PROXY_ADDR":   "127.0.0.1:0",
+			"CELLA_EGRESS_REVERSE_ADDR": "127.0.0.1:0",
 		}), &out, &errOut)
 	}()
 	t.Cleanup(func() {

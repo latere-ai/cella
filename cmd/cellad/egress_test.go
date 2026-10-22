@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -221,8 +222,7 @@ func TestEgressEndToEnd(t *testing.T) {
 // sandbox whose boundary needs a gateway is created only when one
 // acknowledged its map.
 func TestTheEgressSubcommandConnects(t *testing.T) {
-	proxyAddr, reverseAddr := freePort(t), freePort(t)
-	plane := startPlane(t, proxyAddr, reverseAddr)
+	plane := startPlane(t, gatewayAt, gatewayReverseAt)
 
 	// The key is minted before the role starts, through the route an
 	// operator uses, so what the gateway carries is what a deployment holds.
@@ -236,8 +236,8 @@ func TestTheEgressSubcommandConnects(t *testing.T) {
 		codec <- run(ctx, []string{"egress"}, env(map[string]string{
 			"CELLA_URL":                 plane.url,
 			"CELLA_ENVIRONMENT_KEY":     key,
-			"CELLA_EGRESS_PROXY_ADDR":   proxyAddr,
-			"CELLA_EGRESS_REVERSE_ADDR": reverseAddr,
+			"CELLA_EGRESS_PROXY_ADDR":   "127.0.0.1:0",
+			"CELLA_EGRESS_REVERSE_ADDR": "127.0.0.1:0",
 		}), &out, &errOut)
 	}()
 	defer func() {
@@ -647,20 +647,20 @@ func doors(t *testing.T) (proxy, reverse net.Listener) {
 	return proxy, reverse
 }
 
-// freePort reserves a loopback address by binding and releasing it, for the
-// role run through its own variables, which binds the address itself.
-func freePort(t *testing.T) string {
-	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	address := ln.Addr().String()
-	if err = ln.Close(); err != nil {
-		t.Fatal(err)
-	}
-	return address
-}
+// gatewayAt and gatewayReverseAt are where a control plane points its
+// sandboxes for the gateway in the tests that run the egress role as a
+// subcommand. The plane starts first, because the role needs a key the plane
+// mints, so the doors the role binds are not known yet: the role binds port 0
+// and reports its doors, and the plane only writes these two into a
+// sandbox's environment, which no sandbox of those tests dials.
+const (
+	gatewayAt        = "gateway.invalid:3128"
+	gatewayReverseAt = "gateway.invalid:8080"
+)
+
+// doorsReport is the egress role's start-up line, which names the doors it
+// bound.
+var doorsReport = regexp.MustCompile(`egress proxy=(\S+) reverse=(\S+)`)
 
 func certificatePEM(t *testing.T, server *httptest.Server) string {
 	t.Helper()

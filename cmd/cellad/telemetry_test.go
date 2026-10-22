@@ -425,8 +425,7 @@ func TestTelemetryExportsOverOTLP(t *testing.T) {
 // them: its telemetry leaves over OTLP and its connection counts are the
 // control plane's, taken as its records arrive.
 func TestEgressRoleServesNoScrapeSurface(t *testing.T) {
-	proxyAddr, reverseAddr := freePort(t), freePort(t)
-	plane := startPlane(t, proxyAddr, reverseAddr)
+	plane := startPlane(t, gatewayAt, gatewayReverseAt)
 
 	key := plane.environmentKey(t)
 	var out syncBuffer
@@ -436,8 +435,8 @@ func TestEgressRoleServesNoScrapeSurface(t *testing.T) {
 		codec <- run(ctx, []string{"egress"}, env(map[string]string{
 			"CELLA_URL":                 plane.url,
 			"CELLA_ENVIRONMENT_KEY":     key,
-			"CELLA_EGRESS_PROXY_ADDR":   proxyAddr,
-			"CELLA_EGRESS_REVERSE_ADDR": reverseAddr,
+			"CELLA_EGRESS_PROXY_ADDR":   "127.0.0.1:0",
+			"CELLA_EGRESS_REVERSE_ADDR": "127.0.0.1:0",
 		}), &out, io.Discard)
 	}()
 	defer func() {
@@ -449,7 +448,11 @@ func TestEgressRoleServesNoScrapeSurface(t *testing.T) {
 		}
 	}()
 	deadline := time.Now().Add(15 * time.Second)
-	for !strings.Contains(out.String(), "egress proxy=") {
+	var doors []string
+	for {
+		if doors = doorsReport.FindStringSubmatch(out.String()); doors != nil {
+			break
+		}
 		if time.Now().After(deadline) {
 			t.Fatalf("the egress role never reported its doors; stdout %q", out.String())
 		}
@@ -460,7 +463,7 @@ func TestEgressRoleServesNoScrapeSurface(t *testing.T) {
 	}
 	// Neither door serves an exposition: they speak the boundary's
 	// protocols and nothing else.
-	for _, addr := range []string{proxyAddr, reverseAddr} {
+	for _, addr := range doors[1:] {
 		code, body := get(t, "http://"+addr+"/metrics")
 		if code == http.StatusOK && strings.Contains(body, "# TYPE cella_") {
 			t.Errorf("the gateway served an exposition on %s", addr)

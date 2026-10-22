@@ -274,7 +274,7 @@ func TestServeWithAdmission(t *testing.T) {
 // TestServeWithoutAdmissionSaysBuiltin: an installation that configures no
 // endpoint runs the identity step, and its start-up line says so.
 func TestServeWithoutAdmissionSaysBuiltin(t *testing.T) {
-	plane := startPlaneWith(t, freePort(t), freePort(t), nil)
+	plane := startPlaneWith(t, gatewayAt, gatewayReverseAt, nil)
 	if !strings.Contains(plane.out.String(), "admission=builtin") {
 		t.Fatalf("the start-up line = %q", plane.out.String())
 	}
