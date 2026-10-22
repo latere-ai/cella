@@ -229,8 +229,10 @@ type EnvironmentStatus struct {
 	// Capabilities is the intersection of the live workers' reports, or the
 	// in-process driver's own.
 	Capabilities Capabilities `json:"capabilities,omitzero"`
-	// Workers and Gateways are how many of each hold a stream open, and
-	// LastHeartbeat when the most recent worker was last heard from.
+	// Workers is how many workers hold a stream open or have registered
+	// and not opened theirs yet, Gateways how many gateways hold a stream
+	// open, and LastHeartbeat when the most recent worker was last heard
+	// from.
 	Workers int `json:"workers,omitempty"`
 	// Hosts is one entry per live worker whose driver reports the machine
 	// it runs on: its operating system, architecture, grants and network

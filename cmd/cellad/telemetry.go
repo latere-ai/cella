@@ -151,8 +151,9 @@ func environmentSeries(environments []v1.Environment) []metrics.Series {
 }
 
 // workerSeries is the scrape-time answer for cella_workers_connected: every
-// environment with how many of its workers hold a stream, zero included, so
-// an environment whose workers all left reads zero rather than nothing.
+// environment with the workers its status counts, those holding a stream and
+// those registered to open one, zero included, so an environment whose
+// workers all left reads zero rather than nothing.
 func workerSeries(environments []v1.Environment) []metrics.Series {
 	out := make([]metrics.Series, 0, len(environments))
 	for _, obj := range environments {

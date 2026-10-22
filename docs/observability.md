@@ -84,7 +84,7 @@ code.
 | Metric | Labels |
 |---|---|
 | `cella_environments` | `phase` (`Pending`, `Ready`, `Offline`), `reason` (`HeartbeatLost` or `DriverNotReady` on `Offline`, empty otherwise) |
-| `cella_workers_connected` | `environment`: how many of its workers hold a stream, `0` where none does |
+| `cella_workers_connected` | `environment`: how many of its workers hold a stream or have registered to open one, `0` where none does |
 
 Both read the records `GET /v1/environments` answers with, so the scrape
 and the route agree. Like `cella_sandboxes`, they are published by the

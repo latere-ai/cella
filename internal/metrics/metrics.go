@@ -54,8 +54,9 @@ type Options struct {
 	Capacity func() []Series
 	// Environments is how many environments are in each phase, labeled
 	// phase and reason, and Workers how many workers of each environment
-	// hold a stream, labeled environment. Both read the controller's
-	// environment records, which its phase loop keeps current.
+	// hold a stream or have registered to open one, labeled environment.
+	// Both read the controller's environment records, which its phase loop
+	// keeps current.
 	Environments func() []Series
 	Workers      func() []Series
 }

@@ -241,7 +241,7 @@ var help = map[string]string{
 	"cella_gateways_connected":              "gateways of the environment holding a sync stream",
 	"cella_gateway_snapshots_total":         "boundary snapshots sent to a joining gateway",
 	"cella_environments":                    "environments by phase and the reason they are in it",
-	"cella_workers_connected":               "workers of the environment holding a stream",
+	"cella_workers_connected":               "workers of the environment holding a stream or registered to open one",
 	"cella_pool_size":                       "prewarmed entries by state",
 	"cella_queue_depth":                     "sandboxes waiting in each queue of a queued environment",
 	"cella_capacity":                        "each quantity an environment declares, and what its sandboxes hold of it",
