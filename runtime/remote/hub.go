@@ -551,6 +551,10 @@ func (c *connection) hello(m Message) error {
 	if err != nil {
 		return err
 	}
+	// From here operations reach the worker. A registration alone already
+	// counts in its environment's status, so this line is what tells an
+	// operator that the stream itself is open.
+	c.hub.log.Info("a worker's stream opened", "environment", c.environment, "worker", w.id)
 	if m.Watch {
 		go c.watch()
 	}

@@ -4,6 +4,9 @@
 package remote_test
 
 import (
+	"bytes"
+	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -69,5 +72,45 @@ func TestARegistrationIsPendingUntilItsStreamOpens(t *testing.T) {
 	mu.Unlock()
 	if pendingOf(t, hub, "env_a", waiting.Worker) {
 		t.Error("a registration past the pending window with no stream is still pending")
+	}
+}
+
+// TestTheHubLogsTheStreamItOpens: the hub logs a worker's stream once the
+// hello binds it to its registration, naming the worker, and logs nothing of
+// the kind for a registration whose stream has not opened. The registration
+// already counts in the environment's status, so the line is the one sign
+// that operations reach the worker.
+func TestTheHubLogsTheStreamItOpens(t *testing.T) {
+	var mu sync.Mutex
+	var logged bytes.Buffer
+	log := slog.New(slog.NewTextHandler(writerFunc(func(p []byte) (int, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		return logged.Write(p)
+	}), nil))
+	read := func() string {
+		mu.Lock()
+		defer mu.Unlock()
+		return logged.String()
+	}
+	hub := remote.NewHub(remote.HubOptions{Offline: time.Minute, Log: log})
+	registration := remote.Registration{Driver: "podman", Isolation: v1.IsolationContainer}
+	opened, err := hub.Register("env_a", registration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waiting, err := hub.Register("env_a", registration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	openStream(t, hub, "env_a", opened.Worker, remote.ServeOptions{})
+	waitFor(t, "the opened stream logged", func() bool {
+		return strings.Contains(read(), `msg="a worker's stream opened" environment=env_a worker=`+opened.Worker)
+	})
+	if n := strings.Count(read(), "a worker's stream opened"); n != 1 {
+		t.Errorf("one stream opened and the hub logged %d:\n%s", n, read())
+	}
+	if strings.Contains(read(), waiting.Worker) {
+		t.Errorf("a registration whose stream has not opened was logged:\n%s", read())
 	}
 }
