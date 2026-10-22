@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -53,9 +54,16 @@ func labelOf(m map[string]string, key string) string {
 	return m[key]
 }
 
-// The type of an activity line that records an approval rather than an
-// operation.
-const TypeApproval = "approval"
+// The types of an activity line that records something other than an
+// operation: an approval; a connection a command was refused, with its host
+// and port; and a host the person allowed, for one session or saved to the
+// host policy for every session.
+const (
+	TypeApproval       = "approval"
+	TypeNetworkRefused = "network_refused"
+	TypeHostAllowed    = "host_allowed"
+	TypeHostSaved      = "host_saved"
+)
 
 // Entry is one line of the activity log.
 type Entry struct {
@@ -70,6 +78,9 @@ type Entry struct {
 	Command []string `json:"command,omitempty"`
 	Path    string   `json:"path,omitempty"`
 	To      string   `json:"to,omitempty"`
+	// Host and Port are a refused connection's, or an allowed host's.
+	Host string `json:"host,omitempty"`
+	Port int    `json:"port,omitempty"`
 	// Outcome is ok, refused or failed, and Reason why.
 	Outcome  string `json:"outcome,omitempty"`
 	Reason   string `json:"reason,omitempty"`
@@ -101,6 +112,8 @@ func (e Entry) Line(home string) string {
 		parts = append(parts, Shorten(home, e.Path)+" -> "+Shorten(home, e.To))
 	case e.Path != "":
 		parts = append(parts, Shorten(home, e.Path))
+	case e.Host != "":
+		parts = append(parts, net.JoinHostPort(e.Host, strconv.Itoa(e.Port)))
 	}
 	line := strings.Join(parts, "  ")
 	switch {

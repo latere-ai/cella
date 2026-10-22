@@ -279,10 +279,23 @@ func credentialsOr(err, otherwise error) error {
 // sessions start without asking, unless the query or the file says
 // otherwise. The paths read outside the folders and the remembered triggers
 // the file kept stay.
+//
+// It never proposes the network any. A query asking for it is refused, and
+// a file that had it proposes the allowlist of DefaultHosts in its place:
+// with any, everything readable in a granted folder can be sent to any
+// public host, so the person chooses it with a change of the host policy
+// once the computer is connected, or through a client whose consent states
+// it (Connect with terms that name it).
 func ProposePolicy(previous Policy, q ConnectQuery, home, cwd string, name func() string) (Policy, error) {
+	if q.Network == NetworkAny {
+		return Policy{}, errors.New("the network any is never proposed at a connect: connect with allowlist or none, then choose any with a change of the host policy, after reading what it allows")
+	}
 	p := Policy{
 		Name: previous.Name, SessionStart: previous.SessionStart, Folders: previous.Folders, Network: previous.Network,
 		ReadPaths: previous.ReadPaths, RememberedTriggers: previous.RememberedTriggers,
+	}
+	if p.Network.Mode == NetworkAny {
+		p.Network = Network{}
 	}
 	if q.SessionStart != "" || p.SessionStart == "" {
 		p.SessionStart = orDefault(q.SessionStart, SessionStartAllow)
@@ -312,6 +325,7 @@ func ProposePolicy(previous Policy, q ConnectQuery, home, cwd string, name func(
 	if q.Network != "" || p.Network.Mode == "" {
 		p.Network.Mode = orDefault(q.Network, NetworkAllowlist)
 	}
+	p.Network.Blocked = nil
 	switch {
 	case p.Network.Mode == NetworkNone:
 		p.Network.Hosts = nil

@@ -73,6 +73,15 @@ const (
 	CodeRenameFailed       = "device_rename_failed"
 	CodeCredentialsNeeded  = "device_credentials_needed"
 	CodeHomeFolderFailed   = "device_home_folder_failed"
+	// CodeNetworkUnenforceable is a host policy whose network is any on a
+	// computer whose sandbox cannot enforce it: srt, on Linux and in a
+	// program that does not call hostsandbox.Main, admits only the hosts it
+	// is given. The policy is refused rather than run with another network.
+	CodeNetworkUnenforceable = "device_network_unenforceable"
+	// CodeHostNotAllowed is a host a person asked to allow that cannot be:
+	// not a host or a port, on a network of none, or blocked by a wildcard
+	// entry, which the detail names.
+	CodeHostNotAllowed = "device_host_not_allowed"
 
 	// The platform's own refusals of a device's create (platform spec 220),
 	// which reach the CLI as Cella's forbidden with the reason in its
@@ -173,6 +182,14 @@ var refusals = map[string]struct{ message, hint string }{
 	CodeHomeFolderFailed: {
 		"A granted folder holds your home directory, and ~/.config or ~/.docker could not be created in it.",
 		"The detail names which one and why. Create it yourself, then run `latere devices connect` again.",
+	},
+	CodeNetworkUnenforceable: {
+		"This computer cannot enforce the network any, so the host policy was not used.",
+		"Any is enforced by macOS's own sandbox alone. Choose allowlist or none here.",
+	},
+	CodeHostNotAllowed: {
+		"This host cannot be allowed here.",
+		"The detail says why.",
 	},
 	CodeRenameFailed: {
 		"The device could not be renamed, so its name is unchanged.",

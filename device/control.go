@@ -149,7 +149,34 @@ func (e *Engine) ControlHandler() http.Handler {
 		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("POST /v1/remove", e.handleRemove)
+	mux.HandleFunc("POST /v1/sessions/{session}/hosts", func(w http.ResponseWriter, r *http.Request) {
+		e.handleHost(w, r, func(ctx context.Context, host string, port int) error {
+			return e.AllowSessionHost(ctx, r.PathValue("session"), host, port)
+		})
+	})
+	mux.HandleFunc("POST /v1/policy/hosts", func(w http.ResponseWriter, r *http.Request) {
+		e.handleHost(w, r, func(_ context.Context, host string, port int) error { return e.SaveHost(host, port) })
+	})
 	return mux
+}
+
+// handleHost is POST /v1/sessions/{session}/hosts, which allows a host for
+// one session (AllowSessionHost), and POST /v1/policy/hosts, which saves it
+// to the host policy (SaveHost): {"host": "...", "port": 443}, as a
+// network_refused event names them.
+func (e *Engine) handleHost(w http.ResponseWriter, r *http.Request, allow func(context.Context, string, int) error) {
+	body, ok := httpjson.DecodeBody[struct {
+		Host string `json:"host"`
+		Port int    `json:"port"`
+	}](w, r)
+	if !ok {
+		return
+	}
+	if err := allow(r.Context(), body.Host, body.Port); err != nil {
+		writeControlError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // handleProposal is GET /v1/connect?name=&folder=&network=&host=&session_start=,
@@ -258,6 +285,8 @@ func writeControlError(w http.ResponseWriter, err error) {
 		status, code, message = http.StatusNotFound, "not_remembered", "No remembered trigger has this id."
 	case errors.Is(err, ErrNotRunning):
 		status, code, message = http.StatusConflict, "not_serving", "This computer is not serving right now."
+	case errors.Is(err, ErrNoSession):
+		status, code, message = http.StatusNotFound, "no_session", "No sandbox of this session runs on this computer."
 	case errors.Is(err, ErrNotPending):
 		status, code, message = http.StatusNotFound, "not_pending", "Nothing waits for an answer under this id; it was answered or withdrawn."
 	case errors.Is(err, ErrNotRememberable):
@@ -358,8 +387,8 @@ func (e *Engine) handleActivity(w http.ResponseWriter, r *http.Request) {
 
 // handleApprovals answers the creates waiting for the person, and with
 // follow=1 keeps the stream open with every create asked, answered or
-// withdrawn and every session started, asked or not, which is what a client
-// tells the person of. A follower is a client that can answer: while it
+// withdrawn, every session started, asked or not, and every connection a
+// command was refused, which is what a client tells the person of. A follower is a client that can answer: while it
 // holds the stream, a create waits for it.
 func (e *Engine) handleApprovals(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("follow") != "1" {
@@ -386,7 +415,7 @@ func (e *Engine) handleApprovals(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			switch ev.Kind {
-			case EventAsked, EventAnswered, EventWithdrawn, EventStarted:
+			case EventAsked, EventAnswered, EventWithdrawn, EventStarted, EventNetworkRefused:
 				if !stream.send(ev) {
 					return
 				}

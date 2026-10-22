@@ -155,6 +155,17 @@ type Engine struct {
 	devDone   chan struct{}
 	activity  *Activity
 	lastCheck time.Time
+
+	// allowMu guards what the person allowed beyond the host policy while
+	// the current driver serves: by session, the entries allowed for that
+	// session alone (AllowSessionHost), and the entries saved to the policy
+	// since the driver was built (SaveHost), which every session's next
+	// command gets until the next driver reads them from the file. The
+	// driver reads them under its own lock, so allowMu is never held while
+	// calling the driver.
+	allowMu sync.Mutex
+	allowed map[string][]string
+	saved   []string
 }
 
 // New builds an engine. Nothing runs until Run.
@@ -450,6 +461,9 @@ func (e *Engine) serveDevice(ctx context.Context, policy Policy) (err error) {
 	}
 	e.confirmSavedLogin(devCtx, policy.Device)
 	e.notice(SessionStartNotice(policy))
+	if words := NetworkNotice(policy); words != "" {
+		e.notice(words)
+	}
 	for {
 		if err = e.waitWhilePaused(devCtx); err != nil {
 			return nil //nolint:nilerr // the context ending under a pause is the person stopping the engine, or a removal the deferred function answers
@@ -522,7 +536,7 @@ func (e *Engine) waitWhilePaused(ctx context.Context) error {
 func DriverOptions(p Policy, paths Paths, goos string) (local.Options, error) {
 	o := local.Options{
 		DataDir: paths.DataDir(p.Device), Deny: paths.Deny(goos), Home: paths.Home,
-		Network: local.Network{Mode: p.Network.Mode, Hosts: p.Network.Hosts},
+		Network: asLocal(p.Network),
 	}
 	for _, f := range p.Folders {
 		path, err := Expand(paths.Home, f.Path)
@@ -572,9 +586,16 @@ func CheckDriver(p Policy, paths Paths, goos string, build func(local.Options) (
 // engine serves again: after a pause, a reload, or a key renewed at its
 // expiry.
 func (e *Engine) serveOnce(ctx context.Context) (bool, error) {
+	// The driver reads the policy as it is now, the hosts saved to it
+	// included, and nothing is allowed for a session yet: the policy is
+	// read and the allowances forgotten under allowMu, which SaveHost holds
+	// to change both.
+	e.allowMu.Lock()
 	e.mu.Lock()
 	policy := e.policy
 	e.mu.Unlock()
+	e.allowed, e.saved = nil, nil
+	e.allowMu.Unlock()
 	o, err := DriverOptions(policy, e.cfg.Paths, e.cfg.GOOS)
 	if err != nil {
 		return false, Fail(CodePolicyInvalid, "", err)
@@ -582,14 +603,22 @@ func (e *Engine) serveOnce(ctx context.Context) (bool, error) {
 	if err = os.MkdirAll(o.DataDir, 0o700); err != nil {
 		return false, Fail(CodeServeFailed, "create the sandboxes' directory", err)
 	}
+	o.OnRefused, o.Allowed = e.refusedHost, e.allowedFor
 	d, err := e.cfg.NewDriver(o)
 	switch {
 	case errors.Is(err, local.ErrRunsAsRoot):
 		return false, Fail(CodeRunsAsRoot, "", err)
+	case errors.Is(err, local.ErrNetworkUnenforceable):
+		return false, Fail(CodeNetworkUnenforceable, "", err)
 	case err != nil:
 		return false, Fail(CodePolicyInvalid, "", err)
 	}
 	defer func() {
+		// The worker stopped every sandbox as it returned, so what was
+		// allowed for their sessions goes with them.
+		e.allowMu.Lock()
+		e.allowed = nil
+		e.allowMu.Unlock()
 		if c, ok := d.(io.Closer); ok {
 			_ = c.Close()
 		}
@@ -1079,12 +1108,17 @@ func (e *Engine) recount() {
 		if s.Phase != runtime.Running {
 			continue
 		}
-		id := labelOf(s.Labels, e.cfg.Labels.Session)
-		if id == "" {
-			id = s.ID
-		}
-		sessions[id] = true
+		sessions[e.sessionOf(s.ID, s.Labels)] = true
 	}
+	// A session with no sandbox running here has ended or been removed:
+	// what was allowed for it alone is forgotten.
+	e.allowMu.Lock()
+	for session := range e.allowed {
+		if !sessions[session] {
+			delete(e.allowed, session)
+		}
+	}
+	e.allowMu.Unlock()
 	e.mu.Lock()
 	changed := e.sessions != len(sessions)
 	e.sessions = len(sessions)
@@ -1239,8 +1273,8 @@ func (e *Engine) Reload() error {
 	if policy.Device != env {
 		return Fail(CodePolicyInvalid, fmt.Sprintf("the file names the device %s, and this engine serves %s", policy.Device, env), nil)
 	}
-	if err = CheckDriver(policy, e.cfg.Paths, e.cfg.GOOS, e.cfg.NewDriver); err != nil {
-		return Fail(CodePolicyInvalid, "", err)
+	if err = e.refusePolicy(policy); err != nil {
+		return err
 	}
 	e.mu.Lock()
 	e.policy = policy

@@ -3,7 +3,10 @@
 
 package device
 
-import "sync"
+import (
+	"sync"
+	"time"
+)
 
 // The kinds of event a client of the engine receives.
 const (
@@ -16,6 +19,11 @@ const (
 	// with the facts its prompt would show, so a client can tell the person.
 	EventStarted = "started"
 	EventNotice  = "notice"
+	// EventNetworkRefused is a connection a session's command was refused
+	// by this computer's network or the session's own, with the host and
+	// port it asked for, so a client can offer to allow the host for the
+	// session (AllowSessionHost) or for every session (SaveHost).
+	EventNetworkRefused = "network_refused"
 )
 
 // The states of the engine.
@@ -32,12 +40,13 @@ const (
 
 // Event is one thing a client of the engine is told: a change of status, a
 // line of activity, a create asked, answered or withdrawn, a session
-// started, or a notice the person should read.
+// started, a connection refused, or a notice the person should read.
 type Event struct {
-	Kind     string    `json:"kind"`
-	Status   *Status   `json:"status,omitempty"`
-	Activity *Entry    `json:"activity,omitempty"`
-	Approval *Approval `json:"approval,omitempty"`
+	Kind     string          `json:"kind"`
+	Status   *Status         `json:"status,omitempty"`
+	Activity *Entry          `json:"activity,omitempty"`
+	Approval *Approval       `json:"approval,omitempty"`
+	Refusal  *NetworkRefusal `json:"refusal,omitempty"`
 	// Answer and By are an answered create's: the answer and the client
 	// that gave it.
 	Answer string `json:"answer,omitempty"`
@@ -45,6 +54,22 @@ type Event struct {
 	// Notice is a sentence for the person, such as a warning that the key
 	// is kept in a file.
 	Notice string `json:"notice,omitempty"`
+}
+
+// NetworkRefusal is one connection a command was refused: the host it asked
+// for and the port, and the session, agent and sandbox it came from. It
+// carries nothing of the request: no path, header or body. The host is the
+// one the command asked for, chosen by whatever runs there, so a client
+// shows it exactly. A command repeating a refusal is told once a minute.
+// Session is empty for a sandbox its plane names no session on; a client
+// then allows the host by the sandbox's id.
+type NetworkRefusal struct {
+	Time    time.Time `json:"time"`
+	Session string    `json:"session,omitempty"`
+	Agent   string    `json:"agent,omitempty"`
+	Sandbox string    `json:"sandbox"`
+	Host    string    `json:"host"`
+	Port    int       `json:"port"`
 }
 
 // Status is what /v1/status answers and the terminal's status line shows.

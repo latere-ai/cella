@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"slices"
@@ -19,11 +20,16 @@ import (
 	"latere.ai/x/pkg/atomicfile"
 )
 
-// The two networks a device allows. The local driver offers no open
-// network: its sandbox runtime allows named hosts only.
+// The networks a device allows: an allow list of hosts, none, or any
+// public host but those it blocks. Any is never a default, nor proposed at
+// a connect: with it everything readable in a granted folder can be sent to
+// any public host, so the person chooses it knowing that. Only macOS's own
+// sandbox enforces it; elsewhere a policy naming it is refused with
+// CodeNetworkUnenforceable.
 const (
 	NetworkAllowlist = "allowlist"
 	NetworkNone      = "none"
+	NetworkAny       = "any"
 )
 
 // DefaultHosts seed the allowlist at connect: the git and package hosts a
@@ -74,11 +80,15 @@ type Folder struct {
 	Write bool   `yaml:"write" json:"write"`
 }
 
-// Network is the network sessions may reach: an allowlist of hosts, or
-// none.
+// Network is the network sessions may reach: an allowlist of hosts, none,
+// or any public host but those Blocked names. Under any, Hosts names the
+// ports beyond 443 and 80 a host is reached on, each as host:port. A
+// Blocked entry is a host, an address or "*.example.com" for the names below
+// example.com (not example.com itself), alone or as host:port.
 type Network struct {
-	Mode  string   `yaml:"mode" json:"mode"`
-	Hosts []string `yaml:"hosts,flow" json:"hosts"`
+	Mode    string   `yaml:"mode" json:"mode"`
+	Hosts   []string `yaml:"hosts,flow" json:"hosts"`
+	Blocked []string `yaml:"blocked,flow,omitempty" json:"blocked,omitempty"`
 }
 
 // Remembered is one scheduled trigger admitted without asking: by its id
@@ -94,6 +104,9 @@ const policyHeader = `# The host policy of this computer for latere devices (spe
 # The platform never writes this file. A change to folders, network or
 # read_paths takes effect at the next 'latere devices connect'; one to
 # session_start (allow or ask) or remembered_triggers at the next session.
+# network.mode is allowlist (the hosts listed), none, or any: any public
+# host but those under network.blocked, so everything readable in a granted
+# folder can be sent to any public host. Any is enforced on macOS alone.
 # 'latere devices policy' prints and checks it.
 `
 
@@ -181,9 +194,11 @@ func Shorten(home, p string) string {
 }
 
 // Problems lists what is wrong with the policy's own shape: a network that
-// is not allowlist or none, a path neither absolute nor under ~, a
-// remembered trigger missing its id, its version or its expiry. The folder
-// rules themselves are the local driver's, which CheckFolders applies.
+// is not allowlist, none or any, a blocked list on a network other than
+// any, a host under any that names no port, a path neither absolute nor
+// under ~, a remembered trigger missing its id, its version or its expiry.
+// The folder rules and the reading of each blocked entry are the local
+// driver's, which CheckDriver applies.
 func (p Policy) Problems(home string) []string {
 	var out []string
 	switch p.SessionStart {
@@ -192,9 +207,19 @@ func (p Policy) Problems(home string) []string {
 		out = append(out, fmt.Sprintf("session_start is %q; it is allow or ask", p.SessionStart))
 	}
 	switch p.Network.Mode {
-	case NetworkAllowlist, NetworkNone:
+	case NetworkAllowlist, NetworkNone, NetworkAny:
 	default:
-		out = append(out, fmt.Sprintf("network.mode is %q; it is allowlist or none", p.Network.Mode))
+		out = append(out, fmt.Sprintf("network.mode is %q; it is allowlist, none or any", p.Network.Mode))
+	}
+	if p.Network.Mode != NetworkAny && len(p.Network.Blocked) > 0 {
+		out = append(out, "network.blocked is the deny list of network.mode any, and the mode is "+p.Network.Mode)
+	}
+	if p.Network.Mode == NetworkAny {
+		for _, h := range p.Network.Hosts {
+			if _, _, err := net.SplitHostPort(h); err != nil {
+				out = append(out, fmt.Sprintf("network.hosts under any names a port beyond 443 and 80 as host:port, and %q names none; any already reaches every host on those two", h))
+			}
+		}
 	}
 	if len(p.Folders) == 0 {
 		out = append(out, "folders is empty; a session works in one of the folders this computer grants")

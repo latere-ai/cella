@@ -279,6 +279,33 @@ refuses it, `PutPolicy` changes the name, folders or network, and
 `Remove` removes the device. The control socket answers the same over
 HTTP.
 
+The host policy's network is `allowlist`, `none` or `any`, the last with
+a `blocked` list of hosts. The engine refuses `any` with
+`device_network_unenforceable` where the sandbox cannot enforce it, which
+is everywhere but macOS, never running it as another network. It is never
+the default, and `ProposeConnect` never proposes it: the connect screen
+and its facts say that with it everything readable in a granted folder
+can be sent to any public host, and a client offers it with a change of
+the policy.
+
+Each connection a session's command is refused, by this computer's
+network or the session's own, reaches every subscriber as a
+`network_refused` event and the activity log as a line: the host and port
+the command asked for, and the session, agent and sandbox it came from,
+never the request itself. `AllowSessionHost(ctx, session, host, port)` lets
+that session's later commands reach the host, on this computer alone and
+without changing the policy file, until the session's sandbox stops or is
+deleted here, or the engine stops, pauses or reloads. `SaveHost(host,
+port)` writes it into the policy for every session, whose next commands
+reach it at once, with no restart. A command that runs keeps the network
+it started with: the host reaches the next one. Under `any`, allowing a
+host lifts the policy's own block of it by name and admits a port beyond
+443 and 80; a host a `*.` entry blocks is refused with
+`device_host_not_allowed` until that entry is narrowed. Over the control
+socket, `POST /v1/sessions/{session}/hosts` and `POST /v1/policy/hosts`
+take `{"host": "...", "port": 443}`, and `GET /v1/approvals?follow=1`
+carries the refusals.
+
 Before it serves a writable grant of a folder above the person's home
 directory, the engine creates `~/.config` and `~/.docker` where they are
 missing, mode 0700. Each holds a path the sandbox always denies, and on

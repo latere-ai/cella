@@ -15,6 +15,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"latere.ai/x/cella/runtime/local"
 )
 
 // What a desktop client does through the control socket that the terminal
@@ -101,14 +103,17 @@ type Proposal struct {
 }
 
 // The kinds of fact the person is shown before this computer is connected.
+// FactNetworkPorts are the hosts the network any reaches on a port beyond
+// 443 and 80.
 const (
-	FactFolders    = "folders"
-	FactSecrets    = "secrets"
-	FactNetwork    = "network"
-	FactReadPaths  = "read_paths"
-	FactWho        = "who"
-	FactRemembered = "remembered"
-	FactLog        = "log"
+	FactFolders      = "folders"
+	FactSecrets      = "secrets"
+	FactNetwork      = "network"
+	FactNetworkPorts = "network_ports"
+	FactReadPaths    = "read_paths"
+	FactWho          = "who"
+	FactRemembered   = "remembered"
+	FactLog          = "log"
 )
 
 // Fact is one thing the person is told before this computer is connected:
@@ -155,7 +160,23 @@ func connectFacts(p Policy) []Fact {
 		folders.Items = append(folders.Items, fmt.Sprintf("%s (%s)", f.Path, access))
 	}
 	network := Fact{Kind: FactNetwork, Text: "Network: none. Commands on this computer reach no host."}
-	if p.Network.Mode != NetworkNone && len(p.Network.Hosts) > 0 {
+	var ports *Fact
+	switch {
+	case p.Network.Mode == NetworkAny:
+		network = Fact{
+			Kind: FactNetwork, Note: anyWords,
+			Text: "Network: any. Commands on this computer may reach any public host on\n" +
+				"the internet, over HTTPS and HTTP, but not this computer or the\nnetworks it is on.",
+		}
+		if len(p.Network.Blocked) > 0 {
+			network.Text = "Network: any. Commands on this computer may reach any public host on\n" +
+				"the internet, over HTTPS and HTTP, but not this computer, the networks\nit is on, or these hosts:"
+			network.Items, network.inline = p.Network.Blocked, true
+		}
+		if len(p.Network.Hosts) > 0 {
+			ports = &Fact{Kind: FactNetworkPorts, Text: "Commands may also reach these hosts on the port named:", Items: p.Network.Hosts, inline: true}
+		}
+	case p.Network.Mode != NetworkNone && len(p.Network.Hosts) > 0:
 		network = Fact{
 			Kind: FactNetwork, Text: "Network: commands may reach these hosts only:", Items: p.Network.Hosts, inline: true,
 			Note: "A host that accepts writes, such as a git host, can carry data out.",
@@ -174,6 +195,9 @@ func connectFacts(p Policy) []Fact {
 		folders,
 		{Kind: FactSecrets, Text: "Everything in these folders is readable to the agent, a project's .env\nfile and other secrets kept there included."},
 		network,
+	}
+	if ports != nil {
+		facts = append(facts, *ports)
 	}
 	// What a host policy file kept from an earlier connect is granted too,
 	// so the person is told it: the paths read outside the folders, and the
@@ -232,18 +256,35 @@ var ErrNotRemembered = errors.New("no remembered trigger has this id")
 var errClientRemoved = errors.New("the device was removed through the control socket")
 
 // checkPolicy lists what is wrong with a policy: its own shape, then the
-// local driver's folder, read path and network rules.
-func (e *Engine) checkPolicy(p Policy) []string {
-	problems := p.Problems(e.cfg.Paths.Home)
+// local driver's folder, read path and network rules. It reports whether
+// the driver refused the network as one this computer cannot enforce.
+func (e *Engine) checkPolicy(p Policy) (problems []string, unenforceable bool) {
+	problems = p.Problems(e.cfg.Paths.Home)
 	if len(problems) == 0 {
 		if err := CheckDriver(p, e.cfg.Paths, e.cfg.GOOS, e.cfg.NewDriver); err != nil {
 			problems = append(problems, err.Error())
+			unenforceable = errors.Is(err, local.ErrNetworkUnenforceable)
 		}
 	}
 	if problems == nil {
 		problems = []string{}
 	}
-	return problems
+	return problems, unenforceable
+}
+
+// refusePolicy is the refusal of a policy checkPolicy finds wrong, and nil
+// for one it does not: CodeNetworkUnenforceable for the network any where
+// this computer cannot enforce it, never a silent widening or narrowing,
+// and CodePolicyInvalid for anything else.
+func (e *Engine) refusePolicy(p Policy) error {
+	problems, unenforceable := e.checkPolicy(p)
+	switch {
+	case unenforceable:
+		return Fail(CodeNetworkUnenforceable, strings.Join(problems, "; "), local.ErrNetworkUnenforceable)
+	case len(problems) > 0:
+		return Fail(CodePolicyInvalid, strings.Join(problems, "; "), nil)
+	}
+	return nil
 }
 
 // enroller is the engine's Enroller, refusing an engine built without one.
@@ -295,7 +336,8 @@ func (e *Engine) ProposeConnect(q ConnectQuery) (Proposal, error) {
 		p.Folders = nil
 	}
 	terms, facts := TermsOf(p), ConnectFacts(p)
-	return Proposal{Policy: terms, Facts: facts, Consent: Consent(terms, facts), Problems: e.checkPolicy(p)}, nil
+	problems, _ := e.checkPolicy(p)
+	return Proposal{Policy: terms, Facts: facts, Consent: Consent(terms, facts), Problems: problems}, nil
 }
 
 // Connect is POST /v1/connect: with a consent that matches the terms and
@@ -315,12 +357,9 @@ func (e *Engine) Connect(ctx context.Context, t Terms, consent string) (ConnectA
 		return ConnectAnswer{}, err
 	}
 	p := previous
-	p.Device, p.Name, p.SessionStart, p.Folders, p.Network = "", CleanName(t.Name), t.SessionStart, t.Folders, t.Network
-	if p.Network.Mode == NetworkNone {
-		p.Network.Hosts = nil
-	}
-	if problems := e.checkPolicy(p); len(problems) > 0 {
-		return ConnectAnswer{}, Fail(CodePolicyInvalid, strings.Join(problems, "; "), nil)
+	p.Device, p.Name, p.SessionStart, p.Folders, p.Network = "", CleanName(t.Name), t.SessionStart, t.Folders, cleanNetwork(t.Network)
+	if err := e.refusePolicy(p); err != nil {
+		return ConnectAnswer{}, err
 	}
 	// The facts are those of the file as it is now, the read paths and
 	// remembered triggers it kept included, so a file changed since the
@@ -422,22 +461,30 @@ func (e *Engine) apply(p Policy, c PolicyChange) (Policy, error) {
 		}
 	}
 	if c.Network != nil {
-		p.Network = *c.Network
-		if p.Network.Mode == NetworkNone {
-			p.Network.Hosts = nil
-		}
+		p.Network = cleanNetwork(*c.Network)
 	}
-	if problems := e.checkPolicy(p); len(problems) > 0 {
-		return Policy{}, Fail(CodePolicyInvalid, strings.Join(problems, "; "), nil)
+	if err := e.refusePolicy(p); err != nil {
+		return Policy{}, err
 	}
 	return p, nil
+}
+
+// cleanNetwork drops the lists a network's mode does not read: the hosts of
+// none. A blocked list on a mode other than any is kept, for the check to
+// refuse rather than drop silently.
+func cleanNetwork(n Network) Network {
+	if n.Mode == NetworkNone {
+		n.Hosts = nil
+	}
+	return n
 }
 
 // servesTheSame reports whether two policies give the local driver the same
 // folders and network, so a change between them needs no reload: a reload
 // restarts the worker, which stops every running session.
 func servesTheSame(a, b Policy) bool {
-	return slices.Equal(a.Folders, b.Folders) && a.Network.Mode == b.Network.Mode && slices.Equal(a.Network.Hosts, b.Network.Hosts)
+	return slices.Equal(a.Folders, b.Folders) && a.Network.Mode == b.Network.Mode && slices.Equal(a.Network.Hosts, b.Network.Hosts) &&
+		slices.Equal(a.Network.Blocked, b.Network.Blocked)
 }
 
 // PutPolicy is PUT /v1/policy: the change is checked as `connect` checks a
