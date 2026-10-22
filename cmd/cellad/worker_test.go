@@ -35,10 +35,12 @@ func TestWorkerEndToEnd(t *testing.T) {
 	waitFor(t, "the worker to announce itself",
 		func() bool { return strings.Contains(first.out.String(), "worker driver=native") })
 
-	// The environment reports the worker once its stream is up. This is the
+	// The environment reports the worker from its registration on, and the
+	// control plane logs the stream once the worker opens it. This is the
 	// whole of the seam: the key authenticated a registration and a stream,
 	// and the control plane made no outbound connection at all.
 	waitFor(t, "the environment to report the worker", func() bool { return p.environment(t).Status.Workers == 1 })
+	waitFor(t, "the worker's stream to open", func() bool { return p.streamsOpened() == 1 })
 	obj := p.environment(t)
 	if obj.Status.LastHeartbeat.IsZero() {
 		t.Errorf("the environment reports a worker and no heartbeat: %+v", obj.Status)
@@ -54,7 +56,9 @@ func TestWorkerEndToEnd(t *testing.T) {
 	}
 
 	// A worker that goes away leaves the environment with none, which is
-	// what the phase of spec 021 is computed from.
+	// what the phase of spec 021 is computed from. Its stream is open, so
+	// its end is what stops the count; a worker stopped before its stream
+	// opened would hold its place for the pending window instead.
 	if code := first.stop(); code != 0 {
 		t.Errorf("the worker exited %d; stderr %q", code, first.errOut.String())
 	}
@@ -63,11 +67,20 @@ func TestWorkerEndToEnd(t *testing.T) {
 		t.Errorf("with the worker gone the scrape reads the connected workers as %v, %v", v, ok)
 	}
 
-	// And a worker that comes back registers again and the environment holds
-	// one once more, without anything having dialed it.
+	// And a worker that comes back registers again and opens a stream of its
+	// own, and the environment holds one once more, without anything having
+	// dialed it.
 	startWorker(t, p, key, nil)
 	waitFor(t, "the environment to report the worker that came back",
 		func() bool { return p.environment(t).Status.Workers == 1 })
+	waitFor(t, "the stream of the worker that came back to open", func() bool { return p.streamsOpened() == 2 })
+}
+
+// streamsOpened is how many worker streams the control plane has logged
+// open. A registration counts in status.workers before its stream opens, so
+// a test that acts on the stream waits for this and not for the count.
+func (p *plane) streamsOpened() int {
+	return strings.Count(p.errOut.String(), `"msg":"a worker's stream opened"`)
 }
 
 // runningWorker is one cellad worker running in this process: its output, and
