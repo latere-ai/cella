@@ -40,16 +40,12 @@ func Reserve(t T) int {
 	t.Helper()
 	port, release, err := reserve()
 	if err != nil {
+		// A T other than *testing.T may return from Fatalf.
 		t.Fatalf("reserving a loopback port: %v", err)
+		return 0
 	}
 	t.Cleanup(release)
 	return port
-}
-
-// Addr is a reserved port as a loopback host:port address.
-func Addr(t T) string {
-	t.Helper()
-	return net.JoinHostPort("127.0.0.1", strconv.Itoa(Reserve(t)))
 }
 
 // Listen binds the loopback port with SO_REUSEPORT and listens on it, which

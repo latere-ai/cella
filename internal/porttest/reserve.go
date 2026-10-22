@@ -10,6 +10,15 @@ import (
 	"syscall"
 )
 
+// The calls reserve makes, which a test replaces to make one of them fail.
+var (
+	socket      = syscall.Socket
+	setsockopt  = syscall.SetsockoptInt
+	bind        = syscall.Bind
+	getsockname = syscall.Getsockname
+	closeSocket = syscall.Close
+)
+
 // reserve binds a socket that sets SO_REUSEPORT to 127.0.0.1 on a port the
 // kernel picks, and leaves it bound without listening. A bind of the same
 // port admits only another socket that sets SO_REUSEPORT. A socket that
@@ -21,7 +30,7 @@ func reserve() (int, func(), error) {
 	// package makes its own, so a process the test starts meanwhile does not
 	// inherit the reservation and hold it past the test.
 	syscall.ForkLock.RLock()
-	fd, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_STREAM, 0)
+	fd, err := socket(syscall.AF_INET, syscall.SOCK_STREAM, 0)
 	if err == nil {
 		syscall.CloseOnExec(fd)
 	}
@@ -30,16 +39,16 @@ func reserve() (int, func(), error) {
 		return 0, nil, fmt.Errorf("socket: %w", err)
 	}
 	fail := func(step string, err error) (int, func(), error) {
-		_ = syscall.Close(fd)
+		_ = closeSocket(fd)
 		return 0, nil, fmt.Errorf("%s: %w", step, err)
 	}
-	if err := syscall.SetsockoptInt(fd, syscall.SOL_SOCKET, syscall.SO_REUSEPORT, 1); err != nil {
+	if err := setsockopt(fd, syscall.SOL_SOCKET, syscall.SO_REUSEPORT, 1); err != nil {
 		return fail("SO_REUSEPORT", err)
 	}
-	if err := syscall.Bind(fd, &syscall.SockaddrInet4{Addr: [4]byte{127, 0, 0, 1}}); err != nil {
+	if err := bind(fd, &syscall.SockaddrInet4{Addr: [4]byte{127, 0, 0, 1}}); err != nil {
 		return fail("bind", err)
 	}
-	name, err := syscall.Getsockname(fd)
+	name, err := getsockname(fd)
 	if err != nil {
 		return fail("getsockname", err)
 	}
@@ -47,7 +56,7 @@ func reserve() (int, func(), error) {
 	if !ok {
 		return fail("getsockname", fmt.Errorf("the socket is bound to a %T", name))
 	}
-	return inet.Port, func() { _ = syscall.Close(fd) }, nil
+	return inet.Port, func() { _ = closeSocket(fd) }, nil
 }
 
 // reusePort sets SO_REUSEPORT on a socket before the net package binds it.
