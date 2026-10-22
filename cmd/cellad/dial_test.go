@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"os"
 	"regexp"
@@ -22,6 +21,7 @@ import (
 	"latere.ai/x/pkg/authkit/issuertest"
 
 	"latere.ai/x/cella/internal/cellacli"
+	"latere.ai/x/cella/internal/porttest"
 )
 
 // serveArg turns this test binary into the HTTP server a native sandbox runs
@@ -46,8 +46,20 @@ func TestMain(m *testing.M) {
 		mux.HandleFunc(prefixPath, func(w http.ResponseWriter, r *http.Request) {
 			_, _ = io.WriteString(w, r.Header.Get("X-Forwarded-Prefix"))
 		})
-		server := &http.Server{Addr: net.JoinHostPort("127.0.0.1", os.Args[2]), Handler: mux, ReadHeaderTimeout: 10 * time.Second}
-		fmt.Fprintln(os.Stderr, server.ListenAndServe())
+		// The server binds beside the test's reservation of the port, which
+		// holds the port from the test's pick until the test ends.
+		port, err := strconv.Atoi(os.Args[2])
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		ln, err := porttest.Listen(context.Background(), port)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		server := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+		fmt.Fprintln(os.Stderr, server.Serve(ln))
 		os.Exit(1)
 	}
 	os.Exit(m.Run())
@@ -71,14 +83,7 @@ func TestDialAndPortProxy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, free, err := net.SplitHostPort(freePort(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	port, err := strconv.Atoi(free)
-	if err != nil {
-		t.Fatal(err)
-	}
+	port := porttest.Reserve(t)
 	command, err := json.Marshal([]string{exe, serveArg, strconv.Itoa(port)})
 	if err != nil {
 		t.Fatal(err)

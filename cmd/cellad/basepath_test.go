@@ -8,7 +8,6 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -22,6 +21,7 @@ import (
 
 	apidoc "latere.ai/x/cella/api"
 	"latere.ai/x/cella/client"
+	"latere.ai/x/cella/internal/porttest"
 	driver "latere.ai/x/cella/runtime"
 )
 
@@ -231,14 +231,7 @@ func TestServingUnderABasePathEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, free, err := net.SplitHostPort(freePort(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	port, err := strconv.Atoi(free)
-	if err != nil {
-		t.Fatal(err)
-	}
+	port := porttest.Reserve(t)
 	command, err := json.Marshal([]string{exe, serveArg, strconv.Itoa(port)})
 	if err != nil {
 		t.Fatal(err)
