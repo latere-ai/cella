@@ -252,8 +252,12 @@ reason `HeartbeatLost` once nothing has been heard for
 `CELLA_ENVIRONMENT_OFFLINE`, and `Ready` again when a worker returns.
 `workers` and `hosts` count a worker from its registration and stop
 counting it when its stream ends, so a read right after either already
-says so. An environment below `Ready` refuses a new sandbox and leaves
-the ones it already holds running.
+says so. A worker that stops after registering and before opening its
+stream is counted for 45 seconds from its registration, because nothing
+tells the control plane it went away. A sandbox created in the moment
+between a registration and its stream stays `Pending` until the stream
+opens. An environment below `Ready` refuses a new sandbox and leaves the
+ones it already holds running.
 
 ## Run sandboxes on it
 

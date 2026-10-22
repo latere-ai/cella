@@ -508,6 +508,39 @@ func TestWorkerReplacedBeforeItsStreamOpens(t *testing.T) {
 	}
 }
 
+// TestACreateBeforeTheStreamWaitsForIt: a worker's registration makes its
+// environment Ready before the worker opens its stream, and a sandbox created
+// on it in between stays placed and runs once the stream opens, rather than
+// failing with no worker to reach.
+func TestACreateBeforeTheStreamWaitsForIt(t *testing.T) {
+	p := startPlane(t, "", "")
+	if status, answer := applyAs(t, p, p.bearer, "early",
+		`{"mode":"worker","isolation":"none","capacity":{"sandboxes":4}}`); status != http.StatusCreated {
+		t.Fatalf("the apply answered %d: %s", status, answer)
+	}
+	key, _ := mintAs(t, p, p.bearer, "early", "")
+	release := make(chan struct{})
+	runEmbedded(t, p, key, worker.Options{HTTPClient: &http.Client{Transport: heldAnswer{release: release}}})
+	// The answer to the registration is held, so the worker has not dialed
+	// its stream while the environment already reads Ready.
+	waitFor(t, "the environment to read Ready from the registration", func() bool {
+		obj := p.environmentNamed(t, "early")
+		return obj.Status.Phase == v1.EnvironmentReady && obj.Status.Workers == 1
+	})
+	id := sandboxOn(t, p, "early", "before-the-stream")
+	if obj := sandboxNow(t, p, id); obj.Status.Phase != driver.Pending {
+		t.Errorf("with the stream not open the sandbox is %s %s, want Pending", obj.Status.Phase, obj.Status.Reason)
+	}
+	close(release)
+	waitFor(t, "the sandbox to run once the stream opened", func() bool {
+		obj := sandboxNow(t, p, id)
+		if obj.Status.Phase == "Failed" {
+			t.Fatalf("the sandbox failed with %s", obj.Status.Reason)
+		}
+		return obj.Status.Phase == driver.Running
+	})
+}
+
 // recordingHost is a worker's driver that confines with its own allow list:
 // it declares none and an allow list with EgressLocal, and keeps every create
 // spec it is handed.

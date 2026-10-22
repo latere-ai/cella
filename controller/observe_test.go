@@ -66,3 +66,41 @@ func TestObserveEnvironmentHoldsTheLease(t *testing.T) {
 		t.Error("a lease that could not be read wrote nonetheless")
 	}
 }
+
+// TestASandboxWaitsForTheStreamItsWorkerOpens: an environment reads Ready
+// from a registration whose stream has not opened yet, and a sandbox placed
+// on it then stays placed, never handed to the worker's driver, until the
+// stream opens; it is created once the stream is open, rather than failing
+// on a worker that is about to connect.
+func TestASandboxWaitsForTheStreamItsWorkerOpens(t *testing.T) {
+	c, _, w, _ := twoEnvironments(t, Options{})
+	applyWorker(t, c, "laptop")
+	w.set([]Registration{{Worker: "wrk_1", LastHeartbeat: c.clock.Now(), Pending: true}})
+	if err := c.ObserveEnvironment(t.Context(), "laptop"); err != nil {
+		t.Fatal(err)
+	}
+	if got := phase(t, c, "laptop"); got != v1.EnvironmentReady {
+		t.Fatalf("a registered worker leaves the environment %s", got)
+	}
+	obj := workspace()
+	obj.Metadata.Name = "early"
+	obj.Spec.Environment = "laptop"
+	early, err := realized(t.Context(), c, obj, "alice", 0)
+	if err != nil {
+		t.Fatalf("a create before the stream opened failed: %v", err)
+	}
+	if !placed(early) || len(w.driver.sandboxes()) != 0 {
+		t.Fatalf("before the stream opened the sandbox is %s %s and the worker's driver holds %d",
+			early.Status.Phase, early.Status.Reason, len(w.driver.sandboxes()))
+	}
+
+	w.set([]Registration{{Worker: "wrk_1", LastHeartbeat: c.clock.Now(), Connected: true}})
+	created, err := finished(t.Context(), c, early, nil)
+	if err != nil {
+		t.Fatalf("the create once the stream opened failed: %v", err)
+	}
+	if placed(created) || created.Status.Reason == ReasonCreateFailed || len(w.driver.sandboxes()) != 1 {
+		t.Errorf("once the stream opened the sandbox is %s %s and the worker's driver holds %d",
+			created.Status.Phase, created.Status.Reason, len(w.driver.sandboxes()))
+	}
+}

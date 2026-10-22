@@ -6,6 +6,17 @@ refused before it is pushed.
 
 ## Unreleased
 
+### Fixed
+
+- **A sandbox created right after its worker registers waits for the
+  worker's stream.** An environment reads `Ready` from the moment a
+  worker's registration is answered, a moment before the worker opens its
+  stream, and a sandbox created on it in between failed with
+  `CreateFailed`. It now stays `Pending` until the stream opens and then
+  runs. The control plane logs `a worker's stream opened`, with the
+  worker's id, each time a stream opens, since a registration alone
+  already counts in `status.workers`.
+
 ## v0.21.0 - 2026-10-22
 
 ### Added

@@ -636,6 +636,30 @@ func (c *Controller) registrationsOf(name string) (int, time.Time, string) {
 	return count, last, driverName
 }
 
+// streamOpening reports whether a worker environment is served by nothing
+// but registrations whose streams have not opened yet: it reads Ready, and
+// no operation can reach a worker of it until one of those streams opens. A
+// registration stops being pending once its window passes with no stream,
+// so this ends either way.
+func (c *Controller) streamOpening(name string) bool {
+	obj, held := c.environmentOf(name)
+	if !held || obj.Spec.Mode != v1.EnvironmentWorker || c.registrations == nil {
+		return false
+	}
+	pending := false
+	for _, w := range c.registrations(name) {
+		if w.Connected {
+			return false
+		}
+		pending = pending || w.Pending
+	}
+	return pending
+}
+
+// streamRetry is how soon the scheduler takes again a sandbox it kept placed
+// while its environment's worker was opening its stream.
+const streamRetry = 100 * time.Millisecond
+
 // hostsOf is the host of every worker of one environment that registrationsOf
 // counts and that reports one, in the order the registrations list them,
 // which is status.hosts (spec 082).

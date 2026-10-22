@@ -932,6 +932,14 @@ func (c *Controller) realize(ctx context.Context, id string) error {
 	if unavailable == nil && !ready {
 		return nil
 	}
+	// A worker's registration makes its environment Ready before the
+	// worker opens its stream, and nothing reaches the worker until it does.
+	// A sandbox placed in between stays placed, and the loop takes it again
+	// shortly, rather than failing on a worker that is about to connect.
+	if c.streamOpening(obj.Status.Environment) {
+		time.AfterFunc(streamRetry, c.wakeScheduler)
+		return nil
+	}
 	d, err := c.driverFor(obj.Status.Environment)
 	if err != nil {
 		return err
