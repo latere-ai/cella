@@ -22,9 +22,10 @@ refused before it is pushed.
   host that never listens, from the moment it picks the port until the
   case ends, so no other process the machine runs takes it first. Where a
   sandbox shares the host's network, as a native one does,
-  `Options.Echo` and `Options.Listen` bind the port with `SO_REUSEPORT`,
-  the one bind the reservation admits; a command that binds without it is
-  refused the port. A sandbox with a network of its own binds as before.
+  `Options.Echo` and `Options.Listen` bind the port with `SO_REUSEPORT`:
+  a command that binds the port on loopback without it is refused, and on
+  Linux one that binds it on every address is too. A sandbox with a
+  network of its own binds as before.
 
 ### Fixed
 

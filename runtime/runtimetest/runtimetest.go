@@ -44,7 +44,8 @@ type Options struct {
 	// the case ends, on a loopback socket of the host that never listens, so
 	// that no other process the machine runs takes it first. Where a sandbox
 	// shares the host's network, as a native one does, the command binds the
-	// port with SO_REUSEPORT, which is the one bind the hold admits. Where a
+	// port with SO_REUSEPORT: the hold refuses a bind of the port on loopback
+	// without it, and on Linux a bind on every address as well. Where a
 	// sandbox has a network of its own, the hold is on a port of the host's
 	// and the command binds as it likes.
 	Listen func(port int) []string
