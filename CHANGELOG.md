@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.22.0 - 2026-10-29
+
 ### Added
 
 - **`make run` can leave its ports to the kernel.** `CELLA_RUN_PORT=0
