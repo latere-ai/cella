@@ -359,6 +359,13 @@ type Change struct {
 	// resized by it: a Disk that differs from the sandbox's own is
 	// ErrUnsupported, and so is the field on a driver that changes no size.
 	Resources *Resources
+	// Egress is the boundary as it is to stand after the change. It is
+	// handed only to a driver that declares EgressLocal, which confines the
+	// workload with its own proxy and so is the one place the boundary is
+	// enforced: every command started after the change is held to it, and
+	// a process already running keeps the boundary it started under until
+	// the sandbox's next start.
+	Egress *Egress
 	// Adopt turns a prewarmed entry into the caller's sandbox in one
 	// exclusive act. It is exclusive of every other field of this type:
 	// adoption writes the whole record and one call is one act.
@@ -388,7 +395,7 @@ func (c Change) Adoption() (*Adoption, error) {
 	if c.Adopt == nil {
 		return nil, nil
 	}
-	if c.Labels != nil || c.Env != nil || c.Lifecycle != nil || len(c.Token) > 0 || c.Resources != nil {
+	if c.Labels != nil || c.Env != nil || c.Lifecycle != nil || len(c.Token) > 0 || c.Resources != nil || c.Egress != nil {
 		return nil, fmt.Errorf("%w: Adopt is exclusive of every other change", ErrInvalid)
 	}
 	return c.Adopt, nil

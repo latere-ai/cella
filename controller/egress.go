@@ -163,6 +163,35 @@ func (c *Controller) carryEnv(ctx context.Context, obj *v1.Sandbox, secrets map[
 	return nil
 }
 
+// carryBoundary hands an update's boundary to a driver that confines the
+// workload with its own proxy (EgressLocal). No gateway decides where such a
+// sandbox connects, so a driver not handed the boundary goes on enforcing
+// the one the sandbox was created with while its status names the new one.
+// A sandbox no driver holds now gets it from the create or the start that
+// brings it back, which compile the boundary again. The caller holds the
+// lock.
+func (c *Controller) carryBoundary(ctx context.Context, obj v1.Sandbox, m egress.Map) error {
+	if !c.CapabilitiesOf(obj.Status.Environment).EgressLocal {
+		return nil
+	}
+	switch obj.Status.Phase {
+	case PhaseQueued, PhaseLost, PhaseRecovering, PhaseDeleting:
+		return nil
+	}
+	if placed(obj) {
+		return nil
+	}
+	d, err := c.driverFor(obj.Status.Environment)
+	if err != nil {
+		return err
+	}
+	spec := c.egressSpec(obj.Status.Environment, m)
+	if err := d.Update(ctx, obj.Status.ID, driver.Change{Egress: &spec}); err != nil && !errors.Is(err, driver.ErrNotFound) {
+		return err
+	}
+	return nil
+}
+
 // restoreEgress puts back the boundary a sandbox had before an update that
 // failed after its map was compiled, so every map a gateway holds is one
 // desired state has, and answers the update's error with the restore's. A

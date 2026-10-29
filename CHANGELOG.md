@@ -17,6 +17,14 @@ refused before it is pushed.
   next start. Every sandbox now has a Secret, which holds at least that
   path, since the Pod reads each of its variables from the sandbox's
   Secret.
+- **An update that changes the boundary of a sandbox on the local runtime
+  reaches it.** The local runtime enforces the boundary with its own proxy,
+  and it kept the boundary the sandbox was created with, so an update that
+  narrowed the allow list was reported as enforced while commands still
+  reached the hosts it removed. Every command started after the update now
+  gets the new boundary; a process already running keeps its own until the
+  next start. An update the runtime does not take fails and changes
+  nothing.
 
 ## v0.22.2 - 2026-10-29
 

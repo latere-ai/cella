@@ -1728,6 +1728,9 @@ func (c *Controller) Update(ctx context.Context, obj v1.Sandbox) (v1.Sandbox, er
 	if err := c.resize(ctx, held, &obj); err != nil {
 		return v1.Sandbox{}, c.restoreEgress(ctx, held, obj, err)
 	}
+	if err := c.carryBoundary(ctx, obj, boundary.Map); err != nil {
+		return v1.Sandbox{}, c.restoreEgress(ctx, held, obj, err)
+	}
 	// The environment is the workload's from its next start, so a driver
 	// that did not take it fails no apply: the digest stays where it was,
 	// and the next apply or secret change hands it again.

@@ -526,6 +526,11 @@ func (d *Driver) Update(ctx context.Context, id string, c driver.Change) error {
 			}
 			r.Env[driver.TokenFileEnv] = d.paths(id).token
 		}
+		if c.Egress != nil {
+			r.Egress = v1.NarrowEgress(v1.Egress{
+				Mode: v1.EgressMode(c.Egress.Mode), AllowedHosts: c.Egress.AllowedHosts, DeniedHosts: c.Egress.DeniedHosts,
+			}, d.hostNetwork())
+		}
 		if c.Lifecycle != nil {
 			r.State.AutoStop, r.State.AutoDelete, r.State.ExpiresAt = c.Lifecycle.AutoStop, c.Lifecycle.AutoDelete, time.Time{}
 			if c.Lifecycle.TTL > 0 {

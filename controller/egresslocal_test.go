@@ -113,6 +113,63 @@ func TestEgressLocalNeedsNoGatewayAtTheController(t *testing.T) {
 	}
 }
 
+// TestAnUpdatedBoundaryReachesTheDriverThatEnforcesIt: a driver that
+// confines the workload with its own proxy is the one place its boundary is
+// enforced, so an update that narrows the allow list hands the driver the
+// new one, with no door or credential, and an update the driver did not
+// take fails and keeps the boundary the driver still holds. A driver that
+// enforces through a gateway is handed no boundary.
+func TestAnUpdatedBoundaryReachesTheDriverThatEnforcesIt(t *testing.T) {
+	c, here, laptop, _, _ := openWithLocalEgress(t)
+	ctx := t.Context()
+	obj := bounded()
+	obj.Metadata.Name = "on-laptop"
+	obj.Spec.Environment = "laptop"
+	obj.Spec.Network.Egress.AllowedHosts = []string{"api.example.com", "files.example.com"}
+	created, err := realized(ctx, c, obj, "alice", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	narrowed := created
+	narrowed.Spec.Network.Egress.AllowedHosts = []string{"api.example.com"}
+	if _, err = c.Update(ctx, narrowed); err != nil {
+		t.Fatal(err)
+	}
+	got := laptop.egressChanges()
+	if len(got) != 1 || got[0].Mode != string(v1.EgressAllowlist) || !slices.Equal(got[0].AllowedHosts, []string{"api.example.com"}) ||
+		got[0].ProxyAddr != "" || got[0].Credential != "" || got[0].CAPEM != "" {
+		t.Fatalf("the driver was handed %+v, want the narrowed allow list alone", got)
+	}
+
+	laptop.failUpdates(errors.New("the device is not there"))
+	closed := narrowed
+	closed.Spec.Network.Egress = v1.Egress{Mode: v1.EgressNone}
+	if _, err = c.Update(ctx, closed); err == nil {
+		t.Fatal("an update the driver did not take succeeded")
+	}
+	held, err := c.Get(ctx, created.Status.ID, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e := held.Spec.Network.Egress; e.Mode != v1.EgressAllowlist || !slices.Equal(e.AllowedHosts, []string{"api.example.com"}) {
+		t.Errorf("the failed update left the boundary %+v", e)
+	}
+
+	home := bounded()
+	home.Metadata.Name = "at-home"
+	created, err = realized(ctx, c, home, "alice", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	created.Spec.Network.Egress.AllowedHosts = []string{"api.example.com", "files.example.com"}
+	if _, err = c.Update(ctx, created); err != nil {
+		t.Fatal(err)
+	}
+	if got := here.egressChanges(); len(got) != 0 {
+		t.Errorf("a driver that enforces through a gateway was handed %+v", got)
+	}
+}
+
 // TestNeedsGatewayOn: a driver-enforced boundary needs no gateway, and every
 // other one that needs a gateway still does.
 func TestNeedsGatewayOn(t *testing.T) {

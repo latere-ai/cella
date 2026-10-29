@@ -130,7 +130,12 @@ and another port is named with the host, as `github.com:22` for git over
 SSH. A proxy that runs beside each command is its only route out (on
 macOS it admits a connection by its host and port and never decrypts
 it), so an environment on the local runtime needs no egress gateway and
-reports `EgressEnforced` `True` with the reason `DriverEnforced`.
+reports `EgressEnforced` `True` with the reason `DriverEnforced`. An
+update that changes the sandbox's boundary reaches that proxy: every
+command started after it gets the new boundary, narrowed to what your
+computer allows as above, and a process already running keeps the one it
+started with until the sandbox is started again. An update the local
+runtime does not take fails, and the sandbox keeps its boundary.
 
 `any` is the one network that names what is refused rather than what is
 reached: any public host on the internet, but those

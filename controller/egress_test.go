@@ -135,6 +135,19 @@ func (d *gatewayDriver) envChanges() []map[string]string {
 	return out
 }
 
+// egressChanges are the boundaries the driver was handed by an update.
+func (d *gatewayDriver) egressChanges() []driver.Egress {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	var out []driver.Egress
+	for _, c := range d.changes {
+		if c.Egress != nil {
+			out = append(out, *c.Egress)
+		}
+	}
+	return out
+}
+
 func (d *gatewayDriver) Inspect(_ context.Context, id string) (driver.State, error) {
 	return driver.State{ID: id, Phase: driver.Running}, nil
 }

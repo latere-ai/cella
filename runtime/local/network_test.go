@@ -192,6 +192,31 @@ func TestACommandGetsTheHostsNetworkNow(t *testing.T) {
 	}
 }
 
+// TestACommandGetsTheBoundaryAnUpdateSet: the driver is the one place a
+// sandbox's boundary is enforced, so a command started after an update gets
+// the boundary the update set, narrowed to the host's network, and not the
+// one the sandbox was created with.
+func TestACommandGetsTheBoundaryAnUpdateSet(t *testing.T) {
+	shim(t)
+	h := newHost(t)
+	d := h.open(t, Options{DataDir: tempDir(t), Lookup: os.LookupEnv, Network: Network{Mode: NetworkAllowlist, Hosts: []string{"github.com", "example.com"}}})
+	sandbox(t, d, driver.CreateSpec{ID: "sbx_a", Egress: driver.Egress{Mode: string(v1.EgressAllowlist), AllowedHosts: []string{"github.com", "example.com"}}})
+	narrowed := driver.Egress{Mode: string(v1.EgressAllowlist), AllowedHosts: []string{"github.com", "pastebin.com"}}
+	if err := d.Update(t.Context(), "sbx_a", driver.Change{Egress: &narrowed}); err != nil {
+		t.Fatal(err)
+	}
+	if got := d.stage(mustLoad(t, d, "sbx_a"), "probe", []string{"true"}, nil, "/").Network; !slices.Equal(got.Domains, []string{"github.com"}) {
+		t.Errorf("a command after the update reaches %v", got.Domains)
+	}
+	closed := driver.Egress{Mode: string(v1.EgressNone)}
+	if err := d.Update(t.Context(), "sbx_a", driver.Change{Egress: &closed}); err != nil {
+		t.Fatal(err)
+	}
+	if got := d.stage(mustLoad(t, d, "sbx_a"), "probe", []string{"true"}, nil, "/").Network; got.Mode != hostsandbox.NetworkNone {
+		t.Errorf("a command after the boundary closed renders %+v", got)
+	}
+}
+
 // TestNetworkAllow: allowing a host saves it as a person would have it: on
 // an allow list it joins the hosts; on any it lifts the host's block and
 // admits a port beyond the standard ones; none and a wildcard's block are
