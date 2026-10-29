@@ -6,6 +6,15 @@ refused before it is pushed.
 
 ## Unreleased
 
+### Fixed
+
+- **A streamed answer reaches an HTTP/1.1 workload with its end marked.**
+  When the gateway substituted into a request whose destination streamed
+  its answer over HTTP/2, as a model's is, a workload that spoke HTTP/1.1
+  read the whole stream and then waited forever for the connection to
+  close. Claude Code hung on its first request this way. The stream is
+  now sent chunked, and the connection serves the next request.
+
 ## v0.22.1 - 2026-10-29
 
 ### Fixed

@@ -338,6 +338,59 @@ func TestATerminatedRequestReadsTheProtocolItSpoke(t *testing.T) {
 	}
 }
 
+// TestATerminatedStreamEndsWhereTheUpstreamEnded: an event stream an HTTP/2
+// upstream sends, with no length, reaches an HTTP/1.1 workload with its end
+// marked, so the workload reads it to the end and sends its next request on
+// the same connection. A model's streamed answer is such a stream.
+func TestATerminatedStreamEndsWhereTheUpstreamEnded(t *testing.T) {
+	up := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		for _, part := range []string{"data: a\n\n", "data: b\n\n"} {
+			_, _ = io.WriteString(w, part)
+			w.(http.Flusher).Flush()
+		}
+	}))
+	up.EnableHTTP2 = true
+	up.StartTLS()
+	t.Cleanup(up.Close)
+	upstreamTrust := x509.NewCertPool()
+	upstreamTrust.AddCert(up.Certificate())
+	h := newHarness(t, up.Listener.Addr().String(), upstreamTrust)
+	var dialer net.Dialer
+	h.gate.gateway.Dial = func(ctx context.Context, network, _ string) (net.Conn, error) {
+		return dialer.DialContext(ctx, network, h.upstream)
+	}
+	ca, caPEM, _, err := pkgegress.GenerateCA(CACommonName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.gate.gateway.CA = ca
+	trust := x509.NewCertPool()
+	trust.AppendCertsFromPEM(caPEM)
+	m := egress.Map{Principal: "sandbox:sbx_a", Version: 1, Credential: "c", Mode: v1.EgressAllowlist, Allow: []string{"example.com"}}
+	h.store.Apply(m)
+	h.store.registry.Set(m.Principal, []pkgegress.Entry{{
+		Placeholder: []byte(egress.MintPlaceholder()), Secret: []byte("a value"), AllowedHosts: []string{"example.com"},
+	}})
+
+	client := proxyClient(t, h.proxy.Listener.Addr().String(), "c", trust)
+	client.Timeout = 5 * time.Second
+	for i := range 2 {
+		resp, err := client.Get("https://example.com/")
+		if err != nil {
+			t.Fatalf("request %d: %v", i, err)
+		}
+		body, err := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if err != nil {
+			t.Fatalf("request %d: the stream did not end: %v", i, err)
+		}
+		if string(body) != "data: a\n\ndata: b\n\n" {
+			t.Fatalf("request %d: read %q", i, body)
+		}
+	}
+}
+
 // TestTheReverseDoorReadsAPort: a destination written with a port on the
 // reverse door is decided by its host, refused before any dial where that
 // host is an address no boundary admits, and dialed and filed at the port
