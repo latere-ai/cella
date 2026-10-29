@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.22.1 - 2026-10-29
+
 ### Fixed
 
 - **A request the gateway substitutes into answers in the protocol the
