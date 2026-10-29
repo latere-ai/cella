@@ -898,6 +898,7 @@ func (c *Controller) adopt(ctx context.Context, obj v1.Sandbox, d driver.Driver,
 		obj.Status.Reason = ReasonCreateFailed
 		return export(obj), errors.Join(err, revoked, c.persist(settle, obj, MutationFailed))
 	}
+	handedEnv(&obj, boundary.Env)
 	obj.Status.Conditions = setCondition(obj.Status.Conditions, scheduledCondition(true, c.clock.Now()))
 	obj, err = c.refresh(settle, obj)
 	return export(obj), errors.Join(err, c.persist(settle, obj, phaseMutation(obj.Status.Phase)))
@@ -998,6 +999,7 @@ func (c *Controller) realize(ctx context.Context, id string) error {
 		return errors.Join(err, c.failCreate(settle, obj, parent, nil, previous))
 	}
 	obj.Status.TokenState = tokenState
+	handedEnv(&obj, boundary.Env)
 	if err := c.persist(settle, obj, MutationStatus); err != nil {
 		// The row still says what the store holds, so the next pass takes
 		// it again from there, with a map and an identity of its own.
@@ -1701,8 +1703,10 @@ func crockfordULID(b [16]byte) string {
 //
 // The boundary reaches a gateway before desired state claims it, which is the
 // order design 018 fixes for a create and holds for an update: a map no
-// gateway will hold is a refusal, and the boundary the object already had is
-// put back so that every map a gateway holds is a map desired state has.
+// gateway will hold is a refusal, and an update that fails after its map was
+// compiled puts back the boundary the object already had, so that every map
+// a gateway holds is a map desired state has. The update is compiled on a
+// copy of the status, so the object held is the one put back.
 // Design 003 marks every field a running sandbox would have to be recreated
 // for immutable, so the driver is called only for what it can carry: a new
 // size, and the environment when the secrets mounted changed it.
@@ -1714,26 +1718,25 @@ func (c *Controller) Update(ctx context.Context, obj v1.Sandbox) (v1.Sandbox, er
 	if !ok {
 		return v1.Sandbox{}, ErrNotFound
 	}
-	obj.Status = held.Status
-	before := c.secretEnvOf(held)
+	obj.Status = clone(held).Status
 	boundary, err := c.pushEgress(ctx, &obj)
 	if err != nil {
-		previous := clone(held)
-		if _, restore := c.pushEgress(ctx, &previous); restore != nil {
-			err = errors.Join(err, restore)
-		}
-		return v1.Sandbox{}, err
+		return v1.Sandbox{}, c.restoreEgress(ctx, held, obj, err)
 	}
 	obj.Status.Secrets = boundary.Secrets
 	obj.Status.Conditions = setCondition(obj.Status.Conditions, c.egressCondition(obj.Status.Environment, boundary.Map, boundary.Held, time.Now().UTC()))
 	if err := c.resize(ctx, held, &obj); err != nil {
-		return v1.Sandbox{}, err
+		return v1.Sandbox{}, c.restoreEgress(ctx, held, obj, err)
 	}
-	if err := c.carryEnv(ctx, obj, before, boundary.Env); err != nil {
-		return v1.Sandbox{}, err
+	// The environment is the workload's from its next start, so a driver
+	// that did not take it fails no apply: the digest stays where it was,
+	// and the next apply or secret change hands it again.
+	if err := c.carryEnv(ctx, &obj, boundary.Env); err != nil {
+		c.log.WarnContext(ctx, "the sandbox's environment was not handed to its driver",
+			"sandbox", obj.Status.ID, "err", err)
 	}
 	if err := c.persist(ctx, obj, MutationUpdated); err != nil {
-		return v1.Sandbox{}, err
+		return v1.Sandbox{}, c.restoreEgress(ctx, held, obj, err)
 	}
 	// What the driver made of a new size is read at once and not at the
 	// next interval, so status.resources follows the update.

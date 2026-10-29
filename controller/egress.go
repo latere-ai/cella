@@ -6,7 +6,10 @@ package controller
 import (
 	"cmp"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"maps"
 	"slices"
 	"strings"
@@ -99,61 +102,86 @@ func (c *Controller) compileEgress(ctx context.Context, obj *v1.Sandbox) (bounda
 	return boundary{Map: m, Env: env, Secrets: status}, nil
 }
 
-// secretEnvOf is the part of a sandbox's environment its mounted secrets put
-// there: each mount's placeholder as desired state records it, and the
-// companion variable the secret's inject names, read from the secret as it
-// stands. It reads and mints nothing, so it says what the workload was given
-// before a change is compiled.
-func (c *Controller) secretEnvOf(obj v1.Sandbox) map[string]string {
-	env := map[string]string{}
-	if obj.Status.EgressState == nil {
-		return env
+// envDigest is the digest EgressState.EnvDigest holds: of the environment
+// itself, so two environments that say the same thing have one digest
+// however they were built.
+func envDigest(env map[string]string) string {
+	sum := sha256.New()
+	for _, key := range slices.Sorted(maps.Keys(env)) {
+		// Each name and value goes in with its length ahead of it, so no
+		// two environments write the same bytes. A hash takes every write.
+		_, _ = fmt.Fprintf(sum, "%d:%s%d:%s", len(key), key, len(env[key]), env[key])
 	}
-	for _, mount := range obj.Spec.Secrets {
-		for _, record := range obj.Status.EgressState.Secrets {
-			if record.Name != mount.Name || record.Env != mount.Env {
-				continue
-			}
-			env[mount.Env] = record.Placeholder
-			if secret, held := c.secretObjects[record.ID]; held {
-				maps.Copy(env, manifest.CompanionEnv(mount.Env, secret.Spec.Inject))
-			}
-			break
-		}
-	}
-	return env
+	return hex.EncodeToString(sum.Sum(nil))
 }
 
-// carryEnv hands the driver a sandbox's environment again when the variables
-// its secrets put there changed: a secret its owner mounted or dropped by an
-// update, or a secret whose inject moved to another header or parameter. A
-// running process keeps the environment it started with, so the driver
-// records the new one and the workload has it from its next start. A sandbox
-// no driver holds now gets it from the create or the start that brings it
-// back, which compile the boundary again. The caller holds the lock.
-func (c *Controller) carryEnv(ctx context.Context, obj v1.Sandbox, before, after map[string]string) error {
-	if maps.Equal(before, after) {
+// handedEnv records on a sandbox the environment its driver was handed at a
+// create, with the secret environment a compile produced.
+func handedEnv(obj *v1.Sandbox, secrets map[string]string) {
+	if obj.Status.EgressState != nil {
+		obj.Status.EgressState.EnvDigest = envDigest(withSecretEnv(obj.Spec.Env, secrets))
+	}
+}
+
+// carryEnv hands the driver a sandbox's environment when it is not the one
+// the driver last took: a secret its owner mounted or dropped by an update,
+// a secret whose inject moved to another header or parameter, or a hand-off
+// that did not reach the driver before. A running process keeps the
+// environment it started with, so the driver records the new one and the
+// workload has it from its next start. A sandbox no driver holds now gets it
+// from the create or the start that brings it back, which compile the
+// boundary again. On success obj records what the driver took; the caller
+// holds the lock and writes obj.
+func (c *Controller) carryEnv(ctx context.Context, obj *v1.Sandbox, secrets map[string]string) error {
+	state := obj.Status.EgressState
+	env := maps.Clone(withSecretEnv(obj.Spec.Env, secrets))
+	if env == nil {
+		env = map[string]string{}
+	}
+	digest := envDigest(env)
+	if state == nil || state.EnvDigest == digest {
 		return nil
 	}
 	switch obj.Status.Phase {
 	case PhaseQueued, PhaseLost, PhaseRecovering, PhaseDeleting:
 		return nil
 	}
-	if placed(obj) {
+	if placed(*obj) {
 		return nil
 	}
 	d, err := c.driverFor(obj.Status.Environment)
 	if err != nil {
 		return err
 	}
-	env := maps.Clone(withSecretEnv(obj.Spec.Env, after))
-	if env == nil {
-		env = map[string]string{}
-	}
-	if err := d.Update(ctx, obj.Status.ID, driver.Change{Env: &env}); err != nil && !errors.Is(err, driver.ErrNotFound) {
+	if err := d.Update(ctx, obj.Status.ID, driver.Change{Env: &env}); err != nil {
+		if errors.Is(err, driver.ErrNotFound) {
+			return nil
+		}
 		return err
 	}
+	state.EnvDigest = digest
 	return nil
+}
+
+// restoreEgress puts back the boundary a sandbox had before an update that
+// failed after its map was compiled, so every map a gateway holds is one
+// desired state has, and answers the update's error with the restore's. A
+// gateway takes no map numbered at or below one it holds, so the one put
+// back is numbered past the one that failed, and the object held keeps that
+// number for the compile after it. The caller holds the lock.
+func (c *Controller) restoreEgress(ctx context.Context, held, failed v1.Sandbox, err error) error {
+	previous := clone(held)
+	if previous.Status.EgressState != nil && failed.Status.EgressState != nil {
+		previous.Status.EgressState.Version = max(previous.Status.EgressState.Version, failed.Status.EgressState.Version)
+	}
+	_, restore := c.pushEgress(ctx, &previous)
+	if held.Status.EgressState != nil && previous.Status.EgressState != nil {
+		held.Status.EgressState.Version = previous.Status.EgressState.Version
+	}
+	if restore != nil {
+		return errors.Join(err, restore)
+	}
+	return err
 }
 
 // secretViews binds each mount to a Secret, mints a placeholder for one that
@@ -221,7 +249,7 @@ func (c *Controller) secretViews(ctx context.Context, obj *v1.Sandbox) ([]egress
 // resolver resolved it, by sec_ id or by a name among the owner's own.
 func (c *Controller) bindMount(held []v1.MountedSecret, mount v1.SecretMount, owner string) (v1.MountedSecret, error) {
 	for _, record := range held {
-		if record.Env == mount.Env && record.Name == mount.Name {
+		if boundTo(record, mount) {
 			return record, nil
 		}
 	}
@@ -231,6 +259,14 @@ func (c *Controller) bindMount(held []v1.MountedSecret, mount v1.SecretMount, ow
 		record.Name = c.secretObjects[id].Metadata.Name
 	}
 	return record, nil
+}
+
+// boundTo reports whether a record is the binding of one mount: the same
+// environment key, and the secret named the way the mount names it. A mount
+// by sec_ id is recorded under the secret's own name, so its id is what
+// matches it again.
+func boundTo(record v1.MountedSecret, mount v1.SecretMount) bool {
+	return record.Env == mount.Env && (record.Name == mount.Name || (record.ID != "" && record.ID == mount.Name))
 }
 
 // viewOf is one Secret as the compiler reads it, with the value this compile

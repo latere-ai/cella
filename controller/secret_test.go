@@ -460,6 +460,163 @@ func TestASecretWhoseInjectMovedCarriesItsCompanion(t *testing.T) {
 	}
 }
 
+// TestAnEnvironmentAPushMissedIsCarried: a secret whose inject moved while no
+// gateway took the map still reaches the driver's environment, since what the
+// workload reads at its next start does not wait on a gateway connected now.
+func TestAnEnvironmentAPushMissedIsCarried(t *testing.T) {
+	c, gw, _ := sealedController(t)
+	ctx := t.Context()
+	vendor := aSecret("vendor", "api.vendor.example", "k-1")
+	vendor.Spec.Inject = v1.SecretInject{Header: "X-Api-Key", Scheme: v1.SchemeRaw}
+	secret, err := c.CreateSecret(ctx, vendor, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = realized(ctx, c, mounting("vendor", "VENDOR_KEY"), "alice", 0); err != nil {
+		t.Fatal(err)
+	}
+	d := openDriver(c).(*gatewayDriver)
+	gw.mu.Lock()
+	gw.sendErr = errors.New("the gateway is not there")
+	gw.mu.Unlock()
+
+	vendor.Spec.Value = ""
+	vendor.Spec.Inject = v1.SecretInject{Header: "X-Vendor-Token", Scheme: v1.SchemeRaw}
+	if _, err = c.UpdateSecret(ctx, vendor, secret.Status.ID); err != nil {
+		t.Fatal(err)
+	}
+	envs := d.envChanges()
+	if len(envs) != 1 || envs[0]["VENDOR_KEY_HEADER"] != "X-Vendor-Token" {
+		t.Fatalf("the environments handed to the driver are %v", envs)
+	}
+}
+
+// TestAnEnvironmentTheDriverMissedIsHandedAgain: an apply whose environment
+// the driver did not take still applies, and the next apply hands it again,
+// because the sandbox records the environment its driver last took.
+func TestAnEnvironmentTheDriverMissedIsHandedAgain(t *testing.T) {
+	c, gw, _ := sealedController(t)
+	ctx := t.Context()
+	if _, err := c.CreateSecret(ctx, aSecret("models", "api.latere.ai", "lux_first"), "alice"); err != nil {
+		t.Fatal(err)
+	}
+	plain := workspace()
+	plain.Spec.Network.Egress = v1.Egress{Mode: v1.EgressAllowlist, AllowedHosts: []string{"registry.npmjs.org"}}
+	obj, err := realized(ctx, c, plain, "alice", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := openDriver(c).(*gatewayDriver)
+	next := obj
+	next.Spec.Secrets = []v1.SecretMount{{Name: "models", Env: "ANTHROPIC_API_KEY"}}
+
+	d.failUpdates(errors.New("the worker is not there"))
+	if _, err = c.Update(ctx, next); err != nil {
+		t.Fatalf("an apply failed on the environment alone: %v", err)
+	}
+	if got := len(d.envChanges()); got != 0 {
+		t.Fatalf("a driver that failed took %d environments", got)
+	}
+
+	d.failUpdates(nil)
+	for range 2 {
+		if _, err = c.Update(ctx, next); err != nil {
+			t.Fatal(err)
+		}
+	}
+	envs := d.envChanges()
+	if len(envs) != 1 || envs[0]["ANTHROPIC_API_KEY"] != lastMap(t, gw, obj.Status.ID).Entries[0].Placeholder {
+		t.Fatalf("the environments handed to the driver are %v, want the missed one once", envs)
+	}
+}
+
+// TestAMountByIDKeepsItsPlaceholder: a secret mounted by its sec_ id is bound
+// once, so a rotation hands the gateway the placeholder the workload already
+// holds and hands the driver nothing.
+func TestAMountByIDKeepsItsPlaceholder(t *testing.T) {
+	c, gw, _ := sealedController(t)
+	ctx := t.Context()
+	github := aSecret("github", "api.github.com", "ghp_first")
+	secret, err := c.CreateSecret(ctx, github, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	obj, err := realized(ctx, c, mounting(secret.Status.ID, "GITHUB_TOKEN"), "alice", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := openDriver(c).(*gatewayDriver)
+	held := d.created(t).Env["GITHUB_TOKEN"]
+
+	github.Spec.Value = "ghp_second"
+	if _, err = c.UpdateSecret(ctx, github, secret.Status.ID); err != nil {
+		t.Fatal(err)
+	}
+	m := lastMap(t, gw, obj.Status.ID)
+	if len(m.Entries) != 1 || m.Entries[0].Placeholder != held || m.Entries[0].Value != "ghp_second" {
+		t.Fatalf("the map after a rotation is %+v, the workload holds %q", m.Entries, held)
+	}
+	if got := len(d.envChanges()); got != 0 {
+		t.Fatalf("a rotation handed the driver %d environments", got)
+	}
+}
+
+// TestAnUpdateThatFailsAfterItsPushPutsTheBoundaryBack: an update that drops
+// a mount and is then refused by the driver leaves the object as it was, and
+// the gateway is handed back the map it had, with the placeholder the
+// workload holds, numbered past the map that failed.
+func TestAnUpdateThatFailsAfterItsPushPutsTheBoundaryBack(t *testing.T) {
+	c, gw, _ := sealedController(t)
+	ctx := t.Context()
+	if _, err := c.CreateSecret(ctx, aSecret("github", "api.github.com", "ghp_canary"), "alice"); err != nil {
+		t.Fatal(err)
+	}
+	obj := mounting("github", "GITHUB_TOKEN")
+	obj.Spec.Resources = v1.Resources{CPU: "500m", Memory: "256Mi", Disk: "5Gi", Max: v1.ResourceMax{CPU: "1", Memory: "1Gi"}}
+	created, err := realized(ctx, c, obj, "alice", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := openDriver(c).(*gatewayDriver)
+	held := d.created(t).Env["GITHUB_TOKEN"]
+
+	d.failUpdates(errors.New("the worker is not there"))
+	next := created
+	next.Spec.Secrets = nil
+	next.Spec.Resources.CPU = "750m"
+	if _, err = c.Update(ctx, next); err == nil {
+		t.Fatal("an update the driver refused was accepted")
+	}
+	var versions []int64
+	for _, m := range gw.maps() {
+		if m.Principal == egress.Principal(created.Status.ID) {
+			versions = append(versions, m.Version)
+		}
+	}
+	if !slices.IsSorted(versions) || len(slices.Compact(slices.Clone(versions))) != len(versions) {
+		t.Fatalf("the gateway was handed versions %v, want each past the last", versions)
+	}
+	m := lastMap(t, gw, created.Status.ID)
+	if len(m.Entries) != 1 || m.Entries[0].Placeholder != held {
+		t.Fatalf("the map put back is %+v, the workload holds %q", m.Entries, held)
+	}
+	read, err := c.Get(ctx, created.Status.ID, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(read.Spec.Secrets) != 1 || read.Spec.Resources.CPU != "500m" {
+		t.Fatalf("a refused update changed the object: %+v %+v", read.Spec.Secrets, read.Spec.Resources)
+	}
+
+	d.failUpdates(nil)
+	if _, err = c.Update(ctx, read); err != nil {
+		t.Fatal(err)
+	}
+	if after := lastMap(t, gw, created.Status.ID); after.Version <= m.Version || after.Entries[0].Placeholder != held {
+		t.Fatalf("the next update handed version %d after %d, placeholder %q", after.Version, m.Version, after.Entries[0].Placeholder)
+	}
+}
+
 // TestASecretTheBoundaryDeniesIsNotInjectable is the compiler's own answer,
 // written into the sandbox's status beside the controller's.
 func TestASecretTheBoundaryDeniesIsNotInjectable(t *testing.T) {

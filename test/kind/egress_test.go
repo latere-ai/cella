@@ -105,11 +105,13 @@ func TestClusterEgressBoundary(t *testing.T) {
 }
 
 // TestClusterNoLateralMovement: a sandbox reaches no other sandbox's Pod,
-// neither straight from its own network nor through the gateway. The
-// gateway's own egress is open on this stack and the prober's boundary is
-// `open`, so the gateway admits the destination and dials it, which its 502
-// and the record of the attempt show: what refuses that connection is the
-// other sandbox's ingress rule alone.
+// neither straight from its own network nor through the gateway. Straight
+// from its own network, the other sandbox's ingress rule refuses it. Through
+// the gateway, the prober's boundary is `open` and the gateway's own egress
+// is open on this stack, but the Pod's address is not public and lies outside
+// the range the stack names (CELLA_EGRESS_PRIVATE_RANGES holds the Service
+// range alone), so the gateway refuses it before any dial, which its 403 and
+// the record of the attempt show.
 func TestClusterNoLateralMovement(t *testing.T) {
 	url, token := stack(t)
 	client := &http.Client{Timeout: 2 * time.Minute}
@@ -136,10 +138,10 @@ func TestClusterNoLateralMovement(t *testing.T) {
 		t.Fatalf("a sandbox reached another sandbox's Pod at %s and brought back %s bytes", ip, got)
 	}
 	through := execIn(t, client, url, token, prober, "/bin/sh", "-c", askScript, "ask", net.JoinHostPort(ip, strconv.Itoa(dialPort)))
-	if !strings.HasPrefix(through, "HTTP/1.1 502") {
-		t.Fatalf("the gateway answered %q for another sandbox's Pod at %s, want 502: admitted and not reached", through, ip)
+	if !strings.HasPrefix(through, "HTTP/1.1 403") {
+		t.Fatalf("the gateway answered %q for another sandbox's Pod at %s, want 403: an address that is not public", through, ip)
 	}
-	awaitEgressRecord(t, client, url, token, prober, ip, "passthrough")
+	awaitEgressRecord(t, client, url, token, prober, ip, "denied")
 }
 
 // TestClusterMeshReachability: a parent and the child spawned with its token

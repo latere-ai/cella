@@ -21,11 +21,21 @@ refused before it is pushed.
   address each connection dials, after the name resolved, on both doors
   and for a request it substitutes a secret into, so a name that resolves
   to a private, loopback, link-local, carrier-grade NAT or unique local
-  address is refused like the address written out. The connection record
-  says `NonPublicAddress`. An installation whose sandboxes reach a host on
-  its own network, such as a registry or a mirror, names those ranges in
-  `CELLA_EGRESS_PRIVATE_RANGES` on the gateway; without it, those
-  connections are now refused.
+  address is refused like the address written out. The workload is
+  answered `403`, and the connection record says `NonPublicAddress`; a
+  request refused inside a tunnel the gateway terminates is recorded on
+  its own, beside the tunnel. An installation whose sandboxes reach a
+  host on its own network, such as a registry, a mirror or an OAuth token
+  endpoint, names those ranges in `CELLA_EGRESS_PRIVATE_RANGES` on the
+  gateway; without it, those connections are now refused. A range that
+  reaches loopback, link-local or the unspecified address stops the
+  gateway at start, since no boundary admits those.
+- **The reverse door reads a port.** A destination written as
+  `host:port` in the first path segment is decided by its host, refused
+  before any dial when that host is an address no boundary admits, and
+  dialed and recorded at the port it names. Before, the port was part of
+  the host the boundary read, and the record said `443` whatever was
+  dialed.
 - **The control plane's host is decided by the boundary like any other.**
   The gateway no longer refuses every connection to the host in
   `CELLA_URL`. An installation that serves the control plane on a host it
@@ -53,7 +63,19 @@ refused before it is pushed.
   environment, and the workload has the placeholder from its next start;
   a running process keeps the environment it started with. The same holds
   when a secret's `inject` moves to another header or query parameter,
-  which changes its `<env>_HEADER` or `<env>_QUERY` companion.
+  which changes its `<env>_HEADER` or `<env>_QUERY` companion. A driver
+  that did not take the new environment, such as a worker that was not
+  connected, fails no apply: the next apply or secret change hands it
+  again.
+- **A secret mounted by its `sec_` id keeps its placeholder.** Each
+  rotation, and each apply, gave such a mount a new placeholder in the
+  gateway's map, while the workload kept the one it started with, so the
+  secret stopped being substituted after its first rotation.
+- **An update that fails after its map reached the gateway puts the old
+  map back.** An update refused by the driver, or one whose write failed,
+  left the gateway holding the map it asked for while the workload stayed
+  as it was. The gateway now holds the map the workload has, with the
+  placeholders it holds.
 - **`make run` no longer reads the last run's addresses.** A restart over
   the kept state directory could read the stubs' addresses of the run
   before, a moment before the new stubs wrote theirs, and start `cellad`

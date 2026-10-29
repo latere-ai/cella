@@ -233,6 +233,10 @@ func (c *Controller) recoverLocked(ctx context.Context, obj v1.Sandbox, now time
 	case err != nil:
 		c.retry[id] = now.Add(recoveryBackoff(attempt))
 		return false, errors.Join(fmt.Errorf("recreating the sandbox: %w", err), c.revokeToken(ctx, state))
+	default:
+		// An adopted sandbox kept the environment it had; one created
+		// again took this one.
+		handedEnv(&obj, boundary.Env)
 	}
 	if state != nil {
 		obj.Status.TokenState = state

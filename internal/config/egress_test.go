@@ -43,9 +43,11 @@ func TestLoadEgressReadsPrivateRanges(t *testing.T) {
 }
 
 // TestLoadEgressRefusesARangeThatIsNotOne names the entry, so the operator
-// sees which of several is wrong.
+// sees which of several is wrong. A range that reaches the gateway's own
+// machine or link is refused the same way, so no range reopens what the
+// gateway refuses for every boundary.
 func TestLoadEgressRefusesARangeThatIsNotOne(t *testing.T) {
-	for _, raw := range []string{"registry.internal", "10.0.0.1", "10.0.0.0/8,10.0.0.0/33"} {
+	for _, raw := range []string{"registry.internal", "10.0.0.1", "10.0.0.0/8,10.0.0.0/33", "0.0.0.0/0", "127.0.0.0/16", "169.254.169.254/32", "::/0", "fe80::/64"} {
 		_, err := LoadEgress(egressEnv(map[string]string{"CELLA_EGRESS_PRIVATE_RANGES": raw}))
 		if err == nil || !strings.Contains(err.Error(), "CELLA_EGRESS_PRIVATE_RANGES") {
 			t.Fatalf("LoadEgress(%q) = %v, want the variable named", raw, err)

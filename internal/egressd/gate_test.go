@@ -10,6 +10,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/pem"
+	"errors"
 	"io"
 	"log/slog"
 	"net"
@@ -17,6 +18,7 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -80,6 +82,7 @@ func newHarness(t *testing.T, upstream string, trust *x509.CertPool) *harness {
 		log: slog.Default(),
 		now: func() time.Time { return time.Now().UTC() },
 	}
+	h.gate.gateway.Refused = h.gate.refused
 	h.proxy = httptest.NewServer(http.HandlerFunc(h.gate.ServeProxy))
 	t.Cleanup(h.proxy.Close)
 	h.reverse = httptest.NewServer(http.HandlerFunc(h.gate.ServeReverse))
@@ -235,6 +238,95 @@ func TestANameThatResolvesInwardIsRefusedAtTheDial(t *testing.T) {
 		if r.Decision != egress.DecisionDenied || r.Reason != reasonNonPublic || r.Host != "inward.example.com" {
 			t.Fatalf("record = %+v, want a denial for %s", r, reasonNonPublic)
 		}
+	}
+}
+
+// TestATerminatedRequestThatResolvesInwardIsRefused is the same rule for a
+// destination with a credential bound to it: the engine terminates the
+// tunnel, the dialer refuses the address, the workload reads 403, and each
+// refused request is filed as a denial beside the tunnel's own record.
+func TestATerminatedRequestThatResolvesInwardIsRefused(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	h := newHarness(t, ln.Addr().String(), nil)
+	public := pkgegress.PublicDialer(nil)
+	h.gate.gateway.Dial = func(ctx context.Context, network, _ string) (net.Conn, error) {
+		h.dialed.Add(1)
+		return public(ctx, network, h.upstream)
+	}
+	ca, caPEM, _, err := pkgegress.GenerateCA(CACommonName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.gate.gateway.CA = ca
+	trust := x509.NewCertPool()
+	trust.AppendCertsFromPEM(caPEM)
+	m := egress.Map{Principal: "sandbox:sbx_a", Version: 1, Credential: "c", Mode: v1.EgressAllowlist, Allow: []string{"inward.example.com"}}
+	h.store.Apply(m)
+	h.store.registry.Set(m.Principal, []pkgegress.Entry{{
+		Placeholder: []byte(egress.MintPlaceholder()), Secret: []byte("a value"), AllowedHosts: []string{"inward.example.com"},
+	}})
+
+	resp, err := proxyClient(t, h.proxy.Listener.Addr().String(), "c", trust).Get("https://inward.example.com/v1/x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("the terminated request answered %d, want %d", resp.StatusCode, http.StatusForbidden)
+	}
+	if h.dialed.Load() == 0 {
+		t.Fatal("the engine never dialed, so the refusal came from somewhere else")
+	}
+	records := waitForRecords(t, h, 2)
+	denied := slices.IndexFunc(records, func(r egress.Record) bool {
+		return r.Decision == egress.DecisionDenied && r.Reason == reasonNonPublic &&
+			r.Host == "inward.example.com" && r.Port == 443 && r.Method == http.MethodGet && r.Path == "/v1/x"
+	})
+	if denied < 0 {
+		t.Fatalf("records = %+v, want the refused request filed as %s", records, reasonNonPublic)
+	}
+}
+
+// TestTheReverseDoorReadsAPort: a destination written with a port on the
+// reverse door is decided by its host, refused before any dial where that
+// host is an address no boundary admits, and dialed and filed at the port
+// it named.
+func TestTheReverseDoorReadsAPort(t *testing.T) {
+	h := newHarness(t, "127.0.0.1:1", nil)
+	h.store.Apply(egress.Map{Principal: "sandbox:sbx_a", Version: 1, Credential: "c", Mode: v1.EgressOpen})
+	for _, target := range []string{"127.0.0.1:8443", "169.254.169.254:80", "[::1]:8443", "10.1.2.3:8443"} {
+		resp, _ := reverse(t, h.reverse.URL+"/"+target+"/v1/x", "c", nil)
+		if resp.StatusCode != http.StatusForbidden {
+			t.Fatalf("the reverse door answered %d for %s, want %d", resp.StatusCode, target, http.StatusForbidden)
+		}
+	}
+	if h.dialed.Load() != 0 {
+		t.Fatal("the reverse door dialed an address no boundary admits")
+	}
+	for _, r := range h.taken() {
+		if r.Decision != egress.DecisionDenied || r.Port == 443 {
+			t.Fatalf("record = %+v, want a denial at the port named", r)
+		}
+	}
+
+	var asked atomic.Value
+	h.gate.upstream = &http.Transport{DialContext: func(_ context.Context, _, address string) (net.Conn, error) {
+		asked.Store(address)
+		return nil, errors.New("no upstream in this test")
+	}}
+	if resp, _ := reverse(t, h.reverse.URL+"/api.example.com:8443/v1/x", "c", nil); resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("the reverse door answered %d for a host with a port, want the dial it made to fail", resp.StatusCode)
+	}
+	if got, _ := asked.Load().(string); got != "api.example.com:8443" {
+		t.Fatalf("the request was dialed to %q, want api.example.com:8443", got)
+	}
+	last := h.taken()[len(h.taken())-1]
+	if last.Host != "api.example.com" || last.Port != 8443 {
+		t.Fatalf("record = %+v, want api.example.com at 8443", last)
 	}
 }
 

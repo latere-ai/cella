@@ -82,6 +82,8 @@ type gatewayDriver struct {
 	// changes are the updates the driver was handed, in order.
 	changes []driver.Change
 	create  error
+	// update fails every update, which the driver then did not take.
+	update error
 	// local declares EgressLocal: the driver enforces its own allow list.
 	local bool
 }
@@ -106,8 +108,18 @@ func (d *gatewayDriver) Create(_ context.Context, s driver.CreateSpec) (driver.R
 func (d *gatewayDriver) Update(_ context.Context, _ string, c driver.Change) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if d.update != nil {
+		return d.update
+	}
 	d.changes = append(d.changes, c)
 	return nil
+}
+
+// failUpdates makes every update fail with err, or none with nil.
+func (d *gatewayDriver) failUpdates(err error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.update = err
 }
 
 // envChanges are the environments the driver was handed by an update.

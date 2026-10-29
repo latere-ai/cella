@@ -278,6 +278,12 @@ type EgressState struct {
 	// recreated secret of the same name from taking a running sandbox's
 	// place.
 	Secrets []MountedSecret `json:"secrets,omitempty"`
+	// EnvDigest is a digest of the environment the driver last took for
+	// this sandbox, its manifest's own with each mount's placeholder and
+	// companion. A compile whose environment differs hands the driver the
+	// new one, so a hand-off that failed is made again by the next apply or
+	// secret change. Empty means not known, which hands it once.
+	EnvDigest string `json:"envDigest,omitempty"`
 }
 
 // PortStatus is one declared port and what the driver's probe found:

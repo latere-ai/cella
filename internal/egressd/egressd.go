@@ -164,6 +164,7 @@ func New(ctx context.Context, o Options) (*Gateway, error) {
 		upstream: upstream,
 		records:  client.Record, log: o.Log, now: o.Now,
 	}
+	g.gateway.Refused = g.refused
 	gw := &Gateway{opts: o, log: o.Log, store: s, gate: g, client: client, caPEM: caPEM, environment: environment}
 	gw.proxy = &http.Server{Handler: http.HandlerFunc(g.ServeProxy), ReadHeaderTimeout: 30 * time.Second}
 	gw.reverse = &http.Server{Handler: http.HandlerFunc(g.ServeReverse), ReadHeaderTimeout: 30 * time.Second}

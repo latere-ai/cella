@@ -173,14 +173,35 @@ func loadEgressGateway(getenv Getenv, problems *[]string) EgressGateway {
 	return g
 }
 
+// localRanges are the addresses of the machine the gateway runs on and the
+// link it sits on: its own listeners, and a cloud's metadata service. No
+// boundary admits them, so no range the operator names may reach them, for a
+// name that resolves there as for the address written out.
+var localRanges = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/32"),
+	netip.MustParsePrefix("127.0.0.0/8"),
+	netip.MustParsePrefix("169.254.0.0/16"),
+	netip.MustParsePrefix("224.0.0.0/24"),
+	netip.MustParsePrefix("::/128"),
+	netip.MustParsePrefix("::1/128"),
+	netip.MustParsePrefix("fe80::/10"),
+	netip.MustParsePrefix("ff02::/16"),
+}
+
 // parseRanges reads a list of CIDR ranges separated by commas or white
-// space. An entry that is no range is named, so the operator sees which.
+// space. An entry that is no range, or one that reaches the gateway's own
+// machine or link, is named, so the operator sees which.
 func parseRanges(raw string) ([]netip.Prefix, error) {
 	var out []netip.Prefix
 	for _, field := range strings.FieldsFunc(raw, func(r rune) bool { return r == ',' || unicode.IsSpace(r) }) {
 		prefix, err := netip.ParsePrefix(field)
 		if err != nil {
 			return nil, fmt.Errorf("names %q, which is not a range such as 10.0.0.0/8", field)
+		}
+		for _, local := range localRanges {
+			if prefix.Overlaps(local) {
+				return nil, fmt.Errorf("names %q, which reaches %s on the gateway's own machine or link", field, local)
+			}
 		}
 		out = append(out, prefix.Masked())
 	}

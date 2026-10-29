@@ -158,7 +158,10 @@ put the placeholder. A running process keeps the environment it started
 with, so a secret its owner mounts on a sandbox that exists, or a
 secret whose `inject` moves, is in the gateway's map at once and in the
 workload's environment from its next start: the controller hands the
-driver the new environment, which records it for that start. `status.secrets.mounted` lists the names;
+driver the new environment, which records it for that start. The
+sandbox records a digest of the environment its driver last took, so a
+hand-off the driver missed is made again by the next apply or secret
+change. `status.secrets.mounted` lists the names;
 `status.secrets.notInjectable` lists any whose secret was deleted, or
 whose every host is off the allow list or on the deny list, so the
 caller knows those requests will leave unauthenticated rather than
@@ -172,7 +175,7 @@ gateway checks ever rotates under a running process.
 | Door | The sandbox uses | For |
 |---|---|---|
 | proxy | `HTTPS_PROXY=http://sandbox:<credential>@<gateway>:<port>`, the same in `HTTP_PROXY`, `NO_PROXY` for loopback and the mesh, and their lowercase forms; the trust file projected read-only at `/run/cella/egress-ca.pem`, the public roots the control plane or the worker read and then the gateway's CA ([[073-sandbox-trust-bundle]]), named by `SSL_CERT_FILE`, `NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`, `GIT_SSL_CAINFO`, `CURL_CA_BUNDLE`; those variables replace a client's trust store, and the gateway terminates only toward a host a secret is bound to and passes every other through untouched, so the file carries both | every client that honors proxy variables and the trust variables; stock clients send the URL's userinfo as `Proxy-Authorization: Basic`, which the gateway reads |
-| reverse | `CELLA_GATEWAY_URL=http://<gateway>:<port>` and the convention `$CELLA_GATEWAY_URL/<host>/<path>` over plain HTTP inside the environment, with the header `Cella-Egress-Credential: <credential>`; `CELLA_GATEWAY_CREDENTIAL` carries the value | runtimes that ignore proxy variables or private CAs: Node's built-in fetch, the JVM, Bun; the gateway names the destination from the first path segment, so `Authorization` stays free for the upstream's placeholder |
+| reverse | `CELLA_GATEWAY_URL=http://<gateway>:<port>` and the convention `$CELLA_GATEWAY_URL/<host>/<path>` over plain HTTP inside the environment, with the header `Cella-Egress-Credential: <credential>`; `CELLA_GATEWAY_CREDENTIAL` carries the value | runtimes that ignore proxy variables or private CAs: Node's built-in fetch, the JVM, Bun; the gateway names the destination from the first path segment, `<host>` or `<host>:<port>` with 443 the default, so `Authorization` stays free for the upstream's placeholder |
 
 The keys above are reserved ([[003-manifest-contract]]); `egress`
 exports the list as `ReservedEnv` and `TestReservedKeysMatchTheGateway`
@@ -364,9 +367,13 @@ What the gateway role adds, and the tests of this spec prove:
   `CELLA_EGRESS_PRIVATE_RANGES` names. The check is made on the address
   each connection dials, after its name resolved, on both doors and for
   a terminated request alike, so a name that resolves inward is refused
-  like the address written out (`NonPublicAddress`, 403). An address
-  written out is refused before any dial, and `localhost` with the
-  names under it is refused by name (`LocalTarget`).
+  like the address written out (`NonPublicAddress`, 403). A terminated
+  tunnel carries many requests, so each refused one is recorded on its
+  own, beside the tunnel. An address written out is refused before any
+  dial, on the reverse door with or without a port, and `localhost` with
+  the names under it is refused by name (`LocalTarget`). A range that
+  reaches loopback, link-local or the unspecified address is refused at
+  start, so no range reopens what no boundary admits.
 - Ports: an entry substitutes only toward its `scope.ports`.
 - Placement: an entry's value replaces its placeholder only in the
   header or query parameter its `inject` names, and in the body when
@@ -416,8 +423,9 @@ The `Volume` kind ([[019-volumes]]); the worker's own stream
 | A gateway that connects with nothing receives every map; one that missed a purge while disconnected drops that principal on reconnect; a sidecar receives one; two gateways each hold the full set and a put unacknowledged by the second is retried until it acks | `TestSnapshotIsAuthoritative`, `TestASnapshotIsSentOnConnect`, `TestASidecarReceivesOneMap` | [[039-egress-gateway]]: `TestASnapshotIsSentOnConnect`, `TestSendReturnsOnTheFirstAcknowledgment`, `TestASidecarReceivesOneMap`, `TestSnapshotIsAuthoritative` |
 | A put with a version at or below the held one is acknowledged and not applied; a value update produces a higher version and lands | `TestApplyTakesOnlyAHigherVersion`, `TestAPutAppliesAndIsAcknowledged` | [[039-egress-gateway]]: `TestApplyTakesOnlyAHigherVersion`, `TestAPutAppliesAndIsAcknowledged` |
 | With no gateway connected, or none acknowledging within the timeout, the create fails with `driver_unavailable`, no sandbox is left, and the environment is `Degraded NoGateway`; in sidecar mode the workload container does not start before the sidecar's ack | `TestCreateWaitsForTheGateway` | [[039-egress-gateway]]: `TestCreateWaitsForTheGateway`, less the sidecar and the Degraded phase |
-| The gateway connects only to public addresses and the ranges `CELLA_EGRESS_PRIVATE_RANGES` names, judged by the address each connection dials on both doors; the control plane's host is decided by the boundary like any other host | `TestGateMatrix`, `TestANameThatResolvesInwardIsRefusedAtTheDial`, `TestLoadEgressReadsPrivateRanges` | passing |
-| A secret its owner mounts on a sandbox that exists, or whose `inject` moves, reaches the driver as the workload's environment for its next start; a rotation of the value alone reaches none | `TestASecretMountedByAnUpdateReachesTheNextStart`, `TestASecretWhoseInjectMovedCarriesItsCompanion` | passing |
+| The gateway connects only to public addresses and the ranges `CELLA_EGRESS_PRIVATE_RANGES` names, judged by the address each connection dials on both doors and for each terminated request; no range reaches loopback or link-local; the control plane's host is decided by the boundary like any other host | `TestGateMatrix`, `TestANameThatResolvesInwardIsRefusedAtTheDial`, `TestATerminatedRequestThatResolvesInwardIsRefused`, `TestTheReverseDoorReadsAPort`, `TestLoadEgressReadsPrivateRanges`, `TestLoadEgressRefusesARangeThatIsNotOne` | passing |
+| A secret its owner mounts on a sandbox that exists, or whose `inject` moves, reaches the driver as the workload's environment for its next start, and one the driver missed is handed again; a rotation of the value alone reaches none, for a mount by name or by `sec_` id | `TestASecretMountedByAnUpdateReachesTheNextStart`, `TestASecretWhoseInjectMovedCarriesItsCompanion`, `TestAnEnvironmentAPushMissedIsCarried`, `TestAnEnvironmentTheDriverMissedIsHandedAgain`, `TestAMountByIDKeepsItsPlaceholder` | passing |
+| An update that fails after its map reached a gateway puts back the map desired state has, numbered past the one that failed | `TestUpdateWhoseBoundaryNoGatewayWillHold`, `TestAnUpdateThatFailsAfterItsPushPutsTheBoundaryBack` | passing |
 | A placeholder sent to an in-scope host and port is substituted in the header or query its `inject` names, or the body when opted in, on both doors; sent to any other host, port, or place it passes through verbatim | `TestSubstitutionIsScopedAndPlaced`, `TestSubstitutionHoldsThePortScope` against the gateway | [[046-secret-kind]]: passing, less placement on the proxy door, which `pkg/egress` has no seam for |
 | Framing headers are never rewritten; a chunked, a large, and a binary body are never read | `TestBodySubstitutionIsOptIn`, `TestSecretRefusals` | [[046-secret-kind]]: `TestBodySubstitutionIsOptIn` over the opt-in and the binary body; a framing header is refused at apply by `TestSecretRefusals`, and the rest is `pkg/egress`'s own suite |
 | `basic` substitutes base64 of `user:pass`; `bearer` and `raw` substitute verbatim and the upstream sees one `Bearer ` | `TestValueOf`, `TestSubstitutionIsScopedAndPlaced` | [[046-secret-kind]]: passing |

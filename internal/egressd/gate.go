@@ -164,6 +164,18 @@ func refusedAtDial(err error) bool {
 	return errors.Is(err, pkgegress.ErrNonPublicDestination)
 }
 
+// refused files a terminated request the dialer did not send because its
+// host resolved to an address that is not public. The engine answered the
+// workload 403; one tunnel carries many requests, so each is filed on its
+// own, beside the tunnel's record.
+func (g *gate) refused(principal string, req *http.Request) {
+	host, port := splitHostPort(req.URL.Host, 443)
+	g.record(egress.Record{
+		Principal: principal, Door: egress.DoorProxy, Host: host, Port: port,
+		Decision: egress.DecisionDenied, Reason: reasonNonPublic, Method: req.Method, Path: req.URL.Path,
+	})
+}
+
 // record files one connection, with whatever the door saw of it.
 func (g *gate) record(r egress.Record) {
 	if g.records == nil {
@@ -277,9 +289,12 @@ func (g *gate) tunnel(w http.ResponseWriter, r *http.Request, d decision, host s
 // uses, and it leaves Authorization free for the upstream's own placeholder.
 func (g *gate) ServeReverse(w http.ResponseWriter, r *http.Request) {
 	started := g.now()
-	host, rest, ok := splitReversePath(r.URL.Path)
+	authority, rest, ok := splitReversePath(r.URL.Path)
+	// The segment is host or host:port, as a CONNECT's authority is, and
+	// the host alone is what the boundary and the address checks read.
+	host, port := splitHostPort(authority, 443)
 	credential := strings.TrimSpace(r.Header.Get(egress.CredentialHeader))
-	d := g.decide(credential, host, 443)
+	d := g.decide(credential, host, port)
 	if d.principal == "" {
 		http.Error(w, "this gateway needs the sandbox's own credential", http.StatusUnauthorized)
 		return
@@ -289,7 +304,7 @@ func (g *gate) ServeReverse(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rec := egress.Record{
-		Principal: d.principal, Door: egress.DoorReverse, Host: host, Port: 443,
+		Principal: d.principal, Door: egress.DoorReverse, Host: host, Port: port,
 		Decision: d.verdict, Reason: d.reason, Method: r.Method, Path: rest, At: started,
 	}
 	if !d.allowed() {
@@ -301,7 +316,7 @@ func (g *gate) ServeReverse(w http.ResponseWriter, r *http.Request) {
 	// it, so there is nothing to tunnel and the request is rebuilt toward
 	// the destination over TLS.
 	rec.Decision = egress.DecisionAllowed
-	out, err := g.upstreamRequest(r, host, rest, d.principal)
+	out, err := g.upstreamRequest(r, host, port, rest, d.principal)
 	if err != nil {
 		rec.Reason = "BadRequest"
 		g.record(rec)
@@ -339,8 +354,8 @@ func (g *gate) ServeReverse(w http.ResponseWriter, r *http.Request) {
 // substitutes every placeholder the destination is in scope for. A
 // substitution that cannot be made fails the request rather than sending a
 // placeholder the caller meant to be a value.
-func (g *gate) upstreamRequest(r *http.Request, host, path, principal string) (*http.Request, error) {
-	target := &url.URL{Scheme: "https", Host: host, Path: path, RawQuery: r.URL.RawQuery}
+func (g *gate) upstreamRequest(r *http.Request, host string, port int, path, principal string) (*http.Request, error) {
+	target := &url.URL{Scheme: "https", Host: authorityOf(host, port), Path: path, RawQuery: r.URL.RawQuery}
 	out, err := http.NewRequestWithContext(r.Context(), r.Method, target.String(), r.Body)
 	if err != nil {
 		return nil, err
@@ -357,7 +372,7 @@ func (g *gate) upstreamRequest(r *http.Request, host, path, principal string) (*
 	// Each entry is applied to the one place its owner named, which is the
 	// placement rule of spec 018: a placeholder anywhere else in the request
 	// leaves as the opaque token it is.
-	if err = g.substitutePlaced(r.Context(), principal, host, 443, out); err != nil {
+	if err = g.substitutePlaced(r.Context(), principal, host, port, out); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -397,6 +412,15 @@ func splitReversePath(path string) (host, rest string, ok bool) {
 		return host, "/", true
 	}
 	return host, "/" + rest, true
+}
+
+// authorityOf writes a destination back as a URL's host: the host alone on
+// the default port, as it was asked for, and host:port on any other.
+func authorityOf(host string, port int) string {
+	if port == 443 && !strings.Contains(host, ":") {
+		return host
+	}
+	return net.JoinHostPort(strings.Trim(host, "[]"), strconv.Itoa(port))
 }
 
 // splitHostPort reads a destination written as host or host:port.
