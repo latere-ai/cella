@@ -23,7 +23,7 @@ require (
 	k8s.io/apimachinery v0.35.4
 	k8s.io/client-go v0.35.4
 	latere.ai/x/ci-gate v0.56.0
-	latere.ai/x/pkg v0.110.0
+	latere.ai/x/pkg v0.110.1-0.20261029184550-0e605b093fca
 	sigs.k8s.io/yaml v1.6.0
 )
 

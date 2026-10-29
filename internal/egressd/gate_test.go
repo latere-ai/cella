@@ -19,6 +19,7 @@ import (
 	"net/netip"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -288,6 +289,52 @@ func TestATerminatedRequestThatResolvesInwardIsRefused(t *testing.T) {
 	})
 	if denied < 0 {
 		t.Fatalf("records = %+v, want the refused request filed as %s", records, reasonNonPublic)
+	}
+}
+
+// TestATerminatedRequestReadsTheProtocolItSpoke: an HTTP/1.1 workload whose
+// request the gateway terminates reads an HTTP/1.1 status line, though the
+// gateway reached the upstream over HTTP/2. A strict client, as Bun's is,
+// refuses a status line that names HTTP/2.0 on an HTTP/1.1 connection.
+func TestATerminatedRequestReadsTheProtocolItSpoke(t *testing.T) {
+	up := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "proto="+strconv.Itoa(r.ProtoMajor))
+	}))
+	up.EnableHTTP2 = true
+	up.StartTLS()
+	t.Cleanup(up.Close)
+	upstreamTrust := x509.NewCertPool()
+	upstreamTrust.AddCert(up.Certificate())
+	h := newHarness(t, up.Listener.Addr().String(), upstreamTrust)
+	var dialer net.Dialer
+	h.gate.gateway.Dial = func(ctx context.Context, network, _ string) (net.Conn, error) {
+		return dialer.DialContext(ctx, network, h.upstream)
+	}
+	ca, caPEM, _, err := pkgegress.GenerateCA(CACommonName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.gate.gateway.CA = ca
+	trust := x509.NewCertPool()
+	trust.AppendCertsFromPEM(caPEM)
+	// example.com is a name the test server's certificate holds.
+	m := egress.Map{Principal: "sandbox:sbx_a", Version: 1, Credential: "c", Mode: v1.EgressAllowlist, Allow: []string{"example.com"}}
+	h.store.Apply(m)
+	h.store.registry.Set(m.Principal, []pkgegress.Entry{{
+		Placeholder: []byte(egress.MintPlaceholder()), Secret: []byte("a value"), AllowedHosts: []string{"example.com"},
+	}})
+
+	resp, err := proxyClient(t, h.proxy.Listener.Addr().String(), "c", trust).Get("https://example.com/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Proto != "HTTP/1.1" || string(body) != "proto=2" {
+		t.Fatalf("the workload read %s with %q, want HTTP/1.1 over an upstream that spoke h2", resp.Proto, body)
 	}
 }
 

@@ -6,6 +6,14 @@ refused before it is pushed.
 
 ## Unreleased
 
+### Fixed
+
+- **A request the gateway substitutes into answers in the protocol the
+  workload spoke.** When the gateway reached the destination over HTTP/2,
+  a workload that spoke HTTP/1.1 read a status line naming `HTTP/2.0`.
+  curl read it; Bun, and so Claude Code, refused it as a connection error,
+  so Claude Code could not reach a model through a mounted secret.
+
 ## v0.22.0 - 2026-10-29
 
 ### Added
