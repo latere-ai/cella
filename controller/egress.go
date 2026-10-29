@@ -167,11 +167,14 @@ func (c *Controller) carryEnv(ctx context.Context, obj *v1.Sandbox, secrets map[
 // workload with its own proxy (EgressLocal). No gateway decides where such a
 // sandbox connects, so a driver not handed the boundary goes on enforcing
 // the one the sandbox was created with while its status names the new one.
-// A sandbox no driver holds now gets it from the create or the start that
-// brings it back, which compile the boundary again. The caller holds the
-// lock.
-func (c *Controller) carryBoundary(ctx context.Context, obj v1.Sandbox, m egress.Map) error {
-	if !c.CapabilitiesOf(obj.Status.Environment).EgressLocal {
+// It is handed only when the update changed the boundary or the secrets
+// whose hosts join it, so an apply of anything else does not depend on the
+// driver being reachable; a hand-off that failed puts the old boundary back,
+// so the next apply differs again. A sandbox no driver holds now gets it
+// from the create or the start that brings it back, which compile the
+// boundary again. The caller holds the lock.
+func (c *Controller) carryBoundary(ctx context.Context, held, obj v1.Sandbox, m egress.Map) error {
+	if !c.CapabilitiesOf(obj.Status.Environment).EgressLocal || sameBoundary(held.Spec, obj.Spec) {
 		return nil
 	}
 	switch obj.Status.Phase {
@@ -190,6 +193,15 @@ func (c *Controller) carryBoundary(ctx context.Context, obj v1.Sandbox, m egress
 		return err
 	}
 	return nil
+}
+
+// sameBoundary reports whether two specs ask for the same boundary: the same
+// mode and hosts, and the same secrets mounted, whose hosts join the allow
+// list.
+func sameBoundary(a, b v1.SandboxSpec) bool {
+	x, y := a.Network.Egress, b.Network.Egress
+	return x.Mode == y.Mode && slices.Equal(x.AllowedHosts, y.AllowedHosts) &&
+		slices.Equal(x.DeniedHosts, y.DeniedHosts) && slices.Equal(a.Secrets, b.Secrets)
 }
 
 // restoreEgress puts back the boundary a sandbox had before an update that

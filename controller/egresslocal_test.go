@@ -117,8 +117,9 @@ func TestEgressLocalNeedsNoGatewayAtTheController(t *testing.T) {
 // confines the workload with its own proxy is the one place its boundary is
 // enforced, so an update that narrows the allow list hands the driver the
 // new one, with no door or credential, and an update the driver did not
-// take fails and keeps the boundary the driver still holds. A driver that
-// enforces through a gateway is handed no boundary.
+// take fails and keeps the boundary the driver still holds. An apply that
+// leaves the boundary alone hands nothing, so it does not depend on the
+// driver. A driver that enforces through a gateway is handed no boundary.
 func TestAnUpdatedBoundaryReachesTheDriverThatEnforcesIt(t *testing.T) {
 	c, here, laptop, _, _ := openWithLocalEgress(t)
 	ctx := t.Context()
@@ -142,7 +143,15 @@ func TestAnUpdatedBoundaryReachesTheDriverThatEnforcesIt(t *testing.T) {
 	}
 
 	laptop.failUpdates(errors.New("the device is not there"))
-	closed := narrowed
+	labelled := narrowed
+	labelled.Metadata.Labels = map[string]string{"team": "a"}
+	if _, err = c.Update(ctx, labelled); err != nil {
+		t.Fatalf("an apply that left the boundary alone needed the driver: %v", err)
+	}
+	if got := laptop.egressChanges(); len(got) != 1 {
+		t.Fatalf("an apply that left the boundary alone handed %d boundaries", len(got)-1)
+	}
+	closed := labelled
 	closed.Spec.Network.Egress = v1.Egress{Mode: v1.EgressNone}
 	if _, err = c.Update(ctx, closed); err == nil {
 		t.Fatal("an update the driver did not take succeeded")
