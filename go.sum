@@ -312,10 +312,8 @@ k8s.io/utils v0.0.0-20260210185600-b8788abfbbc2 h1:AZYQSJemyQB5eRxqcPky+/7EdBj0x
 k8s.io/utils v0.0.0-20260210185600-b8788abfbbc2/go.mod h1:xDxuJ0whA3d0I4mf/C4ppKHxXynQ+fxnkmQH0vTHnuk=
 latere.ai/x/ci-gate v0.56.0 h1:52eMeBew50UiJfFhLtAMUfwMH+ENUM4WKKLCzANXBd8=
 latere.ai/x/ci-gate v0.56.0/go.mod h1:SYUdCY8Ob6oNGc+23pS0u7qoxafBFixY6IrpH2UgHzQ=
-latere.ai/x/pkg v0.110.1 h1:ugz02UbdG9J7LCS+A2jXxO/gYFBEbaQOhnU5wgMnY74=
-latere.ai/x/pkg v0.110.1/go.mod h1:neEq6JP/IEi6keAMCdlHzADcdgv1o5kJePrLKYjVb4M=
-latere.ai/x/pkg v0.110.2-0.20261029211741-4bb2cd42b73e h1:KTFHkLqSSop86QJTdY9nAcz+uVzL89OQh326eHRo/90=
-latere.ai/x/pkg v0.110.2-0.20261029211741-4bb2cd42b73e/go.mod h1:neEq6JP/IEi6keAMCdlHzADcdgv1o5kJePrLKYjVb4M=
+latere.ai/x/pkg v0.110.2 h1:+KCH8EXEXkW/sAhKR2ExowMJBUYxfp8HRXWUKsHkG98=
+latere.ai/x/pkg v0.110.2/go.mod h1:neEq6JP/IEi6keAMCdlHzADcdgv1o5kJePrLKYjVb4M=
 pgregory.net/rapid v1.2.0 h1:keKAYRcjm+e1F0oAuU5F5+YPAWcyxNNRK2wud503Gnk=
 pgregory.net/rapid v1.2.0/go.mod h1:PY5XlDGj0+V1FCq0o192FdRhpKHGTRIWBgqjDBTrq04=
 sigs.k8s.io/json v0.0.0-20250730193827-2d320260d730 h1:IpInykpT6ceI+QxKBbEflcR5EXP7sU1kvOlxwZh5txg=
