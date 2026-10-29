@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.22.2 - 2026-10-29
+
 ### Fixed
 
 - **A streamed answer reaches an HTTP/1.1 workload with its end marked.**
