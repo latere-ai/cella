@@ -11,6 +11,13 @@ Each sandbox is one PersistentVolumeClaim, its workspace, and one Pod in the
 namespace the control plane is configured for. Stopping a sandbox deletes
 the Pod and keeps the claim, so the files survive a stop and a start.
 
+The container's root file system is read only: the workspace, `/tmp` and
+the volumes are the places a sandbox writes. `HOME` is the workspace, so a
+tool that keeps its configuration or installs its packages under the home
+directory writes there and finds it again after a restart. A manifest that
+sets `HOME` in `spec.env` keeps its own; a home inside the image is read
+only.
+
 | Capability | On Kubernetes |
 |---|---|
 | Commands (`exec`) | yes, with stdin and a terminal when asked |

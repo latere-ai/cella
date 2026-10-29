@@ -122,9 +122,9 @@ func TestPodWithDisplay(t *testing.T) {
 		t.Fatalf("the desktop's readiness probe is %+v", probe)
 	}
 	// The workload is told which screen to draw on and nothing else of the
-	// desktop's own environment.
+	// desktop's own environment: its home is its own.
 	workload := resolved(pod, podEnvData(withDesk, now, false))
-	if !maps.Equal(workload, map[string]string{display.DisplayEnv: display.DisplayValue}) {
+	if !maps.Equal(workload, map[string]string{display.DisplayEnv: display.DisplayValue, "HOME": driver.DefaultWorkdir}) {
 		t.Fatalf("the workload's environment is %v", workload)
 	}
 
@@ -133,7 +133,7 @@ func TestPodWithDisplay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plain.Spec.Containers) != 1 || len(plain.Spec.Containers[0].Env) != 0 {
+	if len(plain.Spec.Containers) != 1 || slices.ContainsFunc(plain.Spec.Containers[0].Env, func(e corev1.EnvVar) bool { return e.Name == display.DisplayEnv }) {
 		t.Fatalf("a sandbox with no desktop renders %d containers and %v", len(plain.Spec.Containers), plain.Spec.Containers[0].Env)
 	}
 }

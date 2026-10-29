@@ -6,6 +6,18 @@ refused before it is pushed.
 
 ## Unreleased
 
+### Fixed
+
+- **On Kubernetes, a sandbox can write to its home directory.** The root
+  file system is read only, so a tool that writes under `HOME`, such as
+  `npm install -g` or Claude Code saving its settings, failed with
+  `ENOENT` or `EROFS`. `HOME` is now the workspace unless `spec.env` sets
+  it, as on the native runtime, and what is written there survives a
+  restart. A sandbox started before this keeps the image's home until its
+  next start. Every sandbox now has a Secret, which holds at least that
+  path, since the Pod reads each of its variables from the sandbox's
+  Secret.
+
 ## v0.22.2 - 2026-10-29
 
 ### Fixed

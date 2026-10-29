@@ -324,7 +324,7 @@ Every Pod carries the security baseline of
 |---|---|
 | `securityContext.runAsNonRoot` | `true` |
 | `securityContext.capabilities.drop` | `["ALL"]` |
-| `securityContext.readOnlyRootFilesystem` | `true`, with the workspace, `/tmp`, and the volumes as the only writable mounts |
+| `securityContext.readOnlyRootFilesystem` | `true`, with the workspace, `/tmp`, and the volumes as the only writable mounts; `HOME` is the workspace where the sandbox's environment names none, as on native, so a tool that writes under its home writes to a mount a restart keeps |
 | `securityContext.seccompProfile.type` | `RuntimeDefault` |
 | `securityContext.allowPrivilegeEscalation` | `false` |
 | `securityContext.privileged` | `false` |

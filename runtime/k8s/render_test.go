@@ -48,11 +48,13 @@ func TestRenderPodAndClaim(t *testing.T) {
 			Name: tokenSecretName(s.ID), Key: envVarKey(generation(now), name),
 		}}}
 	}
-	if want := []corev1.EnvVar{ref("A"), ref("B")}; !reflect.DeepEqual(c.Env, want) {
+	if want := []corev1.EnvVar{ref("A"), ref("B"), ref("HOME")}; !reflect.DeepEqual(c.Env, want) {
 		t.Fatalf("env %v, want it sorted as %v", c.Env, want)
 	}
-	if got := resolved(pod, podEnvData(s, now, false)); !maps.Equal(got, s.Env) {
-		t.Fatalf("the references resolve to %v, want %v", got, s.Env)
+	want := maps.Clone(s.Env)
+	want["HOME"] = "/data"
+	if got := resolved(pod, podEnvData(s, now, false)); !maps.Equal(got, want) {
+		t.Fatalf("the references resolve to %v, want %v", got, want)
 	}
 	if c.WorkingDir != "/workspace/sub" {
 		t.Fatalf("workdir %q", c.WorkingDir)
@@ -95,6 +97,35 @@ func TestRenderPodAndClaim(t *testing.T) {
 	}
 	if claim.Name != pod.Name {
 		t.Fatalf("claim %s and pod %s are not one name", claim.Name, pod.Name)
+	}
+}
+
+// TestTheWorkloadsHomeIsTheWorkspace: the root file system takes no writes,
+// so the workload's home is its workspace unless the sandbox names its own,
+// and the Pod carries it as every other variable, so a command inherits it.
+func TestTheWorkloadsHomeIsTheWorkspace(t *testing.T) {
+	h := newHarness(t)
+	elsewhere := spec("sbx_elsewhere")
+	elsewhere.Workspace.Path = "/data"
+	named := spec("sbx_named")
+	named.Env = map[string]string{"HOME": "/workspace/me"}
+	for _, c := range []struct {
+		name string
+		s    driver.CreateSpec
+		want string
+	}{
+		{"the default workspace", spec("sbx_default"), driver.DefaultWorkdir},
+		{"a workspace elsewhere", elsewhere, "/data"},
+		{"a home the sandbox names", named, "/workspace/me"},
+	} {
+		h.created(t, c.s)
+		if got := h.envOf(t, h.podOf(t, c.s.ID))["HOME"]; got != c.want {
+			t.Errorf("%s: HOME is %q, want %q", c.name, got, c.want)
+		}
+		h.referencesOnly(t, c.s.ID)
+		if set := assignments(h.ran(t, c.s.ID, nil)); set["HOME"] != "" {
+			t.Errorf("%s: a command is given HOME=%s on its argv, not by its container", c.name, set["HOME"])
+		}
 	}
 }
 

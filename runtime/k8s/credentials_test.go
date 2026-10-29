@@ -502,8 +502,10 @@ func TestMoveCredentialsRewritesAnOldRecord(t *testing.T) {
 		t.Fatalf("the move rewrote %d records: %v", rewritten, err)
 	}
 	h.moved(t, s.ID, s.Env, credValue)
-	if _, err := h.cs.CoreV1().Secrets(namespace).Get(t.Context(), tokenSecretName(plain.ID), metav1.GetOptions{}); !apierrors.IsNotFound(err) {
-		t.Errorf("a sandbox with no credentials was given a Secret: %v", err)
+	for _, key := range []string{envKey, credentialKey} {
+		if _, held := h.secretOf(t, plain.ID).Data[key]; held {
+			t.Errorf("the move gave a sandbox with no credentials %s", key)
+		}
 	}
 	if rewritten, err = h.MoveCredentials(t.Context()); err != nil || rewritten != 0 {
 		t.Errorf("a second move rewrote %d records: %v", rewritten, err)

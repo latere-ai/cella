@@ -217,8 +217,8 @@ func TestNoTokenProjectsNothing(t *testing.T) {
 	if h.claimOf(t, id).Annotations[annToken] != "" {
 		t.Error("the claim records a projection that did not happen")
 	}
-	if _, err := h.cs.CoreV1().Secrets(namespace).Get(t.Context(), tokenSecretName(id), metav1.GetOptions{}); !apierrors.IsNotFound(err) {
-		t.Errorf("a secret was created for a sandbox with no token: %v", err)
+	if _, held := h.secretOf(t, id).Data[tokenKey]; held {
+		t.Error("the Secret of a sandbox with no token holds one")
 	}
 }
 

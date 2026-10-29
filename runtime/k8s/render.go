@@ -322,15 +322,26 @@ func (d *Driver) claim(s driver.CreateSpec, now time.Time) (*corev1.PersistentVo
 // that holds the Pod open for Exec and leaves on the first TERM.
 var keepAlive = []string{"/bin/sh", "-c", "trap 'exit 0' TERM; while :; do sleep 60 & wait $!; done"}
 
+// homeEnv is the variable that names the workload's home.
+const homeEnv = "HOME"
+
 // workloadEnv is the environment the workload container starts with: the
 // sandbox's own, the token's path where it carries an identity, the gateway's
 // doors, the sandbox's credential and the trust variables, so every client
 // that honors them leaves through the gateway the rule leaves open (spec
 // 018), and the screen to draw on beside the desktop of spec 023.
+//
+// HOME is the workspace where the sandbox's own environment names none. The
+// root file system is read only, so the image's home takes no writes, and a
+// tool that keeps its configuration or its installs under HOME fails there;
+// the workspace is the one writable place a restart keeps.
 func workloadEnv(s driver.CreateSpec, token bool) map[string]string {
 	environment := maps.Clone(s.Env)
 	if environment == nil {
 		environment = map[string]string{}
+	}
+	if _, named := environment[homeEnv]; !named {
+		environment[homeEnv] = workspacePath(s)
 	}
 	if token {
 		environment[driver.TokenFileEnv] = driver.TokenPath
@@ -465,7 +476,7 @@ func (d *Driver) pod(s driver.CreateSpec, now time.Time, token bool) (*corev1.Po
 
 // withDisplayEnv adds what a workload beside the desktop needs to address the
 // screen. The geometry and the home are the desktop's own and are not set on
-// the workload, whose home is its image's.
+// the workload, whose home is its own (workloadEnv).
 func withDisplayEnv(environment map[string]string) map[string]string {
 	out := maps.Clone(environment)
 	if out == nil {
