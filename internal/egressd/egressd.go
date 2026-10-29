@@ -21,6 +21,8 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/netip"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -63,8 +65,14 @@ type Options struct {
 	// roots when it dials a destination.
 	UpstreamCAPEM string
 	Log           *slog.Logger
+	// PrivateRanges are the addresses that are not public which the gateway
+	// may still dial for a sandbox, CELLA_EGRESS_PRIVATE_RANGES: a registry
+	// or a mirror on the operator's own network. Every other address that is
+	// not public is refused, by the address a connection dials.
+	PrivateRanges []netip.Prefix
 	// Dial is the seam toward a destination. It is nil in an installation,
-	// where the gateway dials directly.
+	// where the gateway dials directly and only to public addresses and
+	// PrivateRanges; a caller that sets it takes over that decision.
 	Dial func(ctx context.Context, network, address string) (net.Conn, error)
 	// Ready, when set, is called once the gateway holds its first snapshot,
 	// so a caller knows the doors are answering from the control plane's
@@ -118,8 +126,7 @@ func New(ctx context.Context, o Options) (*Gateway, error) {
 	}
 	dial := o.Dial
 	if dial == nil {
-		var dialer net.Dialer
-		dial = dialer.DialContext
+		dial = pkgegress.PublicDialer(o.PrivateRanges)
 	}
 	// One transport reaches every upstream, the token endpoint of an oauth
 	// secret included, so the dial seam and the operator's own authority
@@ -143,13 +150,14 @@ func New(ctx context.Context, o Options) (*Gateway, error) {
 	// stamped with the clock the records are.
 	s.report, s.now = client.Use, o.Now
 	g := &gate{
-		store: s, controlPlane: hostOf(o.URL), dial: dial,
+		store: s, private: slices.Clone(o.PrivateRanges), dial: dial,
 		gateway: &pkgegress.Gateway{
 			Registry:             s.Registry(),
 			CA:                   ca,
 			Auth:                 credentialAuth{store: s},
 			UpstreamTLS:          upstreamTLSConfig,
 			BlockLoopbackTargets: true,
+			Dial:                 dial,
 			Realm:                Realm,
 			Log:                  o.Log,
 		},
@@ -304,20 +312,4 @@ func gatewayID() string {
 		return "gw"
 	}
 	return "gw-" + fmt.Sprintf("%x", b)
-}
-
-// hostOf is the host of a URL, which is what the gate refuses as a
-// destination.
-func hostOf(raw string) string {
-	trimmed := strings.TrimSpace(raw)
-	for _, scheme := range []string{"https://", "http://", "wss://", "ws://"} {
-		if rest, ok := strings.CutPrefix(trimmed, scheme); ok {
-			trimmed = rest
-			break
-		}
-	}
-	if i := strings.IndexAny(trimmed, "/?#"); i >= 0 {
-		trimmed = trimmed[:i]
-	}
-	return hostOnly(trimmed)
 }

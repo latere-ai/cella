@@ -88,7 +88,7 @@ func TestValueOf(t *testing.T) {
 // credential "c" under mode allowlist over the entries' own hosts.
 func substituting(t *testing.T, upstreamHost string, trust *x509.CertPool, entries ...egress.Entry) *harness {
 	t.Helper()
-	h := newHarness(t, upstreamHost, "", trust)
+	h := newHarness(t, upstreamHost, trust)
 	var allow []string
 	for _, e := range entries {
 		allow = append(allow, e.Hosts...)

@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strconv"
 	"strings"
@@ -29,7 +30,7 @@ import (
 const (
 	reasonNoCredential   = "NoCredential"
 	reasonLocalTarget    = "LocalTarget"
-	reasonControlPlane   = "ControlPlane"
+	reasonNonPublic      = "NonPublicAddress"
 	reasonNoMap          = "NoMap"
 	reasonModeNone       = "EgressNone"
 	reasonNotAllowed     = "NotOnTheAllowList"
@@ -45,13 +46,15 @@ const Realm = "cella-egress"
 // the destination, and whether anything is substituted on the way.
 type gate struct {
 	store *store
-	// controlPlane is the host the gateway itself connects to. A sandbox
-	// may never reach it through the gateway: its own workload token is an
-	// identity, and a proxy that carried it would let a sandbox act on the
-	// control plane from inside the boundary.
-	controlPlane string
-	// dial opens the connection to an upstream. It is the one seam an
-	// operator whose gateway sits behind another proxy replaces.
+	// private are the non-public ranges the operator lets the gateway dial,
+	// CELLA_EGRESS_PRIVATE_RANGES. Every other address that is not public is
+	// refused: the gateway sits on its operator's network, and a sandbox
+	// would otherwise reach that network through it.
+	private []netip.Prefix
+	// dial opens the connection to an upstream. In an installation it is
+	// pkg/egress's PublicDialer over private, which refuses an address that
+	// is not public whatever name led to it; an operator whose gateway sits
+	// behind another proxy replaces it.
 	dial func(ctx context.Context, network, address string) (net.Conn, error)
 	// gateway is the substitution engine's own CONNECT proxy, which takes
 	// the connections that have something to substitute.
@@ -80,8 +83,10 @@ func (d decision) allowed() bool {
 }
 
 // decide is the whole of the boundary's rule, in the order the acceptance
-// criteria state it. It reads no body and opens no connection.
-func (g *gate) decide(credential, host string, port int) decision {
+// criteria state it. It reads no body and opens no connection. A name is
+// decided here by the boundary alone; where it leads is decided again when
+// the connection is dialed, by the address it resolved to.
+func (g *gate) decide(credential, host string, _ int) decision {
 	principal, ok := g.store.Principal(credential)
 	if !ok {
 		return decision{verdict: egress.DecisionDenied, reason: reasonNoCredential}
@@ -95,8 +100,8 @@ func (g *gate) decide(credential, host string, port int) decision {
 	case isLocalTarget(host):
 		d.verdict, d.reason = egress.DecisionDenied, reasonLocalTarget
 		return d
-	case g.isControlPlane(host, port):
-		d.verdict, d.reason = egress.DecisionDenied, reasonControlPlane
+	case g.isNonPublicAddress(host):
+		d.verdict, d.reason = egress.DecisionDenied, reasonNonPublic
 		return d
 	}
 	m, held := g.store.Map(principal)
@@ -140,10 +145,23 @@ func isLocalTarget(host string) bool {
 	return ip.IsLoopback() || ip.IsUnspecified() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast()
 }
 
-// isControlPlane reports whether a destination names the control plane this
-// gateway connects to, at any port.
-func (g *gate) isControlPlane(host string, _ int) bool {
-	return g.controlPlane != "" && strings.EqualFold(hostOnly(g.controlPlane), hostOnly(host))
+// isNonPublicAddress reports whether a destination written as an address is
+// one the gateway does not dial: not public, and outside every range the
+// operator named. It answers before the dial for the case the address is
+// plain to see; a name that resolves to such an address is refused by the
+// dialer.
+func (g *gate) isNonPublicAddress(host string) bool {
+	ip, err := netip.ParseAddr(strings.Trim(host, "[]"))
+	if err != nil {
+		return false
+	}
+	return pkgegress.CheckPublic(ip, g.private) != nil
+}
+
+// refusedAtDial reports whether a dial failed because the address the name
+// resolved to is not one the gateway dials.
+func refusedAtDial(err error) bool {
+	return errors.Is(err, pkgegress.ErrNonPublicDestination)
 }
 
 // record files one connection, with whatever the door saw of it.
@@ -194,6 +212,12 @@ func (g *gate) tunnel(w http.ResponseWriter, r *http.Request, d decision, host s
 	started := g.now()
 	rec := egress.Record{Principal: d.principal, Door: egress.DoorProxy, Host: host, Port: port, Decision: d.verdict, At: started}
 	upstream, err := g.dial(r.Context(), "tcp", net.JoinHostPort(host, strconv.Itoa(port)))
+	if refusedAtDial(err) {
+		rec.Decision, rec.Reason = egress.DecisionDenied, reasonNonPublic
+		g.record(rec)
+		http.Error(w, "the gateway does not connect to "+host+": it resolves to an address that is not public", http.StatusForbidden)
+		return
+	}
 	if err != nil {
 		g.log.WarnContext(r.Context(), "the gateway could not reach an admitted destination", "host", host, "err", err)
 		rec.Reason = "Unreachable"
@@ -285,6 +309,12 @@ func (g *gate) ServeReverse(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp, err := g.upstream.RoundTrip(out)
+	if refusedAtDial(err) {
+		rec.Decision, rec.Reason = egress.DecisionDenied, reasonNonPublic
+		g.record(rec)
+		http.Error(w, "the gateway does not connect to "+host+": it resolves to an address that is not public", http.StatusForbidden)
+		return
+	}
 	if err != nil {
 		rec.Reason = "Unreachable"
 		g.record(rec)
@@ -378,14 +408,6 @@ func splitHostPort(authority string, def int) (string, int) {
 		return host, def
 	}
 	return authority, def
-}
-
-// hostOnly strips a port from a host:port and the brackets from a v6 literal.
-func hostOnly(authority string) string {
-	if host, _, err := net.SplitHostPort(authority); err == nil {
-		return host
-	}
-	return strings.Trim(authority, "[]")
 }
 
 // upstreamTLS is the trust the gateway itself dials with: the system roots,

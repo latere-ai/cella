@@ -15,6 +15,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"net/url"
 	"strings"
 	"sync"
@@ -50,9 +51,8 @@ func (h *harness) taken() []egress.Record {
 	return append([]egress.Record(nil), h.records...)
 }
 
-// newHarness builds the gate over a loopback upstream. controlPlane is the
-// host the gate refuses as a destination.
-func newHarness(t *testing.T, upstream, controlPlane string, trust *x509.CertPool) *harness {
+// newHarness builds the gate over a loopback upstream.
+func newHarness(t *testing.T, upstream string, trust *x509.CertPool) *harness {
 	t.Helper()
 	h := &harness{store: newStore(nil), upstream: upstream}
 	tlsConfig := &tls.Config{RootCAs: trust, MinVersion: tls.VersionTLS12}
@@ -66,7 +66,7 @@ func newHarness(t *testing.T, upstream, controlPlane string, trust *x509.CertPoo
 		return dialer.DialContext(ctx, network, h.upstream)
 	}
 	h.gate = &gate{
-		store: h.store, controlPlane: controlPlane, dial: dial,
+		store: h.store, private: []netip.Prefix{netip.MustParsePrefix("10.20.0.0/16")}, dial: dial,
 		gateway: &pkgegress.Gateway{
 			Registry: h.store.Registry(), CA: ca, Auth: credentialAuth{store: h.store},
 			UpstreamTLS: tlsConfig, BlockLoopbackTargets: true, Realm: Realm, Log: slog.Default(),
@@ -91,7 +91,7 @@ func newHarness(t *testing.T, upstream, controlPlane string, trust *x509.CertPoo
 // destinations no boundary admits, and a caller the gateway does not know.
 // Every case is decided with no dial.
 func TestGateMatrix(t *testing.T) {
-	h := newHarness(t, "127.0.0.1:1", "control.example.internal", nil)
+	h := newHarness(t, "127.0.0.1:1", nil)
 	h.store.Apply(egress.Map{Principal: "sandbox:sbx_none", Version: 1, Credential: "none", Mode: v1.EgressNone})
 	h.store.Apply(egress.Map{Principal: "sandbox:sbx_allow", Version: 1, Credential: "allow", Mode: v1.EgressAllowlist, Allow: []string{"api.example.com", "*.cdn.example.com"}})
 	h.store.Apply(egress.Map{Principal: "sandbox:sbx_open", Version: 1, Credential: "open", Mode: v1.EgressOpen, Deny: []string{"blocked.example.com", "*.blocked.example.net"}})
@@ -125,7 +125,13 @@ func TestGateMatrix(t *testing.T) {
 		{"theSixLoopback", "open", "::1", egress.DecisionDenied, reasonLocalTarget},
 		{"theLinkLocalMetadataAddress", "open", "169.254.169.254", egress.DecisionDenied, reasonLocalTarget},
 		{"aNameUnderLocalhost", "open", "db.localhost", egress.DecisionDenied, reasonLocalTarget},
-		{"theControlPlane", "open", "control.example.internal", egress.DecisionDenied, reasonControlPlane},
+		{"thePrivateNetwork", "open", "10.0.0.1", egress.DecisionDenied, reasonNonPublic},
+		{"theCarrierGradeNAT", "allow", "100.64.0.1", egress.DecisionDenied, reasonNonPublic},
+		{"aMappedPrivateAddress", "open", "::ffff:192.168.1.1", egress.DecisionDenied, reasonNonPublic},
+		{"aUniqueLocalAddress", "open", "[fd00::1]", egress.DecisionDenied, reasonNonPublic},
+		{"aRangeTheOperatorNamed", "open", "10.20.1.1", egress.DecisionPassthrough, ""},
+		{"thePlatformsOwnHostIsAnyHost", "open", "api.latere.ai", egress.DecisionPassthrough, ""},
+		{"aPublicAddress", "open", "203.0.114.1", egress.DecisionPassthrough, ""},
 		{"noDestination", "open", "", egress.DecisionDenied, reasonBadDestination},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -145,7 +151,7 @@ func TestGateMatrix(t *testing.T) {
 // buying reach its sandbox does not have. The map compiler drops the entry,
 // and the gate refuses the host whether or not one survived.
 func TestADeniedHostBeatsASecretsScope(t *testing.T) {
-	h := newHarness(t, "127.0.0.1:1", "", nil)
+	h := newHarness(t, "127.0.0.1:1", nil)
 	m := egress.Map{
 		Principal: "sandbox:sbx_a", Version: 1, Credential: "c", Mode: v1.EgressOpen,
 		Deny: []string{"api.example.com"},
@@ -162,7 +168,7 @@ func TestADeniedHostBeatsASecretsScope(t *testing.T) {
 // TestProxyDoorRefusesBeforeAnyDial holds the whole point of the gate: a
 // destination the boundary does not admit never reaches the network.
 func TestProxyDoorRefusesBeforeAnyDial(t *testing.T) {
-	h := newHarness(t, "127.0.0.1:1", "", nil)
+	h := newHarness(t, "127.0.0.1:1", nil)
 	h.store.Apply(egress.Map{Principal: "sandbox:sbx_a", Version: 1, Credential: "c", Mode: v1.EgressAllowlist, Allow: []string{"api.example.com"}})
 	resp := connect(t, h.proxy.Listener.Addr().String(), "other.example.com:443", "c")
 	if resp != http.StatusForbidden {
@@ -180,11 +186,63 @@ func TestProxyDoorRefusesBeforeAnyDial(t *testing.T) {
 	}
 }
 
+// TestANameThatResolvesInwardIsRefusedAtTheDial is the half of the rule a
+// name cannot get past: the boundary admits the name, and the address it
+// resolves to is not public, so neither door connects though something
+// listens there, and the record says why.
+func TestANameThatResolvesInwardIsRefusedAtTheDial(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	h := newHarness(t, ln.Addr().String(), nil)
+	// Every name resolves to the listener on loopback, which is what a name
+	// pointed at the gateway's own network looks like to the dialer.
+	public := pkgegress.PublicDialer(nil)
+	inward := func(ctx context.Context, network, _ string) (net.Conn, error) {
+		h.dialed.Add(1)
+		return public(ctx, network, h.upstream)
+	}
+	h.gate.dial = inward
+	h.gate.upstream = &http.Transport{DialContext: inward}
+	h.store.Apply(egress.Map{Principal: "sandbox:sbx_a", Version: 1, Credential: "c", Mode: v1.EgressAllowlist, Allow: []string{"inward.example.com"}})
+
+	if got := connect(t, h.proxy.Listener.Addr().String(), "inward.example.com:443", "c"); got != http.StatusForbidden {
+		t.Fatalf("CONNECT answered %d, want %d", got, http.StatusForbidden)
+	}
+	req, err := http.NewRequest(http.MethodGet, h.reverse.URL+"/inward.example.com/v1/x", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set(egress.CredentialHeader, "c")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("the reverse door answered %d, want %d", resp.StatusCode, http.StatusForbidden)
+	}
+	if h.dialed.Load() == 0 {
+		t.Fatal("neither door dialed, so the refusal came from somewhere else")
+	}
+	records := h.taken()
+	if len(records) != 2 {
+		t.Fatalf("records = %+v, want one per door", records)
+	}
+	for _, r := range records {
+		if r.Decision != egress.DecisionDenied || r.Reason != reasonNonPublic || r.Host != "inward.example.com" {
+			t.Fatalf("record = %+v, want a denial for %s", r, reasonNonPublic)
+		}
+	}
+}
+
 // TestProxyDoorNeedsTheSandboxsOwnCredential answers a caller the gateway
 // cannot place with the challenge, and files no record: there is no
 // principal to file one under.
 func TestProxyDoorNeedsTheSandboxsOwnCredential(t *testing.T) {
-	h := newHarness(t, "127.0.0.1:1", "", nil)
+	h := newHarness(t, "127.0.0.1:1", nil)
 	h.store.Apply(egress.Map{Principal: "sandbox:sbx_a", Version: 1, Credential: "c", Mode: v1.EgressOpen})
 	for _, credential := range []string{"", "wrong"} {
 		if got := connect(t, h.proxy.Listener.Addr().String(), "api.example.com:443", credential); got != http.StatusProxyAuthRequired {
@@ -210,7 +268,7 @@ func TestProxyDoorTunnelsAnAdmittedHost(t *testing.T) {
 	trust := x509.NewCertPool()
 	trust.AddCert(upstream.Certificate())
 
-	h := newHarness(t, hostPort(t, upstream.URL), "", trust)
+	h := newHarness(t, hostPort(t, upstream.URL), trust)
 	h.store.Apply(egress.Map{Principal: "sandbox:sbx_a", Version: 1, Credential: "c", Mode: v1.EgressAllowlist, Allow: []string{"api.example.com"}})
 
 	client := proxyClient(t, h.proxy.Listener.Addr().String(), "c", trust)
@@ -254,7 +312,7 @@ func TestReverseDoor(t *testing.T) {
 	defer upstream.Close()
 	trust := x509.NewCertPool()
 	trust.AddCert(upstream.Certificate())
-	h := newHarness(t, hostPort(t, upstream.URL), "", trust)
+	h := newHarness(t, hostPort(t, upstream.URL), trust)
 	h.store.Apply(egress.Map{Principal: "sandbox:sbx_a", Version: 1, Credential: "c", Mode: v1.EgressAllowlist, Allow: []string{"api.example.com"}})
 
 	t.Run("anAdmittedHost", func(t *testing.T) {
@@ -312,7 +370,7 @@ func TestReverseDoor(t *testing.T) {
 // ordinary proxy, which would leak a plaintext request to a destination the
 // gate has not decided on.
 func TestTheProxyDoorAnswersOnlyConnect(t *testing.T) {
-	h := newHarness(t, "127.0.0.1:1", "", nil)
+	h := newHarness(t, "127.0.0.1:1", nil)
 	resp, err := http.Get(h.proxy.URL + "/anything")
 	if err != nil {
 		t.Fatal(err)
@@ -326,7 +384,7 @@ func TestTheProxyDoorAnswersOnlyConnect(t *testing.T) {
 // TestTheGatewayAnswersAnUnreachableDestination keeps a destination that the
 // boundary admits but the network does not from looking like a refusal.
 func TestTheGatewayAnswersAnUnreachableDestination(t *testing.T) {
-	h := newHarness(t, "127.0.0.1:1", "", nil)
+	h := newHarness(t, "127.0.0.1:1", nil)
 	h.store.Apply(egress.Map{Principal: "sandbox:sbx_a", Version: 1, Credential: "c", Mode: v1.EgressOpen})
 	if got := connect(t, h.proxy.Listener.Addr().String(), "api.example.com:443", "c"); got != http.StatusBadGateway {
 		t.Fatalf("CONNECT answered %d, want %d", got, http.StatusBadGateway)
@@ -374,17 +432,7 @@ func TestSplitReversePath(t *testing.T) {
 	}
 }
 
-func TestHostOfAndSplitHostPort(t *testing.T) {
-	for _, tc := range []struct{ in, want string }{
-		{"https://control.example.internal/v1", "control.example.internal"},
-		{"http://control.example.internal:8080", "control.example.internal"},
-		{"control.example.internal", "control.example.internal"},
-		{"[::1]:8080", "::1"},
-	} {
-		if got := hostOf(tc.in); got != tc.want {
-			t.Errorf("hostOf(%q) = %q, want %q", tc.in, got, tc.want)
-		}
-	}
+func TestSplitHostPort(t *testing.T) {
 	if host, port := splitHostPort("api.example.com:8443", 443); host != "api.example.com" || port != 8443 {
 		t.Errorf("splitHostPort = %q, %d", host, port)
 	}
@@ -523,7 +571,7 @@ func certPEM(t *testing.T, server *httptest.Server) string {
 // destination is tunneled by the gate. The entry is put in the engine
 // directly here, because the compiler carries no value yet.
 func TestAHostWithACredentialIsTerminated(t *testing.T) {
-	h := newHarness(t, "127.0.0.1:1", "", nil)
+	h := newHarness(t, "127.0.0.1:1", nil)
 	m := egress.Map{Principal: "sandbox:sbx_a", Version: 1, Credential: "c", Mode: v1.EgressAllowlist, Allow: []string{"api.example.com", "plain.example.com"}}
 	h.store.Apply(m)
 	h.store.registry.Set(m.Principal, []pkgegress.Entry{{
@@ -571,7 +619,7 @@ func TestATunnelNeedsTheConnectionItself(t *testing.T) {
 			_ = conn.Close()
 		}
 	}()
-	h := newHarness(t, upstream.Addr().String(), "", nil)
+	h := newHarness(t, upstream.Addr().String(), nil)
 	h.store.Apply(egress.Map{Principal: "sandbox:sbx_a", Version: 1, Credential: "c", Mode: v1.EgressOpen})
 	recorder := httptest.NewRecorder()
 	h.gate.ServeProxy(recorder, connectRequest(t, "api.example.com:443", "c"))

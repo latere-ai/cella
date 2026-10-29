@@ -6,11 +6,13 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net/netip"
 	"net/url"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // Defaults of the egress role and of the control plane's half of it.
@@ -64,6 +66,9 @@ type EgressConfig struct {
 	// Insecure admits a control plane URL that is http:// on a host other
 	// than loopback. The stubs set it; nothing else should.
 	Insecure bool
+	// PrivateRanges are the addresses that are not public which the gateway
+	// still dials for a sandbox. Unset, it dials public addresses alone.
+	PrivateRanges []netip.Prefix
 }
 
 // LoadEgress reads the egress role's configuration, or returns one error
@@ -86,6 +91,11 @@ func LoadEgress(getenv Getenv) (EgressConfig, error) {
 		}
 		c.Insecure = value
 	}
+	ranges, err := parseRanges(getenv("CELLA_EGRESS_PRIVATE_RANGES"))
+	if err != nil {
+		problems = append(problems, "CELLA_EGRESS_PRIVATE_RANGES "+err.Error())
+	}
+	c.PrivateRanges = ranges
 	if c.URL == "" {
 		problems = append(problems, "CELLA_URL is unset, and the gateway connects outbound to it")
 	} else if err := checkControlPlaneURL(c.URL, c.Insecure); err != nil {
@@ -161,4 +171,18 @@ func loadEgressGateway(getenv Getenv, problems *[]string) EgressGateway {
 		*problems = append(*problems, "CELLA_GATEWAY_REVERSE is set without CELLA_GATEWAY; a sandbox reaches the reverse door only where it reaches the gateway")
 	}
 	return g
+}
+
+// parseRanges reads a list of CIDR ranges separated by commas or white
+// space. An entry that is no range is named, so the operator sees which.
+func parseRanges(raw string) ([]netip.Prefix, error) {
+	var out []netip.Prefix
+	for _, field := range strings.FieldsFunc(raw, func(r rune) bool { return r == ',' || unicode.IsSpace(r) }) {
+		prefix, err := netip.ParsePrefix(field)
+		if err != nil {
+			return nil, fmt.Errorf("names %q, which is not a range such as 10.0.0.0/8", field)
+		}
+		out = append(out, prefix.Masked())
+	}
+	return out, nil
 }

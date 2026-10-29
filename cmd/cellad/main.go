@@ -147,6 +147,7 @@ func egressRole(ctx context.Context, args []string, getenv config.Getenv, stdout
 		URL: cfg.URL, Key: cfg.EnvironmentKey,
 		ProxyAddr: cfg.ProxyAddr, ReverseAddr: cfg.ReverseAddr,
 		CAPEM: cfg.CAKeyPEM, UpstreamCAPEM: cfg.CABundlePEM,
+		PrivateRanges: cfg.PrivateRanges,
 	})
 	if err != nil {
 		return fail(stderr, fmt.Errorf("egress: %w", err))

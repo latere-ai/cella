@@ -292,6 +292,7 @@ func TestTheEgressSubcommandRefusesABadConfiguration(t *testing.T) {
 		{"noKey", map[string]string{"CELLA_URL": "http://127.0.0.1:8080"}, "CELLA_ENVIRONMENT_KEY is unset"},
 		{"aKeyThatIsNotAnEnvironmentKey", map[string]string{"CELLA_URL": "http://127.0.0.1:8080", "CELLA_ENVIRONMENT_KEY": "a.b.c"}, "CELLA_ENVIRONMENT_KEY"},
 		{"aControlPlaneInTheClear", map[string]string{"CELLA_URL": "http://cella.example.com", "CELLA_ENVIRONMENT_KEY": "a.b.c"}, "CELLA_INSECURE_CONTROL_PLANE"},
+		{"aPrivateRangeThatIsNotARange", map[string]string{"CELLA_URL": "http://127.0.0.1:8080", "CELLA_ENVIRONMENT_KEY": "a.b.c", "CELLA_EGRESS_PRIVATE_RANGES": "10.0.0.0/8, registry.internal"}, `"registry.internal"`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var errOut bytes.Buffer

@@ -17,6 +17,23 @@ refused before it is pushed.
 
 ### Changed
 
+- **The egress gateway connects only to public addresses.** It judges the
+  address each connection dials, after the name resolved, on both doors
+  and for a request it substitutes a secret into, so a name that resolves
+  to a private, loopback, link-local, carrier-grade NAT or unique local
+  address is refused like the address written out. The connection record
+  says `NonPublicAddress`. An installation whose sandboxes reach a host on
+  its own network, such as a registry or a mirror, names those ranges in
+  `CELLA_EGRESS_PRIVATE_RANGES` on the gateway; without it, those
+  connections are now refused.
+- **The control plane's host is decided by the boundary like any other.**
+  The gateway no longer refuses every connection to the host in
+  `CELLA_URL`. An installation that serves the control plane on a host it
+  shares with other services, under one API host, left its sandboxes
+  unable to reach any of them; a sandbox now reaches that host when its
+  boundary admits it. The `ControlPlane` reason no longer appears in
+  connection records. The `cella` client still reads no proxy variable,
+  so a sandbox's own token never passes through the gateway.
 - **The driver suite holds the ports it names.** `runtimetest` reserves
   each port a case hands a sandbox's server, on a loopback socket of the
   host that never listens, from the moment it picks the port until the

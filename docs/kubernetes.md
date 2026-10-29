@@ -113,15 +113,26 @@ secret. A program that honors none of them reaches nothing.
 `status.conditions` reports `EgressEnforced` true once the gateway holds
 the sandbox's boundary.
 
+The gateway connects only to public addresses, whatever the boundary
+admits: a name that resolves to a private, loopback, link-local or
+carrier-grade NAT address is refused when the gateway dials it, so a
+sandbox cannot use the gateway to reach the cluster or the network the
+gateway runs on. `CELLA_EGRESS_PRIVATE_RANGES` on the gateway names the
+ranges it may still dial, such as a registry beside the cluster
+([Configuration](configuration.md)).
+
 Mesh members reach each other directly, not through the gateway, at
 `<name>.<mesh>`, where `<mesh>` is `mesh-` followed by the lowercase mesh
 id after its prefix.
 
 Two limits hold on this runtime:
 
-- A sandbox does not reach the control plane from inside. The control plane
-  is outside the policy, so `cella` inside a sandbox cannot call the API; a
-  child sandbox is created with the sandbox's token from outside it.
+- `cella` inside a sandbox does not reach the control plane. Its client
+  reads no proxy variable, so the sandbox's token never passes through the
+  gateway, and the policy admits no other way out; a child sandbox is
+  created with the sandbox's token from outside it. A program that does
+  use the gateway reaches the control plane's host as any other host the
+  boundary admits.
 - A sandbox taken from a warm pool started before it had a gateway, so its
   environment carries none of the variables above until its next start,
   whose Pod carries them. Until then its commands reach the gateway only

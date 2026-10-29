@@ -54,6 +54,12 @@ spec:
               value: ":3128"
             - name: CELLA_EGRESS_REVERSE_ADDR
               value: ":8080"
+            # The upstream the egress tests reach is a Service of this
+            # cluster, at a private address, and the gateway dials no
+            # address that is not public outside the ranges named here.
+            # 10.96.0.0/12 holds kind's Service addresses.
+            - name: CELLA_EGRESS_PRIVATE_RANGES
+              value: "10.96.0.0/12"
             # Minted by up.sh at the control plane for the default
             # environment. Until the Secret exists the container waits.
             - name: CELLA_ENVIRONMENT_KEY

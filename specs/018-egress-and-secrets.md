@@ -177,8 +177,8 @@ gateway checks ever rotates under a running process.
 The keys above are reserved ([[003-manifest-contract]]); `egress`
 exports the list as `ReservedEnv` and `TestReservedKeysMatchTheGateway`
 holds the two copies equal. A program that uses neither door reaches
-nothing, because the driver's network rule admits only the gateway,
-DNS, and the control plane.
+nothing, because the driver's network rule admits only the gateway and
+DNS.
 
 ### The map
 
@@ -208,8 +208,15 @@ at resolve as `secret_host_conflict` ([[003-manifest-contract]]).
 controller on every `Send`, so a value update that changes no sandbox
 field still produces a higher version, and a gateway applies a map if
 and only if its version is above the one it holds for that principal.
-DNS and the control plane are not in `Allow`: they are admitted by the
-driver's network rule, which never routes them through the gateway.
+DNS is not in `Allow`: the driver's network rule admits it beside the
+gateway. The control plane is a host like any other: a sandbox reaches
+it through the gateway when its boundary admits the control plane's
+host, and the control plane's own authorization decides what a
+credential sent there may do. The `cella` client reads no proxy
+variable, so the sandbox's own token never passes through the gateway
+([[011-agent-client]]). An installation may serve the control plane on
+a host it shares with other services, so a rule against that host
+would refuse every one of them.
 Every map of an environment is a function of desired state, secret
 values, and the credentials in desired state, so the control plane can
 always produce the full set for a gateway that connects with nothing.
@@ -224,7 +231,8 @@ that it dials nothing.
 
 The gateway is `cellad egress`. It reads `CELLA_URL`,
 `CELLA_ENVIRONMENT_KEY`, `CELLA_EGRESS_PROXY_ADDR`,
-`CELLA_EGRESS_REVERSE_ADDR`, and `CELLA_EGRESS_CA_KEY`, and opens one
+`CELLA_EGRESS_REVERSE_ADDR`, `CELLA_EGRESS_CA_KEY`, and
+`CELLA_EGRESS_PRIVATE_RANGES`, and opens one
 WebSocket to `GET /v1/environments/{id}/egress` ([[008-api]]) with the
 environment key as its bearer, subprotocol `cella.egress.v1`, framed
 as one JSON text message per line:
@@ -312,7 +320,7 @@ in the map needs no key set and never rotates.
 
 | Environment | Gateway | Network rule |
 |---|---|---|
-| k8s | one Deployment per namespace, or a per-pod sidecar with `CELLA_EGRESS_SIDECAR=1` | a NetworkPolicy per sandbox admits DNS, the gateway, and `cellad`; nothing else; ingress only from mesh peers |
+| k8s | one Deployment per namespace, or a per-pod sidecar with `CELLA_EGRESS_SIDECAR=1` | a NetworkPolicy per sandbox admits DNS, the gateway, and the sandbox's mesh peers; nothing else; ingress only from mesh peers |
 | podman | one container per host on the sandboxes' network | per-sandbox network with the gateway as the only route |
 | local | one process per host on loopback | the sandbox runtime's own allow-only proxy admits exactly one domain, the gateway's; the sandbox's `HTTPS_PROXY` dials the gateway, so the runtime's policy never sees a real host and `open` cannot be expressed through it, which is why [[004-runtime-contract]]'s `local` row omits `open` |
 | native | one process per host on loopback | unenforced; `EgressEnforced` false |
@@ -351,6 +359,14 @@ What the gateway role adds, and the tests of this spec prove:
   on `Allow`; `mode: open` refuses one to a host on `Deny`; `mode:
   none` refuses every connection; each before any bytes flow, with 403
   on the reverse door and a refused CONNECT on the proxy door.
+- Addresses: the gateway sits on its operator's network, so it
+  connects only to public addresses and to the non-public ranges
+  `CELLA_EGRESS_PRIVATE_RANGES` names. The check is made on the address
+  each connection dials, after its name resolved, on both doors and for
+  a terminated request alike, so a name that resolves inward is refused
+  like the address written out (`NonPublicAddress`, 403). An address
+  written out is refused before any dial, and `localhost` with the
+  names under it is refused by name (`LocalTarget`).
 - Ports: an entry substitutes only toward its `scope.ports`.
 - Placement: an entry's value replaces its placeholder only in the
   header or query parameter its `inject` names, and in the body when
@@ -400,6 +416,7 @@ The `Volume` kind ([[019-volumes]]); the worker's own stream
 | A gateway that connects with nothing receives every map; one that missed a purge while disconnected drops that principal on reconnect; a sidecar receives one; two gateways each hold the full set and a put unacknowledged by the second is retried until it acks | `TestSnapshotIsAuthoritative`, `TestASnapshotIsSentOnConnect`, `TestASidecarReceivesOneMap` | [[039-egress-gateway]]: `TestASnapshotIsSentOnConnect`, `TestSendReturnsOnTheFirstAcknowledgment`, `TestASidecarReceivesOneMap`, `TestSnapshotIsAuthoritative` |
 | A put with a version at or below the held one is acknowledged and not applied; a value update produces a higher version and lands | `TestApplyTakesOnlyAHigherVersion`, `TestAPutAppliesAndIsAcknowledged` | [[039-egress-gateway]]: `TestApplyTakesOnlyAHigherVersion`, `TestAPutAppliesAndIsAcknowledged` |
 | With no gateway connected, or none acknowledging within the timeout, the create fails with `driver_unavailable`, no sandbox is left, and the environment is `Degraded NoGateway`; in sidecar mode the workload container does not start before the sidecar's ack | `TestCreateWaitsForTheGateway` | [[039-egress-gateway]]: `TestCreateWaitsForTheGateway`, less the sidecar and the Degraded phase |
+| The gateway connects only to public addresses and the ranges `CELLA_EGRESS_PRIVATE_RANGES` names, judged by the address each connection dials on both doors; the control plane's host is decided by the boundary like any other host | `TestGateMatrix`, `TestANameThatResolvesInwardIsRefusedAtTheDial`, `TestLoadEgressReadsPrivateRanges` | passing |
 | A secret its owner mounts on a sandbox that exists, or whose `inject` moves, reaches the driver as the workload's environment for its next start; a rotation of the value alone reaches none | `TestASecretMountedByAnUpdateReachesTheNextStart`, `TestASecretWhoseInjectMovedCarriesItsCompanion` | passing |
 | A placeholder sent to an in-scope host and port is substituted in the header or query its `inject` names, or the body when opted in, on both doors; sent to any other host, port, or place it passes through verbatim | `TestSubstitutionIsScopedAndPlaced`, `TestSubstitutionHoldsThePortScope` against the gateway | [[046-secret-kind]]: passing, less placement on the proxy door, which `pkg/egress` has no seam for |
 | Framing headers are never rewritten; a chunked, a large, and a binary body are never read | `TestBodySubstitutionIsOptIn`, `TestSecretRefusals` | [[046-secret-kind]]: `TestBodySubstitutionIsOptIn` over the opt-in and the binary body; a framing header is refused at apply by `TestSecretRefusals`, and the rest is `pkg/egress`'s own suite |
