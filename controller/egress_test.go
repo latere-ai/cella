@@ -75,11 +75,13 @@ func (g *gateway) maps() []egress.Map {
 // the egress modes a test wants it to enforce.
 type gatewayDriver struct {
 	runtimetest.Nop
-	mu     sync.Mutex
-	order  *[]string
-	modes  []v1.EgressMode
-	specs  []driver.CreateSpec
-	create error
+	mu    sync.Mutex
+	order *[]string
+	modes []v1.EgressMode
+	specs []driver.CreateSpec
+	// changes are the updates the driver was handed, in order.
+	changes []driver.Change
+	create  error
 	// local declares EgressLocal: the driver enforces its own allow list.
 	local bool
 }
@@ -99,6 +101,26 @@ func (d *gatewayDriver) Create(_ context.Context, s driver.CreateSpec) (driver.R
 		return driver.Ref{}, d.create
 	}
 	return driver.Ref{ID: s.ID}, nil
+}
+
+func (d *gatewayDriver) Update(_ context.Context, _ string, c driver.Change) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.changes = append(d.changes, c)
+	return nil
+}
+
+// envChanges are the environments the driver was handed by an update.
+func (d *gatewayDriver) envChanges() []map[string]string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	var out []map[string]string
+	for _, c := range d.changes {
+		if c.Env != nil {
+			out = append(out, *c.Env)
+		}
+	}
+	return out
 }
 
 func (d *gatewayDriver) Inspect(_ context.Context, id string) (driver.State, error) {

@@ -99,6 +99,63 @@ func (c *Controller) compileEgress(ctx context.Context, obj *v1.Sandbox) (bounda
 	return boundary{Map: m, Env: env, Secrets: status}, nil
 }
 
+// secretEnvOf is the part of a sandbox's environment its mounted secrets put
+// there: each mount's placeholder as desired state records it, and the
+// companion variable the secret's inject names, read from the secret as it
+// stands. It reads and mints nothing, so it says what the workload was given
+// before a change is compiled.
+func (c *Controller) secretEnvOf(obj v1.Sandbox) map[string]string {
+	env := map[string]string{}
+	if obj.Status.EgressState == nil {
+		return env
+	}
+	for _, mount := range obj.Spec.Secrets {
+		for _, record := range obj.Status.EgressState.Secrets {
+			if record.Name != mount.Name || record.Env != mount.Env {
+				continue
+			}
+			env[mount.Env] = record.Placeholder
+			if secret, held := c.secretObjects[record.ID]; held {
+				maps.Copy(env, manifest.CompanionEnv(mount.Env, secret.Spec.Inject))
+			}
+			break
+		}
+	}
+	return env
+}
+
+// carryEnv hands the driver a sandbox's environment again when the variables
+// its secrets put there changed: a secret its owner mounted or dropped by an
+// update, or a secret whose inject moved to another header or parameter. A
+// running process keeps the environment it started with, so the driver
+// records the new one and the workload has it from its next start. A sandbox
+// no driver holds now gets it from the create or the start that brings it
+// back, which compile the boundary again. The caller holds the lock.
+func (c *Controller) carryEnv(ctx context.Context, obj v1.Sandbox, before, after map[string]string) error {
+	if maps.Equal(before, after) {
+		return nil
+	}
+	switch obj.Status.Phase {
+	case PhaseQueued, PhaseLost, PhaseRecovering, PhaseDeleting:
+		return nil
+	}
+	if placed(obj) {
+		return nil
+	}
+	d, err := c.driverFor(obj.Status.Environment)
+	if err != nil {
+		return err
+	}
+	env := maps.Clone(withSecretEnv(obj.Spec.Env, after))
+	if env == nil {
+		env = map[string]string{}
+	}
+	if err := d.Update(ctx, obj.Status.ID, driver.Change{Env: &env}); err != nil && !errors.Is(err, driver.ErrNotFound) {
+		return err
+	}
+	return nil
+}
+
 // secretViews binds each mount to a Secret, mints a placeholder for one that
 // has none, reads the value, and builds what the compiler needs. It also
 // returns what the status reports and the environment the driver projects.

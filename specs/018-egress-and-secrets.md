@@ -10,7 +10,7 @@ depends_on:
 affects: [manifest/v1/, egress/, internal/egressd/, internal/api/, internal/store/, internal/config/, runtime/]
 effort: large
 created: 2026-09-12
-updated: 2026-10-01
+updated: 2026-10-29
 author: changkun
 ---
 
@@ -154,7 +154,11 @@ recorded only in the sandbox's desired state and the gateway's map;
 retain placeholders, is unused here. When the secret injects into a
 header other than `Authorization` or into a query parameter, a
 companion `<env>_HEADER=<name>` or `<env>_QUERY=<name>` says where to
-put the placeholder. `status.secrets.mounted` lists the names;
+put the placeholder. A running process keeps the environment it started
+with, so a secret its owner mounts on a sandbox that exists, or a
+secret whose `inject` moves, is in the gateway's map at once and in the
+workload's environment from its next start: the controller hands the
+driver the new environment, which records it for that start. `status.secrets.mounted` lists the names;
 `status.secrets.notInjectable` lists any whose secret was deleted, or
 whose every host is off the allow list or on the deny list, so the
 caller knows those requests will leave unauthenticated rather than
@@ -396,6 +400,7 @@ The `Volume` kind ([[019-volumes]]); the worker's own stream
 | A gateway that connects with nothing receives every map; one that missed a purge while disconnected drops that principal on reconnect; a sidecar receives one; two gateways each hold the full set and a put unacknowledged by the second is retried until it acks | `TestSnapshotIsAuthoritative`, `TestASnapshotIsSentOnConnect`, `TestASidecarReceivesOneMap` | [[039-egress-gateway]]: `TestASnapshotIsSentOnConnect`, `TestSendReturnsOnTheFirstAcknowledgment`, `TestASidecarReceivesOneMap`, `TestSnapshotIsAuthoritative` |
 | A put with a version at or below the held one is acknowledged and not applied; a value update produces a higher version and lands | `TestApplyTakesOnlyAHigherVersion`, `TestAPutAppliesAndIsAcknowledged` | [[039-egress-gateway]]: `TestApplyTakesOnlyAHigherVersion`, `TestAPutAppliesAndIsAcknowledged` |
 | With no gateway connected, or none acknowledging within the timeout, the create fails with `driver_unavailable`, no sandbox is left, and the environment is `Degraded NoGateway`; in sidecar mode the workload container does not start before the sidecar's ack | `TestCreateWaitsForTheGateway` | [[039-egress-gateway]]: `TestCreateWaitsForTheGateway`, less the sidecar and the Degraded phase |
+| A secret its owner mounts on a sandbox that exists, or whose `inject` moves, reaches the driver as the workload's environment for its next start; a rotation of the value alone reaches none | `TestASecretMountedByAnUpdateReachesTheNextStart`, `TestASecretWhoseInjectMovedCarriesItsCompanion` | passing |
 | A placeholder sent to an in-scope host and port is substituted in the header or query its `inject` names, or the body when opted in, on both doors; sent to any other host, port, or place it passes through verbatim | `TestSubstitutionIsScopedAndPlaced`, `TestSubstitutionHoldsThePortScope` against the gateway | [[046-secret-kind]]: passing, less placement on the proxy door, which `pkg/egress` has no seam for |
 | Framing headers are never rewritten; a chunked, a large, and a binary body are never read | `TestBodySubstitutionIsOptIn`, `TestSecretRefusals` | [[046-secret-kind]]: `TestBodySubstitutionIsOptIn` over the opt-in and the binary body; a framing header is refused at apply by `TestSecretRefusals`, and the rest is `pkg/egress`'s own suite |
 | `basic` substitutes base64 of `user:pass`; `bearer` and `raw` substitute verbatim and the upstream sees one `Bearer ` | `TestValueOf`, `TestSubstitutionIsScopedAndPlaced` | [[046-secret-kind]]: passing |

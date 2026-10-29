@@ -7,7 +7,7 @@ depends_on:
 affects: [manifest/, manifest/v1/, docs/]
 effort: large
 created: 2026-09-12
-updated: 2026-09-23
+updated: 2026-10-29
 author: changkun
 ---
 
@@ -180,7 +180,7 @@ caller may narrow, only a non-workload actor may widen); `stopped`
 | `workspace.volume` | string | none; required for `volume` | no | a `Volume` name attached read-write at `workspace.path` in place of the managed workspace, so the files outlive the sandbox ([[019-volumes]]) |
 | `volumes[]` | list | empty | stopped, `Volumes` | each `{name, path, volume, readOnly}`; `name` a DNS-1123 label, unique; `path` absolute, unique, not equal to or nested with another mount or `/run/cella`; `volume` a `Volume` the caller may attach, by name among the caller's own or by `vol_` id, in the same environment, and `Available`; an attach its `access` excludes is `volume_busy` ([[019-volumes]]) |
 | `env` | map | empty | no | keys POSIX names; values up to 32 KiB total; a key in the reserved set below is `reserved_prefix` |
-| `secrets[]` | list | empty | narrow | each `{name, env}`; `name` a `Secret` the caller may mount, by name among the caller's own or by `sec_` id; `env` a POSIX name not in `env`, not reserved, not another entry's `env`, and not equal to any entry's `<env>_HEADER` or `<env>_QUERY`; two entries whose secrets scope one host are `secret_host_conflict` |
+| `secrets[]` | list | empty | narrow | each `{name, env}`; `name` a `Secret` the caller may mount, by name among the caller's own or by `sec_` id; `env` a POSIX name not in `env`, not reserved, not another entry's `env`, and not equal to any entry's `<env>_HEADER` or `<env>_QUERY`; two entries whose secrets scope one host are `secret_host_conflict`; an entry the owner adds to a sandbox that exists is in the gateway's map at once and in the workload's environment from its next start |
 | `network.egress.mode` | enum | `allowlist` when any host is set or any secret is mounted, else `open` | narrow | `none` blocks egress; `allowlist` admits `allowedHosts` and every mounted secret's hosts through the gateway; `open` admits everything but `deniedHosts`; DNS and the control plane are admitted by the driver's rule in every mode. Order for narrowing: `open` > `allowlist` > `none`. The environment's `capabilities.egress` list must contain the mode |
 | `network.egress.allowedHosts` | []string | empty | narrow | host patterns under the host rule below; with any mode but `allowlist` is `exclusive_fields`; narrowing removes entries |
 | `network.egress.deniedHosts` | []string | empty | narrow | host patterns; with any mode but `open` is `exclusive_fields`; a denied host wins over a mounted secret's scope; narrowing adds entries |

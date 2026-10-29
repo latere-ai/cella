@@ -1702,9 +1702,10 @@ func crockfordULID(b [16]byte) string {
 // The boundary reaches a gateway before desired state claims it, which is the
 // order design 018 fixes for a create and holds for an update: a map no
 // gateway will hold is a refusal, and the boundary the object already had is
-// put back so that every map a gateway holds is a map desired state has. The
-// driver is not called, because design 003 marks every field a running
-// sandbox would have to be recreated for immutable.
+// put back so that every map a gateway holds is a map desired state has.
+// Design 003 marks every field a running sandbox would have to be recreated
+// for immutable, so the driver is called only for what it can carry: a new
+// size, and the environment when the secrets mounted changed it.
 func (c *Controller) Update(ctx context.Context, obj v1.Sandbox) (v1.Sandbox, error) {
 	c.awaitGateway(ctx, obj)
 	c.mu.Lock()
@@ -1714,6 +1715,7 @@ func (c *Controller) Update(ctx context.Context, obj v1.Sandbox) (v1.Sandbox, er
 		return v1.Sandbox{}, ErrNotFound
 	}
 	obj.Status = held.Status
+	before := c.secretEnvOf(held)
 	boundary, err := c.pushEgress(ctx, &obj)
 	if err != nil {
 		previous := clone(held)
@@ -1725,6 +1727,9 @@ func (c *Controller) Update(ctx context.Context, obj v1.Sandbox) (v1.Sandbox, er
 	obj.Status.Secrets = boundary.Secrets
 	obj.Status.Conditions = setCondition(obj.Status.Conditions, c.egressCondition(obj.Status.Environment, boundary.Map, boundary.Held, time.Now().UTC()))
 	if err := c.resize(ctx, held, &obj); err != nil {
+		return v1.Sandbox{}, err
+	}
+	if err := c.carryEnv(ctx, obj, before, boundary.Env); err != nil {
 		return v1.Sandbox{}, err
 	}
 	if err := c.persist(ctx, obj, MutationUpdated); err != nil {

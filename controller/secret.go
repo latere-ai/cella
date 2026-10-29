@@ -109,10 +109,14 @@ func (c *Controller) UpdateSecret(ctx context.Context, obj v1.Secret, id string)
 	obj.Spec.Value = ""
 	obj.Status = held.Status
 	obj.Status.UpdatedAt = time.Now().UTC()
+	before := map[string]map[string]string{}
+	for _, sb := range c.mountingLocked(id) {
+		before[sb.Status.ID] = c.secretEnvOf(sb)
+	}
 	if err := c.persistSecret(ctx, obj, plaintext, MutationSecretUpdated); err != nil {
 		return obj, err
 	}
-	c.repushMounts(ctx, id)
+	c.repushMounts(ctx, id, before)
 	return c.secretRead(id), nil
 }
 
@@ -140,7 +144,9 @@ func (c *Controller) DeleteSecret(ctx context.Context, id string) (v1.Secret, er
 	if c.durable == nil {
 		c.emitSecret(ctx, MutationSecretDeleted, held)
 	}
-	c.repushMounts(ctx, id)
+	// A deleted secret leaves its placeholder in the workload's environment,
+	// so no environment is carried to the driver.
+	c.repushMounts(ctx, id, nil)
 	// Every answer this type gives goes through the same strip, so the rule
 	// that a value is never read back is one line and not a habit.
 	return manifest.StripSecretValue(held), nil
@@ -313,18 +319,26 @@ func (c *Controller) persistSecret(ctx context.Context, obj v1.Secret, plaintext
 
 // repushMounts hands every sandbox that mounts this secret its map again, at
 // a higher version, so a rotation or a withdrawal reaches a running gateway
-// without the sandbox restarting.
+// without the sandbox restarting. before is each sandbox's secret
+// environment ahead of the change; where the change moved it, the driver is
+// handed the new one for the workload's next start. nil carries none.
 //
 // It never fails the act that caused it: the sandbox already exists, its
 // desired state is written, and a gateway that missed the push is made whole
 // by its next snapshot. The caller's mutex is held.
-func (c *Controller) repushMounts(ctx context.Context, id string) {
+func (c *Controller) repushMounts(ctx context.Context, id string, before map[string]map[string]string) {
 	for _, sb := range c.mountingLocked(id) {
 		obj := clone(sb)
 		boundary, err := c.pushEgress(ctx, &obj)
 		if err != nil {
 			c.log.WarnContext(ctx, "the sandbox's map was not pushed after a secret changed",
 				"sandbox", obj.Status.ID, "secret", id, "err", err)
+		}
+		if previous, ok := before[obj.Status.ID]; ok && err == nil {
+			if err := c.carryEnv(ctx, obj, previous, boundary.Env); err != nil {
+				c.log.WarnContext(ctx, "the sandbox's environment was not handed to its driver after a secret changed",
+					"sandbox", obj.Status.ID, "secret", id, "err", err)
+			}
 		}
 		obj.Status.Secrets = boundary.Secrets
 		if err := c.persist(ctx, obj, MutationStatus); err != nil {

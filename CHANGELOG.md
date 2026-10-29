@@ -29,6 +29,14 @@ refused before it is pushed.
 
 ### Fixed
 
+- **A secret mounted on a workload that exists reaches its environment.**
+  An owner who added a secret to a workload by an update had its value in
+  the gateway at once, but the placeholder never reached the workload's
+  environment, not even after a restart. The driver now records the new
+  environment, and the workload has the placeholder from its next start;
+  a running process keeps the environment it started with. The same holds
+  when a secret's `inject` moves to another header or query parameter,
+  which changes its `<env>_HEADER` or `<env>_QUERY` companion.
 - **`make run` no longer reads the last run's addresses.** A restart over
   the kept state directory could read the stubs' addresses of the run
   before, a moment before the new stubs wrote theirs, and start `cellad`

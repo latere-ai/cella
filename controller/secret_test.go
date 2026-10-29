@@ -378,6 +378,88 @@ func TestRotationAndRevocationReachTheGateway(t *testing.T) {
 	}
 }
 
+// TestASecretMountedByAnUpdateReachesTheNextStart: an owner who mounts a
+// secret on a sandbox that exists has the gateway hold its value at once and
+// the driver hold its placeholder for the workload's next start, the same
+// placeholder the map substitutes. An update that mounts nothing new hands
+// the driver nothing.
+func TestASecretMountedByAnUpdateReachesTheNextStart(t *testing.T) {
+	c, gw, _ := sealedController(t)
+	ctx := t.Context()
+	if _, err := c.CreateSecret(ctx, aSecret("models", "api.latere.ai", "lux_first"), "alice"); err != nil {
+		t.Fatal(err)
+	}
+	plain := workspace()
+	plain.Spec.Env = map[string]string{"LOG_LEVEL": "debug"}
+	plain.Spec.Network.Egress = v1.Egress{Mode: v1.EgressAllowlist, AllowedHosts: []string{"registry.npmjs.org"}}
+	obj, err := realized(ctx, c, plain, "alice", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := openDriver(c).(*gatewayDriver)
+
+	next := obj
+	next.Spec.Secrets = []v1.SecretMount{{Name: "models", Env: "ANTHROPIC_API_KEY"}}
+	if _, err = c.Update(ctx, next); err != nil {
+		t.Fatal(err)
+	}
+	m := lastMap(t, gw, obj.Status.ID)
+	if len(m.Entries) != 1 || m.Entries[0].Value != "lux_first" {
+		t.Fatalf("the map after the update is %+v", m)
+	}
+	envs := d.envChanges()
+	if len(envs) != 1 {
+		t.Fatalf("the driver was handed %d environments, want one", len(envs))
+	}
+	if envs[0]["ANTHROPIC_API_KEY"] != m.Entries[0].Placeholder || envs[0]["LOG_LEVEL"] != "debug" {
+		t.Fatalf("the environment handed to the driver is %v, the map's placeholder %q", envs[0], m.Entries[0].Placeholder)
+	}
+
+	if _, err = c.Update(ctx, next); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(d.envChanges()); got != 1 {
+		t.Fatalf("an update that mounted nothing new handed the driver an environment; %d in all", got)
+	}
+}
+
+// TestASecretWhoseInjectMovedCarriesItsCompanion: a secret moved to another
+// header changes the companion variable its mounting sandboxes read, which
+// reaches each driver; a rotation of the value alone changes nothing a
+// workload reads and reaches none.
+func TestASecretWhoseInjectMovedCarriesItsCompanion(t *testing.T) {
+	c, _, _ := sealedController(t)
+	ctx := t.Context()
+	vendor := aSecret("vendor", "api.vendor.example", "k-1")
+	vendor.Spec.Inject = v1.SecretInject{Header: "X-Api-Key", Scheme: v1.SchemeRaw}
+	secret, err := c.CreateSecret(ctx, vendor, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = realized(ctx, c, mounting("vendor", "VENDOR_KEY"), "alice", 0); err != nil {
+		t.Fatal(err)
+	}
+	d := openDriver(c).(*gatewayDriver)
+
+	vendor.Spec.Value = "k-2"
+	if _, err = c.UpdateSecret(ctx, vendor, secret.Status.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(d.envChanges()); got != 0 {
+		t.Fatalf("a rotation handed the driver %d environments", got)
+	}
+
+	vendor.Spec.Value = ""
+	vendor.Spec.Inject = v1.SecretInject{Header: "X-Vendor-Token", Scheme: v1.SchemeRaw}
+	if _, err = c.UpdateSecret(ctx, vendor, secret.Status.ID); err != nil {
+		t.Fatal(err)
+	}
+	envs := d.envChanges()
+	if len(envs) != 1 || envs[0]["VENDOR_KEY_HEADER"] != "X-Vendor-Token" || envs[0]["VENDOR_KEY"] == "" {
+		t.Fatalf("the environments handed to the driver are %v", envs)
+	}
+}
+
 // TestASecretTheBoundaryDeniesIsNotInjectable is the compiler's own answer,
 // written into the sandbox's status beside the controller's.
 func TestASecretTheBoundaryDeniesIsNotInjectable(t *testing.T) {
