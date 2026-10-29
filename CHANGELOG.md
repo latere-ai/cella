@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.22.3 - 2026-10-30
+
 ### Fixed
 
 - **On Kubernetes, a sandbox can write to its home directory.** The root
