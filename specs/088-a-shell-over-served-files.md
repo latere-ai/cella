@@ -127,7 +127,7 @@ otherwise one of:
 | `path` | a path no mount serves, or a relative path while the directory is not served |
 | `expansion` | a value known only once something has run: command substitution, a variable the line does not set, `~`, `$1`, a value that may split, or a value in an option's place |
 | `construct` | a construct the package does not run: brace expansion, which dash leaves as it is; a background job; a function definition; `<>`; `$'…'`; a `cd` inside a loop, a pipe or a `case` |
-| `size` | a line past the sizes the package runs (below): longer than 64 KiB, nested deeper than 64, a command of more than 16 expansions, or more than 32 pipes |
+| `size` | a line past the sizes the package runs (below): longer than 64 KiB, nested deeper than 64, a command of more than 16 expansions, more than 32 pipes, or a pattern of more than 8 wildcards |
 
 A program's arguments are read as the program reads them, with a
 placeholder for a value known only at run time, so its paths are told
@@ -203,7 +203,9 @@ memory and CPU; here the bounds are the package's. A line that reaches
 one stops where it is, with a message in the shell's form (`$0: LINE:
 the line ran more than 50000 steps`) and status 2, and `Run` returns no
 error: the line ran, and what it changed before the bound stays
-changed. It is never handed elsewhere halfway, for the reason a line
+changed. The command that reached the bound writes nothing: a
+redirection's file is written when its command is done, and a stopped
+command is not done. It is never handed elsewhere halfway, for the reason a line
 never moves to a sandbox halfway. A caller whose context ends still gets
 the context's error.
 
@@ -215,8 +217,9 @@ other bound is checked:
 |---|---|---|
 | `MaxLine` | 64 KiB | everything below grows with the line |
 | `MaxDepth` | 64 | the parser's stack grows with nesting: 50 000 nested `$((` take 256 MB of stack, 50 000 `(` 66 MB, a 64 KiB line of nested `if` 8 MB. Brackets, `if`, `while`, `until`, `for`, `case` and the `&&`, `||` and `\|` of one list are counted on the text before it is parsed, and compound commands again on the parsed line |
-| `MaxExpansions` | 16 | one command's words are made in full before any bound sees them: 16 expansions of a value at the value bound is 4 MiB. Counted over a command's words, assignments, redirections and here documents, a `for` list, a `case` word and one item's patterns; a word with an unquoted wildcard counts as one |
+| `MaxExpansions` | 16 | one command's words are made in full before any bound sees them: 16 expansions of a value at the value bound is 4 MiB. Counted over a command's words, assignments, redirections and here documents, a `for` list, and a `case` clause's word and patterns together; a word with an unquoted wildcard counts as one |
 | `MaxPipes` | 32 | every pipe, here document and `<` is a pipe of the process while its command runs |
+| `MaxStars` | 8 | a pattern is matched as a regular expression, whose cost is its wildcards times the length of what it is matched against: a pattern of 1 000 `*` takes 4 s over a 256 KiB value. Counted in every word the shell globs, every `case` pattern, and the pattern of `${x#p}`, `${x##p}`, `${x%p}` and `${x%%p}`, here documents' expansions among them |
 
 While a line runs, `Limits` bound it; a caller passes its own or takes
 the defaults:
@@ -232,14 +235,24 @@ the defaults:
 | `Names` | 50 000 | the directory entries the line lists, by its patterns and its programs |
 
 The words of every command are checked before it runs, and the
-variables with them. An assignment alone calls no command, so `Run`
-follows each statement that only assigns with a check of its own, run
-as `true` so the assignment's status stands; that is why the trace is
-refused. `printf` runs as one of the package's programs rather than the
+variables with them. An assignment alone calls no command, and `read`
+sets its variables after its call, so `Run` follows each statement that
+only assigns, and each `read`, with a check of its own, which answers
+the status of the statement before it, so `while read` and `read ||`
+read as they do in dash; that is why the trace is refused. A negated
+`read` is not followed, since under `set -e` the check would end the
+line on the status the negation turned; the next command checks its
+value. `printf` runs as one of the package's programs rather than the
 interpreter's builtin, so its output is counted like any program's.
 `read` takes a line byte by byte, about a megabyte a second, so a line
-read whole into a variable is bounded by `Input` through the pipe and
-by `Time`, and the variable by `Value` once the next command runs.
+read whole into a variable is bounded by `Input` through the pipe or
+the `<`, and by `Time`.
+
+`Time` and `Steps` are taken between statements; one statement runs to
+its end. The sizes bound what one statement can cost: the worst found
+is a `case` whose word holds 8 expansions at the value bound and whose
+8 patterns hold 8 wildcards each, about 2.5 s, so a line ends at most a
+few seconds past `Time`.
 
 The defaults are sized for folders of notes: a line over a folder of
 2 000 files of up to a megabyte each lists, reads and sorts them well
@@ -355,5 +368,6 @@ side, and it is not built here:
    time bound; a pattern over a folder of 2 000 files in a loop; a
    redirection that grows; words and variables past their bounds; and a
    `printf` of wide fields. A line nested past `MaxDepth`, wider than
-   `MaxExpansions` or past `MaxLine` is refused as `size` in under a
-   second.
+   `MaxExpansions`, with a pattern past `MaxStars` or past `MaxLine` is
+   refused as `size` in under a second. A `read` keeps its status in
+   `while`, `||`, `!` and under `set -e`.
