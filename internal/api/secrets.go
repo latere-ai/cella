@@ -177,7 +177,12 @@ func (h *handler) secretItem(w http.ResponseWriter, r *http.Request) {
 		respondError(w, err)
 		return
 	}
-	deleted, err := h.Controller.DeleteSecret(r.Context(), obj.Status.ID, version)
+	var deleted v1.Secret
+	if version != 0 {
+		deleted, err = h.Controller.DeleteSecretAt(r.Context(), obj.Status.ID, version)
+	} else {
+		deleted, err = h.Controller.DeleteSecret(r.Context(), obj.Status.ID)
+	}
 	if err != nil {
 		respondError(w, err)
 		return

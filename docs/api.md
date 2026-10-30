@@ -87,7 +87,9 @@ older version is refused with `412 precondition_failed` and the secret is
 left as it is, so a cleanup that decided on a read never removes a value
 written after it. An update that leaves the value as it was does not move
 the version. A delete without `If-Match`, or with `*`, deletes the secret
-whatever its version.
+whatever its version. Environments answer a stale `If-Match` with `409`
+for historical reasons; secrets answer `412`, the status HTTP gives a
+failed `If-Match`.
 
 **Request ids.** Every answer carries `X-Request-Id`. Send your own and it
 is carried through the answer, the events, and the logs; otherwise the

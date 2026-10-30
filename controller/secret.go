@@ -120,17 +120,26 @@ func (c *Controller) UpdateSecret(ctx context.Context, obj v1.Secret, id string)
 // mounts it a map without it: the placeholder stays in the workload's
 // environment as the inert string it always was, status.secrets.notInjectable
 // names it, and the next request leaves unauthenticated rather than with a
-// value whose owner withdrew it.
-//
-// ifVersion is the status.version an If-Match named, and zero deletes the
-// Secret at whatever version it holds; no Secret is at version zero, since
-// one is created with its value. A Secret whose value was written since that
-// version is left as it is and the answer is ErrPreconditionFailed. The
-// comparison is made under the lock every write of a Secret takes, so a write
-// that lands after the caller's read is never deleted. An update that leaves
-// the value as it was does not move status.version, so it does not stop the
-// delete.
-func (c *Controller) DeleteSecret(ctx context.Context, id string, ifVersion int64) (v1.Secret, error) {
+// value whose owner withdrew it. It deletes the Secret at whatever version it
+// holds.
+func (c *Controller) DeleteSecret(ctx context.Context, id string) (v1.Secret, error) {
+	return c.deleteSecret(ctx, id, func(v1.Secret) bool { return true })
+}
+
+// DeleteSecretAt is DeleteSecret only while the Secret is at version, the
+// status.version an If-Match named. A Secret whose value was written since is
+// left as it is and the answer is ErrPreconditionFailed; no Secret is at
+// version zero, since one is created with its value. The comparison is made
+// under the lock every write of a Secret takes, so a write that lands after
+// the caller's read is never deleted. An update that leaves the value as it
+// was does not move status.version, so it does not stop the delete.
+func (c *Controller) DeleteSecretAt(ctx context.Context, id string, version int64) (v1.Secret, error) {
+	return c.deleteSecret(ctx, id, func(held v1.Secret) bool { return int64(held.Status.Version) == version })
+}
+
+// deleteSecret is the delete of both: at reports whether the Secret held may
+// be deleted, and is asked under the lock.
+func (c *Controller) deleteSecret(ctx context.Context, id string, at func(held v1.Secret) bool) (v1.Secret, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.secrets == nil {
@@ -140,7 +149,7 @@ func (c *Controller) DeleteSecret(ctx context.Context, id string, ifVersion int6
 	if !ok {
 		return v1.Secret{}, ErrNotFound
 	}
-	if ifVersion != 0 && int64(held.Status.Version) != ifVersion {
+	if !at(held) {
 		return v1.Secret{}, ErrPreconditionFailed
 	}
 	previous := c.secretObjects

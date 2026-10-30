@@ -153,7 +153,7 @@ func TestSecretUsedNeedsAMount(t *testing.T) {
 		t.Fatalf("the report after a failed write: %v, %d writes", err, len(store.writes))
 	}
 
-	if _, err := c.DeleteSecret(ctx, secret, 0); err != nil {
+	if _, err := c.DeleteSecret(ctx, secret); err != nil {
 		t.Fatal(err)
 	}
 	clock.Advance(v1.SecretLastUsedResolution)

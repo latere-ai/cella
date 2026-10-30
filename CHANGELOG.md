@@ -16,13 +16,11 @@ refused before it is pushed.
   that carries one secret now carries an `ETag`, its `status.version`,
   which moves each time the value is written. A delete without
   `If-Match` deletes the secret as before.
-
-### Changed
-
-- **In the `controller` package, `Controller.DeleteSecret(ctx, id,
-  ifVersion)` takes the version to delete at.** Pass 0 to delete the
-  secret at whatever version it holds, as the call did before;
-  `ErrPreconditionFailed` is a secret at another version.
+- **In the `controller` package, `Controller.DeleteSecretAt(ctx, id,
+  version)` deletes a secret only at that version.** A secret at
+  another version is left as it is and the call answers
+  `ErrPreconditionFailed`. `DeleteSecret` is unchanged and still
+  deletes at whatever version is held.
 
 ## v0.22.4 - 2026-10-30
 

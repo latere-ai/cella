@@ -173,10 +173,10 @@ func TestSecretCollection(t *testing.T) {
 	})
 
 	t.Run("aDelete", func(t *testing.T) {
-		if _, err := c.DeleteSecret(ctx, created.Status.ID, 0); err != nil {
+		if _, err := c.DeleteSecret(ctx, created.Status.ID); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := c.DeleteSecret(ctx, created.Status.ID, 0); !errors.Is(err, ErrNotFound) {
+		if _, err := c.DeleteSecret(ctx, created.Status.ID); !errors.Is(err, ErrNotFound) {
 			t.Fatalf("a second delete: %v", err)
 		}
 		if _, err := c.GetSecret(ctx, "github", "alice"); !errors.Is(err, ErrNotFound) {
@@ -187,8 +187,9 @@ func TestSecretCollection(t *testing.T) {
 
 // TestADeleteAtAVersionKeepsALaterWrite is the race a caller that decides on
 // a read has: it reads a Secret, the value is written again, and its delete
-// arrives naming the version it read. The Secret is left as the write made
-// it, and a delete at the version it now holds removes it.
+// arrives naming the version it read. DeleteSecretAt leaves the Secret as the
+// write made it, refuses version zero, which no Secret is at, and removes the
+// Secret at the version it now holds.
 func TestADeleteAtAVersionKeepsALaterWrite(t *testing.T) {
 	c, _, _ := sealedController(t)
 	ctx := t.Context()
@@ -204,15 +205,18 @@ func TestADeleteAtAVersionKeepsALaterWrite(t *testing.T) {
 		t.Fatalf("the write did not move the version from %d", read.Status.Version)
 	}
 
-	if _, err = c.DeleteSecret(ctx, read.Status.ID, int64(read.Status.Version)); !errors.Is(err, ErrPreconditionFailed) {
+	if _, err = c.DeleteSecretAt(ctx, read.Status.ID, int64(read.Status.Version)); !errors.Is(err, ErrPreconditionFailed) {
 		t.Fatalf("a delete at the version read before the write: %v, want ErrPreconditionFailed", err)
+	}
+	if _, err = c.DeleteSecretAt(ctx, read.Status.ID, 0); !errors.Is(err, ErrPreconditionFailed) {
+		t.Fatalf("a delete at version zero: %v, want ErrPreconditionFailed", err)
 	}
 	kept, err := c.GetSecret(ctx, read.Status.ID, "alice")
 	if err != nil || kept.Status.Version != rewritten.Status.Version {
 		t.Fatalf("after the refused delete the secret is %+v, %v; want it at version %d", kept.Status, err, rewritten.Status.Version)
 	}
 
-	deleted, err := c.DeleteSecret(ctx, read.Status.ID, int64(rewritten.Status.Version))
+	deleted, err := c.DeleteSecretAt(ctx, read.Status.ID, int64(rewritten.Status.Version))
 	if err != nil || deleted.Status.ID != read.Status.ID {
 		t.Fatalf("a delete at the version held: %+v, %v", deleted.Status, err)
 	}
@@ -273,7 +277,7 @@ func TestAStoreWithNoSecretCollectionServesNone(t *testing.T) {
 			_, err := c.UpdateSecret(ctx, aSecret("github", "api.github.com", "x"), "sec_1")
 			return err
 		}},
-		{"delete", func() error { _, err := c.DeleteSecret(ctx, "sec_1", 0); return err }},
+		{"delete", func() error { _, err := c.DeleteSecret(ctx, "sec_1"); return err }},
 	} {
 		if err := tc.run(); !errors.Is(err, ErrNoSecretKey) {
 			t.Fatalf("%s: %v, want ErrNoSecretKey", tc.name, err)
@@ -395,7 +399,7 @@ func TestRotationAndRevocationReachTheGateway(t *testing.T) {
 		t.Fatal("the rotation changed the placeholder the workload holds")
 	}
 
-	if _, err = c.DeleteSecret(ctx, secret.Status.ID, 0); err != nil {
+	if _, err = c.DeleteSecret(ctx, secret.Status.ID); err != nil {
 		t.Fatal(err)
 	}
 	third := lastMap(t, gw, obj.Status.ID)
