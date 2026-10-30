@@ -254,8 +254,8 @@ redirection's file unwritten.
 
 `read` runs as one of the package's programs too. The interpreter's
 reads a byte per system call, about 0.75 µs a byte, so a 16 MiB line
-with no break took 12 s in one statement before any bound could see the
-variable it made. The package's reads a block at a time, keeps what it
+with no break cost about 12 s of CPU in one statement, past the time
+bound, before any bound could see the variable it made. The package's reads a block at a time, keeps what it
 read past its line for whatever reads the same input next, `cat` after
 `read` in `{ read -r a; cat; } < f` among them, and stops the line once
 its line passes `Value`, since the line becomes a variable: that 16 MiB
