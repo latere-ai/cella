@@ -188,23 +188,28 @@ type session struct {
 	// length of the line it ends on.
 	pipesMu sync.Mutex
 	pipes   map[*os.File]*atomic.Int64
+	// rest is what a read read of an input past its line, which the next
+	// read of the input reads first.
+	restMu sync.Mutex
+	rest   map[*os.File][]byte
 }
 
 // internal names of the commands the call handler swaps a builtin for:
-// dash's echo, printf, whose output then passes the line's bounds, and a
-// cd that failed. No word of a line can hold a NUL, so no line can name
-// them.
+// dash's echo, printf, whose output then passes the line's bounds, read,
+// which reads its input a block at a time, and a cd that failed. No word
+// of a line can hold a NUL, so no line can name them.
 const (
 	internalEcho   = "\x00echo"
 	internalPrintf = "\x00printf"
+	internalRead   = "\x00read"
 	internalCdFail = "\x00cd"
 	// internalStatus ends with the status it is given.
 	internalStatus = "\x00status"
 )
 
 // call runs before every command: it records the command's line, swaps
-// echo for dash's, and answers a cd that cannot succeed with dash's words
-// and status.
+// echo, printf and read for the package's, and answers a cd that cannot
+// succeed with dash's words and status.
 func (s *session) call(ctx context.Context, args []string) ([]string, error) {
 	hc := interp.HandlerCtx(ctx)
 	if hc.Pos.IsValid() {
@@ -225,6 +230,8 @@ func (s *session) call(ctx context.Context, args []string) ([]string, error) {
 		return append([]string{internalEcho}, args[1:]...), nil
 	case "printf":
 		return append([]string{internalPrintf}, args[1:]...), nil
+	case "read":
+		return append([]string{internalRead}, args[1:]...), nil
 	case "cd":
 		target := ""
 		rest := args[1:]
@@ -263,11 +270,14 @@ func (s *session) exec(ctx context.Context, args []string) error {
 		name:   args[0],
 		dir:    hc.Dir,
 		env:    hc.Env,
-		stdin:  hc.Stdin,
 		stdout: hc.Stdout,
 		stderr: hc.Stderr,
 	}
-	if p.stdin == nil {
+	// The interpreter's standard input is a file or none.
+	if in, ok := hc.Stdin.(*os.File); ok {
+		p.in = in
+		p.stdin = stdinReader{s: s, in: in}
+	} else {
 		p.stdin = bytes.NewReader(nil)
 	}
 	p.stdout = s.pipe(p.stdout, p.shown())
@@ -278,6 +288,8 @@ func (s *session) exec(ctx context.Context, args []string) error {
 		return status(echo(p, args[1:]))
 	case internalPrintf:
 		return status(printf(p, args[1:]))
+	case internalRead:
+		return s.read(ctx, p, args[1:])
 	case internalStatus:
 		code, err := strconv.Atoi(args[1])
 		if err != nil {
@@ -346,6 +358,12 @@ func (p *proc) hold(n int) bool {
 	err := p.s.budget.hold(p.shown(), n)
 	p.held += n
 	return err == nil
+}
+
+// release lets go of n bytes the program held.
+func (p *proc) release(n int) {
+	p.s.budget.release(n)
+	p.held -= n
 }
 
 // free lets go of what the program held.
@@ -528,6 +546,8 @@ type proc struct {
 	stdin  io.Reader
 	stdout io.Writer
 	stderr io.Writer
+	// in is the file standard input reads, nil when there is none.
+	in *os.File
 	// werr is the first write to stdout or stderr that failed.
 	werr error
 	// held is what the program holds of the Input bound.
@@ -596,11 +616,10 @@ func (p *proc) readStdin() ([]byte, error) {
 // stdinIsFile reports whether the program's standard input is a file a
 // redirection opened, whose size a program can know before reading it.
 func (p *proc) stdinIsFile() bool {
-	f, ok := p.stdin.(*os.File)
-	if !ok {
+	if p.in == nil {
 		return false
 	}
-	_, ok = p.s.inputs.Load(f)
+	_, ok := p.s.inputs.Load(p.in)
 	return ok
 }
 

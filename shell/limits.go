@@ -237,6 +237,8 @@ func printable(name string) string {
 		return "echo"
 	case internalPrintf:
 		return "printf"
+	case internalRead:
+		return "read"
 	}
 	return name
 }

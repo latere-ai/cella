@@ -96,9 +96,10 @@ func TestADoublingValueStops(t *testing.T) {
 }
 
 func TestADoublingReadStops(t *testing.T) {
+	long := fmt.Sprintf("read: a line longer than %d bytes", DefaultValue)
 	line := "x=a\nwhile :; do\nread -r y <<EOF\n$x$x\nEOF\nx=$y\ndone"
 	res := bounded(t, filesFS(), Request{Command: line}, 32<<20)
-	stops(t, res, fmt.Sprintf("value longer than %d bytes", DefaultValue))
+	stops(t, res, "sh: 3: "+long)
 
 	// A line through a pipe is held whole by what reads it.
 	res = bounded(t, bigFS(), Request{Command: "cat oneline | read -r y; echo done", Limits: Limits{Input: 1 << 20}}, 32<<20)
@@ -108,7 +109,39 @@ func TestADoublingReadStops(t *testing.T) {
 	m := bigFS()
 	m.put("/memory/user/long", strings.Repeat("x", DefaultValue+16)+"\n", day)
 	res = bounded(t, m, Request{Command: "read -r y < long; echo done"}, 32<<20)
-	stops(t, res, fmt.Sprintf("y: value longer than %d bytes", DefaultValue))
+	stops(t, res, long)
+	m.put("/memory/user/value", strings.Repeat("x", DefaultValue)+"\n", day)
+	res = bounded(t, m, Request{Command: "read -r y < value; echo ${#y}"}, 32<<20)
+	if res.ExitCode != 0 || string(res.Output) != fmt.Sprintf("%d\n", DefaultValue) {
+		t.Errorf("a line of the Value bound: got exit %d and %.80q", res.ExitCode, res.Output)
+	}
+}
+
+// TestALongLineStopsItsRead checks that a read stops as soon as its line
+// passes the Value bound, however long the line it is given: here one of
+// 16 MiB, the Input bound, with no line break.
+func TestALongLineStopsItsRead(t *testing.T) {
+	m := bigFS()
+	m.put("/memory/user/l16", strings.Repeat("x", DefaultInput), day)
+	long := fmt.Sprintf("read: a line longer than %d bytes", DefaultValue)
+	for _, line := range []string{
+		"read -r x < l16; echo done",
+		"read x < l16; echo done",
+		"cat l16 | { read -r x; }; echo done",
+		"cat l16 | read -r x; echo done",
+		"while read -r x; do :; done < l16; echo done",
+		"cat l16 | while read -r x; do :; done; echo done",
+	} {
+		start := time.Now()
+		res := bounded(t, m, Request{Command: line}, 32<<20)
+		if took := time.Since(start); took > time.Second && !raceEnabled {
+			t.Errorf("%q took %v", line, took)
+		}
+		stops(t, res, long)
+		if strings.Contains(string(res.Output), "done") {
+			t.Errorf("%q ran past the bound: %q", line, res.Output)
+		}
+	}
 }
 
 func TestAReadKeepsItsStatus(t *testing.T) {
