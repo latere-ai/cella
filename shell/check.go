@@ -32,8 +32,9 @@ const (
 	// value decides a path or an option.
 	ReasonExpansion Reason = "expansion"
 	// ReasonSize is a line longer than MaxLine, nested deeper than
-	// MaxDepth, with a command of more expansions than MaxExpansions, or
-	// with more pipes than MaxPipes.
+	// MaxDepth, with a command of more expansions than MaxExpansions,
+	// with more pipes than MaxPipes, or with a pattern of more wildcards
+	// than MaxStars.
 	ReasonSize Reason = "size"
 	// ReasonConstruct is a construct the package does not run: a function,
 	// a background job, a brace expansion, cd inside a loop or a pipe, a

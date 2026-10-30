@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"os"
 	"path"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -197,6 +198,8 @@ const (
 	internalEcho   = "\x00echo"
 	internalPrintf = "\x00printf"
 	internalCdFail = "\x00cd"
+	// internalStatus ends with the status it is given.
+	internalStatus = "\x00status"
 )
 
 // call runs before every command: it records the command's line, swaps
@@ -211,9 +214,9 @@ func (s *session) call(ctx context.Context, args []string) ([]string, error) {
 		return nil, err
 	}
 	if args[0] == internalCheck {
-		// The check of an assignment, which is done: the assignment's
-		// status stands.
-		return []string{"true"}, nil
+		// The check of an assignment or a read, which is done: the
+		// statement's status stands.
+		return []string{internalStatus, strconv.Itoa(hc.LastExitStatus)}, nil
 	}
 	s.redirectFailed.Store(false)
 	s.writeFailed.Store(false)
@@ -234,7 +237,7 @@ func (s *session) call(ctx context.Context, args []string) ([]string, error) {
 		if target == "" {
 			return args, nil
 		}
-		if !s.files.dirExists(ctx, clean(hc.Dir, target)) {
+		if !s.files.dirExists(uncounted(ctx), clean(hc.Dir, target)) {
 			return []string{internalCdFail, target}, nil
 		}
 		// The interpreter's cd takes no "--"; dash's does.
@@ -255,7 +258,7 @@ func (s *session) exec(ctx context.Context, args []string) error {
 		s.line.Store(int64(hc.Pos.Line()) + s.offset)
 	}
 	p := &proc{
-		ctx:    ctx,
+		ctx:    uncounted(ctx),
 		s:      s,
 		name:   args[0],
 		dir:    hc.Dir,
@@ -275,6 +278,12 @@ func (s *session) exec(ctx context.Context, args []string) error {
 		return status(echo(p, args[1:]))
 	case internalPrintf:
 		return status(printf(p, args[1:]))
+	case internalStatus:
+		code, err := strconv.Atoi(args[1])
+		if err != nil {
+			return fmt.Errorf("shell: the status %q of a check: %w", args[1], err)
+		}
+		return status(code)
 	case internalCdFail:
 		p.eprintf("%s: %d: cd: can't cd to %s\n", s.name, s.line.Load(), args[1])
 		return status(2)
@@ -366,6 +375,7 @@ func status(code int) error {
 // command is done with it.
 func (s *session) open(ctx context.Context, name string, flag int, _ os.FileMode) (io.ReadWriteCloser, error) {
 	hc := interp.HandlerCtx(ctx)
+	ctx = uncounted(ctx)
 	p := clean(hc.Dir, name)
 	if p == devNull {
 		return nullFile{}, nil
@@ -476,7 +486,7 @@ func (nullFile) Close() error                { return nil }
 
 // readDir lists a directory a pattern reads.
 func (s *session) readDir(ctx context.Context, name string) ([]fs.DirEntry, error) {
-	infos, err := s.files.readDir(ctx, name)
+	infos, err := s.files.readDir(uncounted(ctx), name)
 	if err != nil {
 		return nil, err
 	}
@@ -488,14 +498,14 @@ func (s *session) readDir(ctx context.Context, name string) ([]fs.DirEntry, erro
 }
 
 func (s *session) stat(ctx context.Context, name string, _ bool) (fs.FileInfo, error) {
-	return s.files.stat(ctx, name)
+	return s.files.stat(uncounted(ctx), name)
 }
 
 // access answers test -r, -w and -x and cd's check: a served path is
 // readable and searchable, and writable unless its mount is read only;
 // no file of the file system is executable.
 func (s *session) access(ctx context.Context, name string, mode interp.AccessMode) error {
-	info, err := s.files.stat(ctx, name)
+	info, err := s.files.stat(uncounted(ctx), name)
 	if err != nil {
 		return err
 	}

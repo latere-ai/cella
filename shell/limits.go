@@ -71,12 +71,17 @@ const (
 	MaxDepth = 64
 	// MaxExpansions bounds the parameter expansions and patterns in the
 	// words of one command with its redirections and here documents, in
-	// a for loop's list, and in a case clause's word and one item's
-	// patterns.
+	// a for loop's list, and in a case clause's word and patterns
+	// together.
 	MaxExpansions = 16
 	// MaxPipes bounds a line's pipes, here documents and input
 	// redirections together.
 	MaxPipes = 32
+	// MaxStars bounds the wildcards * of one pattern: a word the shell
+	// globs, a case pattern, and the pattern ${x#p} and its kin remove.
+	// A pattern is matched as a regular expression, whose cost grows
+	// with its wildcards times the length of what it is matched against.
+	MaxStars = 8
 )
 
 func (l Limits) withDefaults() Limits {
@@ -232,8 +237,6 @@ func printable(name string) string {
 		return "echo"
 	case internalPrintf:
 		return "printf"
-	case internalCheck:
-		return "sh"
 	}
 	return name
 }
@@ -253,6 +256,26 @@ func countSteps(ctx context.Context, b *budget) context.Context { return stepCtx
 func (c stepCtx) Err() error {
 	c.b.step()
 	return c.Context.Err()
+}
+
+// lineKey is the key a stepCtx answers the line's own context for.
+type lineKey struct{}
+
+func (c stepCtx) Value(key any) any {
+	if key == (lineKey{}) {
+		return c.Context
+	}
+	return c.Context.Value(key)
+}
+
+// uncounted is the line's context under a handler's: the one programs
+// and the file system are given, so only the interpreter's questions
+// count as steps, not what a file system asks of its context.
+func uncounted(ctx context.Context) context.Context {
+	if line, ok := ctx.Value(lineKey{}).(context.Context); ok {
+		return line
+	}
+	return ctx
 }
 
 // buffer is what a program keeps until it writes it, held against the
@@ -357,16 +380,19 @@ func (w pipeWriter) Write(d []byte) (int, error) {
 	return w.f.Write(d)
 }
 
-// internalCheck is the command the line's assignments are followed by:
-// an assignment alone calls no handler, so the check of the line's
-// variables runs after it. No word of a line can hold a NUL, so no line
-// can name it.
+// internalCheck is the command the line's assignments and reads are
+// followed by: an assignment calls no handler, and read sets its
+// variables after its call, so the check of the line's variables runs
+// after them. It answers the status of the statement before it. No word
+// of a line can hold a NUL, so no line can name it.
 const internalCheck = "\x00check"
 
-// instrument follows every statement that only assigns with the check
-// of the line's variables, in a block so the assignment stays the
-// shell's own. An assignment's status is 0 in every line Check allows,
-// since it allows no command substitution, and the check's is too.
+// instrument follows every statement that only assigns, and every read,
+// with the check of the line's variables, in a block so the assignment
+// stays the shell's own and the block's status is the statement's. A
+// negated read is left as it is: the check would answer the negated
+// status unnegated, which set -e would end the line on; the next command
+// checks its value.
 func instrument(f *syntax.File) {
 	syntax.Walk(f, func(n syntax.Node) bool {
 		st, ok := n.(*syntax.Stmt)
@@ -374,7 +400,12 @@ func instrument(f *syntax.File) {
 			return true
 		}
 		call, ok := st.Cmd.(*syntax.CallExpr)
-		if !ok || len(call.Args) > 0 || len(call.Assigns) == 0 {
+		if !ok {
+			return true
+		}
+		assigns := len(call.Args) == 0 && len(call.Assigns) > 0
+		read := len(call.Args) > 0 && call.Args[0].Lit() == "read" && !st.Negated
+		if !assigns && !read {
 			return true
 		}
 		pos := call.Pos()
@@ -387,8 +418,8 @@ func instrument(f *syntax.File) {
 				{Position: pos, Cmd: check},
 			},
 		}
-		// An assignment's words hold no statement, so nothing in the
-		// block needs a check of its own.
+		// An assignment's and a read's words hold no statement, so
+		// nothing in the block needs a check of its own.
 		return false
 	})
 }
@@ -441,8 +472,8 @@ func nesting(command string) int {
 	return max(deepest, depth)
 }
 
-// sized reports whether a parsed line keeps to MaxDepth, MaxExpansions
-// and MaxPipes.
+// sized reports whether a parsed line keeps to MaxDepth, MaxExpansions,
+// MaxPipes and MaxStars.
 func sized(f *syntax.File) bool {
 	pipes := 0
 	ok := true
@@ -487,9 +518,30 @@ func sized(f *syntax.File) bool {
 				words(it.Items...)
 			}
 		case *syntax.CaseClause:
-			words(x.Word)
+			ws := []*syntax.Word{x.Word}
 			for _, it := range x.Items {
-				words(it.Patterns...)
+				ws = append(ws, it.Patterns...)
+			}
+			words(ws...)
+		case *syntax.Redirect:
+			if x.Hdoc != nil {
+				// A here document's text is no pattern; the patterns of
+				// its expansions are.
+				syntax.Walk(x.Hdoc, func(y syntax.Node) bool {
+					if pe, isParam := y.(*syntax.ParamExp); isParam && pe.Exp != nil && stars(pe.Exp.Word) > MaxStars {
+						ok = false
+					}
+					return ok
+				})
+				if stars(x.Word) > MaxStars {
+					ok = false
+				}
+				return false
+			}
+		case *syntax.Word:
+			if stars(x) > MaxStars {
+				ok = false
+				return false
 			}
 		}
 		switch n.(type) {
@@ -512,7 +564,8 @@ func sized(f *syntax.File) bool {
 	return ok && pipes <= MaxPipes
 }
 
-// children are the statements and words directly in a compound command.
+// children are the statements and words directly in a compound command:
+// its lists, a for loop's words, and a case clause's word and patterns.
 func children(n syntax.Node) []syntax.Node {
 	var out []syntax.Node
 	stmts := func(list []*syntax.Stmt) {
@@ -537,13 +590,45 @@ func children(n syntax.Node) []syntax.Node {
 		stmts(x.Cond)
 		stmts(x.Do)
 	case *syntax.ForClause:
+		if it, isIter := x.Loop.(*syntax.WordIter); isIter {
+			for _, w := range it.Items {
+				out = append(out, w)
+			}
+		}
 		stmts(x.Do)
 	case *syntax.CaseClause:
+		out = append(out, x.Word)
 		for _, it := range x.Items {
+			for _, w := range it.Patterns {
+				out = append(out, w)
+			}
 			stmts(it.Stmts)
 		}
 	}
 	return out
+}
+
+// stars counts the wildcards * a word holds outside quotes.
+func stars(w *syntax.Word) int {
+	if w == nil {
+		return 0
+	}
+	n := 0
+	for _, part := range w.Parts {
+		lit, isLit := part.(*syntax.Lit)
+		if !isLit {
+			continue
+		}
+		for i := 0; i < len(lit.Value); i++ {
+			switch lit.Value[i] {
+			case '\\':
+				i++
+			case '*':
+				n++
+			}
+		}
+	}
+	return n
 }
 
 // expansions counts a word's parameter expansions, and its patterns: a

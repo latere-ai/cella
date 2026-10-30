@@ -22,8 +22,7 @@ func deadline() time.Duration {
 
 // bounded runs a line and fails the test when it took longer than the
 // deadline or allocated more than maxAlloc bytes on the way; zero
-// allocates without a bound, for a line the time bound stops. Under the
-// race detector only the deadline is checked.
+// allocates without a bound, for a line the time bound stops.
 func bounded(t *testing.T, fsys FS, r Request, maxAlloc uint64) Result {
 	t.Helper()
 	if r.Dir == "" {
@@ -42,7 +41,12 @@ func bounded(t *testing.T, fsys FS, r Request, maxAlloc uint64) Result {
 	if took > deadline() {
 		t.Errorf("Run(%.80q) took %v", r.Command, took)
 	}
-	if alloc := after.TotalAlloc - before.TotalAlloc; maxAlloc > 0 && !raceEnabled && alloc > maxAlloc {
+	if raceEnabled {
+		// The race detector drops what sync.Pool keeps, so regexp
+		// allocates a machine for every line grep matches.
+		maxAlloc *= 32
+	}
+	if alloc := after.TotalAlloc - before.TotalAlloc; maxAlloc > 0 && alloc > maxAlloc {
 		t.Errorf("Run(%.80q) allocated %d bytes, want at most %d", r.Command, alloc, maxAlloc)
 	}
 	return res
@@ -105,6 +109,26 @@ func TestADoublingReadStops(t *testing.T) {
 	m.put("/memory/user/long", strings.Repeat("x", DefaultValue+16)+"\n", day)
 	res = bounded(t, m, Request{Command: "read -r y < long; echo done"}, 32<<20)
 	stops(t, res, fmt.Sprintf("y: value longer than %d bytes", DefaultValue))
+}
+
+func TestAReadKeepsItsStatus(t *testing.T) {
+	m := filesFS()
+	m.put("/memory/user/two", "a\nb\n", day)
+	for _, tc := range []struct{ line, want string }{
+		{"while read -r l; do echo \"<$l>\"; done < two; echo $?", "<a>\n<b>\n0\n"},
+		{"read -r a < /dev/null || echo eof $?", "eof 1\n"},
+		{"read -r a < /dev/null; echo $?", "1\n"},
+		{"! read -r a < /dev/null && echo negated", "negated\n"},
+		{"set -e; ! read -r a < two; echo after $a", "after a\n"},
+		{"set -e; if read -r a < /dev/null; then echo yes; else echo no; fi", "no\n"},
+		{"set -e; read -r a < /dev/null; echo unreached", ""},
+		{"echo x | read -r a; echo $?", "0\n"},
+	} {
+		res := run(t, m, Request{Command: tc.line, Dir: "/memory/user"})
+		if string(res.Output) != tc.want {
+			t.Errorf("%q: got exit %d and %q, want %q", tc.line, res.ExitCode, res.Output, tc.want)
+		}
+	}
 }
 
 func TestAPipeIntoSortOrUniqStops(t *testing.T) {
@@ -218,6 +242,15 @@ func TestWideExpansionIsRefused(t *testing.T) {
 		"x=a; for i in " + x17 + "; do :; done",
 		"x=a; case " + x17 + " in a) :;; esac",
 		"echo" + strings.Repeat(" /memory/user/*", MaxExpansions+1),
+		// A case clause's word and patterns count together.
+		"x=a; case $x in " + strings.Repeat("*a) ;; ", MaxExpansions) + "esac",
+		// A pattern's wildcards.
+		"echo /memory/user/" + strings.Repeat("*a", MaxStars+1),
+		"x=a; case $x in " + strings.Repeat("*a", MaxStars+1) + ") ;; esac",
+		"x=a; echo ${x%" + strings.Repeat("*a", MaxStars+1) + "}",
+		"x=a; y=${x##" + strings.Repeat("*a", MaxStars+1) + "}",
+		"x=a; cat <<EOF\n${x%" + strings.Repeat("*a", MaxStars+1) + "}\nEOF",
+		"for f in /memory/user/" + strings.Repeat("*a", MaxStars+1) + "; do :; done",
 	} {
 		if p := Check(line, "/memory/user", folders); p.Reason != ReasonSize {
 			t.Errorf("Check(%.40q…) = %+v, want size", line, p)
@@ -227,6 +260,10 @@ func TestWideExpansionIsRefused(t *testing.T) {
 		"x=a; echo " + strings.Repeat("$x", MaxExpansions),
 		"echo" + strings.Repeat(" /memory/user/*", MaxExpansions),
 		"echo '" + strings.Repeat("*", 100) + "'",
+		"echo \\" + strings.Repeat("*\\", 20),
+		"x=a; case $x in " + strings.Repeat("*a) ;; ", MaxExpansions-1) + "esac",
+		"x=a; echo ${x%" + strings.Repeat("*a", MaxStars) + "}",
+		"cat <<EOF\n" + strings.Repeat("* a list item\n", 20) + "EOF",
 	} {
 		if p := Check(line, "/memory/user", folders); !p.OK() {
 			t.Errorf("Check(%.40q…) = %+v, want it run", line, p)
@@ -282,6 +319,26 @@ func TestPrintfIsBounded(t *testing.T) {
 func TestAnAssignmentKeepsItsStatus(t *testing.T) {
 	res := run(t, filesFS(), Request{Command: "false; x=1; echo $?; x=2 && echo and; ! y=1 || echo not; set -e; z=3; echo $x$z", Dir: "/memory/user"})
 	if string(res.Output) != "0\nand\nnot\n23\n" || res.ExitCode != 0 {
+		t.Errorf("got exit %d and %q", res.ExitCode, res.Output)
+	}
+}
+
+// askingFS is a file system that asks its context for its error many
+// times on every read, as an HTTP client may.
+type askingFS struct{ *memFS }
+
+func (a askingFS) ReadFile(ctx context.Context, name string) ([]byte, error) {
+	for range 2 * DefaultSteps {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+	}
+	return a.memFS.ReadFile(ctx, name)
+}
+
+func TestOnlyTheLineCountsSteps(t *testing.T) {
+	res := run(t, askingFS{filesFS()}, Request{Command: "cat nikita-heumann-your-latere-ai-cofounder.md > /dev/null && cat < notes/today.md", Dir: "/memory/user"})
+	if res.ExitCode != 0 || string(res.Output) != "buy milk\n" {
 		t.Errorf("got exit %d and %q", res.ExitCode, res.Output)
 	}
 }
