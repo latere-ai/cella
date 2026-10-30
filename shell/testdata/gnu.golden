@@ -1,0 +1,2909 @@
+### NOW 1793356154
+### CMD "ls"
+a.txt
+big.txt
+B.txt
+cofounder-notes.md
+data.csv
+dir
+empty
+emptydir
+my-notes.md
+my_notes.md
+mynotes.md
+names.txt
+nonl.txt
+notes.md
+sizes.txt
+spaced.txt
+
+### EXIT 0
+### CMD "ls -a"
+.
+..
+a.txt
+big.txt
+B.txt
+cofounder-notes.md
+data.csv
+dir
+empty
+emptydir
+.hidden
+my-notes.md
+my_notes.md
+mynotes.md
+names.txt
+nonl.txt
+notes.md
+sizes.txt
+spaced.txt
+
+### EXIT 0
+### CMD "ls -A"
+a.txt
+big.txt
+B.txt
+cofounder-notes.md
+data.csv
+dir
+empty
+emptydir
+.hidden
+my-notes.md
+my_notes.md
+mynotes.md
+names.txt
+nonl.txt
+notes.md
+sizes.txt
+spaced.txt
+
+### EXIT 0
+### CMD "ls -l"
+total 64
+-rw-r--r-- 1 root root   40 Oct  2 09:00 a.txt
+-rw-r--r-- 1 root root 5000 Jan  2  2024 big.txt
+-rw-r--r-- 1 root root   26 Sep 30 18:30 B.txt
+-rw-r--r-- 1 root root   26 Oct  1 12:34 cofounder-notes.md
+-rw-r--r-- 1 root root   59 Sep 15 08:00 data.csv
+drwxr-xr-x 3 root root 4096 Oct  1 12:34 dir
+-rw-r--r-- 1 root root    0 Jan  2  2024 empty
+drwxr-xr-x 2 root root 4096 Jan  2  2024 emptydir
+-rw-r--r-- 1 root root    5 Sep 15 08:00 my-notes.md
+-rw-r--r-- 1 root root   11 Sep 15 08:00 my_notes.md
+-rw-r--r-- 1 root root    6 Sep 15 08:00 mynotes.md
+-rw-r--r-- 1 root root   55 Sep 15 08:00 names.txt
+-rw-r--r-- 1 root root   20 Sep 15 08:00 nonl.txt
+-rw-r--r-- 1 root root   44 Oct  1 12:34 notes.md
+-rw-r--r-- 1 root root   18 Sep 15 08:00 sizes.txt
+-rw-r--r-- 1 root root   19 Sep 15 08:00 spaced.txt
+
+### EXIT 0
+### CMD "ls -la"
+total 76
+drwxr-xr-x 4 root root 4096 Oct  1 12:34 .
+drwxr-xr-x 4 root root 4096 Jan  2  2024 ..
+-rw-r--r-- 1 root root   40 Oct  2 09:00 a.txt
+-rw-r--r-- 1 root root 5000 Jan  2  2024 big.txt
+-rw-r--r-- 1 root root   26 Sep 30 18:30 B.txt
+-rw-r--r-- 1 root root   26 Oct  1 12:34 cofounder-notes.md
+-rw-r--r-- 1 root root   59 Sep 15 08:00 data.csv
+drwxr-xr-x 3 root root 4096 Oct  1 12:34 dir
+-rw-r--r-- 1 root root    0 Jan  2  2024 empty
+drwxr-xr-x 2 root root 4096 Jan  2  2024 emptydir
+-rw-r--r-- 1 root root    7 Jan  2  2024 .hidden
+-rw-r--r-- 1 root root    5 Sep 15 08:00 my-notes.md
+-rw-r--r-- 1 root root   11 Sep 15 08:00 my_notes.md
+-rw-r--r-- 1 root root    6 Sep 15 08:00 mynotes.md
+-rw-r--r-- 1 root root   55 Sep 15 08:00 names.txt
+-rw-r--r-- 1 root root   20 Sep 15 08:00 nonl.txt
+-rw-r--r-- 1 root root   44 Oct  1 12:34 notes.md
+-rw-r--r-- 1 root root   18 Sep 15 08:00 sizes.txt
+-rw-r--r-- 1 root root   19 Sep 15 08:00 spaced.txt
+
+### EXIT 0
+### CMD "ls -lh"
+total 64K
+-rw-r--r-- 1 root root   40 Oct  2 09:00 a.txt
+-rw-r--r-- 1 root root 4.9K Jan  2  2024 big.txt
+-rw-r--r-- 1 root root   26 Sep 30 18:30 B.txt
+-rw-r--r-- 1 root root   26 Oct  1 12:34 cofounder-notes.md
+-rw-r--r-- 1 root root   59 Sep 15 08:00 data.csv
+drwxr-xr-x 3 root root 4.0K Oct  1 12:34 dir
+-rw-r--r-- 1 root root    0 Jan  2  2024 empty
+drwxr-xr-x 2 root root 4.0K Jan  2  2024 emptydir
+-rw-r--r-- 1 root root    5 Sep 15 08:00 my-notes.md
+-rw-r--r-- 1 root root   11 Sep 15 08:00 my_notes.md
+-rw-r--r-- 1 root root    6 Sep 15 08:00 mynotes.md
+-rw-r--r-- 1 root root   55 Sep 15 08:00 names.txt
+-rw-r--r-- 1 root root   20 Sep 15 08:00 nonl.txt
+-rw-r--r-- 1 root root   44 Oct  1 12:34 notes.md
+-rw-r--r-- 1 root root   18 Sep 15 08:00 sizes.txt
+-rw-r--r-- 1 root root   19 Sep 15 08:00 spaced.txt
+
+### EXIT 0
+### CMD "ls -1"
+a.txt
+big.txt
+B.txt
+cofounder-notes.md
+data.csv
+dir
+empty
+emptydir
+my-notes.md
+my_notes.md
+mynotes.md
+names.txt
+nonl.txt
+notes.md
+sizes.txt
+spaced.txt
+
+### EXIT 0
+### CMD "ls -R"
+.:
+a.txt
+big.txt
+B.txt
+cofounder-notes.md
+data.csv
+dir
+empty
+emptydir
+my-notes.md
+my_notes.md
+mynotes.md
+names.txt
+nonl.txt
+notes.md
+sizes.txt
+spaced.txt
+
+./dir:
+one.md
+sub
+
+./dir/sub:
+two.txt
+
+./emptydir:
+
+### EXIT 0
+### CMD "ls -lR dir"
+dir:
+total 8
+-rw-r--r-- 1 root root   13 Oct  1 12:34 one.md
+drwxr-xr-x 2 root root 4096 Sep 15 08:00 sub
+
+dir/sub:
+total 4
+-rw-r--r-- 1 root root 10 Sep 15 08:00 two.txt
+
+### EXIT 0
+### CMD "ls -t"
+a.txt
+cofounder-notes.md
+dir
+notes.md
+B.txt
+data.csv
+my-notes.md
+my_notes.md
+mynotes.md
+names.txt
+nonl.txt
+sizes.txt
+spaced.txt
+big.txt
+empty
+emptydir
+
+### EXIT 0
+### CMD "ls -S"
+big.txt
+dir
+emptydir
+data.csv
+names.txt
+notes.md
+a.txt
+B.txt
+cofounder-notes.md
+nonl.txt
+spaced.txt
+sizes.txt
+my_notes.md
+mynotes.md
+my-notes.md
+empty
+
+### EXIT 0
+### CMD "ls -r"
+spaced.txt
+sizes.txt
+notes.md
+nonl.txt
+names.txt
+mynotes.md
+my_notes.md
+my-notes.md
+emptydir
+empty
+dir
+data.csv
+cofounder-notes.md
+B.txt
+big.txt
+a.txt
+
+### EXIT 0
+### CMD "ls -ltr"
+total 64
+drwxr-xr-x 2 root root 4096 Jan  2  2024 emptydir
+-rw-r--r-- 1 root root    0 Jan  2  2024 empty
+-rw-r--r-- 1 root root 5000 Jan  2  2024 big.txt
+-rw-r--r-- 1 root root   19 Sep 15 08:00 spaced.txt
+-rw-r--r-- 1 root root   18 Sep 15 08:00 sizes.txt
+-rw-r--r-- 1 root root   20 Sep 15 08:00 nonl.txt
+-rw-r--r-- 1 root root   55 Sep 15 08:00 names.txt
+-rw-r--r-- 1 root root    6 Sep 15 08:00 mynotes.md
+-rw-r--r-- 1 root root   11 Sep 15 08:00 my_notes.md
+-rw-r--r-- 1 root root    5 Sep 15 08:00 my-notes.md
+-rw-r--r-- 1 root root   59 Sep 15 08:00 data.csv
+-rw-r--r-- 1 root root   26 Sep 30 18:30 B.txt
+-rw-r--r-- 1 root root   44 Oct  1 12:34 notes.md
+drwxr-xr-x 3 root root 4096 Oct  1 12:34 dir
+-rw-r--r-- 1 root root   26 Oct  1 12:34 cofounder-notes.md
+-rw-r--r-- 1 root root   40 Oct  2 09:00 a.txt
+
+### EXIT 0
+### CMD "ls -d dir"
+dir
+
+### EXIT 0
+### CMD "ls -ld dir emptydir"
+drwxr-xr-x 3 root root 4096 Oct  1 12:34 dir
+drwxr-xr-x 2 root root 4096 Jan  2  2024 emptydir
+
+### EXIT 0
+### CMD "ls -F"
+a.txt
+big.txt
+B.txt
+cofounder-notes.md
+data.csv
+dir/
+empty
+emptydir/
+my-notes.md
+my_notes.md
+mynotes.md
+names.txt
+nonl.txt
+notes.md
+sizes.txt
+spaced.txt
+
+### EXIT 0
+### CMD "ls -p dir"
+one.md
+sub/
+
+### EXIT 0
+### CMD "ls dir notes.md emptydir"
+notes.md
+
+dir:
+one.md
+sub
+
+emptydir:
+
+### EXIT 0
+### CMD "ls missing"
+ls: cannot access 'missing': No such file or directory
+
+### EXIT 2
+### CMD "ls missing notes.md"
+ls: cannot access 'missing': No such file or directory
+notes.md
+
+### EXIT 2
+### CMD "ls -l notes.md big.txt"
+-rw-r--r-- 1 root root 5000 Jan  2  2024 big.txt
+-rw-r--r-- 1 root root   44 Oct  1 12:34 notes.md
+
+### EXIT 0
+### CMD "ls /memory"
+shared
+user
+
+### EXIT 0
+### CMD "ls -la /memory/shared"
+total 16
+drwxr-xr-x 3 root root 4096 Jan  2  2024 .
+drwxr-xr-x 4 root root 4096 Jan  2  2024 ..
+drwxr-xr-x 2 root root 4096 Sep 15 08:00 plan
+-rw-r--r-- 1 root root   34 Jan  2  2024 team.md
+
+### EXIT 0
+### CMD "ls -lG"
+total 64
+-rw-r--r-- 1 root   40 Oct  2 09:00 a.txt
+-rw-r--r-- 1 root 5000 Jan  2  2024 big.txt
+-rw-r--r-- 1 root   26 Sep 30 18:30 B.txt
+-rw-r--r-- 1 root   26 Oct  1 12:34 cofounder-notes.md
+-rw-r--r-- 1 root   59 Sep 15 08:00 data.csv
+drwxr-xr-x 3 root 4096 Oct  1 12:34 dir
+-rw-r--r-- 1 root    0 Jan  2  2024 empty
+drwxr-xr-x 2 root 4096 Jan  2  2024 emptydir
+-rw-r--r-- 1 root    5 Sep 15 08:00 my-notes.md
+-rw-r--r-- 1 root   11 Sep 15 08:00 my_notes.md
+-rw-r--r-- 1 root    6 Sep 15 08:00 mynotes.md
+-rw-r--r-- 1 root   55 Sep 15 08:00 names.txt
+-rw-r--r-- 1 root   20 Sep 15 08:00 nonl.txt
+-rw-r--r-- 1 root   44 Oct  1 12:34 notes.md
+-rw-r--r-- 1 root   18 Sep 15 08:00 sizes.txt
+-rw-r--r-- 1 root   19 Sep 15 08:00 spaced.txt
+
+### EXIT 0
+### CMD "ls -n"
+total 64
+-rw-r--r-- 1 0 0   40 Oct  2 09:00 a.txt
+-rw-r--r-- 1 0 0 5000 Jan  2  2024 big.txt
+-rw-r--r-- 1 0 0   26 Sep 30 18:30 B.txt
+-rw-r--r-- 1 0 0   26 Oct  1 12:34 cofounder-notes.md
+-rw-r--r-- 1 0 0   59 Sep 15 08:00 data.csv
+drwxr-xr-x 3 0 0 4096 Oct  1 12:34 dir
+-rw-r--r-- 1 0 0    0 Jan  2  2024 empty
+drwxr-xr-x 2 0 0 4096 Jan  2  2024 emptydir
+-rw-r--r-- 1 0 0    5 Sep 15 08:00 my-notes.md
+-rw-r--r-- 1 0 0   11 Sep 15 08:00 my_notes.md
+-rw-r--r-- 1 0 0    6 Sep 15 08:00 mynotes.md
+-rw-r--r-- 1 0 0   55 Sep 15 08:00 names.txt
+-rw-r--r-- 1 0 0   20 Sep 15 08:00 nonl.txt
+-rw-r--r-- 1 0 0   44 Oct  1 12:34 notes.md
+-rw-r--r-- 1 0 0   18 Sep 15 08:00 sizes.txt
+-rw-r--r-- 1 0 0   19 Sep 15 08:00 spaced.txt
+
+### EXIT 0
+### CMD "ls dir/*.md"
+dir/one.md
+
+### EXIT 0
+### CMD "ls *.txt"
+a.txt
+big.txt
+B.txt
+names.txt
+nonl.txt
+sizes.txt
+spaced.txt
+
+### EXIT 0
+### CMD "ls --color=never"
+a.txt
+big.txt
+B.txt
+cofounder-notes.md
+data.csv
+dir
+empty
+emptydir
+my-notes.md
+my_notes.md
+mynotes.md
+names.txt
+nonl.txt
+notes.md
+sizes.txt
+spaced.txt
+
+### EXIT 0
+### CMD "ls -lhS"
+total 64K
+-rw-r--r-- 1 root root 4.9K Jan  2  2024 big.txt
+drwxr-xr-x 3 root root 4.0K Oct  1 12:34 dir
+drwxr-xr-x 2 root root 4.0K Jan  2  2024 emptydir
+-rw-r--r-- 1 root root   59 Sep 15 08:00 data.csv
+-rw-r--r-- 1 root root   55 Sep 15 08:00 names.txt
+-rw-r--r-- 1 root root   44 Oct  1 12:34 notes.md
+-rw-r--r-- 1 root root   40 Oct  2 09:00 a.txt
+-rw-r--r-- 1 root root   26 Sep 30 18:30 B.txt
+-rw-r--r-- 1 root root   26 Oct  1 12:34 cofounder-notes.md
+-rw-r--r-- 1 root root   20 Sep 15 08:00 nonl.txt
+-rw-r--r-- 1 root root   19 Sep 15 08:00 spaced.txt
+-rw-r--r-- 1 root root   18 Sep 15 08:00 sizes.txt
+-rw-r--r-- 1 root root   11 Sep 15 08:00 my_notes.md
+-rw-r--r-- 1 root root    6 Sep 15 08:00 mynotes.md
+-rw-r--r-- 1 root root    5 Sep 15 08:00 my-notes.md
+-rw-r--r-- 1 root root    0 Jan  2  2024 empty
+
+### EXIT 0
+### CMD "ls .."
+shared
+user
+
+### EXIT 0
+### CMD "ls -aR dir"
+dir:
+.
+..
+one.md
+sub
+
+dir/sub:
+.
+..
+.dot
+two.txt
+
+### EXIT 0
+### CMD "ls -lt dir"
+total 8
+-rw-r--r-- 1 root root   13 Oct  1 12:34 one.md
+drwxr-xr-x 2 root root 4096 Sep 15 08:00 sub
+
+### EXIT 0
+### CMD "ls -l emptydir"
+total 0
+
+### EXIT 0
+### CMD "ls -R emptydir"
+emptydir:
+
+### EXIT 0
+### CMD "ls -A dir/sub"
+.dot
+two.txt
+
+### EXIT 0
+### CMD "cat notes.md"
+# Notes
+buy milk
+TODO: call Anna
+todo later
+
+### EXIT 0
+### CMD "cat -n notes.md a.txt"
+     1	# Notes
+     2	buy milk
+     3	TODO: call Anna
+     4	todo later
+     5	apple
+     6	banana
+     7	apple
+     8	cherry
+     9	banana
+    10	banana
+
+### EXIT 0
+### CMD "cat -b spaced.txt"
+     1	one
+
+
+     2	two
+     3		three  
+
+### EXIT 0
+### CMD "cat -E notes.md"
+# Notes$
+buy milk$
+TODO: call Anna$
+todo later$
+
+### EXIT 0
+### CMD "cat -s spaced.txt"
+one
+
+two
+	three  
+
+### EXIT 0
+### CMD "cat -A spaced.txt"
+one$
+$
+$
+two$
+^Ithree  $
+
+### EXIT 0
+### CMD "cat -T spaced.txt"
+one
+
+
+two
+^Ithree  
+
+### EXIT 0
+### CMD "cat missing"
+cat: missing: No such file or directory
+
+### EXIT 1
+### CMD "cat dir"
+cat: dir: Is a directory
+
+### EXIT 1
+### CMD "cat missing notes.md"
+cat: missing: No such file or directory
+# Notes
+buy milk
+TODO: call Anna
+todo later
+
+### EXIT 1
+### CMD "cat < notes.md"
+# Notes
+buy milk
+TODO: call Anna
+todo later
+
+### EXIT 0
+### CMD "cat notes.md | cat -n"
+     1	# Notes
+     2	buy milk
+     3	TODO: call Anna
+     4	todo later
+
+### EXIT 0
+### CMD "cat empty"
+
+### EXIT 0
+### CMD "cat -"
+
+### EXIT 0
+### CMD "cat notes.md - a.txt"
+# Notes
+buy milk
+TODO: call Anna
+todo later
+apple
+banana
+apple
+cherry
+banana
+banana
+
+### EXIT 0
+### CMD "X=1\ncat <<EOF\nhello $X\nEOF"
+hello 1
+
+### EXIT 0
+### CMD "head -n 2 notes.md"
+# Notes
+buy milk
+
+### EXIT 0
+### CMD "head -2 a.txt"
+apple
+banana
+
+### EXIT 0
+### CMD "head -c 5 notes.md"
+# Not
+### EXIT 0
+### CMD "head notes.md a.txt"
+==> notes.md <==
+# Notes
+buy milk
+TODO: call Anna
+todo later
+
+==> a.txt <==
+apple
+banana
+apple
+cherry
+banana
+banana
+
+### EXIT 0
+### CMD "head -n -2 a.txt"
+apple
+banana
+apple
+cherry
+
+### EXIT 0
+### CMD "head -q notes.md a.txt"
+# Notes
+buy milk
+TODO: call Anna
+todo later
+apple
+banana
+apple
+cherry
+banana
+banana
+
+### EXIT 0
+### CMD "head -v notes.md"
+==> notes.md <==
+# Notes
+buy milk
+TODO: call Anna
+todo later
+
+### EXIT 0
+### CMD "tail -n 2 a.txt"
+banana
+banana
+
+### EXIT 0
+### CMD "tail -n +3 a.txt"
+apple
+cherry
+banana
+banana
+
+### EXIT 0
+### CMD "tail -3 a.txt"
+cherry
+banana
+banana
+
+### EXIT 0
+### CMD "tail -c 4 notes.md"
+ter
+
+### EXIT 0
+### CMD "tail notes.md a.txt"
+==> notes.md <==
+# Notes
+buy milk
+TODO: call Anna
+todo later
+
+==> a.txt <==
+apple
+banana
+apple
+cherry
+banana
+banana
+
+### EXIT 0
+### CMD "head missing"
+head: cannot open 'missing' for reading: No such file or directory
+
+### EXIT 1
+### CMD "head dir"
+head: error reading 'dir': Is a directory
+
+### EXIT 1
+### CMD "tail missing"
+tail: cannot open 'missing' for reading: No such file or directory
+
+### EXIT 1
+### CMD "head -n 1 empty"
+
+### EXIT 0
+### CMD "cat a.txt | head -n 3 | tail -n 1"
+apple
+
+### EXIT 0
+### CMD "tail -n 0 a.txt"
+
+### EXIT 0
+### CMD "head -c -3 notes.md"
+# Notes
+buy milk
+TODO: call Anna
+todo lat
+### EXIT 0
+### CMD "wc notes.md"
+ 4  9 44 notes.md
+
+### EXIT 0
+### CMD "wc -l notes.md"
+4 notes.md
+
+### EXIT 0
+### CMD "wc -l *.txt"
+   6 B.txt
+   6 a.txt
+   1 big.txt
+  14 names.txt
+   1 nonl.txt
+   5 sizes.txt
+   5 spaced.txt
+  38 total
+
+### EXIT 0
+### CMD "wc -w a.txt B.txt"
+ 6 a.txt
+ 6 B.txt
+12 total
+
+### EXIT 0
+### CMD "wc -c big.txt"
+5000 big.txt
+
+### EXIT 0
+### CMD "wc < notes.md"
+ 4  9 44
+
+### EXIT 0
+### CMD "cat notes.md | wc -l"
+4
+
+### EXIT 0
+### CMD "wc missing notes.md"
+wc: missing: No such file or directory
+ 4  9 44 notes.md
+ 4  9 44 total
+
+### EXIT 1
+### CMD "wc dir"
+wc: dir: Is a directory
+      0       0       0 dir
+
+### EXIT 1
+### CMD "wc -lwc notes.md"
+ 4  9 44 notes.md
+
+### EXIT 0
+### CMD "wc -m names.txt"
+54 names.txt
+
+### EXIT 0
+### CMD "wc -L notes.md"
+15 notes.md
+
+### EXIT 0
+### CMD "wc empty"
+0 0 0 empty
+
+### EXIT 0
+### CMD "wc -l missing"
+wc: missing: No such file or directory
+
+### EXIT 1
+### CMD "grep -i todo notes.md"
+TODO: call Anna
+todo later
+
+### EXIT 0
+### CMD "grep -n TODO notes.md dir/one.md"
+notes.md:3:TODO: call Anna
+dir/one.md:2:TODO two
+
+### EXIT 0
+### CMD "grep -rn TODO . | sort"
+./dir/one.md:2:TODO two
+./notes.md:3:TODO: call Anna
+
+### EXIT 0
+### CMD "grep -r todo dir"
+
+### EXIT 1
+### CMD "grep -ril todo . | sort"
+./dir/one.md
+./notes.md
+
+### EXIT 0
+### CMD "grep -c banana a.txt"
+3
+
+### EXIT 0
+### CMD "grep -c a a.txt B.txt"
+a.txt:5
+B.txt:3
+
+### EXIT 0
+### CMD "grep -v banana a.txt"
+apple
+apple
+cherry
+
+### EXIT 0
+### CMD "grep -E 'app|cher' a.txt"
+apple
+apple
+cherry
+
+### EXIT 0
+### CMD "grep -F 'a.' a.txt data.csv"
+
+### EXIT 1
+### CMD "grep -w an a.txt"
+
+### EXIT 1
+### CMD "grep -x apple a.txt"
+apple
+apple
+
+### EXIT 0
+### CMD "grep -o an a.txt"
+an
+an
+an
+an
+an
+an
+
+### EXIT 0
+### CMD "grep -A1 milk notes.md"
+buy milk
+TODO: call Anna
+
+### EXIT 0
+### CMD "grep -B1 -n call notes.md"
+2-buy milk
+3:TODO: call Anna
+
+### EXIT 0
+### CMD "grep -C1 cherry a.txt"
+apple
+cherry
+banana
+
+### EXIT 0
+### CMD "grep nothing notes.md"
+
+### EXIT 1
+### CMD "grep x missing"
+grep: missing: No such file or directory
+
+### EXIT 2
+### CMD "grep -q apple a.txt"
+
+### EXIT 0
+### CMD "grep -s x missing"
+
+### EXIT 2
+### CMD "grep -l apple *.txt"
+a.txt
+
+### EXIT 0
+### CMD "grep -L apple *.txt"
+B.txt
+big.txt
+names.txt
+nonl.txt
+sizes.txt
+spaced.txt
+
+### EXIT 0
+### CMD "grep -h apple a.txt notes.md"
+apple
+apple
+
+### EXIT 0
+### CMD "grep -H apple a.txt"
+a.txt:apple
+a.txt:apple
+
+### EXIT 0
+### CMD "grep 'ap\\(p\\)le' a.txt"
+apple
+apple
+
+### EXIT 0
+### CMD "grep '^b' a.txt"
+banana
+banana
+banana
+
+### EXIT 0
+### CMD "grep -m1 banana a.txt"
+banana
+
+### EXIT 0
+### CMD "grep -e apple -e cherry a.txt"
+apple
+apple
+cherry
+
+### EXIT 0
+### CMD "grep apple dir"
+grep: dir: Is a directory
+
+### EXIT 2
+### CMD "grep -r --include='*.md' TODO . | sort"
+./dir/one.md:TODO two
+./notes.md:TODO: call Anna
+
+### EXIT 0
+### CMD "grep -rn TODO | sort"
+dir/one.md:2:TODO two
+notes.md:3:TODO: call Anna
+
+### EXIT 0
+### CMD "echo hi | grep h"
+hi
+
+### EXIT 0
+### CMD "grep -i 'ABC' names.txt"
+abc
+Abc
+
+### EXIT 0
+### CMD "grep -n '' spaced.txt"
+1:one
+2:
+3:
+4:two
+5:	three  
+
+### EXIT 0
+### CMD "grep -c '' empty"
+0
+
+### EXIT 1
+### CMD "grep -rh TODO /memory/shared"
+TODO: plan the offsite
+
+### EXIT 0
+### CMD "grep -E '^[0-9]+$' B.txt"
+10
+9
+100
+
+### EXIT 0
+### CMD "grep 'a\\|z' B.txt"
+Zebra
+alpha
+Beta
+
+### EXIT 0
+### CMD "grep -in BETA B.txt"
+3:Beta
+
+### EXIT 0
+### CMD "grep -r TODO dir/sub"
+
+### EXIT 1
+### CMD "grep -ow 'b[a-z]*' notes.md"
+buy
+
+### EXIT 0
+### CMD "find . | sort"
+.
+./a.txt
+./big.txt
+./B.txt
+./cofounder-notes.md
+./data.csv
+./dir
+./dir/one.md
+./dir/sub
+./dir/sub/.dot
+./dir/sub/two.txt
+./empty
+./emptydir
+./.hidden
+./my-notes.md
+./my_notes.md
+./mynotes.md
+./names.txt
+./nonl.txt
+./notes.md
+./sizes.txt
+./spaced.txt
+
+### EXIT 0
+### CMD "find . -name '*.md' | sort"
+./cofounder-notes.md
+./dir/one.md
+./my-notes.md
+./my_notes.md
+./mynotes.md
+./notes.md
+
+### EXIT 0
+### CMD "find . -type d | sort"
+.
+./dir
+./dir/sub
+./emptydir
+
+### EXIT 0
+### CMD "find . -type f -name '*.txt' | sort"
+./a.txt
+./big.txt
+./B.txt
+./dir/sub/two.txt
+./names.txt
+./nonl.txt
+./sizes.txt
+./spaced.txt
+
+### EXIT 0
+### CMD "find dir -maxdepth 1 | sort"
+dir
+dir/one.md
+dir/sub
+
+### EXIT 0
+### CMD "find . -maxdepth 1 -type f | sort"
+./a.txt
+./big.txt
+./B.txt
+./cofounder-notes.md
+./data.csv
+./empty
+./.hidden
+./my-notes.md
+./my_notes.md
+./mynotes.md
+./names.txt
+./nonl.txt
+./notes.md
+./sizes.txt
+./spaced.txt
+
+### EXIT 0
+### CMD "find . -iname 'b*' | sort"
+./big.txt
+./B.txt
+
+### EXIT 0
+### CMD "find . -empty | sort"
+./empty
+./emptydir
+
+### EXIT 0
+### CMD "find missing"
+find: ‘missing’: No such file or directory
+
+### EXIT 1
+### CMD "find . -path './dir/*' | sort"
+./dir/one.md
+./dir/sub
+./dir/sub/.dot
+./dir/sub/two.txt
+
+### EXIT 0
+### CMD "find . -not -name '*.md' -type f | sort"
+./a.txt
+./big.txt
+./B.txt
+./data.csv
+./dir/sub/.dot
+./dir/sub/two.txt
+./empty
+./.hidden
+./names.txt
+./nonl.txt
+./sizes.txt
+./spaced.txt
+
+### EXIT 0
+### CMD "find . -name '*.md' -o -name '*.csv' | sort"
+./cofounder-notes.md
+./data.csv
+./dir/one.md
+./my-notes.md
+./my_notes.md
+./mynotes.md
+./notes.md
+
+### EXIT 0
+### CMD "find dir -mindepth 2 | sort"
+dir/sub/.dot
+dir/sub/two.txt
+
+### EXIT 0
+### CMD "find /memory -maxdepth 1 | sort"
+/memory
+/memory/shared
+/memory/user
+
+### EXIT 0
+### CMD "find dir -type f | sort"
+dir/one.md
+dir/sub/.dot
+dir/sub/two.txt
+
+### EXIT 0
+### CMD "find . -name 'two*'"
+./dir/sub/two.txt
+
+### EXIT 0
+### CMD "find dir/sub -print | sort"
+dir/sub
+dir/sub/.dot
+dir/sub/two.txt
+
+### EXIT 0
+### CMD "find . ! -type d -name '.*' | sort"
+./dir/sub/.dot
+./.hidden
+
+### EXIT 0
+### CMD "find . -maxdepth 0"
+.
+
+### EXIT 0
+### CMD "find /memory/shared -type f | sort"
+/memory/shared/plan/q4.md
+/memory/shared/team.md
+
+### EXIT 0
+### CMD "sort a.txt"
+apple
+apple
+banana
+banana
+banana
+cherry
+
+### EXIT 0
+### CMD "sort -r a.txt"
+cherry
+banana
+banana
+banana
+apple
+apple
+
+### EXIT 0
+### CMD "sort -u a.txt"
+apple
+banana
+cherry
+
+### EXIT 0
+### CMD "sort B.txt"
+10
+100
+9
+alpha
+Beta
+Zebra
+
+### EXIT 0
+### CMD "sort -n B.txt"
+alpha
+Beta
+Zebra
+9
+10
+100
+
+### EXIT 0
+### CMD "sort -f B.txt"
+10
+100
+9
+alpha
+Beta
+Zebra
+
+### EXIT 0
+### CMD "sort -t, -k2 -n data.csv"
+name,age,city
+bob,27,Munich
+anna,31,Berlin
+carl,45,Hamburg
+
+### EXIT 0
+### CMD "sort -t, -k3 data.csv"
+anna,31,Berlin
+name,age,city
+carl,45,Hamburg
+bob,27,Munich
+
+### EXIT 0
+### CMD "sort -t, -k2,2 -nr data.csv"
+carl,45,Hamburg
+anna,31,Berlin
+bob,27,Munich
+name,age,city
+
+### EXIT 0
+### CMD "sort a.txt B.txt"
+10
+100
+9
+alpha
+apple
+apple
+banana
+banana
+banana
+Beta
+cherry
+Zebra
+
+### EXIT 0
+### CMD "sort missing"
+sort: cannot read: missing: No such file or directory
+
+### EXIT 2
+### CMD "sort -o out.txt a.txt && cat out.txt"
+apple
+apple
+banana
+banana
+banana
+cherry
+
+### EXIT 0
+### CMD "cat a.txt | sort | uniq -c"
+      2 apple
+      3 banana
+      1 cherry
+
+### EXIT 0
+### CMD "sort -h sizes.txt"
+512
+1K
+1.5K
+2M
+3G
+
+### EXIT 0
+### CMD "sort names.txt"
+10
+9
+a b
+ab
+abc
+Abc
+ábc
+b-c
+b_c
+bc
+B-c
+Bc
+.dot
+_under
+
+### EXIT 0
+### CMD "sort -r names.txt"
+_under
+.dot
+Bc
+B-c
+bc
+b_c
+b-c
+ábc
+Abc
+abc
+ab
+a b
+9
+10
+
+### EXIT 0
+### CMD "sort -n sizes.txt"
+1K
+1.5K
+2M
+3G
+512
+
+### EXIT 0
+### CMD "sort -k1,1 names.txt"
+10
+9
+a b
+ab
+abc
+Abc
+ábc
+b-c
+b_c
+bc
+B-c
+Bc
+.dot
+_under
+
+### EXIT 0
+### CMD "sort -u -f B.txt"
+10
+100
+9
+alpha
+Beta
+Zebra
+
+### EXIT 0
+### CMD "sort -t, -k1,1 data.csv"
+anna,31,Berlin
+bob,27,Munich
+carl,45,Hamburg
+name,age,city
+
+### EXIT 0
+### CMD "sort -s -t, -k2,2 data.csv"
+bob,27,Munich
+anna,31,Berlin
+carl,45,Hamburg
+name,age,city
+
+### EXIT 0
+### CMD "LC_ALL=C sort names.txt"
+.dot
+10
+9
+Abc
+B-c
+Bc
+_under
+a b
+ab
+abc
+b-c
+b_c
+bc
+ábc
+
+### EXIT 0
+### CMD "sort dir"
+sort: read failed: dir: Is a directory
+
+### EXIT 2
+### CMD "uniq a.txt"
+apple
+banana
+apple
+cherry
+banana
+
+### EXIT 0
+### CMD "sort a.txt | uniq"
+apple
+banana
+cherry
+
+### EXIT 0
+### CMD "sort a.txt | uniq -c"
+      2 apple
+      3 banana
+      1 cherry
+
+### EXIT 0
+### CMD "sort a.txt | uniq -d"
+apple
+banana
+
+### EXIT 0
+### CMD "sort a.txt | uniq -u"
+cherry
+
+### EXIT 0
+### CMD "uniq -i B.txt"
+Zebra
+alpha
+Beta
+10
+9
+100
+
+### EXIT 0
+### CMD "uniq missing"
+uniq: missing: No such file or directory
+
+### EXIT 1
+### CMD "sort a.txt | uniq - out.txt; cat out.txt"
+apple
+banana
+cherry
+
+### EXIT 0
+### CMD "sort a.txt | uniq -cd"
+      2 apple
+      3 banana
+
+### EXIT 0
+### CMD "cut -d, -f1 data.csv"
+name
+anna
+bob
+carl
+
+### EXIT 0
+### CMD "cut -d, -f2,3 data.csv"
+age,city
+31,Berlin
+27,Munich
+45,Hamburg
+
+### EXIT 0
+### CMD "cut -d, -f2- data.csv"
+age,city
+31,Berlin
+27,Munich
+45,Hamburg
+
+### EXIT 0
+### CMD "cut -c1-3 notes.md"
+# N
+buy
+TOD
+tod
+
+### EXIT 0
+### CMD "cut -b2 a.txt"
+p
+a
+p
+h
+a
+a
+
+### EXIT 0
+### CMD "cut -d, -f1 --complement data.csv"
+age,city
+31,Berlin
+27,Munich
+45,Hamburg
+
+### EXIT 0
+### CMD "cut -d, -f1,3 --output-delimiter=' | ' data.csv"
+name | city
+anna | Berlin
+bob | Munich
+carl | Hamburg
+
+### EXIT 0
+### CMD "cut -f1 notes.md"
+# Notes
+buy milk
+TODO: call Anna
+todo later
+
+### EXIT 0
+### CMD "cut -s -f1 notes.md"
+
+### EXIT 0
+### CMD "cut -c1-2,4 a.txt"
+apl
+baa
+apl
+chr
+baa
+baa
+
+### EXIT 0
+### CMD "cut -d, -f-2 data.csv"
+name,age
+anna,31
+bob,27
+carl,45
+
+### EXIT 0
+### CMD "cut -d, -f3 missing data.csv"
+cut: missing: No such file or directory
+city
+Berlin
+Munich
+Hamburg
+
+### EXIT 1
+### CMD "cut -c3- names.txt"
+
+c
+c
+c
+
+bc
+c
+c
+nder
+ot
+
+
+b
+
+
+### EXIT 0
+### CMD "mkdir new && ls -d new"
+new
+
+### EXIT 0
+### CMD "mkdir -p a/b/c && find a | sort"
+a
+a/b
+a/b/c
+
+### EXIT 0
+### CMD "mkdir dir"
+mkdir: cannot create directory ‘dir’: File exists
+
+### EXIT 1
+### CMD "mkdir -p dir && echo ok"
+ok
+
+### EXIT 0
+### CMD "mkdir x/y"
+mkdir: cannot create directory ‘x/y’: No such file or directory
+
+### EXIT 1
+### CMD "mkdir -v n1 n2"
+mkdir: created directory 'n1'
+mkdir: created directory 'n2'
+
+### EXIT 0
+### CMD "mkdir -pv p/q"
+mkdir: created directory 'p'
+mkdir: created directory 'p/q'
+
+### EXIT 0
+### CMD "mkdir /memory/shared/x"
+mkdir: cannot create directory ‘/memory/shared/x’: Read-only file system
+
+### EXIT 1
+### CMD "mkdir /memory/x"
+mkdir: cannot create directory ‘/memory/x’: Read-only file system
+
+### EXIT 1
+### CMD "mkdir notes.md"
+mkdir: cannot create directory ‘notes.md’: File exists
+
+### EXIT 1
+### CMD "mkdir -p notes.md/x"
+mkdir: cannot create directory ‘notes.md’: Not a directory
+
+### EXIT 1
+### CMD "mkdir -p dir/sub/deep && ls dir/sub"
+deep
+two.txt
+
+### EXIT 0
+### CMD "rm a.txt && ls"
+big.txt
+B.txt
+cofounder-notes.md
+data.csv
+dir
+empty
+emptydir
+my-notes.md
+my_notes.md
+mynotes.md
+names.txt
+nonl.txt
+notes.md
+sizes.txt
+spaced.txt
+
+### EXIT 0
+### CMD "rm missing"
+rm: cannot remove 'missing': No such file or directory
+
+### EXIT 1
+### CMD "rm -f missing; echo $?"
+0
+
+### EXIT 0
+### CMD "rm dir"
+rm: cannot remove 'dir': Is a directory
+
+### EXIT 1
+### CMD "rm -r dir && ls"
+a.txt
+big.txt
+B.txt
+cofounder-notes.md
+data.csv
+empty
+emptydir
+my-notes.md
+my_notes.md
+mynotes.md
+names.txt
+nonl.txt
+notes.md
+sizes.txt
+spaced.txt
+
+### EXIT 0
+### CMD "rm -rv dir | sort"
+removed directory 'dir'
+removed directory 'dir/sub'
+removed 'dir/one.md'
+removed 'dir/sub/.dot'
+removed 'dir/sub/two.txt'
+
+### EXIT 0
+### CMD "rm -d emptydir && ls"
+a.txt
+big.txt
+B.txt
+cofounder-notes.md
+data.csv
+dir
+empty
+my-notes.md
+my_notes.md
+mynotes.md
+names.txt
+nonl.txt
+notes.md
+sizes.txt
+spaced.txt
+
+### EXIT 0
+### CMD "rm -d dir"
+rm: cannot remove 'dir': Directory not empty
+
+### EXIT 1
+### CMD "rm -v notes.md a.txt"
+removed 'notes.md'
+removed 'a.txt'
+
+### EXIT 0
+### CMD "rm /memory/shared/team.md"
+rm: cannot remove '/memory/shared/team.md': Read-only file system
+
+### EXIT 1
+### CMD "rm -rf /memory/shared/plan"
+rm: cannot remove '/memory/shared/plan/q4.md': Read-only file system
+
+### EXIT 1
+### CMD "rm -r ."
+rm: refusing to remove '.' or '..' directory: skipping '.'
+
+### EXIT 1
+### CMD "rm -r dir/sub/.. 2>&1; ls dir"
+rm: refusing to remove '.' or '..' directory: skipping 'dir/sub/..'
+one.md
+sub
+
+### EXIT 0
+### CMD "rm emptydir"
+rm: cannot remove 'emptydir': Is a directory
+
+### EXIT 1
+### CMD "rm -rf dir emptydir missing && ls"
+a.txt
+big.txt
+B.txt
+cofounder-notes.md
+data.csv
+empty
+my-notes.md
+my_notes.md
+mynotes.md
+names.txt
+nonl.txt
+notes.md
+sizes.txt
+spaced.txt
+
+### EXIT 0
+### CMD "rm -f notes.md missing a.txt && ls"
+big.txt
+B.txt
+cofounder-notes.md
+data.csv
+dir
+empty
+emptydir
+my-notes.md
+my_notes.md
+mynotes.md
+names.txt
+nonl.txt
+sizes.txt
+spaced.txt
+
+### EXIT 0
+### CMD "mv a.txt c.txt && ls"
+big.txt
+B.txt
+cofounder-notes.md
+c.txt
+data.csv
+dir
+empty
+emptydir
+my-notes.md
+my_notes.md
+mynotes.md
+names.txt
+nonl.txt
+notes.md
+sizes.txt
+spaced.txt
+
+### EXIT 0
+### CMD "mv a.txt dir && ls dir"
+a.txt
+one.md
+sub
+
+### EXIT 0
+### CMD "mv a.txt B.txt dir && ls dir"
+a.txt
+B.txt
+one.md
+sub
+
+### EXIT 0
+### CMD "mv a.txt B.txt notes.md"
+mv: target 'notes.md': Not a directory
+
+### EXIT 1
+### CMD "mv missing x"
+mv: cannot stat 'missing': No such file or directory
+
+### EXIT 1
+### CMD "mv a.txt a.txt"
+mv: 'a.txt' and 'a.txt' are the same file
+
+### EXIT 1
+### CMD "mv -v a.txt c.txt"
+renamed 'a.txt' -> 'c.txt'
+
+### EXIT 0
+### CMD "mv dir dir2 && find dir2 | sort"
+dir2
+dir2/one.md
+dir2/sub
+dir2/sub/.dot
+dir2/sub/two.txt
+
+### EXIT 0
+### CMD "mv dir dir/sub"
+mv: cannot move 'dir' to a subdirectory of itself, 'dir/sub/dir'
+
+### EXIT 1
+### CMD "mv dir notes.md"
+mv: cannot overwrite non-directory 'notes.md' with directory 'dir'
+
+### EXIT 1
+### CMD "mv notes.md emptydir && ls emptydir"
+notes.md
+
+### EXIT 0
+### CMD "mv -n a.txt B.txt; cat B.txt"
+mv: not replacing 'B.txt'
+Zebra
+alpha
+Beta
+10
+9
+100
+
+### EXIT 0
+### CMD "mv a.txt /memory/shared/"
+mv: inter-device move failed: 'a.txt' to '/memory/shared/a.txt'; unable to remove target: Read-only file system
+
+### EXIT 1
+### CMD "mv /memory/shared/team.md ."
+mv: cannot remove '/memory/shared/team.md': Read-only file system
+
+### EXIT 1
+### CMD "mv a.txt nodir/x"
+mv: cannot move 'a.txt' to 'nodir/x': No such file or directory
+
+### EXIT 1
+### CMD "mv a.txt B.txt; cat B.txt"
+apple
+banana
+apple
+cherry
+banana
+banana
+
+### EXIT 0
+### CMD "mv notes.md dir/one.md && cat dir/one.md"
+# Notes
+buy milk
+TODO: call Anna
+todo later
+
+### EXIT 0
+### CMD "mv emptydir dir && ls dir"
+emptydir
+one.md
+sub
+
+### EXIT 0
+### CMD "cp a.txt c.txt && cat c.txt"
+apple
+banana
+apple
+cherry
+banana
+banana
+
+### EXIT 0
+### CMD "cp a.txt dir && ls dir"
+a.txt
+one.md
+sub
+
+### EXIT 0
+### CMD "cp dir d2"
+cp: -r not specified; omitting directory 'dir'
+
+### EXIT 1
+### CMD "cp -r dir d2 && find d2 | sort"
+d2
+d2/one.md
+d2/sub
+d2/sub/.dot
+d2/sub/two.txt
+
+### EXIT 0
+### CMD "cp -rv dir d2 | sort"
+'dir' -> 'd2'
+'dir/one.md' -> 'd2/one.md'
+'dir/sub' -> 'd2/sub'
+'dir/sub/.dot' -> 'd2/sub/.dot'
+'dir/sub/two.txt' -> 'd2/sub/two.txt'
+
+### EXIT 0
+### CMD "cp a.txt a.txt"
+cp: 'a.txt' and 'a.txt' are the same file
+
+### EXIT 1
+### CMD "cp missing x"
+cp: cannot stat 'missing': No such file or directory
+
+### EXIT 1
+### CMD "cp a.txt B.txt notes.md"
+cp: target 'notes.md': Not a directory
+
+### EXIT 1
+### CMD "cp -n a.txt B.txt; cat B.txt"
+cp: warning: behavior of -n is non-portable and may change in future; use --update=none instead
+Zebra
+alpha
+Beta
+10
+9
+100
+
+### EXIT 0
+### CMD "cp a.txt /memory/shared/x"
+cp: cannot create regular file '/memory/shared/x': Read-only file system
+
+### EXIT 1
+### CMD "cp /memory/shared/team.md . && cat team.md"
+team notes
+TODO: plan the offsite
+
+### EXIT 0
+### CMD "cp -r dir dir/sub"
+cp: cannot copy a directory, 'dir', into itself, 'dir/sub/dir'
+
+### EXIT 1
+### CMD "cp -v a.txt c.txt"
+'a.txt' -> 'c.txt'
+
+### EXIT 0
+### CMD "cp a.txt nodir/x"
+cp: cannot create regular file 'nodir/x': No such file or directory
+
+### EXIT 1
+### CMD "cp -r dir emptydir && find emptydir | sort"
+emptydir
+emptydir/dir
+emptydir/dir/one.md
+emptydir/dir/sub
+emptydir/dir/sub/.dot
+emptydir/dir/sub/two.txt
+
+### EXIT 0
+### CMD "cp -R /memory/shared/plan . && ls plan"
+q4.md
+
+### EXIT 0
+### CMD "cp a.txt B.txt dir && ls dir"
+a.txt
+B.txt
+one.md
+sub
+
+### EXIT 0
+### CMD "cp emptydir e2"
+cp: -r not specified; omitting directory 'emptydir'
+
+### EXIT 1
+### CMD "cp -a dir d3 && ls d3"
+one.md
+sub
+
+### EXIT 0
+### CMD "mv -n a.txt B.txt; echo $?"
+mv: not replacing 'B.txt'
+1
+
+### EXIT 0
+### CMD "cp -n a.txt B.txt; echo $?"
+cp: warning: behavior of -n is non-portable and may change in future; use --update=none instead
+0
+
+### EXIT 0
+### CMD "cp -n a.txt new.txt; echo $?; cat new.txt"
+cp: warning: behavior of -n is non-portable and may change in future; use --update=none instead
+0
+apple
+banana
+apple
+cherry
+banana
+banana
+
+### EXIT 0
+### CMD "mv -n a.txt new.txt; echo $?"
+0
+
+### EXIT 0
+### CMD "mv /memory/shared/plan .; ls plan"
+mv: cannot remove '/memory/shared/plan/q4.md': Read-only file system
+q4.md
+
+### EXIT 0
+### CMD "mv dir /memory/"
+mv: inter-device move failed: 'dir' to '/memory/dir'; unable to remove target: Read-only file system
+
+### EXIT 1
+### CMD "mv a.txt /memory/user/dir/ && ls dir"
+a.txt
+one.md
+sub
+
+### EXIT 0
+### CMD "cp -r /memory/shared/plan /memory/shared/plan2"
+cp: cannot create directory '/memory/shared/plan2': Read-only file system
+
+### EXIT 1
+### CMD "mv -v a.txt dir/"
+renamed 'a.txt' -> 'dir/a.txt'
+
+### EXIT 0
+### CMD "mv dir/sub . && ls sub"
+two.txt
+
+### EXIT 0
+### CMD "touch new.txt && ls"
+a.txt
+big.txt
+B.txt
+cofounder-notes.md
+data.csv
+dir
+empty
+emptydir
+my-notes.md
+my_notes.md
+mynotes.md
+names.txt
+new.txt
+nonl.txt
+notes.md
+sizes.txt
+spaced.txt
+
+### EXIT 0
+### CMD "touch -c nope && ls"
+a.txt
+big.txt
+B.txt
+cofounder-notes.md
+data.csv
+dir
+empty
+emptydir
+my-notes.md
+my_notes.md
+mynotes.md
+names.txt
+nonl.txt
+notes.md
+sizes.txt
+spaced.txt
+
+### EXIT 0
+### CMD "touch notes.md; cat notes.md"
+# Notes
+buy milk
+TODO: call Anna
+todo later
+
+### EXIT 0
+### CMD "touch /memory/shared/team.md"
+touch: cannot touch '/memory/shared/team.md': Read-only file system
+
+### EXIT 1
+### CMD "touch nodir/x"
+touch: cannot touch 'nodir/x': No such file or directory
+
+### EXIT 1
+### CMD "touch /memory/shared/new"
+touch: cannot touch '/memory/shared/new': Read-only file system
+
+### EXIT 1
+### CMD "touch dir && echo ok"
+ok
+
+### EXIT 0
+### CMD "touch a b && ls a b"
+a
+b
+
+### EXIT 0
+### CMD "echo hi > out.txt && cat out.txt"
+hi
+
+### EXIT 0
+### CMD "echo a >> notes.md; tail -1 notes.md"
+a
+
+### EXIT 0
+### CMD "echo x > /memory/shared/x"
+/bin/sh: 1: cannot create /memory/shared/x: Read-only file system
+
+### EXIT 2
+### CMD "echo x > nodir/x"
+/bin/sh: 1: cannot create nodir/x: Directory nonexistent
+
+### EXIT 2
+### CMD "cat < missing"
+/bin/sh: 1: cannot open missing: No such file
+
+### EXIT 2
+### CMD "echo -n hi; echo"
+hi
+
+### EXIT 0
+### CMD "echo 'a\\tb'"
+a	b
+
+### EXIT 0
+### CMD "echo -e 'x'"
+-e x
+
+### EXIT 0
+### CMD "echo 'stop\\cnow'; echo"
+stop
+
+### EXIT 0
+### CMD "printf '%s-%d\\n' a 1 b 2"
+a-1
+b-2
+
+### EXIT 0
+### CMD "cd dir && ls && pwd"
+one.md
+sub
+/memory/user/dir
+
+### EXIT 0
+### CMD "cd missing"
+/bin/sh: 1: cd: can't cd to missing
+
+### EXIT 2
+### CMD "cd dir; cd missing; pwd"
+/bin/sh: 1: cd: can't cd to missing
+/memory/user/dir
+
+### EXIT 0
+### CMD "cd /memory/user/dir/sub && cat two.txt"
+two
+three
+
+### EXIT 0
+### CMD "test -f notes.md && echo yes"
+yes
+
+### EXIT 0
+### CMD "[ -d dir ] && echo dir"
+dir
+
+### EXIT 0
+### CMD "test -e missing || echo no"
+no
+
+### EXIT 0
+### CMD "for f in *.txt; do echo \"== $f\"; head -1 \"$f\"; done"
+== B.txt
+Zebra
+== a.txt
+apple
+== big.txt
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+== names.txt
+bc
+== nonl.txt
+first line
+== sizes.txt
+1K
+== spaced.txt
+one
+
+### EXIT 0
+### CMD "if grep -q milk notes.md; then echo found; fi"
+found
+
+### EXIT 0
+### CMD "x=dir; ls $x"
+one.md
+sub
+
+### EXIT 0
+### CMD "ls nothing*"
+ls: cannot access 'nothing*': No such file or directory
+
+### EXIT 2
+### CMD "echo *.md"
+cofounder-notes.md my-notes.md my_notes.md mynotes.md notes.md
+
+### EXIT 0
+### CMD "echo dir/*"
+dir/one.md dir/sub
+
+### EXIT 0
+### CMD "set -e; false; echo no"
+
+### EXIT 1
+### CMD "exit 3"
+
+### EXIT 3
+### CMD "true && false || echo recovered"
+recovered
+
+### EXIT 0
+### CMD "cat notes.md | grep -i todo | wc -l"
+2
+
+### EXIT 0
+### CMD "while read -r line; do echo \"[$line]\"; done < a.txt"
+[apple]
+[banana]
+[apple]
+[cherry]
+[banana]
+[banana]
+
+### EXIT 0
+### CMD "cat notes.md > /dev/null && echo ok"
+ok
+
+### EXIT 0
+### CMD "ls missing 2>/dev/null; echo $?"
+2
+
+### EXIT 0
+### CMD "ls missing 2>&1 | wc -l"
+1
+
+### EXIT 0
+### CMD "case x in x) echo yes;; esac"
+yes
+
+### EXIT 0
+### CMD "cd .. && ls"
+shared
+user
+
+### EXIT 0
+### CMD "cd /memory && ls -l"
+total 8
+drwxr-xr-x 3 root root 4096 Jan  2  2024 shared
+drwxr-xr-x 4 root root 4096 Oct  1 12:34 user
+
+### EXIT 0
+### CMD "pwd"
+/memory/user
+
+### EXIT 0
+### CMD "cd dir/sub && pwd && cd ../.. && pwd"
+/memory/user/dir/sub
+/memory/user
+
+### EXIT 0
+### CMD "echo one\necho two\ncat missing"
+one
+two
+cat: missing: No such file or directory
+
+### EXIT 1
+### CMD "ls && cat cofounder-notes.md"
+a.txt
+big.txt
+B.txt
+cofounder-notes.md
+data.csv
+dir
+empty
+emptydir
+my-notes.md
+my_notes.md
+mynotes.md
+names.txt
+nonl.txt
+notes.md
+sizes.txt
+spaced.txt
+# Cofounder
+met on Monday
+
+### EXIT 0
+### CMD "cd /memory/user && ls && cat cofounder-notes.md"
+a.txt
+big.txt
+B.txt
+cofounder-notes.md
+data.csv
+dir
+empty
+emptydir
+my-notes.md
+my_notes.md
+mynotes.md
+names.txt
+nonl.txt
+notes.md
+sizes.txt
+spaced.txt
+# Cofounder
+met on Monday
+
+### EXIT 0
+### CMD "echo $((2+3))"
+5
+
+### EXIT 0
+### CMD "n=0; for f in dir/*; do n=$((n+1)); done; echo $n"
+2
+
+### EXIT 0
+### CMD "[ notes.md -nt empty ] && echo newer"
+newer
+
+### EXIT 0
+### CMD "test -s empty || echo empty"
+empty
+
+### EXIT 0
+### CMD "echo hi > /dev/null; echo $?"
+0
+
+### EXIT 0
+### CMD "{ echo a; echo b; } > out.txt; cat out.txt"
+a
+b
+
+### EXIT 0
+### CMD "(cd dir; pwd); pwd"
+/memory/user/dir
+/memory/user
+
+### EXIT 0
+### CMD "cat notes.md | sort | head -n 2"
+buy milk
+# Notes
+
+### EXIT 0
+### CMD "sort a.txt | uniq -c | sort -rn | head -n 1"
+      3 banana
+
+### EXIT 0
+### CMD "echo 'a\\bb'"
+ab
+
+### EXIT 0
+### CMD "echo 'tab\\there'"
+tab	here
+
+### EXIT 0
+### CMD "echo 'nl\\nx'"
+nl
+x
+
+### EXIT 0
+### CMD "echo '\\0101'"
+A
+
+### EXIT 0
+### CMD "echo 'back\\\\slash'"
+back\slash
+
+### EXIT 0
+### CMD "echo 'f\\fv\\vr\\r'"
+fvr
+
+### EXIT 0
+### CMD "printf 'a\\tb\\n'"
+a	b
+
+### EXIT 0
+### CMD "cat notes\\.md"
+# Notes
+buy milk
+TODO: call Anna
+todo later
+
+### EXIT 0
+### CMD "echo a\\ b"
+a b
+
+### EXIT 0
+### CMD "ls dir\\/one.md"
+dir/one.md
+
+### EXIT 0
+### CMD "echo \"a\\\"b\" \"c\\$d\" \"e\\\\f\" \"g\\h\""
+a"b c$d e g\h
+
+### EXIT 0
+### CMD "cat <<EOF\na\\$b \\\\ \\x\nEOF"
+a$b \ \x
+
+### EXIT 0
+### CMD "cat <<'EOF'\n$x \\n\nEOF"
+$x \n
+
+### EXIT 0
+### CMD "echo $((3*4)) $((10/3)) $((10%3)) $((2-5)) $((1<2)) $(( (1+2)*3 ))"
+12 3 1 -3 1 9
+
+### EXIT 0
+### CMD "i=2; echo $((i+1))"
+3
+
+### EXIT 0
+### CMD "x=hello; echo ${x} ${#x}"
+hello 5
+
+### EXIT 0
+### CMD "x=a; echo ${x:-b} \"$#\" $?"
+a 0 0
+
+### EXIT 0
+### CMD "x=\"dir\"; ls \"$x\""
+one.md
+sub
+
+### EXIT 0
+### CMD "x='a b'; echo $x"
+a b
+
+### EXIT 0
+### CMD "x=$((1+1)); echo $x"
+2
+
+### EXIT 0
+### CMD "x=a; y=b; echo \"$x$y\" $x$y"
+ab ab
+
+### EXIT 0
+### CMD "x='*.md'; echo $x"
+cofounder-notes.md my-notes.md my_notes.md mynotes.md notes.md
+
+### EXIT 0
+### CMD "for f in dir/*; do cat \"$f\" 2>&1 | head -1; done"
+one
+cat: dir/sub: Is a directory
+
+### EXIT 0
+### CMD "cd -- dir && pwd"
+/memory/user/dir
+
+### EXIT 0
+### CMD "cat 'a b'"
+cat: 'a b': No such file or directory
+
+### EXIT 1
+### CMD "LC_COLLATE=C ls"
+a.txt
+big.txt
+B.txt
+cofounder-notes.md
+data.csv
+dir
+empty
+emptydir
+my-notes.md
+my_notes.md
+mynotes.md
+names.txt
+nonl.txt
+notes.md
+sizes.txt
+spaced.txt
+
+### EXIT 0
+### CMD "LANG=C ls"
+a.txt
+big.txt
+B.txt
+cofounder-notes.md
+data.csv
+dir
+empty
+emptydir
+my-notes.md
+my_notes.md
+mynotes.md
+names.txt
+nonl.txt
+notes.md
+sizes.txt
+spaced.txt
+
+### EXIT 0
+### CMD "sort -g B.txt"
+alpha
+Beta
+Zebra
+9
+10
+100
+
+### EXIT 0
+### CMD "sort -g sizes.txt"
+1K
+1.5K
+2M
+3G
+512
+
+### EXIT 0
+### CMD "sort -t, -k1.2 data.csv"
+name,age,city
+carl,45,Hamburg
+anna,31,Berlin
+bob,27,Munich
+
+### EXIT 0
+### CMD "sort -k1.2,1.3 names.txt"
+9
+10
+ábc
+a b
+ab
+abc
+Abc
+b-c
+B-c
+b_c
+bc
+Bc
+.dot
+_under
+
+### EXIT 0
+### CMD "sort -b -k2 spaced.txt"
+
+
+one
+	three  
+two
+
+### EXIT 0
+### CMD "sort -t, -k2b,2n data.csv"
+name,age,city
+bob,27,Munich
+anna,31,Berlin
+carl,45,Hamburg
+
+### EXIT 0
+### CMD "sort -k2 notes.md"
+TODO: call Anna
+todo later
+buy milk
+# Notes
+
+### EXIT 0
+### CMD "sort -t, -k3,3r -k1 data.csv"
+bob,27,Munich
+carl,45,Hamburg
+name,age,city
+anna,31,Berlin
+
+### EXIT 0
+### CMD "test -r notes.md && echo r"
+r
+
+### EXIT 0
+### CMD "test -w notes.md && echo w"
+w
+
+### EXIT 0
+### CMD "test -w /memory/shared/team.md || echo ro"
+ro
+
+### EXIT 0
+### CMD "test -x notes.md || echo nox"
+nox
+
+### EXIT 0
+### CMD "test -x dir && echo xdir"
+xdir
+
+### EXIT 0
+### CMD "grep -E 'p{2}' a.txt"
+apple
+apple
+
+### EXIT 0
+### CMD "grep 'p\\{2\\}' a.txt"
+apple
+apple
+
+### EXIT 0
+### CMD "grep 'ba\\(na\\)*' a.txt"
+banana
+banana
+banana
+
+### EXIT 0
+### CMD "grep -E '(na)+$' a.txt"
+banana
+banana
+banana
+
+### EXIT 0
+### CMD "grep '[[:upper:]]' B.txt"
+Zebra
+Beta
+
+### EXIT 0
+### CMD "grep '[^a-z]' B.txt"
+Zebra
+Beta
+10
+9
+100
+
+### EXIT 0
+### CMD "grep -E 'a|^1' B.txt"
+Zebra
+alpha
+Beta
+10
+100
+
+### EXIT 0
+### CMD "grep 'an\\?a' a.txt"
+banana
+banana
+banana
+
+### EXIT 0
+### CMD "grep '\\.' names.txt"
+.dot
+
+### EXIT 0
+### CMD "grep -E '\\.' names.txt"
+.dot
+
+### EXIT 0
+### CMD "grep '*a' a.txt"
+
+### EXIT 1
+### CMD "grep '[]a]' B.txt"
+Zebra
+alpha
+Beta
+
+### EXIT 0
+### CMD "grep -e -x B.txt"
+
+### EXIT 1
+### CMD "grep -c '' big.txt"
+1
+
+### EXIT 0
+### CMD "grep -r --exclude='*.md' TODO . | sort"
+
+### EXIT 0
+### CMD "grep -r --exclude-dir=sub two . | sort"
+./dir/one.md:TODO two
+./spaced.txt:two
+
+### EXIT 0
+### CMD "grep -rl two dir | sort"
+dir/one.md
+dir/sub/two.txt
+
+### EXIT 0
+### CMD "grep -r nothing dir; echo $?"
+1
+
+### EXIT 0
+### CMD "grep 'x\\+' big.txt | wc -c"
+5000
+
+### EXIT 0
+### CMD "grep -E 'x+$' big.txt | wc -l"
+1
+
+### EXIT 0
+### CMD "grep -n -o 'a' a.txt | head -3"
+1:a
+2:a
+2:a
+
+### EXIT 0
+### CMD "grep -vc a a.txt"
+1
+
+### EXIT 0
+### CMD "find . \\( -name '*.md' -o -name '*.txt' \\) -type f | sort"
+./a.txt
+./big.txt
+./B.txt
+./cofounder-notes.md
+./dir/one.md
+./dir/sub/two.txt
+./my-notes.md
+./my_notes.md
+./mynotes.md
+./names.txt
+./nonl.txt
+./notes.md
+./sizes.txt
+./spaced.txt
+
+### EXIT 0
+### CMD "find . -not -type d -name 'my*' | sort"
+./my-notes.md
+./my_notes.md
+./mynotes.md
+
+### EXIT 0
+### CMD "find . -name '*.md' -a -type f | sort"
+./cofounder-notes.md
+./dir/one.md
+./my-notes.md
+./my_notes.md
+./mynotes.md
+./notes.md
+
+### EXIT 0
+### CMD "find dir -depth | sort"
+dir
+dir/one.md
+dir/sub
+dir/sub/.dot
+dir/sub/two.txt
+
+### EXIT 0
+### CMD "find . -type f -empty"
+./empty
+
+### EXIT 0
+### CMD "find . -false"
+
+### EXIT 0
+### CMD "find . -maxdepth 1 -true | sort"
+.
+./a.txt
+./big.txt
+./B.txt
+./cofounder-notes.md
+./data.csv
+./dir
+./empty
+./emptydir
+./.hidden
+./my-notes.md
+./my_notes.md
+./mynotes.md
+./names.txt
+./nonl.txt
+./notes.md
+./sizes.txt
+./spaced.txt
+
+### EXIT 0
+### CMD "find . -ipath '*SUB*' | sort"
+./dir/sub
+./dir/sub/.dot
+./dir/sub/two.txt
+
+### EXIT 0
+### CMD "find . -wholename './dir/one.md'"
+./dir/one.md
+
+### EXIT 0
+### CMD "find -L dir -name one.md"
+dir/one.md
+
+### EXIT 0
+### CMD "cat -v notes.md"
+# Notes
+buy milk
+TODO: call Anna
+todo later
+
+### EXIT 0
+### CMD "cat -e spaced.txt"
+one$
+$
+$
+two$
+	three  $
+
+### EXIT 0
+### CMD "cat -t spaced.txt"
+one
+
+
+two
+^Ithree  
+
+### EXIT 0
+### CMD "cat -u notes.md"
+# Notes
+buy milk
+TODO: call Anna
+todo later
+
+### EXIT 0
+### CMD "cat nonl.txt"
+first line
+last line
+### EXIT 0
+### CMD "cat nonl.txt notes.md"
+first line
+last line# Notes
+buy milk
+TODO: call Anna
+todo later
+
+### EXIT 0
+### CMD "tail -n 1 nonl.txt"
+last line
+### EXIT 0
+### CMD "wc -l nonl.txt"
+1 nonl.txt
+
+### EXIT 0
+### CMD "head -c 3 nonl.txt"
+fir
+### EXIT 0
+### CMD "grep line nonl.txt"
+first line
+last line
+
+### EXIT 0
+### CMD "sort nonl.txt a.txt"
+apple
+apple
+banana
+banana
+banana
+cherry
+first line
+last line
+
+### EXIT 0
+### CMD "cut -c1-4 nonl.txt"
+firs
+last
+
+### EXIT 0
+### CMD "uniq nonl.txt"
+first line
+last line
+
+### EXIT 0
+### CMD "tail -c 5 nonl.txt"
+ line
+### EXIT 0
+### CMD "head -n 1 nonl.txt"
+first line
+
+### EXIT 0
+### CMD "tail -n +2 nonl.txt"
+last line
+### EXIT 0
+### CMD "head -n +2 a.txt"
+apple
+banana
+
+### EXIT 0
+### CMD "head -c 1k big.txt | wc -c"
+1024
+
+### EXIT 0
+### CMD "tail -c +4990 big.txt | wc -c"
+11
+
+### EXIT 0
+### CMD "uniq -c -u a.txt"
+      1 apple
+      1 banana
+      1 apple
+      1 cherry
+
+### EXIT 0
+### CMD "uniq -d a.txt"
+banana
+
+### EXIT 0
+### CMD "cut -d, -f2 --output-delimiter=: data.csv"
+age
+31
+27
+45
+
+### EXIT 0
+### CMD "cut -b1,3 --output-delimiter=- a.txt"
+a-p
+b-n
+a-p
+c-e
+b-n
+b-n
+
+### EXIT 0
+### CMD "cut -c2- --complement a.txt"
+a
+b
+a
+c
+b
+b
+
+### EXIT 0
+### CMD "ls -lh big.txt"
+-rw-r--r-- 1 root root 4.9K Jan  2  2024 big.txt
+
+### EXIT 0
+### CMD "ls -1a dir"
+.
+..
+one.md
+sub
+
+### EXIT 0
+### CMD "ls -l dir/sub"
+total 4
+-rw-r--r-- 1 root root 10 Sep 15 08:00 two.txt
+
+### EXIT 0
+### CMD "ls -RA dir"
+dir:
+one.md
+sub
+
+dir/sub:
+.dot
+two.txt
+
+### EXIT 0
+### CMD "ls -l /memory/shared/plan"
+total 4
+-rw-r--r-- 1 root root 20 Sep 15 08:00 q4.md
+
+### EXIT 0
+### CMD "ls -Fl dir"
+total 8
+-rw-r--r-- 1 root root   13 Oct  1 12:34 one.md
+drwxr-xr-x 2 root root 4096 Sep 15 08:00 sub/
+
+### EXIT 0
+### CMD "wc -l < notes.md"
+4
+
+### EXIT 0
+### CMD "wc -c - < notes.md"
+44 -
+
+### EXIT 0
+### CMD "cat notes.md | wc"
+      4       9      44
+
+### EXIT 0
+### CMD "wc -l a.txt - < B.txt"
+ 6 a.txt
+ 6 -
+12 total
+
+### EXIT 0
+### CMD "for t in , ab; do sort -t \"$t\" -k2 data.csv; done"
+bob,27,Munich
+anna,31,Berlin
+carl,45,Hamburg
+name,age,city
+sort: multi-character tab ‘ab’
+
+### EXIT 2

@@ -70,6 +70,15 @@ var engines = map[string][]string{
 	// WebSocket the control plane's streams already admit. Neither reaches
 	// the Postgres driver, because a data plane holds no store.
 	"./runtime/remote": nil,
+	// The shell runs a command line in the calling process over a file
+	// system its caller serves: the POSIX parser and interpreter of
+	// mvdan.cc/sh, with the terminal and system-call packages that
+	// interpreter is built with, and no client (spec 088).
+	"./shell": {
+		"mvdan.cc/sh/v3/syntax", "mvdan.cc/sh/v3/interp", "mvdan.cc/sh/v3/expand",
+		"mvdan.cc/sh/v3/pattern", "mvdan.cc/sh/v3/fileutil", "mvdan.cc/sh/v3/internal",
+		"golang.org/x/term", "golang.org/x/sys/unix",
+	},
 }
 
 // TestRootPackagesDialNothing reads each package's whole build list, not its
