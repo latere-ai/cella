@@ -128,7 +128,7 @@ field left zero takes the default.
 |---|---|---|
 | `Steps` | 50 000 | the statements, commands and loop turns a line runs |
 | `Time` | 10 s | how long a line runs, apart from your context |
-| `Value` | 256 KiB | one variable's value, one word of a command |
+| `Value` | 256 KiB | one variable's value, one word of a command, the line a `read` reads |
 | `Values` | 1 MiB | the line's variables together, one command's words together |
 | `Input` | 16 MiB | what the line's programs hold at once: standard input, the files `sort` sorts, a program's output until it is done, a redirection's file, one line through a pipe |
 | `Read` | 64 MiB | the bytes of files a line reads |
