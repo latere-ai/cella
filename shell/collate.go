@@ -19,6 +19,10 @@ import (
 // the whole strings again, with the punctuation and blanks the first levels
 // skipped, which sort before letters and digits; and last the bytes.
 func collate(a, b string) int {
+	if a == b {
+		// Equal at every level, which sort meets for every repeated line.
+		return 0
+	}
 	for _, level := range []collationLevel{levelBase, levelAccent, levelCase} {
 		if c := compareLevel(a, b, level); c != 0 {
 			return c
