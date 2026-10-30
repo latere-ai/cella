@@ -91,7 +91,7 @@ func (d *Driver) Create(ctx context.Context, s driver.CreateSpec) (driver.Ref, e
 	// written beside them, since the claim's record leaves them out and a
 	// later Start renders its Pod from the two together, and so is every
 	// variable the Pod's container references.
-	data := podEnvData(s, now, token)
+	data := d.podEnvData(s, now, token)
 	if _, held := strip(s); !held.empty() {
 		record, err := held.data()
 		if err != nil {
@@ -159,7 +159,7 @@ func (d *Driver) Start(ctx context.Context, id string) error {
 	// with the environment the record and the Secret hold now.
 	started := d.opts.Now().UTC()
 	token := pvc.Annotations[annToken] == "true"
-	data := podEnvData(spec, started, token)
+	data := d.podEnvData(spec, started, token)
 	d.putTrust(data, spec.Egress.CAPEM)
 	if len(data) > 0 {
 		if err := d.putSecret(ctx, id, pvc, data, isEnvVarKey); err != nil {

@@ -53,7 +53,7 @@ func TestRenderPodAndClaim(t *testing.T) {
 	}
 	want := maps.Clone(s.Env)
 	want["HOME"] = "/data"
-	if got := resolved(pod, podEnvData(s, now, false)); !maps.Equal(got, want) {
+	if got := resolved(pod, h.podEnvData(s, now, false)); !maps.Equal(got, want) {
 		t.Fatalf("the references resolve to %v, want %v", got, want)
 	}
 	if c.WorkingDir != "/workspace/sub" {

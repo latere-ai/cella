@@ -324,7 +324,7 @@ Every Pod carries the security baseline of
 |---|---|
 | `securityContext.runAsNonRoot` | `true` |
 | `securityContext.capabilities.drop` | `["ALL"]` |
-| `securityContext.readOnlyRootFilesystem` | `true`, with the workspace, `/tmp`, and the volumes as the only writable mounts; `HOME` is the workspace where the sandbox's environment names none, as on native, so a tool that writes under its home writes to a mount a restart keeps |
+| `securityContext.readOnlyRootFilesystem` | `true`, with the workspace, `/tmp`, the volumes, and the image's home named by `CELLA_K8S_HOME` as the only writable mounts. The home is the workspace claim's `.home`, filled from the image by an init container `home` of the same image, under this baseline and the workload's limits, only when the directory does not exist yet. `HOME` names it where the sandbox's environment names none, and is the workspace without the setting, as on native |
 | `securityContext.seccompProfile.type` | `RuntimeDefault` |
 | `securityContext.allowPrivilegeEscalation` | `false` |
 | `securityContext.privileged` | `false` |

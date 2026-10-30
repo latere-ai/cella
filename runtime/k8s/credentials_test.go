@@ -166,7 +166,7 @@ func (h *harness) commandEnv(t *testing.T, id string, env map[string]string) map
 func (h *harness) startsWith(t *testing.T, id string, s driver.CreateSpec, token bool) {
 	t.Helper()
 	h.referencesOnly(t, id)
-	if got, want := h.envOf(t, h.podOf(t, id)), workloadEnv(s, token); !maps.Equal(got, want) {
+	if got, want := h.envOf(t, h.podOf(t, id)), h.workloadEnv(s, token); !maps.Equal(got, want) {
 		t.Errorf("the container of %s starts with %v, want %v", id, got, want)
 	}
 }
@@ -431,7 +431,7 @@ func legacy(t *testing.T, h *harness, s driver.CreateSpec) {
 		t.Fatal(err)
 	}
 	pod := h.podOf(t, s.ID)
-	pod.Spec.Containers[0].Env = env(workloadEnv(s, len(s.Token) > 0))
+	pod.Spec.Containers[0].Env = env(h.workloadEnv(s, len(s.Token) > 0))
 	if _, err := h.cs.CoreV1().Pods(namespace).Update(ctx, pod, metav1.UpdateOptions{}); err != nil {
 		t.Fatal(err)
 	}

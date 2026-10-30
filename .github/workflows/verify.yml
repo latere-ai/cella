@@ -215,6 +215,10 @@ jobs:
           go test -count=1 -v -timeout 15m -run '^TestClusterConformance$/^(DialReachesAPort|PortsReportListening)$' ./runtime/k8s 2>&1 | tee driver-kind.txt
           grep -q -- '--- PASS: TestClusterConformance/DialReachesAPort' driver-kind.txt
           grep -q -- '--- PASS: TestClusterConformance/PortsReportListening' driver-kind.txt
+          # The image's home made writable on a real kubelet: the fill, the
+          # claim's ownership under the non-root user, and a restart.
+          go test -count=1 -v -timeout 10m -run '^TestClusterTheImagesHomeIsWritable$' ./runtime/k8s 2>&1 | tee driver-home.txt
+          grep -q -- '--- PASS: TestClusterTheImagesHomeIsWritable' driver-home.txt
       # The contract of spec 015 against the cluster: the same cases, on the
       # Kubernetes environment, with the subjects minted at the stub issuer's
       # node port and the capabilities that driver declares. The stack names

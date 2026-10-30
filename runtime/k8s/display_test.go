@@ -123,7 +123,7 @@ func TestPodWithDisplay(t *testing.T) {
 	}
 	// The workload is told which screen to draw on and nothing else of the
 	// desktop's own environment: its home is its own.
-	workload := resolved(pod, podEnvData(withDesk, now, false))
+	workload := resolved(pod, h.podEnvData(withDesk, now, false))
 	if !maps.Equal(workload, map[string]string{display.DisplayEnv: display.DisplayValue, "HOME": driver.DefaultWorkdir}) {
 		t.Fatalf("the workload's environment is %v", workload)
 	}

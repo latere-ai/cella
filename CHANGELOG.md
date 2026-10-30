@@ -6,6 +6,19 @@ refused before it is pushed.
 
 ## Unreleased
 
+### Added
+
+- **`CELLA_K8S_HOME` makes the images' home directory writable on
+  Kubernetes.** Set it to where your images keep their user's home, such
+  as `/home/agent`. The directory is kept in the workspace's `.home`,
+  filled with the image's own copy the first time a sandbox starts, and
+  named by `HOME`, so the image's shell settings and every path it set
+  under the home keep working, and what a tool writes there, such as
+  `npm install -g` into a prefix under the home, survives a restart. A
+  later start never fills it again. The fill is an init container named
+  `home`, from the sandbox's image, which needs `sh` and `cp`. Without the
+  setting, `HOME` is the workspace as before.
+
 ## v0.22.3 - 2026-10-30
 
 ### Fixed

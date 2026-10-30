@@ -80,6 +80,7 @@ func TestK8sReadsEveryVariable(t *testing.T) {
 		"CELLA_K8S_DEFAULT_DISK":         "10Gi",
 		"CELLA_K8S_READY_TIMEOUT":        "45s",
 		"CELLA_K8S_GRACE_PERIOD":         "20s",
+		"CELLA_K8S_HOME":                 " /home/agent ",
 	})))
 	if err != nil {
 		t.Fatal(err)
@@ -114,6 +115,9 @@ func TestK8sReadsEveryVariable(t *testing.T) {
 	if o.ReadyTimeout != 45*time.Second || o.GracePeriod != 20*time.Second {
 		t.Fatalf("budgets %v %v", o.ReadyTimeout, o.GracePeriod)
 	}
+	if o.Home != "/home/agent" {
+		t.Fatalf("home %q", o.Home)
+	}
 }
 
 func TestK8sReportsEveryBadValue(t *testing.T) {
@@ -129,6 +133,9 @@ func TestK8sReportsEveryBadValue(t *testing.T) {
 		{"CELLA_K8S_MEMORY_REQUEST_RATIO", "half", "at most 1"},
 		{"CELLA_K8S_READY_TIMEOUT", "soon", "not a duration"},
 		{"CELLA_K8S_GRACE_PERIOD", "-1s", "positive"},
+		{"CELLA_K8S_HOME", "home/agent", "absolute, clean directory"},
+		{"CELLA_K8S_HOME", "/home/agent/", "absolute, clean directory"},
+		{"CELLA_K8S_HOME", "/", "absolute, clean directory"},
 	} {
 		t.Run(tc.name+"="+tc.value, func(t *testing.T) {
 			_, err := Load(env(k8sEnv(t, map[string]string{tc.name: tc.value})))

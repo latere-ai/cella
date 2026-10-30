@@ -325,23 +325,71 @@ var keepAlive = []string{"/bin/sh", "-c", "trap 'exit 0' TERM; while :; do sleep
 // homeEnv is the variable that names the workload's home.
 const homeEnv = "HOME"
 
+// homeDir is the directory of the workspace claim that holds the image's home
+// (Options.Home), so what is written there outlives a restart.
+const homeDir = ".home"
+
+// homeMounted reports whether the sandbox's Pod mounts the image's home from
+// its claim: the driver names a home, and the home and the workspace are
+// apart. A home that holds the workspace would be filled with a copy of the
+// claim itself, and one inside the workspace is on the claim already.
+func (d *Driver) homeMounted(s driver.CreateSpec) bool {
+	ws := workspacePath(s)
+	return d.opts.Home != "" && !under(d.opts.Home, ws) && !under(ws, d.opts.Home)
+}
+
+// fillHome is the init container's program, with the image's home as $1 and
+// the directory on the claim as $2. It fills the directory once, the first
+// time the sandbox starts, and leaves it as the workload left it on every
+// start after, so a setting or an install is never overwritten by the
+// image's copy. The copy is made beside the directory and renamed into
+// place, so a start that died half way fills it again. An image with no such
+// home gets an empty one.
+const fillHome = `set -e
+[ -d "$2" ] && exit 0
+rm -rf "$2.fill"
+mkdir "$2.fill"
+if [ -d "$1" ]; then cp -a "$1/." "$2.fill/"; fi
+mv "$2.fill" "$2"`
+
+// mountHome makes the image's home writable: the workload mounts the
+// directory homeDir of the workspace claim at home, and an init container of
+// the same image, under the same baseline and limits, fills that directory
+// from the image's own copy before the workload starts.
+func mountHome(pod *corev1.Pod, home, ws string, resources corev1.ResourceRequirements) {
+	main := &pod.Spec.Containers[0]
+	main.VolumeMounts = append(main.VolumeMounts, corev1.VolumeMount{Name: "workspace", MountPath: home, SubPath: homeDir})
+	pod.Spec.InitContainers = append(pod.Spec.InitContainers, corev1.Container{
+		Name:            HomeContainer,
+		Image:           main.Image,
+		Command:         []string{"sh", "-c", fillHome, HomeContainer, home, path.Join(ws, homeDir)},
+		Resources:       resources,
+		VolumeMounts:    []corev1.VolumeMount{{Name: "workspace", MountPath: ws}},
+		SecurityContext: hardened(),
+	})
+}
+
 // workloadEnv is the environment the workload container starts with: the
 // sandbox's own, the token's path where it carries an identity, the gateway's
 // doors, the sandbox's credential and the trust variables, so every client
 // that honors them leaves through the gateway the rule leaves open (spec
 // 018), and the screen to draw on beside the desktop of spec 023.
 //
-// HOME is the workspace where the sandbox's own environment names none. The
-// root file system is read only, so the image's home takes no writes, and a
-// tool that keeps its configuration or its installs under HOME fails there;
-// the workspace is the one writable place a restart keeps.
-func workloadEnv(s driver.CreateSpec, token bool) map[string]string {
+// HOME, where the sandbox's own environment names none, is a place the
+// workload writes and a restart keeps: the image's home made writable
+// (Options.Home), or else the workspace. The root file system is read only,
+// so a tool that keeps its settings or its installs under an unwritable
+// home fails.
+func (d *Driver) workloadEnv(s driver.CreateSpec, token bool) map[string]string {
 	environment := maps.Clone(s.Env)
 	if environment == nil {
 		environment = map[string]string{}
 	}
 	if _, named := environment[homeEnv]; !named {
 		environment[homeEnv] = workspacePath(s)
+		if d.homeMounted(s) {
+			environment[homeEnv] = d.opts.Home
+		}
 	}
 	if token {
 		environment[driver.TokenFileEnv] = driver.TokenPath
@@ -435,7 +483,7 @@ func (d *Driver) pod(s driver.CreateSpec, now time.Time, token bool) (*corev1.Po
 				Image:      s.Image,
 				Command:    slices.Clone(command),
 				Args:       slices.Clone(args),
-				Env:        secretEnv(s.ID, generation(now), workloadEnv(s, token)),
+				Env:        secretEnv(s.ID, generation(now), d.workloadEnv(s, token)),
 				WorkingDir: workdir,
 				Resources:  limits,
 				VolumeMounts: []corev1.VolumeMount{
@@ -454,6 +502,9 @@ func (d *Driver) pod(s driver.CreateSpec, now time.Time, token bool) (*corev1.Po
 	// The volumes the sandbox mounts (spec 019), read-only where the mount
 	// is. The record on the claim keeps them, so a start renders them again.
 	mountVolumes(pod, s.Volumes)
+	if d.homeMounted(s) {
+		mountHome(pod, d.opts.Home, ws, limits)
+	}
 	if token || s.Egress.CAPEM != "" {
 		volume, mount := tokenProjection(s.ID)
 		pod.Spec.Volumes = append(pod.Spec.Volumes, volume)

@@ -12,11 +12,18 @@ namespace the control plane is configured for. Stopping a sandbox deletes
 the Pod and keeps the claim, so the files survive a stop and a start.
 
 The container's root file system is read only: the workspace, `/tmp` and
-the volumes are the places a sandbox writes. `HOME` is the workspace, so a
-tool that keeps its configuration or installs its packages under the home
-directory writes there and finds it again after a restart. A manifest that
-sets `HOME` in `spec.env` keeps its own; a home inside the image is read
-only.
+the volumes are the places a sandbox writes. Where your images keep their
+user's home, such as `/home/agent`, set `CELLA_K8S_HOME` to it and that
+directory becomes writable too. It is kept in the workspace, in `.home`,
+and filled with the image's own copy the first time the sandbox starts, so
+the image's shell settings and anything it installed for the user are
+there. `HOME` names it, and a tool that keeps its settings or installs
+packages there, `npm install -g` into a prefix the image set under the
+home among them, finds them again after a restart. A later start never
+fills it again, so what the workload changed is kept, and a newer image's
+copy of the home reaches only new sandboxes. The fill runs `sh` and `cp`
+from the sandbox's image. Without `CELLA_K8S_HOME`, `HOME` is the
+workspace. A manifest that sets `HOME` in `spec.env` keeps its own.
 
 | Capability | On Kubernetes |
 |---|---|

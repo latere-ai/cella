@@ -67,6 +67,10 @@ const Container = "main"
 // sandbox's.
 const DisplayContainer = "display"
 
+// HomeContainer is the name of the init container that fills the image's home
+// directory on the workspace claim (Options.Home) before the workload starts.
+const HomeContainer = "home"
+
 // Options configures one driver against one namespace. The zero value is
 // usable: every field falls back to the constants above.
 type Options struct {
@@ -137,6 +141,17 @@ type Options struct {
 	// the copy together. It is a seam with DefaultFillTimeout behind it,
 	// and no variable sets it.
 	FillTimeout time.Duration
+	// Home is the directory the sandboxes' images keep their user's home in,
+	// such as /home/agent. The root file system is read only, so a tool that
+	// writes there, keeping its settings or installing into a directory the
+	// image names, fails. Set, the directory is made writable: the directory
+	// .home of the sandbox's workspace claim is mounted there, filled with the
+	// image's own copy of it the first time the sandbox starts, and HOME names
+	// it unless the sandbox names its own. What is written there outlives a
+	// restart. The fill runs sh and cp from the sandbox's image. Empty, or a
+	// directory that holds the workspace or lies inside it, mounts nothing,
+	// and HOME is the workspace.
+	Home string
 	// TrustRoots are the public roots written into a sandbox's trust file
 	// ahead of the gateway's authority, as egress.LoadRoots read them from
 	// the process's own system bundle or SSL_CERT_FILE. No CELLA_ variable
@@ -226,6 +241,11 @@ func New(opts Options) (*Driver, error) {
 	opts = opts.withDefaults()
 	if opts.CPURequestRatio > 1 || opts.MemoryRequestRatio > 1 {
 		return nil, fmt.Errorf("%w: request ratios are fractions of the limit", driver.ErrInvalid)
+	}
+	if opts.Home != "" {
+		if err := checkPath(opts.Home); err != nil {
+			return nil, fmt.Errorf("%w: the home %q: %w", driver.ErrInvalid, opts.Home, err)
+		}
 	}
 	for _, peer := range []struct {
 		name string

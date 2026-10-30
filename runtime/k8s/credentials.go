@@ -90,10 +90,10 @@ func secretEnv(id, gen string, environment map[string]string) []corev1.EnvVar {
 // earlier start's, immediately before they create the Pod, and nothing else
 // writes them, so the keys a Pod references are the environment it started
 // with.
-func podEnvData(s driver.CreateSpec, now time.Time, token bool) map[string][]byte {
+func (d *Driver) podEnvData(s driver.CreateSpec, now time.Time, token bool) map[string][]byte {
 	gen := generation(now)
 	out := map[string][]byte{}
-	for name, value := range workloadEnv(s, token) {
+	for name, value := range d.workloadEnv(s, token) {
 		out[envVarKey(gen, name)] = []byte(value)
 	}
 	return out

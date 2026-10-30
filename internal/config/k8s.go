@@ -5,6 +5,7 @@ package config
 
 import (
 	"fmt"
+	"path"
 	"strconv"
 	"strings"
 
@@ -47,6 +48,9 @@ func loadK8s(getenv Getenv, problems *[]string) k8s.Options {
 		FillImage: strings.TrimSpace(getenv("CELLA_K8S_FILL_IMAGE")),
 		// Empty is the workspace class, which the driver falls back to.
 		VolumeClass: strings.TrimSpace(getenv("CELLA_K8S_VOLUME_CLASS")),
+		// The images' home is the operator's to name, since only they know
+		// the images; empty is HOME on the workspace.
+		Home: homePath(getenv, "CELLA_K8S_HOME", problems),
 	}
 	o.Gateway, o.DNS = loadPeers(getenv, problems)
 	return o
@@ -90,6 +94,20 @@ func loadPeers(getenv Getenv, problems *[]string) (gateway, dns k8s.Peer) {
 		}
 	}
 	return gateway, dns
+}
+
+// homePath reads an absolute, clean directory other than the root. Empty is
+// none.
+func homePath(getenv Getenv, name string, problems *[]string) string {
+	p := strings.TrimSpace(getenv(name))
+	if p == "" {
+		return ""
+	}
+	if !path.IsAbs(p) || path.Clean(p) != p || p == "/" {
+		*problems = append(*problems, name+" must be an absolute, clean directory other than /, such as /home/agent")
+		return ""
+	}
+	return p
 }
 
 // portList reads a comma-separated list of ports. Empty is the driver's
