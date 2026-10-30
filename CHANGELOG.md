@@ -21,6 +21,16 @@ refused before it is pushed.
   another version is left as it is and the call answers
   `ErrPreconditionFailed`. `DeleteSecret` is unchanged and still
   deletes at whatever version is held.
+- **`latere.ai/x/cella/shell` runs a command line inside your program,
+  over files it serves, with no sandbox.** Implement five file methods
+  over your storage, say which directories you serve and which are read
+  only, and a line such as `cd /notes && ls && grep -rn todo .` runs in
+  milliseconds with the output, messages and exit status of `/bin/sh`
+  and GNU's `ls`, `cat`, `head`, `tail`, `wc`, `grep`, `find`, `sort`,
+  `uniq`, `cut`, `mkdir`, `rm`, `mv`, `cp` and `touch`. A line that needs
+  another program or a path you do not serve is refused before anything
+  runs, with the reason, so you run it in a sandbox as before. See
+  [docs/shell.md](docs/shell.md).
 
 ## v0.22.4 - 2026-10-30
 

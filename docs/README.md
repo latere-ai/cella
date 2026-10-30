@@ -33,6 +33,7 @@ platform on the packages.
 | [The Go client](client.md) | driving a control plane from a Go program: connecting, tokens, manifests in JSON or YAML, sessions, files, following events, and the errors you decide on |
 | [Following events](events.md) | an object's history, following it live from where you left off, and what a proxy in front of the server must do |
 | [Building a plane](plane.md) | a platform on top of Cella: the two doors, the three endpoints you write, the packages in your own binary, and a running example |
+| [A command line over your own files](shell.md) | running a shell command line inside your program over files it serves, with no sandbox: the file system you implement, mounts and read-only folders, what a line can use, and what is refused |
 | [Conformance](conformance.md) | the suite that checks a server against the API: what to give it, what the report says, and how to declare what you do not serve |
 
 The OpenAPI document is [`api/openapi.yaml`](../api/openapi.yaml), and
