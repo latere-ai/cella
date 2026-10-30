@@ -81,6 +81,14 @@ sends `If-Match` with an older version is refused with `409
 version_conflict`, so two administrators cannot silently overwrite each
 other.
 
+A secret's answers carry an `ETag` too: its `status.version`, which moves
+each time the value is written. A delete that sends `If-Match` with an
+older version is refused with `412 precondition_failed` and the secret is
+left as it is, so a cleanup that decided on a read never removes a value
+written after it. An update that leaves the value as it was does not move
+the version. A delete without `If-Match`, or with `*`, deletes the secret
+whatever its version.
+
 **Request ids.** Every answer carries `X-Request-Id`. Send your own and it
 is carried through the answer, the events, and the logs; otherwise the
 server makes one starting `req_`.
@@ -134,6 +142,7 @@ code in the `X-Cella-Error` trailer.
 | `worker_replaced` | 409 | a registration with the same key from the same host took this worker's place; its stream is closed with it |
 | `volume_busy` | 409 | the volume is attached in a way that excludes this: a write to a shared read-only volume, a second writer, or a delete while a sandbox mounts it |
 | `cursor_expired` | 410 | the feed no longer holds the records after that cursor |
+| `precondition_failed` | 412 | the object changed since the version `If-Match` named, so it was left as it is |
 | `body_too_large` | 413 | the body is over `CELLA_MAX_BODY_BYTES` or `CELLA_MAX_UPLOAD_BYTES` |
 | `unsupported_media_type` | 415 | the body is in a type this route does not take |
 | `capability_unsupported` | 422 | the environment cannot provide what the request or the manifest needs |
@@ -301,7 +310,7 @@ line, or authorization request carries it.
 | `GET /v1/secrets` | `secret.list` | list your secrets; `owner` and `label` narrow the list as they do for sandboxes |
 | `PUT /v1/secrets/{name}` | `secret.create` or `secret.update` | apply by name; a second apply rotates the value in place, and running sandboxes use the new value on their next request |
 | `GET /v1/secrets/{name}` | `secret.read` | read one secret without its value |
-| `DELETE /v1/secrets/{name}` | `secret.delete` | delete it; a sandbox that mounted it reports the placeholder as not injectable |
+| `DELETE /v1/secrets/{name}` | `secret.delete` | delete it; a sandbox that mounted it reports the placeholder as not injectable. With `If-Match`, only at that version |
 
 ### Volumes
 

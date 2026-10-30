@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -253,6 +254,74 @@ func TestSecretRoutes(t *testing.T) {
 			http.StatusBadRequest)
 		f.request(http.MethodPost, "/v1/secrets", f.alice, `{`, http.StatusBadRequest)
 	})
+}
+
+// TestASecretDeleteAtAVersion is If-Match on a Secret's delete. Every answer
+// that carries one Secret carries the ETag of its version; a delete naming a
+// version the value has since moved from is refused 412 precondition_failed
+// and leaves the Secret as the write made it; a delete at the version held,
+// quoted or bare, removes it; and a delete without the header, or with "*",
+// deletes whatever version is held, as it did before the header was read.
+func TestASecretDeleteAtAVersion(t *testing.T) {
+	f := setupSealed(t, nil)
+	send := func(method, path, body, ifMatch string, status int) (http.Header, []byte) {
+		t.Helper()
+		header := http.Header{"Content-Type": []string{"application/json"}}
+		if ifMatch != "" {
+			header.Set("If-Match", ifMatch)
+		}
+		res := f.proxied(method, path, f.alice, strings.NewReader(body), header)
+		out, err := io.ReadAll(res.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.StatusCode != status {
+			t.Fatalf("%s %s with If-Match %q: got %d want %d: %s", method, path, ifMatch, res.StatusCode, status, out)
+		}
+		return res.Header, out
+	}
+
+	created, _ := send(http.MethodPost, "/v1/secrets", secretBody("lux", "api.example.com", "key-1"), "", http.StatusCreated)
+	read := created.Get("ETag")
+	if read != `"1"` {
+		t.Fatalf("the create's ETag is %q, want the version it recorded", read)
+	}
+	if got, _ := send(http.MethodGet, "/v1/secrets/lux", "", "", http.StatusOK); got.Get("ETag") != read {
+		t.Fatalf("the read's ETag is %q, want %q", got.Get("ETag"), read)
+	}
+	rotated, _ := send(http.MethodPut, "/v1/secrets/lux", secretBody("lux", "api.example.com", "key-2"), "", http.StatusOK)
+	if rotated.Get("ETag") != `"2"` {
+		t.Fatalf("the rotation's ETag is %q, want the version it moved to", rotated.Get("ETag"))
+	}
+
+	// The delete a caller decided on before the rotation names the version
+	// it read, and the rotated Secret stays.
+	_, refused := send(http.MethodDelete, "/v1/secrets/lux", "", read, http.StatusPreconditionFailed)
+	var envelope struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(refused, &envelope); err != nil || envelope.Error.Code != "precondition_failed" {
+		t.Fatalf("the refusal is %s", refused)
+	}
+	if kept, _ := send(http.MethodGet, "/v1/secrets/lux", "", "", http.StatusOK); kept.Get("ETag") != `"2"` {
+		t.Fatalf("after the refused delete the secret's ETag is %q, want the rotation's", kept.Get("ETag"))
+	}
+	// A header that names no version is the caller's field.
+	send(http.MethodDelete, "/v1/secrets/lux", "", `"not-a-version"`, http.StatusBadRequest)
+	// The version held, without its quotes, is the same as with them.
+	send(http.MethodDelete, "/v1/secrets/lux", "", "2", http.StatusOK)
+	send(http.MethodGet, "/v1/secrets/lux", "", "", http.StatusNotFound)
+
+	// Without the header, and with the wildcard, a delete takes whatever
+	// version is held.
+	for _, ifMatch := range []string{"", "*"} {
+		send(http.MethodPost, "/v1/secrets", secretBody("git", "git.example.com", "token-1"), "", http.StatusCreated)
+		send(http.MethodPut, "/v1/secrets/git", secretBody("git", "git.example.com", "token-2"), "", http.StatusOK)
+		send(http.MethodDelete, "/v1/secrets/git", "", ifMatch, http.StatusOK)
+		send(http.MethodGet, "/v1/secrets/git", "", "", http.StatusNotFound)
+	}
 }
 
 // listedSecrets reads one page of the secret list as one subject and returns

@@ -121,7 +121,16 @@ func (c *Controller) UpdateSecret(ctx context.Context, obj v1.Secret, id string)
 // environment as the inert string it always was, status.secrets.notInjectable
 // names it, and the next request leaves unauthenticated rather than with a
 // value whose owner withdrew it.
-func (c *Controller) DeleteSecret(ctx context.Context, id string) (v1.Secret, error) {
+//
+// ifVersion is the status.version an If-Match named, and zero deletes the
+// Secret at whatever version it holds; no Secret is at version zero, since
+// one is created with its value. A Secret whose value was written since that
+// version is left as it is and the answer is ErrPreconditionFailed. The
+// comparison is made under the lock every write of a Secret takes, so a write
+// that lands after the caller's read is never deleted. An update that leaves
+// the value as it was does not move status.version, so it does not stop the
+// delete.
+func (c *Controller) DeleteSecret(ctx context.Context, id string, ifVersion int64) (v1.Secret, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.secrets == nil {
@@ -130,6 +139,9 @@ func (c *Controller) DeleteSecret(ctx context.Context, id string) (v1.Secret, er
 	held, ok := c.secretObjects[id]
 	if !ok {
 		return v1.Secret{}, ErrNotFound
+	}
+	if ifVersion != 0 && int64(held.Status.Version) != ifVersion {
+		return v1.Secret{}, ErrPreconditionFailed
 	}
 	previous := c.secretObjects
 	delete(c.secretObjects, id)

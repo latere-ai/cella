@@ -995,6 +995,8 @@ func errorEnvelope(err error, requestID string) (int, httpjson.Error) {
 		code = "phase_conflict"
 	case errors.Is(err, controller.ErrVersionConflict):
 		code = "version_conflict"
+	case errors.Is(err, controller.ErrPreconditionFailed):
+		code = "precondition_failed"
 	case errors.Is(err, controller.ErrEnvironmentReserved):
 		code = "reserved_prefix"
 	case errors.Is(err, remote.ErrWorkerLimit):
@@ -1048,6 +1050,9 @@ func errorEnvelope(err error, requestID string) (int, httpjson.Error) {
 	case "version_conflict":
 		status = 409
 		message = "The object changed since you read it; read it again and retry."
+	case "precondition_failed":
+		status = 412
+		message = "The object changed since you read it, so it was left as it is; read it again."
 	case "quota_exceeded":
 		status = 422
 		message = "You have reached your limit of running sandboxes. Stop one to start another."

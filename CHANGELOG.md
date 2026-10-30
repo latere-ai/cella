@@ -6,6 +6,24 @@ refused before it is pushed.
 
 ## Unreleased
 
+### Added
+
+- **A secret's delete can name the version it was decided on.**
+  `DELETE /v1/secrets/{name}` takes `If-Match` with the version a read
+  returned. A secret whose value was written since is left as it is, and
+  the delete is refused with `412 precondition_failed`, so a cleanup that
+  decided on a read never removes a value written after it. Every answer
+  that carries one secret now carries an `ETag`, its `status.version`,
+  which moves each time the value is written. A delete without
+  `If-Match` deletes the secret as before.
+
+### Changed
+
+- **In the `controller` package, `Controller.DeleteSecret(ctx, id,
+  ifVersion)` takes the version to delete at.** Pass 0 to delete the
+  secret at whatever version it holds, as the call did before;
+  `ErrPreconditionFailed` is a secret at another version.
+
 ## v0.22.4 - 2026-10-30
 
 ### Added

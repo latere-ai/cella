@@ -53,6 +53,11 @@ var (
 	// ErrVersionConflict is a conditional write whose row moved since it was
 	// read. Design 008 answers it with 409 version_conflict.
 	ErrVersionConflict = errors.New("the object changed since it was read")
+	// ErrPreconditionFailed is a delete conditional on a version the object
+	// no longer holds: it was written since the read the version came from,
+	// so it is left as it is. Design 008 answers it with 412
+	// precondition_failed.
+	ErrPreconditionFailed = errors.New("the object's version is not the one the request named")
 	// ErrNotWriter is a write refused because this process no longer holds
 	// the writer lease (spec 076): another replica is the writer now, and the
 	// caller's retry reaches it. Design 008 answers it with 503

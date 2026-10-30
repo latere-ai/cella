@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 
 	"latere.ai/x/pkg/authz"
 
@@ -49,7 +50,7 @@ func (h *handler) createSecret(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Location", h.public("/v1/secrets/"+stored.Status.ID))
-	respond(w, http.StatusCreated, stored)
+	respondSecret(w, http.StatusCreated, stored)
 }
 
 // applySecret is PUT /v1/secrets/{key}: a create when the name is free and an
@@ -81,7 +82,7 @@ func (h *handler) applySecret(w http.ResponseWriter, r *http.Request) {
 		respondError(w, err)
 		return
 	}
-	respond(w, http.StatusOK, stored)
+	respondSecret(w, http.StatusOK, stored)
 }
 
 // createNamedSecret is the create half of a PUT: the path names the object,
@@ -120,7 +121,7 @@ func (h *handler) createNamedSecret(w http.ResponseWriter, r *http.Request, key 
 		return
 	}
 	w.Header().Set("Location", h.public("/v1/secrets/"+stored.Status.ID))
-	respond(w, http.StatusCreated, stored)
+	respondSecret(w, http.StatusCreated, stored)
 }
 
 // readSecret decodes and resolves one body. The object it returns carries the
@@ -148,7 +149,11 @@ func (h *handler) readSecret(w http.ResponseWriter, r *http.Request, existing *v
 	return *resolved, true
 }
 
-// secretItem is GET and DELETE of one Secret.
+// secretItem is GET and DELETE of one Secret. A delete may carry If-Match
+// with the version a read's ETag named: a Secret whose value was written since
+// is left as it is and refused precondition_failed, so a caller that decided
+// on a read never deletes a write it did not see. A delete without one, or
+// with "*", deletes the Secret at whatever version it holds.
 func (h *handler) secretItem(w http.ResponseWriter, r *http.Request) {
 	action := authorizer.ActionSecretRead
 	if r.Method == http.MethodDelete {
@@ -164,15 +169,28 @@ func (h *handler) secretItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != http.MethodDelete {
-		respond(w, http.StatusOK, obj)
+		respondSecret(w, http.StatusOK, obj)
 		return
 	}
-	deleted, err := h.Controller.DeleteSecret(r.Context(), obj.Status.ID)
+	version, err := ifMatch(r)
 	if err != nil {
 		respondError(w, err)
 		return
 	}
-	respond(w, http.StatusOK, deleted)
+	deleted, err := h.Controller.DeleteSecret(r.Context(), obj.Status.ID, version)
+	if err != nil {
+		respondError(w, err)
+		return
+	}
+	respondSecret(w, http.StatusOK, deleted)
+}
+
+// respondSecret writes one Secret with the ETag a delete's If-Match is
+// compared against: its status.version, which moves at every write of the
+// value and not at an update that leaves the value as it was.
+func respondSecret(w http.ResponseWriter, status int, obj v1.Secret) {
+	w.Header().Set("ETag", `"`+strconv.Itoa(obj.Status.Version)+`"`)
+	respond(w, status, obj)
 }
 
 // listSecrets is GET /v1/secrets, narrowed to what the actor may see. The

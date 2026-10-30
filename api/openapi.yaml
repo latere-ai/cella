@@ -1416,7 +1416,9 @@ paths:
       operationId: readSecret
       summary: Read a secret
       description: >-
-        Read one secret without its value. Authorized as `secret.read`.
+        Read one secret without its value. The answer carries an ETag, the
+        secret's `status.version`, which a delete's If-Match names.
+        Authorized as `secret.read`.
       responses:
         "200":
           description: The secret, without its value.
@@ -1430,7 +1432,23 @@ paths:
     delete:
       operationId: deleteSecret
       summary: Delete a secret
-      description: Delete one secret. Authorized as `secret.delete`.
+      description: >-
+        Delete one secret. With If-Match, the delete happens only while the
+        secret is at that version: one whose value was written since is left
+        as it is and refused with 412 precondition_failed. An update that
+        leaves the value as it was does not move the version. Without
+        If-Match, or with `*`, the secret is deleted at whatever version it
+        holds. Authorized as `secret.delete`.
+      parameters:
+        - name: If-Match
+          in: header
+          required: false
+          description: >-
+            The ETag a read of the secret answered, its `status.version`,
+            quoted or bare; `*` is any version. A value that is not a version
+            is invalid_field.
+          schema:
+            type: string
       responses:
         "200":
           description: The answer this route serves.

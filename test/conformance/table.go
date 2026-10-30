@@ -38,6 +38,7 @@ var errorTable = map[string]row{
 	"boundary_widened":           {409, "A sandbox cannot widen its own boundary."},
 	"name_taken":                 {409, "You already have an object with this name."},
 	"version_conflict":           {409, "The object changed since you read it; read it again and retry."},
+	"precondition_failed":        {412, "The object changed since you read it, so it was left as it is; read it again."},
 	"phase_conflict":             {409, "The sandbox is not in a state that allows this."},
 	"volume_busy":                {409, "The volume is attached in a way that excludes this."},
 	"secret_host_conflict":       {409, "Two mounted secrets apply to the same host."},
