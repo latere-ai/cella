@@ -100,8 +100,8 @@ A line is refused when it needs anything else: another program, a path
 you do not mount, a command substitution, a variable it did not set, an
 option a program does not take, a background job, brace expansion, or
 `set -x`. A line is refused as `size` when it is longer than 64 KiB,
-nests deeper than 64, has a command with more than 16 expansions, or
-has more than 32 pipes.
+nests deeper than 64, has a command with more than 16 expansions, has
+more than 32 pipes, or has a pattern with more than 8 `*`.
 
 Where the package differs from a sandbox's shell: `grep` has no
 back-references, `find` and `grep -r` visit names in sorted order,
@@ -120,7 +120,8 @@ the shell's kind of message and status 2:
 ```
 
 `Run` answers that as a line that ran, with no error: what it changed
-before the bound stays changed. Set your own in `Request.Limits`; a
+before the bound stays changed, and the command that reached it writes
+no file. Set your own in `Request.Limits`; a
 field left zero takes the default.
 
 | Limit | Default | Bounds |
