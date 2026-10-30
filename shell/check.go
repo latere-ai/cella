@@ -31,6 +31,10 @@ const (
 	// not set, or a value known only once something has run where the
 	// value decides a path or an option.
 	ReasonExpansion Reason = "expansion"
+	// ReasonSize is a line longer than MaxLine, nested deeper than
+	// MaxDepth, with a command of more expansions than MaxExpansions, or
+	// with more pipes than MaxPipes.
+	ReasonSize Reason = "size"
 	// ReasonConstruct is a construct the package does not run: a function,
 	// a background job, a brace expansion, cd inside a loop or a pipe, a
 	// redirection other than <, >, >>, >|, a descriptor's copy or a here
@@ -75,9 +79,15 @@ func Check(command, dir string, mounts []Mount) Plan {
 	if err != nil {
 		return Plan{Reason: ReasonPath}
 	}
+	if len(command) > MaxLine || nesting(command) > MaxDepth {
+		return Plan{Reason: ReasonSize}
+	}
 	f, err := parseLine(command)
 	if err != nil {
 		return Plan{Reason: ReasonSyntax}
+	}
+	if !sized(f) {
+		return Plan{Reason: ReasonSize}
 	}
 	start := ""
 	if dir != "" && serves(mounts, dir) {
@@ -542,14 +552,14 @@ func (c *checker) isMountDir(p string) bool {
 }
 
 // setFlags are the options of set a line may change: the ones that change
-// how a failure, an unset variable or a pipe's status is answered, and the
-// trace.
+// how a failure or an unset variable is answered. The trace is not one:
+// it would print the commands the package runs for its bounds.
 var setFlags = map[string]bool{
-	"-e": true, "+e": true, "-u": true, "+u": true, "-x": true, "+x": true,
-	"-eu": true, "-ue": true, "-ex": true, "-xe": true, "-eux": true,
+	"-e": true, "+e": true, "-u": true, "+u": true, "+x": true,
+	"-eu": true, "-ue": true,
 }
 
-var setNames = map[string]bool{"errexit": true, "nounset": true, "xtrace": true}
+var setNames = map[string]bool{"errexit": true, "nounset": true}
 
 func (c *checker) set(args []field) {
 	for i := 0; i < len(args); i++ {

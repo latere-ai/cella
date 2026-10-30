@@ -158,7 +158,10 @@ func TestCheckFollowsTheLine(t *testing.T) {
 		{"cat <<-EOF\n\tx\n\tEOF", "", Plan{}},
 		{"for x in a b; do cat > $x; done", "/memory/user", Plan{Reason: ReasonExpansion}},
 		// The shell's options and builtins.
-		{"set -eux; set +e; set -o errexit -o nounset; set +o xtrace", "", Plan{}},
+		{"set -eu; set +e; set -o errexit -o nounset; set +x", "", Plan{}},
+		// The trace would print the commands the bounds add.
+		{"set -x; echo hi", "", Plan{Reason: ReasonOption, Program: "set"}},
+		{"set -o xtrace", "", Plan{Reason: ReasonOption, Program: "set"}},
 		{"set -o", "", Plan{Reason: ReasonOption, Program: "set"}},
 		{"set $x", "", Plan{Reason: ReasonExpansion}},
 		{"read -r a b < /memory/user/x; echo $a", "/workspace", Plan{}},

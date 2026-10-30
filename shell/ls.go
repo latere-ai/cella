@@ -146,24 +146,24 @@ func (l *lsInv) run(p *proc) int {
 	l.sort(fileOps, byteOrder)
 	l.sort(dirs, byteOrder)
 
-	var out strings.Builder
+	out := p.buffer()
 	printed := false
 	if len(fileOps) > 0 {
-		l.print(p, &out, listing{entries: fileOps})
+		l.print(p, out, listing{entries: fileOps})
 		printed = true
 	}
 	headers := l.recursive || len(names) > 1
 	for _, d := range dirs {
-		code = max(code, l.listDir(p, &out, d, headers, &printed, byteOrder, true))
+		code = max(code, l.listDir(p, out, d, headers, &printed, byteOrder, true))
 	}
-	p.write([]byte(out.String()))
+	p.flush(out)
 	return code
 }
 
 // listDir prints one directory's entries and, under -R, its
 // subdirectories' after them, and answers ls's status: 2 when a directory
 // the line named could not be read, 1 when one under it could not.
-func (l *lsInv) listDir(p *proc, out *strings.Builder, d lsEntry, header bool, printed *bool, byteOrder bool, named bool) int {
+func (l *lsInv) listDir(p *proc, out *buffer, d lsEntry, header bool, printed *bool, byteOrder bool, named bool) int {
 	infos, err := p.s.files.readDir(p.ctx, d.abs)
 	if err != nil {
 		p.errorf("cannot open directory %s: %s", quote(d.shown), errorText(err))
@@ -192,10 +192,10 @@ func (l *lsInv) listDir(p *proc, out *strings.Builder, d lsEntry, header bool, p
 	}
 	l.sort(entries, byteOrder)
 	if *printed {
-		out.WriteByte('\n')
+		out.putByte('\n')
 	}
 	if header {
-		out.WriteString(d.shown + ":\n")
+		out.puts(d.shown + ":\n")
 	}
 	*printed = true
 	l.print(p, out, listing{entries: entries, total: true})
@@ -260,10 +260,10 @@ func (l *lsInv) suffix(info fs.FileInfo) string {
 	return ""
 }
 
-func (l *lsInv) print(p *proc, out *strings.Builder, g listing) {
+func (l *lsInv) print(p *proc, out *buffer, g listing) {
 	if !l.long {
 		for _, e := range g.entries {
-			out.WriteString(e.shown + l.suffix(e.info) + "\n")
+			out.puts(e.shown + l.suffix(e.info) + "\n")
 		}
 		return
 	}
@@ -291,9 +291,9 @@ func (l *lsInv) print(p *proc, out *strings.Builder, g listing) {
 	}
 	if g.total {
 		if l.human {
-			fmt.Fprintf(out, "total %s\n", humanSize(total*1024))
+			out.printf("total %s\n", humanSize(total*1024))
 		} else {
-			fmt.Fprintf(out, "total %d\n", total)
+			out.printf("total %d\n", total)
 		}
 	}
 	for _, r := range rows {
@@ -301,7 +301,7 @@ func (l *lsInv) print(p *proc, out *strings.Builder, g listing) {
 		if l.noGroup {
 			group = ""
 		}
-		fmt.Fprintf(out, "%s %*s %s%s %*s %s %s\n", r.mode, linkW, r.links, owner, group, sizeW, r.size, r.date, r.name)
+		out.printf("%s %*s %s%s %*s %s %s\n", r.mode, linkW, r.links, owner, group, sizeW, r.size, r.date, r.name)
 	}
 }
 

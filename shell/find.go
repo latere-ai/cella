@@ -39,7 +39,7 @@ type (
 	}
 	findType  string
 	findEmpty struct{}
-	findPrint struct{ out *strings.Builder }
+	findPrint struct{ out *buffer }
 )
 
 func (a findAnd) eval(e findEntry) bool { return a.x.eval(e) && a.y.eval(e) }
@@ -72,8 +72,8 @@ func (findEmpty) eval(e findEntry) bool {
 }
 
 func (p findPrint) eval(e findEntry) bool {
-	p.out.WriteString(e.path)
-	p.out.WriteByte('\n')
+	p.out.puts(e.path)
+	p.out.putByte('\n')
 	return true
 }
 
@@ -85,7 +85,7 @@ type findInv struct {
 	maxDepth int
 	minDepth int
 	depth    bool
-	out      *strings.Builder
+	out      *buffer
 	usesDir  bool // -empty reads every directory it visits
 }
 
@@ -95,7 +95,7 @@ func findError(format string, args ...any) error {
 }
 
 func parseFind(args []string) (invocation, error) {
-	inv := &findInv{args: args, maxDepth: -1, out: &strings.Builder{}}
+	inv := &findInv{args: args, maxDepth: -1, out: &buffer{}}
 	i := 0
 	for i < len(args) && (args[i] == "-H" || args[i] == "-L" || args[i] == "-P") {
 		i++
@@ -284,6 +284,9 @@ func (f *findInv) paths() []int { return f.starts }
 func (f *findInv) cwd() bool { return len(f.starts) == 0 }
 
 func (f *findInv) run(p *proc) int {
+	// The parse made the buffer the expression's -print writes to; it is
+	// held as the line's from here on.
+	f.out.b, f.out.who = p.s.budget, p.shown()
 	starts := operandStrings(f.args, f.starts)
 	if len(starts) == 0 {
 		starts = []string{"."}
@@ -301,7 +304,7 @@ func (f *findInv) run(p *proc) int {
 			code = 1
 		}
 	}
-	p.write([]byte(f.out.String()))
+	p.flush(f.out)
 	return code
 }
 
@@ -325,8 +328,8 @@ func (f *findInv) visit(p *proc, shown, abs string, info fs.FileInfo, depth int)
 	}
 	test := func() {
 		if depth >= f.minDepth && f.expr.eval(e) && f.print {
-			f.out.WriteString(shown)
-			f.out.WriteByte('\n')
+			f.out.puts(shown)
+			f.out.putByte('\n')
 		}
 	}
 	if !f.depth {

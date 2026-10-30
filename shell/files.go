@@ -25,14 +25,29 @@ type files struct {
 	// now is the time of a directory the file system does not know: a
 	// mount's that holds nothing yet, or one mkdir made.
 	now time.Time
+	// budget counts the bytes the line reads and the names it lists.
+	budget *budget
 
 	mu      sync.Mutex
 	made    map[string]bool
 	listing map[string][]fs.FileInfo
 }
 
-func newFiles(fsys FS, mounts []Mount, now time.Time) *files {
-	return &files{fsys: fsys, mounts: mounts, now: now, made: map[string]bool{}, listing: map[string][]fs.FileInfo{}}
+func newFiles(fsys FS, mounts []Mount, now time.Time, b *budget) *files {
+	return &files{fsys: fsys, mounts: mounts, now: now, budget: b, made: map[string]bool{}, listing: map[string][]fs.FileInfo{}}
+}
+
+// readFile is a file's content from the file system, counted against the
+// Read bound.
+func (f *files) readFile(ctx context.Context, p string) ([]byte, error) {
+	data, err := f.fsys.ReadFile(ctx, p)
+	if err != nil {
+		return nil, err
+	}
+	if err := f.budget.reading(len(data)); err != nil {
+		return nil, err
+	}
+	return data, nil
 }
 
 // notServed is the answer for a path no mount serves: the line never
@@ -113,6 +128,9 @@ func (f *files) readDir(ctx context.Context, p string) ([]fs.FileInfo, error) {
 	kept, ok := f.listing[p]
 	f.mu.Unlock()
 	if ok {
+		if err := f.budget.listing(len(kept)); err != nil {
+			return nil, err
+		}
 		return kept, nil
 	}
 	info, err := f.stat(ctx, p)
@@ -147,6 +165,9 @@ func (f *files) readDir(ctx context.Context, p string) ([]fs.FileInfo, error) {
 	f.mu.Lock()
 	f.listing[p] = entries
 	f.mu.Unlock()
+	if err := f.budget.listing(len(entries)); err != nil {
+		return nil, err
+	}
 	return entries, nil
 }
 
@@ -162,7 +183,7 @@ func (f *files) read(ctx context.Context, p string) ([]byte, error) {
 	if dir {
 		return nil, &fs.PathError{Op: "read", Path: p, Err: syscall.EISDIR}
 	}
-	return f.fsys.ReadFile(ctx, p)
+	return f.readFile(ctx, p)
 }
 
 // writable checks that p may be written: served, in a mount that is not
@@ -284,7 +305,7 @@ func (f *files) rename(ctx context.Context, from, to string) error {
 	if r, ok := f.fsys.(Renamer); ok {
 		return r.Rename(ctx, from, to)
 	}
-	data, err := f.fsys.ReadFile(ctx, from)
+	data, err := f.readFile(ctx, from)
 	if err != nil {
 		return err
 	}

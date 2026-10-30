@@ -5,8 +5,6 @@ package shell
 
 import (
 	"bytes"
-	"fmt"
-	"io"
 	"path"
 	"regexp"
 	"strconv"
@@ -301,7 +299,7 @@ type grepRun struct {
 	showNames bool
 	matched   bool
 	failed    bool
-	out       bytes.Buffer
+	out       *buffer
 }
 
 func (g *grepInv) run(p *proc) int {
@@ -310,7 +308,7 @@ func (g *grepInv) run(p *proc) int {
 		p.errorf("%s", strings.TrimPrefix(err.Error(), "error parsing regexp: "))
 		return 2
 	}
-	r := &grepRun{g: g, p: p, re: re}
+	r := &grepRun{g: g, p: p, re: re, out: p.buffer()}
 	names := operandStrings(g.args, g.operands)
 	implicit := false
 	if len(names) == 0 {
@@ -326,7 +324,7 @@ func (g *grepInv) run(p *proc) int {
 			break
 		}
 		if name == "-" {
-			data, err := io.ReadAll(p.stdin)
+			data, err := p.readStdin()
 			if err != nil {
 				r.fail("(standard input)", err)
 				continue
@@ -362,7 +360,7 @@ func (g *grepInv) run(p *proc) int {
 		}
 		r.file(name, data)
 	}
-	p.write(r.out.Bytes())
+	p.flush(r.out)
 	switch {
 	case r.failed && (!g.quiet || !r.matched):
 		return 2
@@ -450,12 +448,12 @@ func (r *grepRun) file(name string, data []byte) {
 	}
 	prefix := func(n int, sep byte) {
 		if r.showNames {
-			r.out.WriteString(name)
-			r.out.WriteByte(sep)
+			r.out.puts(name)
+			r.out.putByte(sep)
 		}
 		if g.number {
-			r.out.WriteString(strconv.Itoa(n))
-			r.out.WriteByte(sep)
+			r.out.puts(strconv.Itoa(n))
+			r.out.putByte(sep)
 		}
 	}
 	lines := splitLines(data)
@@ -469,8 +467,8 @@ func (r *grepRun) file(name string, data []byte) {
 			// Context after the last match is still printed.
 			if pendingAfter > 0 && !quietOut && !g.only {
 				prefix(i+1, '-')
-				r.out.Write(line)
-				r.out.WriteByte('\n')
+				r.out.put(line)
+				r.out.putByte('\n')
 				lastPrinted = i
 				pendingAfter--
 				continue
@@ -481,8 +479,8 @@ func (r *grepRun) file(name string, data []byte) {
 		if !hit {
 			if pendingAfter > 0 && !quietOut && !g.only {
 				prefix(i+1, '-')
-				r.out.Write(line)
-				r.out.WriteByte('\n')
+				r.out.put(line)
+				r.out.putByte('\n')
 				lastPrinted = i
 				pendingAfter--
 			}
@@ -497,13 +495,13 @@ func (r *grepRun) file(name string, data []byte) {
 			continue
 		}
 		if (g.before > 0 || g.after > 0) && printedAny && lastPrinted < i-1-g.before {
-			r.out.WriteString("--\n")
+			r.out.puts("--\n")
 		}
 		if !g.only {
 			for j := max(i-g.before, lastPrinted+1); j < i; j++ {
 				prefix(j+1, '-')
-				r.out.Write(lines[j])
-				r.out.WriteByte('\n')
+				r.out.put(lines[j])
+				r.out.putByte('\n')
 			}
 		}
 		if g.only {
@@ -513,34 +511,34 @@ func (r *grepRun) file(name string, data []byte) {
 						continue
 					}
 					prefix(i+1, ':')
-					r.out.Write(m)
-					r.out.WriteByte('\n')
+					r.out.put(m)
+					r.out.putByte('\n')
 				}
 			}
 		} else {
 			prefix(i+1, ':')
-			r.out.Write(line)
-			r.out.WriteByte('\n')
+			r.out.put(line)
+			r.out.putByte('\n')
 		}
 		lastPrinted, pendingAfter, printedAny = i, g.after, true
 	}
 	switch {
 	case g.count:
 		if r.showNames {
-			fmt.Fprintf(&r.out, "%s:%d\n", name, count)
+			r.out.printf("%s:%d\n", name, count)
 		} else {
-			fmt.Fprintf(&r.out, "%d\n", count)
+			r.out.printf("%d\n", count)
 		}
 	case g.listMatch:
 		if count > 0 {
-			r.out.WriteString(name + "\n")
+			r.out.puts(name + "\n")
 		}
 	case g.listNoMatch:
 		if count == 0 {
-			r.out.WriteString(name + "\n")
+			r.out.puts(name + "\n")
 		}
 	case binary && count > 0:
-		fmt.Fprintf(&r.out, "%s: %s: binary file matches\n", r.p.name, name)
+		r.out.printf("%s: %s: binary file matches\n", r.p.name, name)
 	}
 }
 

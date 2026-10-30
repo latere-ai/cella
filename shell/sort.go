@@ -6,7 +6,6 @@ package shell
 import (
 	"bytes"
 	"cmp"
-	"fmt"
 	"math"
 	"slices"
 	"strconv"
@@ -206,6 +205,10 @@ func (s *sortInv) run(p *proc) int {
 			}
 			return 2
 		}
+		if name != "-" && !p.hold(len(data)) {
+			// sort keeps every file it reads until it writes its output.
+			return 2
+		}
 		for _, l := range splitLines(data) {
 			lines = append(lines, string(l))
 		}
@@ -247,23 +250,24 @@ func (s *sortInv) run(p *proc) int {
 		return c
 	}
 	slices.SortStableFunc(lines, compare)
-	var b strings.Builder
+	b := p.buffer()
+	defer b.free()
 	for i, l := range lines {
 		if s.unique && i > 0 && compareKeys(lines[i-1], l) == 0 {
 			continue
 		}
-		b.WriteString(l)
-		b.WriteByte('\n')
+		b.puts(l)
+		b.putByte('\n')
 	}
 	if s.output >= 0 {
 		name := s.args[s.output]
-		if err := p.s.files.write(p.ctx, p.abs(name), []byte(b.String())); err != nil {
+		if err := p.s.files.write(p.ctx, p.abs(name), b.Bytes()); err != nil {
 			p.errorf("open failed: %s: %s", name, errorText(err))
 			return 2
 		}
 		return 0
 	}
-	p.write([]byte(b.String()))
+	p.flush(b)
 	return 0
 }
 
@@ -442,7 +446,8 @@ func (u *uniqInv) run(p *proc) int {
 		return 1
 	}
 	lines := splitLines(data)
-	var b bytes.Buffer
+	b := p.buffer()
+	defer b.free()
 	same := func(x, y []byte) bool {
 		if u.fold {
 			return bytes.EqualFold(x, y)
@@ -457,10 +462,10 @@ func (u *uniqInv) run(p *proc) int {
 		n := j - i
 		if (!u.repeated || n > 1) && (!u.unique || n == 1) {
 			if u.count {
-				fmt.Fprintf(&b, "%7d ", n)
+				b.printf("%7d ", n)
 			}
-			b.Write(lines[i])
-			b.WriteByte('\n')
+			b.put(lines[i])
+			b.putByte('\n')
 		}
 		i = j
 	}
@@ -472,7 +477,7 @@ func (u *uniqInv) run(p *proc) int {
 		}
 		return 0
 	}
-	p.write(b.Bytes())
+	p.flush(b)
 	return 0
 }
 
@@ -573,7 +578,7 @@ func (c *cutInv) selected(i int) bool {
 
 func (c *cutInv) run(p *proc) int {
 	code := 0
-	var b bytes.Buffer
+	b := p.buffer()
 	for _, name := range c.names() {
 		data, err := p.readInput(name)
 		if err != nil {
@@ -591,19 +596,19 @@ func (c *cutInv) run(p *proc) int {
 						continue
 					}
 					if last >= 0 && last != i-1 {
-						b.WriteString(c.outDelim)
+						b.puts(c.outDelim)
 					}
-					b.WriteByte(line[i])
+					b.putByte(line[i])
 					last = i
 				}
-				b.WriteByte('\n')
+				b.putByte('\n')
 				continue
 			}
 			fs := bytes.Split(line, []byte(c.delim))
 			if len(fs) == 1 {
 				if !c.onlyDelim {
-					b.Write(line)
-					b.WriteByte('\n')
+					b.put(line)
+					b.putByte('\n')
 				}
 				continue
 			}
@@ -613,10 +618,10 @@ func (c *cutInv) run(p *proc) int {
 					parts = append(parts, f)
 				}
 			}
-			b.Write(bytes.Join(parts, []byte(c.outDelim)))
-			b.WriteByte('\n')
+			b.put(bytes.Join(parts, []byte(c.outDelim)))
+			b.putByte('\n')
 		}
 	}
-	p.write(b.Bytes())
+	p.flush(b)
 	return code
 }

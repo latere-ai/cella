@@ -15,7 +15,8 @@
 // Check reads a line before anything runs and answers whether it can run
 // here, and why not: a program the package does not provide, a path no
 // mount serves, an expansion whose value is known only once something has
-// run, or a construct the package does not run. A caller that gets a
+// run, a construct the package does not run, or a line past the sizes it
+// runs. A caller that gets a
 // refusal runs the line where it would have run otherwise; Run never starts
 // a line Check refuses, so a line never runs half here and half elsewhere.
 //
@@ -30,7 +31,9 @@
 //
 // Nothing reaches the host the program runs on: no program is executed, no
 // file of the host is opened, and the environment is the package's own, so
-// no variable of the calling process can be printed.
+// no variable of the calling process can be printed. What a line takes of
+// the process is bounded by Limits, whatever the line holds: a line that
+// reaches a bound stops with the shell's kind of message and status 2.
 package shell
 
 import (
@@ -126,6 +129,9 @@ type Request struct {
 	Now time.Time
 	// MaxOutput bounds the output kept; DefaultMaxOutput when zero.
 	MaxOutput int
+	// Limits bound what the line takes of the process; a zero field
+	// takes its default.
+	Limits Limits
 }
 
 // Result is a command line that ran.
@@ -206,6 +212,9 @@ type output struct {
 	buf       []byte
 	max       int
 	truncated bool
+	// closed is a line that stopped on a bound: what is written after
+	// is dropped, and the line's last words are the bound's.
+	closed bool
 }
 
 // appendf writes a message of the shell's own.
@@ -223,6 +232,9 @@ func (o *output) Write(p []byte) (int, error) {
 func (o *output) add(p []byte) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	if o.closed {
+		return
+	}
 	room := o.max - len(o.buf)
 	if room < len(p) {
 		o.truncated = true
@@ -232,6 +244,20 @@ func (o *output) add(p []byte) {
 		return
 	}
 	o.buf = append(o.buf, p...)
+}
+
+// close drops what is written from now on.
+func (o *output) close() {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.closed = true
+}
+
+// last writes the line's last words, past the bound if need be.
+func (o *output) last(format string, args ...any) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.buf = fmt.Appendf(o.buf, format, args...)
 }
 
 // clean is p made absolute against dir and cleaned; a relative p against

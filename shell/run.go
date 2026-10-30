@@ -26,7 +26,9 @@ import (
 // what it wrote, its exit status and the directory it ended in. A line
 // Check refuses is a *Declined error, and nothing ran. A context that ends
 // stops the line between operations, and Run answers what it had with the
-// context's error.
+// context's error. A line that reaches a bound of the request's Limits
+// stops where it is and ends with the bound's message and status 2, with
+// no error: it ran, and what it changed before stays changed.
 func Run(ctx context.Context, fsys FS, mounts []Mount, r Request) (Result, error) {
 	mounts, err := checkMounts(mounts)
 	if err != nil {
@@ -47,13 +49,28 @@ func Run(ctx context.Context, fsys FS, mounts []Mount, r Request) (Result, error
 	if now.IsZero() {
 		now = time.Now()
 	}
+	lim := r.Limits.withDefaults()
+	// The line runs under its own deadline, which a bound it reaches
+	// also ends.
+	runCtx, cancel := context.WithTimeout(ctx, lim.Time)
+	defer cancel()
 	s := &session{
-		files: newFiles(fsys, mounts, now),
 		name:  r.Name,
 		owner: r.Owner,
 		now:   now,
 		out:   &output{max: r.MaxOutput},
 	}
+	s.budget = &budget{lim: lim, cancel: cancel, out: s.out, line: &s.line}
+	s.files = newFiles(fsys, mounts, now, s.budget)
+	// The time bound stops the line the moment it passes, so nothing the
+	// line writes once it has comes before the bound's message.
+	deadlineSeen := make(chan struct{})
+	stopAtDeadline := context.AfterFunc(runCtx, func() {
+		defer close(deadlineSeen)
+		if ctx.Err() == nil && errors.Is(runCtx.Err(), context.DeadlineExceeded) {
+			s.budget.stop("the line ran longer than %s", lim.Time)
+		}
+	})
 	if s.name == "" {
 		s.name = "sh"
 	}
@@ -86,19 +103,33 @@ func Run(ctx context.Context, fsys FS, mounts []Mount, r Request) (Result, error
 	if err != nil {
 		return Result{}, fmt.Errorf("shell: start the interpreter: %w", err)
 	}
-	runErr := runner.Run(ctx, file)
+	instrument(file)
+	runErr := runner.Run(countSteps(runCtx, s.budget), file)
+	if !stopAtDeadline() {
+		// The line's context ended while it ran: the time bound has been
+		// told from the caller's context and the other bounds once this
+		// returns.
+		<-deadlineSeen
+	}
 	res := Result{ExitCode: 0, Dir: runner.Dir}
 	if res.Dir == placeholder {
 		res.Dir = ""
+	}
+	if ctx.Err() != nil {
+		res.Output, res.Truncated = s.out.result()
+		return res, ctx.Err()
+	}
+	if msg, at := s.budget.stopped(); msg != "" {
+		s.out.last("%s: %d: %s\n", s.name, at, msg)
+		res.ExitCode = 2
+		res.Output, res.Truncated = s.out.result()
+		return res, nil
 	}
 	var status interp.ExitStatus
 	switch {
 	case runErr == nil:
 	case errors.As(runErr, &status):
 		res.ExitCode = int(status)
-	case ctx.Err() != nil:
-		res.Output, res.Truncated = s.out.result()
-		return res, ctx.Err()
 	default:
 		// A handler's failure the line cannot report itself, which no
 		// program of the package returns: the line ends as a shell ends
@@ -150,13 +181,21 @@ type session struct {
 	redirectFailed atomic.Bool
 	// inputs are the files redirections opened for reading.
 	inputs sync.Map
+	// budget is what the line has used of its limits.
+	budget *budget
+	// pipes are the line's pipes a program wrote to, each with the
+	// length of the line it ends on.
+	pipesMu sync.Mutex
+	pipes   map[*os.File]*atomic.Int64
 }
 
 // internal names of the commands the call handler swaps a builtin for:
-// dash's echo and a cd that failed. No word of a line can hold a NUL, so
-// no line can name them.
+// dash's echo, printf, whose output then passes the line's bounds, and a
+// cd that failed. No word of a line can hold a NUL, so no line can name
+// them.
 const (
 	internalEcho   = "\x00echo"
+	internalPrintf = "\x00printf"
 	internalCdFail = "\x00cd"
 )
 
@@ -164,15 +203,25 @@ const (
 // echo for dash's, and answers a cd that cannot succeed with dash's words
 // and status.
 func (s *session) call(ctx context.Context, args []string) ([]string, error) {
-	s.redirectFailed.Store(false)
-	s.writeFailed.Store(false)
 	hc := interp.HandlerCtx(ctx)
 	if hc.Pos.IsValid() {
 		s.line.Store(int64(hc.Pos.Line()) + s.offset)
 	}
+	if err := s.budget.command(args, hc.Env); err != nil {
+		return nil, err
+	}
+	if args[0] == internalCheck {
+		// The check of an assignment, which is done: the assignment's
+		// status stands.
+		return []string{"true"}, nil
+	}
+	s.redirectFailed.Store(false)
+	s.writeFailed.Store(false)
 	switch args[0] {
 	case "echo":
 		return append([]string{internalEcho}, args[1:]...), nil
+	case "printf":
+		return append([]string{internalPrintf}, args[1:]...), nil
 	case "cd":
 		target := ""
 		rest := args[1:]
@@ -218,9 +267,14 @@ func (s *session) exec(ctx context.Context, args []string) error {
 	if p.stdin == nil {
 		p.stdin = bytes.NewReader(nil)
 	}
+	p.stdout = s.pipe(p.stdout, p.shown())
+	p.stderr = s.pipe(p.stderr, p.shown())
+	defer p.free()
 	switch args[0] {
 	case internalEcho:
 		return status(echo(p, args[1:]))
+	case internalPrintf:
+		return status(printf(p, args[1:]))
 	case internalCdFail:
 		p.eprintf("%s: %d: cd: can't cd to %s\n", s.name, s.line.Load(), args[1])
 		return status(2)
@@ -245,12 +299,50 @@ func (s *session) exec(ctx context.Context, args []string) error {
 	// GNU's programs other than cat buffer what they write to a pipe or a
 	// file, so their errors come before their output.
 	stdout := p.stdout
-	var buf bytes.Buffer
-	p.stdout = &buf
+	buf := p.buffer()
+	p.stdout = buf
 	code := inv.run(p)
 	p.stdout = stdout
-	p.write(buf.Bytes())
+	p.flush(buf)
 	return status(p.done(code))
+}
+
+// pipe is a program's standard output or error as it writes it: a pipe
+// of the line is written through a pipeWriter, and anything else as it
+// is.
+func (s *session) pipe(w io.Writer, who string) io.Writer {
+	f, ok := w.(*os.File)
+	if !ok {
+		return w
+	}
+	s.pipesMu.Lock()
+	defer s.pipesMu.Unlock()
+	if s.pipes == nil {
+		s.pipes = map[*os.File]*atomic.Int64{}
+	}
+	run, ok := s.pipes[f]
+	if !ok {
+		run = new(atomic.Int64)
+		s.pipes[f] = run
+	}
+	return pipeWriter{f: f, b: s.budget, who: who, where: "through a pipe", run: run}
+}
+
+// shown is the program's name as its messages say it.
+func (p *proc) shown() string { return printable(p.name) }
+
+// hold takes n bytes of the Input bound for what the program keeps until
+// it is done, false once the line stopped.
+func (p *proc) hold(n int) bool {
+	err := p.s.budget.hold(p.shown(), n)
+	p.held += n
+	return err == nil
+}
+
+// free lets go of what the program held.
+func (p *proc) free() {
+	p.s.budget.release(p.held)
+	p.held = 0
 }
 
 // done is a program's status once its output is written: a program
@@ -284,7 +376,7 @@ func (s *session) open(ctx context.Context, name string, flag int, _ os.FileMode
 		if err != nil {
 			return nil, s.redirectError("open", name, err)
 		}
-		return s.input(data)
+		return s.input(name, data)
 	}
 	if err := s.files.writable(ctx, "create", p); err != nil {
 		return nil, s.redirectError("create", name, err)
@@ -294,7 +386,9 @@ func (s *session) open(ctx context.Context, name string, flag int, _ os.FileMode
 		data, err := s.files.read(ctx, p)
 		switch {
 		case err == nil:
-			w.buf.Write(data)
+			if _, err := w.Write(data); err != nil {
+				return nil, err
+			}
 		case !errors.Is(err, fs.ErrNotExist):
 			return nil, s.redirectError("create", name, err)
 		}
@@ -326,13 +420,26 @@ type writeFile struct {
 	path string
 	name string
 	buf  bytes.Buffer
+	held int
 }
 
 func (w *writeFile) Read([]byte) (int, error) { return 0, syscall.EBADF }
 
-func (w *writeFile) Write(p []byte) (int, error) { return w.buf.Write(p) }
+func (w *writeFile) Write(p []byte) (int, error) {
+	if err := w.s.budget.hold(w.name, len(p)); err != nil {
+		w.s.budget.release(len(p))
+		return 0, err
+	}
+	w.held += len(p)
+	return w.buf.Write(p)
+}
 
 func (w *writeFile) Close() error {
+	defer w.s.budget.release(w.held)
+	if w.s.budget.done.Load() {
+		// The line stopped: its last command's output is not written.
+		return nil
+	}
 	if err := w.s.files.write(w.ctx, w.path, w.buf.Bytes()); err != nil {
 		w.s.out.appendf("%s: %d: cannot create %s: %s\n", w.s.name, w.s.line.Load(), w.name, errorText(err))
 		w.s.writeFailed.Store(true)
@@ -345,16 +452,17 @@ func (w *writeFile) Close() error {
 // and one it was given stays the same file, so a program can tell a file
 // from a pipe as GNU's do. The pipe is closed with the redirection, which
 // ends a write its command did not read.
-func (s *session) input(data []byte) (*os.File, error) {
+func (s *session) input(name string, data []byte) (*os.File, error) {
 	r, w, err := os.Pipe()
 	if err != nil {
 		return nil, fmt.Errorf("shell: open a redirection's input: %w", err)
 	}
 	s.inputs.Store(r, true)
+	pw := pipeWriter{f: w, b: s.budget, who: name, where: "read with <", run: new(atomic.Int64)}
 	go func() {
 		// A command that stops reading closes the read end, which fails
 		// the write; either way the input is done.
-		_, _ = w.Write(data)
+		_, _ = pw.Write(data)
 		_ = w.Close()
 	}()
 	return r, nil
@@ -412,6 +520,8 @@ type proc struct {
 	stderr io.Writer
 	// werr is the first write to stdout or stderr that failed.
 	werr error
+	// held is what the program holds of the Input bound.
+	held int
 }
 
 // errorf writes a message as the program's own, "name: message".
@@ -446,9 +556,31 @@ func (p *proc) abs(name string) string { return clean(p.dir, name) }
 // readInput is a file the program reads, or its standard input for "-".
 func (p *proc) readInput(name string) ([]byte, error) {
 	if name == "-" {
-		return io.ReadAll(p.stdin)
+		return p.readStdin()
 	}
 	return p.s.files.read(p.ctx, p.abs(name))
+}
+
+// readStdin is the program's standard input, held until the program is
+// done.
+func (p *proc) readStdin() ([]byte, error) {
+	var data []byte
+	chunk := make([]byte, 32<<10)
+	for {
+		n, err := p.stdin.Read(chunk)
+		if n > 0 {
+			if !p.hold(n) {
+				return nil, errStopped
+			}
+			data = append(data, chunk[:n]...)
+		}
+		if errors.Is(err, io.EOF) {
+			return data, nil
+		}
+		if err != nil {
+			return data, err
+		}
+	}
 }
 
 // stdinIsFile reports whether the program's standard input is a file a
