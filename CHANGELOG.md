@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.22.5 - 2026-10-30
+
 ### Added
 
 - **A secret's delete can name the version it was decided on.**
