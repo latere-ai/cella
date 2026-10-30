@@ -341,10 +341,46 @@ func TestWordsAndVariablesAreBounded(t *testing.T) {
 }
 
 func TestPrintfIsBounded(t *testing.T) {
+	held := fmt.Sprintf("printf: more than %d bytes held at once", DefaultInput)
 	res := bounded(t, filesFS(), Request{Command: "printf '" + strings.Repeat("%999999d", 40) + "' 1"}, 32<<20)
-	stops(t, res, fmt.Sprintf("printf: more than %d bytes held at once", DefaultInput))
-	res = bounded(t, filesFS(), Request{Command: "printf; printf '%z'; printf '%0100000000d\\n' 1 | wc -c; printf '%5d|%-3s|\\n' 42 a b"}, 32<<20)
-	if want := "usage: printf format [arguments]\ninvalid format char: z\n26\n   42|a  |\n    0|   |\n"; res.ExitCode != 0 || string(res.Output) != want {
+	stops(t, res, held)
+	// A field wider than Go's fmt pads is printed as GNU's printf prints
+	// it, up to the Input bound, and past it stops the line.
+	m := filesFS()
+	for _, line := range []string{
+		"printf '%0100000000d' 0",
+		"printf '%0100000000d' 0 > f",
+		"printf '%-100000000s|' a > f",
+		"printf '%099999999999999999999999d' 0",
+	} {
+		res := bounded(t, m, Request{Command: line}, 8<<20)
+		stops(t, res, held)
+		if strings.Contains(string(res.Output), "%!") {
+			t.Errorf("%q printed fmt's error: %q", line, res.Output)
+		}
+		if _, ok := m.files["/memory/user/f"]; ok {
+			t.Errorf("%q wrote f", line)
+		}
+	}
+	res = bounded(t, m, Request{Command: "printf '%02000000d\\n' -5 | wc -c; printf '%02000000d' -5 | cut -c1-4; printf '%+2000000d|' 5 | cut -c1999998-; " +
+		"printf '%-2000000s|\\n' é | wc -c; printf '%5s|%-4s|%03s|\\n' é é é; printf '%%0100000000d\\n'"}, 64<<20)
+	if want := "2000001\n-000\n +5|\n2000002\n   é|é  |0é|\n%0100000000d\n"; res.ExitCode != 0 || string(res.Output) != want {
+		t.Errorf("got exit %d and %q, want %q", res.ExitCode, res.Output, want)
+	}
+	// A pass as long as the Input bound is written; one byte more stops.
+	small := Limits{Input: 4 << 20}
+	res = bounded(t, m, Request{Command: "printf '%04194304d' 7 > f", Limits: small}, 32<<20)
+	if f, ok := m.files["/memory/user/f"]; res.ExitCode != 0 || !ok || len(f.data) != 4<<20 || !strings.HasSuffix(string(f.data), "007") {
+		t.Errorf("got exit %d and %q, and the file %v", res.ExitCode, res.Output, ok)
+	}
+	delete(m.files, "/memory/user/f")
+	res = bounded(t, m, Request{Command: "printf 'a%04194304d' 7 > f", Limits: small}, 32<<20)
+	stops(t, res, "printf: more than 4194304 bytes held at once")
+	if _, ok := m.files["/memory/user/f"]; ok {
+		t.Errorf("a pass past the bound wrote f")
+	}
+	res = bounded(t, filesFS(), Request{Command: "printf; printf '%z'; printf '%5d|%-3s|\\n' 42 a b"}, 32<<20)
+	if want := "usage: printf format [arguments]\ninvalid format char: z\n   42|a  |\n    0|   |\n"; res.ExitCode != 0 || string(res.Output) != want {
 		t.Errorf("got exit %d and %q", res.ExitCode, res.Output)
 	}
 }

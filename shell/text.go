@@ -13,8 +13,6 @@ import (
 	"syscall"
 	"unicode"
 	"unicode/utf8"
-
-	"mvdan.cc/sh/v3/expand"
 )
 
 // echo is dash's: -n alone as the first argument leaves out the newline,
@@ -46,58 +44,34 @@ func echo(p *proc, args []string) int {
 // printf is the shell's printf, run as one of the package's programs so
 // its output passes the line's bounds: the format is applied to the
 // arguments until they are used, as the interpreter's own applies it.
+// Each pass is held whole while it is made, so a field wider than the
+// Input bound stops the line before it is made.
 func printf(p *proc, args []string) int {
 	if len(args) == 0 {
 		p.eprintf("usage: printf format [arguments]\n")
 		return 2
 	}
 	format, args := args[0], args[1:]
-	// One pass of the format is made whole before it is written.
-	if !p.hold(formatSize(format, args)) {
-		return 1
-	}
 	for {
-		s, n, err := expand.Format(nil, format, args)
+		var f formatted
+		n, err := f.format(format, args, true)
 		if err != nil {
 			p.eprintf("%v\n", err)
 			return 1
 		}
-		p.write([]byte(s))
+		size := f.size(p.s.budget.lim.Input)
+		if !p.hold(size) {
+			return 1
+		}
+		out := f.render()
+		// What the pass is written to holds it from here.
+		p.release(size)
+		p.write(out)
 		args = args[n:]
 		if n == 0 || len(args) == 0 {
 			return 0
 		}
 	}
-}
-
-// maxWidth is the widest field Go's fmt pads to; it prints a wider one's
-// width as an error.
-const maxWidth = 1e6
-
-// formatSize bounds how long one pass of a printf format can be: the
-// format, every argument, and every directive's width.
-func formatSize(format string, args []string) int {
-	n := len(format)
-	for _, a := range args {
-		n += len(a)
-	}
-	for i := 0; i < len(format); i++ {
-		if format[i] != '%' {
-			continue
-		}
-		j := i + 1
-		for j < len(format) && strings.IndexByte("+- ", format[j]) >= 0 {
-			j++
-		}
-		width := 0
-		for ; j < len(format) && format[j] >= '0' && format[j] <= '9'; j++ {
-			width = min(width*10+int(format[j]-'0'), maxWidth+1)
-		}
-		if width <= maxWidth {
-			n += width
-		}
-	}
-	return n
 }
 
 // writeEscaped writes s with dash echo's escapes read, and reports a \c.
