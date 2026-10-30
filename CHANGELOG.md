@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.22.4 - 2026-10-30
+
 ### Added
 
 - **`CELLA_K8S_HOME` makes the images' home directory writable on
