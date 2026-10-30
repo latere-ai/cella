@@ -99,8 +99,9 @@ on.
 `Request` carries the line, the directory it starts in, `$0` (the name
 the shell's messages begin with), the number of the line's first line
 for a caller whose shell runs a line of its own first, the owner `ls -l`
-prints, the time `ls -l` tells a recent file by, and the most output
-kept (64 MiB by default, a machine's bound). `Result` is the output,
+prints, the time `ls -l` tells a recent file by, the most output
+kept (64 MiB by default, a machine's bound), and the `Limits` the line
+runs under (below). `Result` is the output,
 standard output and standard error in the order written, the exit
 status, the directory the line ended in, and whether output was dropped.
 
@@ -126,6 +127,7 @@ otherwise one of:
 | `path` | a path no mount serves, or a relative path while the directory is not served |
 | `expansion` | a value known only once something has run: command substitution, a variable the line does not set, `~`, `$1`, a value that may split, or a value in an option's place |
 | `construct` | a construct the package does not run: brace expansion, which dash leaves as it is; a background job; a function definition; `<>`; `$'…'`; a `cd` inside a loop, a pipe or a `case` |
+| `size` | a line past the sizes the package runs (below): longer than 64 KiB, nested deeper than 64, a command of more than 16 expansions, or more than 32 pipes |
 
 A program's arguments are read as the program reads them, with a
 placeholder for a value known only at run time, so its paths are told
@@ -154,8 +156,10 @@ pipefail` does not exist, and the shell's own messages read as dash
 writes them, `$0: LINE: …`.
 
 The builtins are `cd`, `pwd`, `echo`, `printf`, `test` and `[`, `true`,
-`false`, `:`, `exit`, `set` (`-e`, `-u`, `-x`, and `-o` with `errexit`,
-`nounset`, `xtrace`), `read` (`-r`), `break` and `continue`. `if`,
+`false`, `:`, `exit`, `set` (`-e`, `-u`, `+x`, and `-o` with `errexit`
+and `nounset`), `read` (`-r`), `break` and `continue`. The trace, `set
+-x`, is refused: it would print the commands the bounds below add to a
+line. `if`,
 `for`, `while`, `until`, `case`, `&&`, `||`, `!`, pipes, subshells and
 groups run as the interpreter runs them.
 
@@ -190,6 +194,76 @@ Redirections `>`, `>>`, `>|`, `<`, here documents, `N>&M` and `N>&-`
 run over the file system. A file a redirection writes is written once,
 when its command is done.
 
+### What a line takes of the process
+
+A line runs inside the caller's process, which serves other lines and
+other callers at the same time, so what a line can take of it is
+bounded whatever the line holds. A sandbox bounds a line by its own
+memory and CPU; here the bounds are the package's. A line that reaches
+one stops where it is, with a message in the shell's form (`$0: LINE:
+the line ran more than 50000 steps`) and status 2, and `Run` returns no
+error: the line ran, and what it changed before the bound stays
+changed. It is never handed elsewhere halfway, for the reason a line
+never moves to a sandbox halfway. A caller whose context ends still gets
+the context's error.
+
+Before anything runs, `Check` refuses a line past these sizes as
+`size`; they bound what the parser and the interpreter take before any
+other bound is checked:
+
+| Size | Bound | Why |
+|---|---|---|
+| `MaxLine` | 64 KiB | everything below grows with the line |
+| `MaxDepth` | 64 | the parser's stack grows with nesting: 50 000 nested `$((` take 256 MB of stack, 50 000 `(` 66 MB, a 64 KiB line of nested `if` 8 MB. Brackets, `if`, `while`, `until`, `for`, `case` and the `&&`, `||` and `\|` of one list are counted on the text before it is parsed, and compound commands again on the parsed line |
+| `MaxExpansions` | 16 | one command's words are made in full before any bound sees them: 16 expansions of a value at the value bound is 4 MiB. Counted over a command's words, assignments, redirections and here documents, a `for` list, a `case` word and one item's patterns; a word with an unquoted wildcard counts as one |
+| `MaxPipes` | 32 | every pipe, here document and `<` is a pipe of the process while its command runs |
+
+While a line runs, `Limits` bound it; a caller passes its own or takes
+the defaults:
+
+| Limit | Default | What it bounds |
+|---|---|---|
+| `Steps` | 50 000 | statements, commands, calls and loop turns. The interpreter asks its context before each, so the count is taken there, and a loop that calls nothing, `while x=1; do y=2; done`, is counted too. `while :; do :; done` stops in about 7 ms |
+| `Time` | 10 s | the line's own deadline, apart from the caller's context, so a line stuck on a slow file system stops too |
+| `Value` | 256 KiB | one variable's value and one word of a command |
+| `Values` | 1 MiB | the line's variables together, and one command's words together |
+| `Input` | 16 MiB | what the line's programs hold at once: their standard input, the files `sort` sorts, the output a program keeps until it is done, a redirection's file until its command is done, one pass of a `printf` format, and one line through a pipe or a `<`, which whatever reads it holds whole |
+| `Read` | 64 MiB | the bytes of files the line reads |
+| `Names` | 50 000 | the directory entries the line lists, by its patterns and its programs |
+
+The words of every command are checked before it runs, and the
+variables with them. An assignment alone calls no command, so `Run`
+follows each statement that only assigns with a check of its own, run
+as `true` so the assignment's status stands; that is why the trace is
+refused. `printf` runs as one of the package's programs rather than the
+interpreter's builtin, so its output is counted like any program's.
+`read` takes a line byte by byte, about a megabyte a second, so a line
+read whole into a variable is bounded by `Input` through the pipe and
+by `Time`, and the variable by `Value` once the next command runs.
+
+The defaults are sized for folders of notes: a line over a folder of
+2 000 files of up to a megabyte each lists, reads and sorts them well
+inside every bound. `x=a; for i in
+1 … 25; do x=$x$x; done` stops at `x` past 256 KiB, having allocated
+under 2 MB; without the bounds it allocated 110 MB in 17 ms.
+
+The alternatives considered:
+
+- **Send loops to a sandbox.** `Check` could refuse every loop, so the
+  only unbounded construct runs where it always did. It bounds nothing
+  else: one command's expansions, a pipe into `sort`, a pattern over a
+  large folder and a nested line take memory without a loop, and a
+  `for` over a folder's files is the commonest loop a line over notes
+  has. The bounds cover all of them and keep the loop.
+- **Only the caller's deadline.** A context bounds time, not memory:
+  the doubling above reaches 110 MB long before any tool timeout.
+- **A memory limit on the process.** Go has a soft limit for the whole
+  process, not for one line, and a line that reaches it slows every
+  other line instead of stopping.
+- **Counting steps in the call handler alone.** A loop that only
+  assigns calls no handler; the interpreter's context is asked at every
+  statement and loop turn, so the count is taken there.
+
 ### What differs from a sandbox's shell
 
 Each of these is a deliberate limit, and none reaches outside the
@@ -214,6 +288,9 @@ mounts:
 - `ls -l` shows a directory's size and link count as a disk does,
   4096 and two plus its subdirectories, and the owner the request
   names.
+- A line stops on a bound of the section above where a sandbox would
+  have run on until its memory or the tool's timeout ran out; `set -x`
+  is refused.
 
 ### Tested against GNU
 
@@ -270,3 +347,13 @@ side, and it is not built here:
 7. An `*Explained` error is printed with its words.
 8. The package's build list is the standard library and the rows of
    `arch_test.go`.
+9. Each of these stops within a few seconds, with the bound's message,
+   status 2 and a bounded allocation: a value doubled by assignment,
+   straight and in a loop that calls nothing; a value doubled by `read`
+   from a here document, and a long line read through a pipe and a `<`;
+   a pipe into `sort` and into `uniq`; an endless loop, and one past the
+   time bound; a pattern over a folder of 2 000 files in a loop; a
+   redirection that grows; words and variables past their bounds; and a
+   `printf` of wide fields. A line nested past `MaxDepth`, wider than
+   `MaxExpansions` or past `MaxLine` is refused as `size` in under a
+   second.
