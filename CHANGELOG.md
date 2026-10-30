@@ -29,7 +29,10 @@ refused before it is pushed.
   and GNU's `ls`, `cat`, `head`, `tail`, `wc`, `grep`, `find`, `sort`,
   `uniq`, `cut`, `mkdir`, `rm`, `mv`, `cp` and `touch`. A line that needs
   another program or a path you do not serve is refused before anything
-  runs, with the reason, so you run it in a sandbox as before. See
+  runs, with the reason, so you run it in a sandbox as before. A line
+  runs within bounds on its steps, time, values and the bytes it holds,
+  reads and lists, which you can set in `Request.Limits`; one that
+  reaches a bound stops with a message and status 2. See
   [docs/shell.md](docs/shell.md).
 
 ## v0.22.4 - 2026-10-30

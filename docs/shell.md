@@ -59,7 +59,7 @@ mounts := []shell.Mount{
 
 if plan := shell.Check(line, dir, mounts); !plan.OK() {
 	// plan.Reason says why: "program", "path", "option", "expansion",
-	// "construct" or "syntax"; plan.Program names the program.
+	// "construct", "size" or "syntax"; plan.Program names the program.
 	return runInSandbox(line)
 }
 
@@ -98,7 +98,10 @@ and an error reads `/bin/sh: 1: cannot create x: Read-only file system`.
 
 A line is refused when it needs anything else: another program, a path
 you do not mount, a command substitution, a variable it did not set, an
-option a program does not take, a background job, or brace expansion.
+option a program does not take, a background job, brace expansion, or
+`set -x`. A line is refused as `size` when it is longer than 64 KiB,
+nests deeper than 64, has a command with more than 16 expansions, or
+has more than 32 pipes.
 
 Where the package differs from a sandbox's shell: `grep` has no
 back-references, `find` and `grep -r` visit names in sorted order,
@@ -106,11 +109,37 @@ back-references, `find` and `grep -r` visit names in sorted order,
 refuse a directory a mount is at, or one that holds a mount, before
 touching anything under it.
 
+## Bounds
+
+A line runs inside your process, so what it can take is bounded
+whatever it holds. A line that reaches a bound stops where it is, with
+the shell's kind of message and status 2:
+
+```text
+/bin/sh: 1: the line ran more than 50000 steps
+```
+
+`Run` answers that as a line that ran, with no error: what it changed
+before the bound stays changed. Set your own in `Request.Limits`; a
+field left zero takes the default.
+
+| Limit | Default | Bounds |
+|---|---|---|
+| `Steps` | 50 000 | the statements, commands and loop turns a line runs |
+| `Time` | 10 s | how long a line runs, apart from your context |
+| `Value` | 256 KiB | one variable's value, one word of a command |
+| `Values` | 1 MiB | the line's variables together, one command's words together |
+| `Input` | 16 MiB | what the line's programs hold at once: standard input, the files `sort` sorts, a program's output until it is done, a redirection's file, one line through a pipe |
+| `Read` | 64 MiB | the bytes of files a line reads |
+| `Names` | 50 000 | the directory entries a line lists |
+
+Output past `Request.MaxOutput` (64 MiB by default) is dropped, and
+`res.Truncated` says so. Pick it near what you show of a result.
+
 ## Safety
 
 No program of the host runs and no file of the host is opened,
 whatever the line holds: every file operation is a call of your `FS`,
 for a path under a mount. The environment is the package's own, so no
 variable of your process can be printed. A context that ends stops the
-line between operations, and output past `Request.MaxOutput` (64 MiB by
-default) is dropped.
+line between operations, and `Run` answers the context's error.
