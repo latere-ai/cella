@@ -228,7 +228,7 @@ the defaults:
 |---|---|---|
 | `Steps` | 50 000 | statements, commands, calls and loop turns. The interpreter asks its context before each, so the count is taken there, and a loop that calls nothing, `while x=1; do y=2; done`, is counted too. `while :; do :; done` stops in about 7 ms |
 | `Time` | 10 s | the line's own deadline, apart from the caller's context, so a line stuck on a slow file system stops too |
-| `Value` | 256 KiB | one variable's value and one word of a command |
+| `Value` | 256 KiB | one variable's value, one word of a command, and the line a `read` reads |
 | `Values` | 1 MiB | the line's variables together, and one command's words together |
 | `Input` | 16 MiB | what the line's programs hold at once: their standard input, the files `sort` sorts, the output a program keeps until it is done, a redirection's file until its command is done, one pass of a `printf` format, and one line through a pipe or a `<`, which whatever reads it holds whole |
 | `Read` | 64 MiB | the bytes of files the line reads |
@@ -243,10 +243,28 @@ read as they do in dash; that is why the trace is refused. A negated
 `read` is not followed, since under `set -e` the check would end the
 line on the status the negation turned; the next command checks its
 value. `printf` runs as one of the package's programs rather than the
-interpreter's builtin, so its output is counted like any program's.
-`read` takes a line byte by byte, about a megabyte a second, so a line
-read whole into a variable is bounded by `Input` through the pipe or
-the `<`, and by `Time`.
+interpreter's builtin, so its output is counted like any program's, and
+each pass of its format is held whole before it is made. Go's `fmt`,
+which makes its fields, refuses a width much past a million and prints
+its own error text in the field's place, so the package pads every field
+itself, to its width in bytes as GNU's `printf` does: `printf
+'%02000000d' 0` writes two million zeros, and a field wider than `Input`
+stops the line with `Input`'s message before anything is made, its
+redirection's file unwritten.
+
+`read` runs as one of the package's programs too. The interpreter's
+reads a byte per system call, about 0.75 µs a byte, so a 16 MiB line
+with no break took 12 s in one statement before any bound could see the
+variable it made. The package's reads a block at a time, keeps what it
+read past its line for whatever reads the same input next, `cat` after
+`read` in `{ read -r a; cat; } < f` among them, and stops the line once
+its line passes `Value`, since the line becomes a variable: that 16 MiB
+line stops in a few milliseconds, through a `<`, a pipe or a `while
+read`. It splits a line as the interpreter's does, keeping every byte
+where the interpreter's made a byte that is no UTF-8 a replacement
+character, and drops a NUL, as dash does. The interpreter sets a
+variable only by a statement it runs, so the values are set by an
+assignment it parses, quoted to be read back byte for byte.
 
 `Time` and `Steps` are taken between statements; one statement runs to
 its end. The sizes bound what one statement can cost: the worst found
@@ -276,6 +294,15 @@ The alternatives considered:
 - **Counting steps in the call handler alone.** A loop that only
   assigns calls no handler; the interpreter's context is asked at every
   statement and loop turn, so the count is taken there.
+- **Bounding the line a `read` is given, and keeping the interpreter's
+  `read`.** The writer of a `<` or a pipe could stop a line at `Value`
+  when its reader is a `read`. The system call a byte stays: a `while
+  read` over lines of 1 KiB took 3.9 s before `Steps` stopped it, where
+  the package's takes under 100 ms.
+- **Stopping a `printf` field wider than a million.** Simpler, but a
+  field of two million bytes is well inside `Input`, GNU's `printf`
+  prints it, and the stop's message would name a bound the line did not
+  reach.
 
 ### What differs from a sandbox's shell
 
@@ -371,3 +398,14 @@ side, and it is not built here:
    `MaxExpansions`, with a pattern past `MaxStars` or past `MaxLine` is
    refused as `size` in under a second. A `read` keeps its status in
    `while`, `||`, `!` and under `set -e`.
+10. A line of 16 MiB with no break, read by `read` through a `<`, a
+    pipe or a `while read`, stops in under a second with `read: a line
+    longer than 262144 bytes`, status 2 and a bounded allocation. What a
+    `read` leaves of its input is what the next reader of it reads, and
+    a value read is the line's bytes as they are.
+11. `printf` makes what the interpreter's makes for every format whose
+    widths Go's `fmt` pads, but pads a field to its width in bytes, as
+    GNU's `printf` does, where `fmt` counts characters, and it never
+    prints `fmt`'s error text. A field under `Input` is padded however
+    wide; one past it stops the line with `Input`'s message and status
+    2, and its redirection's file is not written.
