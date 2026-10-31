@@ -34,7 +34,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: upstream
-          image: docker.io/library/alpine:3.22
+          image: docker.io/library/alpine:3.24
           command: ["nc", "-lk", "-p", "8080", "-e", "cat"]
           ports:
             - name: echo
