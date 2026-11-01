@@ -290,9 +290,10 @@ control plane and serves two doors to sandboxes.
 
 | Variable | Default | What it is |
 |---|---|---|
-| `CELLA_URL` | required | the control plane's address, with its path when it is served under one. `--url` overrides it |
+| `CELLA_URL` | required | the control plane's address, with its path when it is served under one. `--url` overrides it. `http://` is accepted on loopback only, as for the worker, unless `CELLA_INSECURE_CONTROL_PLANE` is set |
 | `CELLA_TOKEN` | unset | the bearer to send. `--token` overrides it |
 | `CELLA_TOKEN_FILE` | `/run/cella/token` | a file holding the bearer, read on every request, used when `CELLA_TOKEN` is unset. `--token-file` overrides it |
+| `CELLA_INSECURE_CONTROL_PLANE` | unset | as for the worker |
 
 ## Set inside a sandbox
 

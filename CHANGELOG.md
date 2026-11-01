@@ -13,6 +13,10 @@ refused before it is pushed.
   parent to what a spawned child needs; a CPU, memory or disk ceiling
   lowered below what a child was granted was accepted instead of refused
   with `boundary_exceeded`, naming the child.
+- **`client.New` refuses a non-loopback `http://` control plane address,
+  as the worker and the gateway already did.** `Config.Insecure`, which
+  `client.Environment` sets from `CELLA_INSECURE_CONTROL_PLANE`, is the
+  explicit consent; loopback and `https://` need neither.
 
 ### Changed
 

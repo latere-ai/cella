@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -16,6 +17,10 @@ const (
 	URLEnv       = "CELLA_URL"
 	TokenEnv     = "CELLA_TOKEN"
 	TokenFileEnv = "CELLA_TOKEN_FILE"
+	// InsecureEnv is the escape hatch the worker and the gateway also read:
+	// the explicit consent to an http:// CELLA_URL off loopback. Nothing
+	// an installation runs sets it.
+	InsecureEnv = "CELLA_INSECURE_CONTROL_PLANE"
 )
 
 // DefaultTokenPath is where a driver projects a sandbox's own token
@@ -103,7 +108,8 @@ func Environment(getenv func(string) string) Config {
 	if getenv == nil {
 		getenv = os.Getenv
 	}
-	cfg := Config{URL: getenv(URLEnv)}
+	insecure, _ := strconv.ParseBool(getenv(InsecureEnv))
+	cfg := Config{URL: getenv(URLEnv), Insecure: insecure}
 	switch token, file := getenv(TokenEnv), getenv(TokenFileEnv); {
 	case token != "":
 		cfg.Token = StaticToken(token)

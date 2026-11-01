@@ -79,6 +79,10 @@ type Config struct {
 	// UserAgent is the identity every request carries, DefaultUserAgent
 	// when empty.
 	UserAgent string
+	// Insecure admits a control plane URL that is http:// on a host other
+	// than loopback. Environment sets it from CELLA_INSECURE_CONTROL_PLANE;
+	// nothing else should, because the bearer would travel in the clear.
+	Insecure bool
 }
 
 // Client speaks /v1. It is safe for concurrent use.
@@ -100,6 +104,10 @@ func New(cfg Config) (*Client, error) {
 	if err != nil || base.Host == "" || (base.Scheme != "http" && base.Scheme != "https") {
 		return nil, fmt.Errorf("%s is no http or https address", cfg.URL)
 	}
+	if base.Scheme == "http" && !cfg.Insecure && !isLoopbackHost(base.Hostname()) {
+		return nil, fmt.Errorf("%s is http:// on a host that is not loopback; the bearer would travel in the clear, "+
+			"and CELLA_INSECURE_CONTROL_PLANE=1 is the explicit consent", cfg.URL)
+	}
 	base.Path = strings.TrimSuffix(base.Path, "/")
 	carrier := cfg.HTTPClient
 	if carrier == nil {
@@ -110,6 +118,13 @@ func New(cfg Config) (*Client, error) {
 		agent = DefaultUserAgent
 	}
 	return &Client{base: base, http: carrier, token: cfg.Token, agent: agent}, nil
+}
+
+// isLoopbackHost mirrors the rule the worker and the gateway hold their own
+// CELLA_URL to (internal/config.checkControlPlaneURL): loopback is the one
+// address an operator reaches without consenting to plaintext.
+func isLoopbackHost(host string) bool {
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
 }
 
 // transport is the package's own: it reads no proxy and no trust-store

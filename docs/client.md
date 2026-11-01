@@ -65,7 +65,11 @@ c, err := client.New(client.Environment(os.Getenv))
 `CELLA_TOKEN`, else from the file `CELLA_TOKEN_FILE` names, else from
 `/run/cella/token`. It is the same order the `cella` command uses.
 `client.New` never reads the environment by itself, and refuses a
-configuration with no address.
+configuration with no address, or with an `http://` address on a host
+that is not loopback, as the worker and the gateway also refuse theirs.
+`client.Environment` sets `Config.Insecure` from
+`CELLA_INSECURE_CONTROL_PLANE`, the same explicit consent they read; a
+caller that builds a `Config` itself sets `Insecure` directly.
 
 ### Your own HTTP client
 
