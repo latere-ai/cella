@@ -486,6 +486,15 @@ func TestParentCannotBeNarrowedBelowAChild(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), first.Status.ID) {
 		t.Fatalf("narrowing below a live child answered %v, want a refusal naming %s", err, first.Status.ID)
 	}
+
+	// Update is the route an apply actually takes, and it runs the same
+	// check before anything else: a direct call to NarrowingRefusal proves
+	// the rule, and a call to Update proves the rule is reached from
+	// there, ahead of the resize this driver does not support after
+	// create.
+	if _, err = c.Update(ctx, below); err == nil || !strings.Contains(err.Error(), first.Status.ID) {
+		t.Fatalf("Update narrowing below a live child answered %v, want a refusal naming %s", err, first.Status.ID)
+	}
 }
 
 // refusingCreate is a driver whose Create can be made to refuse, so the undo

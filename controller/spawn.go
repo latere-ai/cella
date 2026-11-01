@@ -270,6 +270,12 @@ func (c *Controller) Tree(root string) []v1.Sandbox {
 func (c *Controller) NarrowingRefusal(updated v1.Sandbox) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	return c.narrowingRefusal(updated)
+}
+
+// narrowingRefusal is NarrowingRefusal without the lock, for a caller that
+// already holds it, such as Update.
+func (c *Controller) narrowingRefusal(updated v1.Sandbox) error {
 	now := c.clock.Now().UTC()
 	for _, child := range c.descendants(updated.Status.ID) {
 		if child.Status.Parent != updated.Status.ID {

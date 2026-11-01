@@ -1724,6 +1724,12 @@ func (c *Controller) Update(ctx context.Context, obj v1.Sandbox) (v1.Sandbox, er
 		return v1.Sandbox{}, ErrNotFound
 	}
 	obj.Status = clone(held).Status
+	// A live descendant's boundary is its parent's to keep: an update that
+	// would leave one outside is refused before anything else runs, so a
+	// refusal here leaves nothing to put back.
+	if err := c.narrowingRefusal(obj); err != nil {
+		return v1.Sandbox{}, err
+	}
 	boundary, err := c.pushEgress(ctx, &obj)
 	if err != nil {
 		return v1.Sandbox{}, c.restoreEgress(ctx, held, obj, err)

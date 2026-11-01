@@ -6,6 +6,14 @@ refused before it is pushed.
 
 ## Unreleased
 
+### Fixed
+
+- **An update that would leave a live child outside its parent's boundary
+  is refused.** `Controller.Update` never called the check that holds a
+  parent to what a spawned child needs; a CPU, memory or disk ceiling
+  lowered below what a child was granted was accepted instead of refused
+  with `boundary_exceeded`, naming the child.
+
 ### Changed
 
 - **Releases are built, signed and published by the shared release stages
