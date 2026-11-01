@@ -14,7 +14,7 @@ depends_on:
 affects: [test/stubs/, test/e2e/, test/conformance/, Makefile, Dockerfile.stubs, .github/workflows/, deploy/examples/kind/, internal/config/]
 effort: medium
 created: 2026-09-12
-updated: 2026-10-19
+updated: 2026-11-01
 author: changkun
 ---
 
@@ -174,7 +174,7 @@ conformance tier runs ([[015-conformance-suite]]).
 | The native tier creates, execs, stops, and deletes through the API with events at the sink | `TestNativeLifecycle` | not built |
 | The postgres tier recovers a lost sandbox after a `cellad` restart and passes the store suite | `TestPostgresRecovery` | not built |
 | The local tier reaches the upstream through the gateway with its placeholder substituted and cannot reach an unlisted host; the sandbox runtime's policy names only the gateway | `TestLocalEgress` | not built |
-| The worker tier runs the lifecycle on the worker's environment while the worker opens no listening socket and `cellad` opens no connection toward it | `TestWorkerLifecycle`, `TestWorkerNoInbound` | not built |
+| The worker tier runs the lifecycle on the worker's environment while the worker opens no listening socket and `cellad` opens no connection toward it | `TestWorkerLifecycle`, `TestWorkerNoInbound` | not built: `TestWorkerLifecycle` under this tier is still open, but the no-inbound half is proved two other ways while this tier waits on it: `TestWorkerNoInbound` in `cmd/cellad`, beside `TestWorkerEndToEnd`, drives the real `cellad worker` role over loopback and holds the process's own listening sockets through a full create, exec, stop and delete; and `TestClusterWorkerNoInbound` ([[013-security-and-threat-model]]) proves it again on the kind stack's worker Environment, behind a NetworkPolicy admitting no ingress at all |
 | The podman tier runs the lifecycle and the driver's conformance suite rootless | `TestPodmanConformance` through `make tier-podman` | the driver's suite runs rootless in `verify` and in the release pipeline (048, 049); the API lifecycle over podman waits on `test/e2e` |
 | The kind tier runs the lifecycle with a Pod and a PVC observed, through enforced policy, on both the in-process environment and the worker's; `up.sh` and `down.sh` leave nothing behind | `TestClusterLifecycle` over `deploy/examples/kind-stubs` | passing for the in-process environment (049): create, ready, exec, delete and the records at the sink, with `up.sh` and `down.sh` as the overlay's own; the stack runs `cellad egress` with a key `up.sh` mints at the control plane and an echo upstream, and `TestClusterEgressBoundary`, `TestClusterNoLateralMovement` and `TestClusterMeshReachability` hold the policy the driver writes, which kind's own network plugin enforces from kind 0.24 on, so no Cilium is installed ([[070-k8s-egress]]). The worker's half waits on the worker tier |
 | Every tier binds `:0`, keeps state under `t.TempDir()`, tears down its containers, and leaves no `srt-mux-*.sock` | `TestTiersAreIsolated` | not built |

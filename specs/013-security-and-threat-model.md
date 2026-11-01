@@ -20,7 +20,7 @@ depends_on:
 affects: [internal/auth/, internal/api/, internal/egressd/, internal/worker/, internal/store/, runtime/, egress/, controller/, manifest/, deploy/, test/e2e/, SECURITY.md]
 effort: medium
 created: 2026-09-12
-updated: 2026-10-29
+updated: 2026-11-01
 author: changkun
 ---
 
@@ -64,20 +64,24 @@ Built:
   v0.6.0).
 - The gateway refuses a request inside a terminated tunnel whose `Host`
   or `:authority` names another authority, with `421` (v0.9.1).
+- The k8s driver's Pod baseline read back from a running container
+  (`id`, `/proc/1/status`, a refused mount and a refused write), a
+  workload token's four tries against its own boundary, the
+  control plane URL rule held by the client as the worker and the
+  gateway already hold it, and the worker tier's no-inbound proof on
+  both the loopback tier and the kind stack, with a NetworkPolicy
+  admitting no ingress at all.
 
 Open:
 
-- Sixteen controls whose test is not written, listed in
+- Thirteen controls whose test is not written, listed in
   `pendingControls`: among them the rate limits, body caps, handler
-  order and route actions of [[008-api]], the running Pod's baseline and
-  the decorator check of [[004-runtime-contract]], the volume rows of
-  [[019-volumes]], and no inbound toward a worker in
-  [[021-data-plane-workers]]. The rate limits do not exist, so the flood
-  control is a claim.
+  order and route actions of [[008-api]], the decorator check of
+  [[004-runtime-contract]], the volume rows of [[019-volumes]], and a
+  map that reaches one environment in [[021-data-plane-workers]]. The
+  rate limits do not exist, so the flood control is a claim.
 - The second half of the cross-check: that each control's test is named
   by the acceptance criteria of the spec its row names.
-- `TestPodSecurityFields`, `TestWorkloadCannotWiden`,
-  `TestControlPlaneURLRule`, and the worker tier with inbound refused.
 
 ## Design
 
@@ -205,9 +209,9 @@ their specs own.
 |---|---|---|
 | Every row's `Test` cell names a test function `go test -list` finds in the module, and every test named appears in the acceptance criteria of the spec the row's `Spec` cell names | `TestThreatModelControlsHaveTests`, reading this file, and `TestAcceptanceCriteriaNameRealTests` over every spec's acceptance table | built ([[056-contract-evidence]]): the first half holds, with the controls whose test is not written carried as an exact list in the test, which shrinks as each test lands (the port proxy's confinement, `TestPortProxyIsConfined`, left it with [[060-dial-and-port-proxy]]), and about a hundred acceptance rows corrected to the tests that run; the second half, that each test is also named by the acceptance criteria of the spec the Spec cell names, is not built |
 | Every commitment in `SECURITY.md` maps to a control row | `TestSecurityPolicyMatchesTheModel`, reading both files | built ([[056-contract-evidence]]): the policy carries the four commitments as a list and an asset table whose every test exists and is a control of this file |
-| A Pod the k8s driver creates has every field of the baseline, `shareProcessNamespace: false` included | `TestPodSecurityFields`, `TestClusterPodIsConfined` running `id`, `cat /proc/1/status`, and a mount attempt | not built |
+| A Pod the k8s driver creates has every field of the baseline, `shareProcessNamespace: false` included | `TestPodSecurityFields`, `TestClusterPodIsConfined` running `id`, `cat /proc/1/status`, and a mount attempt | built: `TestPodSecurityFields` sweeps a Pod carrying every optional container at once (the home fill, the workload, the desktop) and holds each to `hardened()` and the Pod-level fields; `TestClusterPodIsConfined`, on a real kubelet, reads back a non-root uid, `CapEff` all zeros, `NoNewPrivs`, the filtered seccomp mode, the kept-alive shell as its own PID 1, and a refused mount and a refused write |
 | A sandbox cannot reach another sandbox's IP or the Pod network except a mesh peer's `mesh` port | `TestClusterNoLateralMovement`, `TestClusterMeshReachability`, `TestTheSandboxRuleAdmitsDNSAndTheGateway` | built ([[070-k8s-egress]]): on k8s a sandbox reaches no other sandbox's Pod directly or through the gateway and a mesh member reaches its peers, both on the kind tier; a peer is reached on any port, not on its `mesh` ports alone, and reaching the Pod network through the gateway is refused by the gateway's address rule unless the operator names the range, and by the gateway's own egress rule where the operator writes one |
 | A canary secret value and a canary token appear in no sandbox environment, file system, event, record, log, or API response across the e2e tier, and the value reaches the upstream only in the declared header | `TestSecretValuesNeverEnterASandbox`, `TestWorkloadTokenNeverLeavesItsSandbox` | built ([[046-secret-kind]], [[056-contract-evidence]]): the secret value is followed through the sandbox's environment and files, the control plane's data directory, the delivered events, the connection records, both processes' logs and every API answer, and is read back at the upstream in the header its owner named; the canary token is followed through the same tier, with its own projection as the one file allowed to hold it |
-| A workload token that tries to add a host, mount a secret, spawn past its budget, or narrow its parent below itself is refused with the code named | `TestWorkloadCannotWiden` | not built |
-| A non-loopback `http://` `CELLA_URL` is refused by the worker, the gateway, and the client unless the escape hatch is set | `TestControlPlaneURLRule` | not built |
-| A worker host with inbound refused runs the whole tier | [[012-test-stubs-and-tiers]]'s `TestWorkerNoInbound`, `TestClusterWorkerNoInbound` | not built |
+| A workload token that tries to add a host, mount a secret, spawn past its budget, or narrow its parent below itself is refused with the code named | `TestWorkloadCannotWiden` | built: the four tries, each the narrow case of an existing rule read together; narrowing a parent below a live child was a function never called from `Controller.Update`, fixed to run there before anything else, with `TestParentCannotBeNarrowedBelowAChild` extended to call `Update` and not only the bare method |
+| A non-loopback `http://` `CELLA_URL` is refused by the worker, the gateway, and the client unless the escape hatch is set | `TestControlPlaneURLRule` | built: the worker and the gateway already held the rule; the client held none at all, `client.New` accepting any `http://` host and `client.Environment` never reading the escape hatch, fixed with a `Config.Insecure` field `client.Environment` sets from `CELLA_INSECURE_CONTROL_PLANE` |
+| A worker host with inbound refused runs the whole tier | [[012-test-stubs-and-tiers]]'s `TestWorkerNoInbound`, `TestClusterWorkerNoInbound` | built: `TestWorkerNoInbound` runs the real `cellad worker` role beside `cellad serve` over loopback and holds the process's listening sockets through the whole lifecycle; `TestClusterWorkerNoInbound` runs on the kind stack behind a worker Environment and a NetworkPolicy admitting no ingress at all, staging the release image's one binary onto a small userland so the native driver has a shell to fork |
