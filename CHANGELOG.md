@@ -14,9 +14,12 @@ refused before it is pushed.
   lowered below what a child was granted was accepted instead of refused
   with `boundary_exceeded`, naming the child.
 - **`client.New` refuses a non-loopback `http://` control plane address,
-  as the worker and the gateway already did.** `Config.Insecure`, which
-  `client.Environment` sets from `CELLA_INSECURE_CONTROL_PLANE`, is the
-  explicit consent; loopback and `https://` need neither.
+  as the worker and the gateway already did.** This is a client-visible
+  change: code that built a `Client` against a plain `http://` host other
+  than `localhost` or `127.0.0.1` now gets an error from `New` where it
+  used to connect. Set `Config.Insecure`, or `CELLA_INSECURE_CONTROL_PLANE`
+  for `client.Environment`, as the explicit consent; loopback and
+  `https://` need neither.
 
 ### Changed
 
