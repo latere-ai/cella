@@ -33,6 +33,18 @@ attestation. [SECURITY.md](../SECURITY.md) says how to verify one before
 you run it; the short form is
 
 ```
+cosign verify ghcr.io/<owner>/cellad:<tag> \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity-regexp '^https://github\.com/latere-ai/ci/\.github/workflows/image-build\.yml@' \
+  --certificate-github-workflow-repository <owner>/cella
+gh attestation verify oci://ghcr.io/<owner>/cellad:<tag> --repo <owner>/cella \
+  --signer-workflow latere-ai/ci/.github/workflows/image-build.yml
+```
+
+Releases up to v0.22.5 were signed by this repository's own release
+workflow; verify one of those with
+
+```
 cosign verify --certificate-identity https://github.com/<owner>/cella/.github/workflows/release.yml@refs/tags/<tag> \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com ghcr.io/<owner>/cellad:<tag>
 gh attestation verify oci://ghcr.io/<owner>/cellad:<tag> --repo <owner>/cella

@@ -6,6 +6,7 @@ package cella_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io/fs"
 	"maps"
 	"os"
@@ -158,19 +159,61 @@ func TestReleasePublishesUnderTheOwnersNamespace(t *testing.T) {
 			}
 		}
 	}
-	release, err := os.ReadFile(filepath.Join(".github", "workflows", "release.yml"))
+	// The build stage derives the namespace: the repository variable
+	// RELEASE_IMAGE_NAMESPACE, else the repository owner, lowered. A job
+	// that named one would write it down, and cella's own jobs read the
+	// one the build stage derived.
+	release, _ := releaseWorkflow(t)
+	jobs, _ := release["jobs"].(map[string]any)
+	for name, job := range jobs {
+		if dig(job, "with", "namespace") != nil {
+			t.Errorf("%s names an image namespace; it is the repository owner's, or the repository variable's", name)
+		}
+	}
+	for _, job := range []string{"conformance", "install-release"} {
+		if got := str(dig(jobs, job, "env", "OWNER")); got != "${{ needs.build.outputs.owner }}" {
+			t.Errorf("the %s job reads the namespace from %q and not from the build stage", job, got)
+		}
+	}
+}
+
+// stageDir is where latere-ai/ci keeps the shared release stages the
+// release calls.
+const stageDir = "latere-ai/ci/.github/workflows/"
+
+// releaseWorkflow is release.yml, read as a tree and as text.
+func releaseWorkflow(t *testing.T) (object, string) {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(".github", "workflows", "release.yml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{
-		"GITHUB_REPOSITORY_OWNER",
-		"tr '[:upper:]' '[:lower:]'",
-		"RELEASE_IMAGE_NAMESPACE",
-	} {
-		if !strings.Contains(string(release), want) {
-			t.Errorf("release.yml does not read %s; the namespace is derived and overridable, never written down", want)
-		}
+	var o object
+	if err := unmarshalYAML(data, &o); err != nil {
+		t.Fatal(err)
 	}
+	return o, string(data)
+}
+
+// imageSlot is one image the build stage builds, read from the JSON its
+// slot holds.
+func imageSlot(t *testing.T, release object, slot string) map[string]string {
+	t.Helper()
+	var spec map[string]string
+	if err := json.Unmarshal([]byte(str(dig(release, "jobs", "build", "with", slot))), &spec); err != nil {
+		t.Fatalf("the build stage's %s is not the JSON of an image: %v", slot, err)
+	}
+	return spec
+}
+
+// permissionsOf reads a permissions block as scope to access.
+func permissionsOf(v any) map[string]string {
+	out := map[string]string{}
+	m, _ := v.(map[string]any)
+	for scope, access := range m {
+		out[scope] = str(access)
+	}
+	return out
 }
 
 // coordinates name one deployment of one hosted plane: its host, its
@@ -305,70 +348,147 @@ func TestTheReleaseNamesEveryArtifactItBuilds(t *testing.T) {
 			}
 		}
 	}
-	release, err := os.ReadFile(filepath.Join(".github", "workflows", "release.yml"))
-	if err != nil {
-		t.Fatal(err)
+	release, _ := releaseWorkflow(t)
+	stage := dig(release, "jobs", "build", "with")
+	// The archives are written before any image is built, so Dockerfile.ci
+	// copies the very binaries the archives carry.
+	if got := str(dig(stage, "archives_command")); got != `tools/release/build.sh "$TAG" dist` {
+		t.Errorf("the build stage's archives come from %q, want tools/release/build.sh", got)
 	}
+	after := str(dig(stage, "after_images_command"))
+	for _, want := range []string{
+		// The publish stage attaches every file in dist, and the
+		// unarchived binaries are Dockerfile.ci's alone.
+		"rm -f dist/cellad_linux_amd64 dist/cellad_linux_arm64",
+		// The deploy archive pins the digest the build stage pushed.
+		`digest="${IMAGE_1#*@}"`,
+		`tar -czf "dist/deploy-${TAG}.tar.gz" deploy`,
+	} {
+		if !strings.Contains(after, want) {
+			t.Errorf("the command run after the images does not carry %q", want)
+		}
+	}
+	cellad := imageSlot(t, release, "image_1")
+	if cellad["name"] != "cellad" || cellad["dockerfile"] != "Dockerfile.ci" {
+		t.Errorf("the first image is %q from %q, want cellad from Dockerfile.ci", cellad["name"], cellad["dockerfile"])
+	}
+	if got := str(dig(release, "env", "IMAGE")); got != cellad["name"] {
+		t.Errorf("cella's own jobs pull %q, and the build stage builds %q", got, cellad["name"])
+	}
+	if cellad["version_args"] != "version" || cellad["version_expect"] != "{name} {tag} (" {
+		t.Errorf("cellad is asked for its version with %q and expected to print %q, want `version` and \"{name} {tag} (\"",
+			cellad["version_args"], cellad["version_expect"])
+	}
+	install := jobSteps(t, filepath.Join(".github", "workflows", "release.yml"), "install-release")
 	for _, want := range []string{
 		"deploy-${GITHUB_REF_NAME}.tar.gz",
-		// The four archives of each binary and the deploy archive: the
-		// release-verify job counts them and names them.
-		"for binary in cellad cella; do",
-		`[ "$(grep -c . checksums.txt)" -eq 9 ]`,
+		"cellad_${GITHUB_REF_NAME}_linux_amd64.tar.gz",
+		"cellad_${GITHUB_REF_NAME}_linux_arm64.tar.gz",
 		"cella_${GITHUB_REF_NAME}_linux_amd64.tar.gz",
-		"checksums.txt",
-		"checksums.txt.sigstore.json",
-		"sbom-module.spdx.json",
-		"sbom-cellad.spdx.json",
-		"cosign sign --yes",
-		"cosign verify-blob",
-		"cosign verify ",
-		"gh attestation verify",
+		// One compilation: each platform's cellad in the published image
+		// is the archive's, byte for byte.
+		`cmp "cellad_image_${arch}" "cellad_archive_${arch}"`,
 	} {
-		if !strings.Contains(string(release), want) {
-			t.Errorf("release.yml does not carry %q", want)
+		if !strings.Contains(install, want) {
+			t.Errorf("the install-release job does not carry %q", want)
 		}
 	}
 }
 
 // TestTheReleaseRunsSpec014sJobsInOrder: the pipeline's shape is a
 // criterion of its own, because a job that ran after publish would let an
-// unverified release reach the page.
+// unverified release reach the page. The build stage requires the tag's
+// commit to have passed verify before it builds anything, conformance runs
+// between it and the publish stage, and the install walk and the verify
+// stage run only once the release is published. Each stage is called at one
+// version of them, every job runs on a hosted runner, and each job holds
+// what it does and no more. Signing, attesting and tagging are the stages'
+// alone: the file calls none of those tools itself.
 func TestTheReleaseRunsSpec014sJobsInOrder(t *testing.T) {
-	data, err := os.ReadFile(filepath.Join(".github", "workflows", "release.yml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var o object
-	if err := unmarshalYAML(data, &o); err != nil {
-		t.Fatal(err)
-	}
-	jobs, ok := o["jobs"].(map[string]any)
+	release, text := releaseWorkflow(t)
+	jobs, ok := release["jobs"].(map[string]any)
 	if !ok {
 		t.Fatal("release.yml declares no jobs")
 	}
-	want := map[string][]string{
-		"gate-green":      nil,
-		"build":           {"gate-green"},
-		"conformance":     {"build"},
-		"publish":         {"build", "conformance"},
-		"install-release": {"build", "publish"},
-		"release-verify":  {"build", "publish"},
+	if got := permissionsOf(release["permissions"]); !maps.Equal(got, map[string]string{"contents": "read"}) {
+		t.Errorf("the workflow's token holds %v, want to read the repository alone", got)
 	}
-	for name, needs := range want {
+	want := map[string]struct {
+		stage       string // the shared stage the job calls; empty for cella's own
+		needs       []string
+		permissions map[string]string
+	}{
+		"build": {"image-build.yml", nil,
+			map[string]string{"contents": "read", "actions": "read", "packages": "write", "id-token": "write", "attestations": "write"}},
+		"conformance": {"", []string{"build"},
+			map[string]string{"contents": "read", "packages": "read"}},
+		"publish": {"image-publish.yml", []string{"build", "conformance"},
+			map[string]string{"contents": "write", "packages": "write", "id-token": "write"}},
+		"install-release": {"", []string{"build", "publish"},
+			map[string]string{"contents": "read", "packages": "read"}},
+		"release-verify": {"release-verify.yml", []string{"publish"},
+			map[string]string{"contents": "read", "packages": "read", "attestations": "read"}},
+	}
+	pinned := regexp.MustCompile(`@[0-9a-f]{40}$`)
+	versions := map[string]bool{}
+	for name, w := range want {
 		job, ok := jobs[name].(map[string]any)
 		if !ok {
 			t.Errorf("release.yml has no job %s; spec 014 names it", name)
 			continue
 		}
-		got := needsOf(job["needs"])
-		if strings.Join(got, ",") != strings.Join(needs, ",") {
-			t.Errorf("%s needs %v, and spec 014's order makes it %v", name, got, needs)
+		if got := needsOf(job["needs"]); !slices.Equal(got, w.needs) {
+			t.Errorf("%s needs %v, and spec 014's order makes it %v", name, got, w.needs)
 		}
+		if got := permissionsOf(job["permissions"]); !maps.Equal(got, w.permissions) {
+			t.Errorf("%s holds %v, want %v", name, got, w.permissions)
+		}
+		if dig(job, "secrets") != nil {
+			t.Errorf("%s passes secrets, and nothing it runs reads one", name)
+		}
+		if w.stage == "" {
+			if job["uses"] != nil {
+				t.Errorf("%s calls %v; it is cella's own job", name, job["uses"])
+			}
+			if got := str(job["runs-on"]); got != "ubuntu-latest" {
+				t.Errorf("%s runs on %q, want a hosted runner, ubuntu-latest", name, got)
+			}
+			for _, s := range list(job["steps"]) {
+				if uses := str(dig(s, "uses")); uses != "" && !pinned.MatchString(uses) {
+					t.Errorf("%s uses %s, which is not pinned by commit", name, uses)
+				}
+			}
+			continue
+		}
+		uses := str(job["uses"])
+		stage, version, found := strings.Cut(uses, "@")
+		if !found || stage != stageDir+w.stage || version == "" {
+			t.Errorf("%s uses %q, want the shared stage %s at a version", name, uses, w.stage)
+		}
+		versions[version] = true
+		if job["steps"] != nil {
+			t.Errorf("%s runs steps of its own beside the stage it calls", name)
+		}
+		if got := str(dig(job, "with", "runs_on")); got != "ubuntu-latest" {
+			t.Errorf("%s runs on %q, want a hosted runner, ubuntu-latest", name, got)
+		}
+		for key, value := range permissionsOf(dig(job, "with")) {
+			if strings.HasSuffix(key, "_command") && strings.Contains(value, "${{") {
+				t.Errorf("the %s of %s carries an expression; a value reaches a command through its environment", key, name)
+			}
+		}
+	}
+	if len(versions) != 1 {
+		t.Errorf("the stages are called at %v, want one version of them", slices.Sorted(maps.Keys(versions)))
 	}
 	for name := range jobs {
 		if _, ok := want[name]; !ok {
 			t.Errorf("release.yml has the job %s, which spec 014 does not name", name)
+		}
+	}
+	for _, direct := range []string{"cosign", "anchore/sbom-action", "actions/attest-", "imagetools"} {
+		if strings.Contains(text, direct) {
+			t.Errorf("release.yml names %s; the shared stages sign, attest and tag", direct)
 		}
 	}
 }
@@ -689,79 +809,33 @@ func runBlocks(t *testing.T, doc string) (stdout, stderr string, err error) {
 }
 
 // TestReleasePublishesTheDisplayImage: the desktop image of spec 014 takes
-// the control plane's path. It is built for both architectures and pushed
-// by digest under no tag, signed, given an attested bill of materials and
-// provenance, tagged only in publish, its bill of materials attached, and
-// verified by tag from the clean runner.
+// the control plane's path. The build stage builds it from its own file for
+// both architectures, pushes it by digest under no tag, signs it, and gives
+// it an attested bill of materials and provenance; the conformance job runs
+// that digest; the publish stage tags it with every other image the build
+// made; and the verify stage checks it by tag from the clean runner.
 func TestReleasePublishesTheDisplayImage(t *testing.T) {
-	path := filepath.Join(".github", "workflows", "release.yml")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
+	release, _ := releaseWorkflow(t)
+	display := imageSlot(t, release, "image_2")
+	if display["name"] != "cella-display" {
+		t.Fatalf("the second image is %q, want cella-display", display["name"])
 	}
-	var o object
-	if err := unmarshalYAML(data, &o); err != nil {
-		t.Fatal(err)
+	if got := str(dig(release, "env", "DISPLAY_IMAGE")); got != display["name"] {
+		t.Errorf("cella's own jobs pull %q, and the build stage builds %q", got, display["name"])
 	}
-	if got := str(dig(o, "env", "DISPLAY_IMAGE")); got != "cella-display" {
-		t.Fatalf("the workflow's DISPLAY_IMAGE is %q, want cella-display", got)
+	if display["dockerfile"] != "images/display/Dockerfile" {
+		t.Errorf("the display image is built from %q, want images/display/Dockerfile", display["dockerfile"])
 	}
-	var build, attested []string
-	for _, s := range list(dig(o, "jobs", "build", "steps")) {
-		if str(dig(s, "id")) == "display" {
-			build = append(build, str(dig(s, "run")))
-		}
-		if strings.HasSuffix(str(dig(s, "with", "subject-name")), "/cella-display") {
-			attested = append(attested, str(dig(s, "uses")))
-		}
+	if platforms, ok := display["platforms"]; ok && platforms != "linux/amd64,linux/arm64" {
+		t.Errorf("the display image is built for %s, want linux/amd64 and linux/arm64", platforms)
 	}
-	if len(build) != 1 {
-		t.Fatalf("the build job has %d display steps, want one", len(build))
+	if got := str(dig(release, "jobs", "conformance", "env", "DISPLAY_DIGEST")); got != "${{ needs.build.outputs.digest_2 }}" {
+		t.Errorf("the conformance job runs the display digest %q, not the one the build stage pushed", got)
 	}
-	for _, want := range []string{
-		"-f images/display/Dockerfile",
-		"--platform linux/amd64,linux/arm64",
-		"push-by-digest=true",
-		`echo "digest=${digest}" >> "$GITHUB_OUTPUT"`,
-	} {
-		if !strings.Contains(build[0], want) {
-			t.Errorf("the display build does not carry %q", want)
-		}
+	if got := str(dig(release, "jobs", "publish", "with", "images")); got != "${{ needs.build.outputs.images }}" {
+		t.Errorf("the publish stage tags %q, want every image the build made", got)
 	}
-	if strings.Contains(build[0], "GITHUB_REF_NAME") {
-		t.Error("the display build names the tag; the digest is tagged only in publish")
-	}
-	for _, action := range []string{"actions/attest-sbom@", "actions/attest-build-provenance@"} {
-		if !slices.ContainsFunc(attested, func(uses string) bool { return strings.HasPrefix(uses, action) }) {
-			t.Errorf("the display image is not attested by %s", strings.TrimSuffix(action, "@"))
-		}
-	}
-	if got := str(dig(o, "jobs", "build", "outputs", "display")); got != "${{ steps.display.outputs.digest }}" {
-		t.Errorf("the build job's display output is %q", got)
-	}
-	for job, wants := range map[string][]string{
-		"build": {
-			`cosign sign --yes "${REGISTRY}/${OWNER}/${DISPLAY_IMAGE}@${{ steps.display.outputs.digest }}"`,
-		},
-		"publish": {
-			`-t "${REGISTRY}/${OWNER}/${DISPLAY_IMAGE}:${GITHUB_REF_NAME}"`,
-			`"${REGISTRY}/${OWNER}/${DISPLAY_IMAGE}@${{ needs.build.outputs.display }}"`,
-		},
-		"release-verify": {
-			`for image in "${IMAGE}" "${DISPLAY_IMAGE}"; do`,
-			"cosign verify ",
-			"gh attestation verify",
-			"sbom-cella-display.spdx.json",
-		},
-	} {
-		steps := jobSteps(t, path, job)
-		for _, want := range wants {
-			if !strings.Contains(steps, want) {
-				t.Errorf("the %s job does not carry %q", job, want)
-			}
-		}
-	}
-	if !strings.Contains(string(data), "output-file: dist/sbom-cella-display.spdx.json") {
-		t.Error("the display image's bill of materials is not written into dist, so it is not a release asset")
+	if verified := strings.Fields(str(dig(release, "jobs", "release-verify", "with", "images"))); !slices.Contains(verified, display["name"]) {
+		t.Errorf("the verify stage checks %v, without %s", verified, display["name"])
 	}
 }

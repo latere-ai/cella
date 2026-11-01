@@ -71,7 +71,54 @@ claim, so every control names the test you can read and run yourself.
 ## Supply chain
 
 Dependencies are checked for known vulnerabilities on every push. A release
-carries an SPDX bill of materials for the module graph and one per image,
-signatures over the images and the checksums, and a build provenance
-attestation per image, so `gh attestation verify` answers for the image you
-are about to run.
+is built from a tagged commit whose verify run passed, through the shared
+release stages in [latere-ai/ci](https://github.com/latere-ai/ci). Each
+image is signed by the build stage's identity, run for this repository, and
+carries an SPDX bill of materials and a build provenance attestation, so
+`gh attestation verify` answers for the image you are about to run. The
+release carries the archives, the deploy archive, the bill of materials of
+each image, and `checksums.txt` over all of them, signed by the publish
+stage's identity. To check a release, with `OWNER` the account it was
+published under and `TAG` its tag:
+
+```sh
+gh release download "$TAG" -R "$OWNER/cella" -D cella-release
+cd cella-release
+cosign verify-blob --bundle checksums.txt.sigstore.json \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity-regexp '^https://github\.com/latere-ai/ci/\.github/workflows/image-publish\.yml@' \
+  --certificate-github-workflow-repository "$OWNER/cella" checksums.txt
+sha256sum -c checksums.txt
+
+for image in cellad cella-display; do
+  cosign verify "ghcr.io/$OWNER/$image:$TAG" \
+    --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+    --certificate-identity-regexp '^https://github\.com/latere-ai/ci/\.github/workflows/image-build\.yml@' \
+    --certificate-github-workflow-repository "$OWNER/cella"
+  gh attestation verify "oci://ghcr.io/$OWNER/$image:$TAG" -R "$OWNER/cella" \
+    --signer-workflow latere-ai/ci/.github/workflows/image-build.yml
+done
+```
+
+The release workflow runs the same checks against every release it
+publishes.
+
+Releases up to v0.22.5 were signed by this repository's own release
+workflow, whose identity names the tag. Check one of those with the same
+steps, the identity naming that workflow in both `cosign` commands, and no
+`--signer-workflow`; `cella-display` is in the releases from v0.4.0:
+
+```sh
+cosign verify-blob --bundle checksums.txt.sigstore.json \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity "https://github.com/$OWNER/cella/.github/workflows/release.yml@refs/tags/$TAG" \
+  checksums.txt
+sha256sum -c checksums.txt
+
+for image in cellad cella-display; do
+  cosign verify "ghcr.io/$OWNER/$image:$TAG" \
+    --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+    --certificate-identity "https://github.com/$OWNER/cella/.github/workflows/release.yml@refs/tags/$TAG"
+  gh attestation verify "oci://ghcr.io/$OWNER/$image:$TAG" -R "$OWNER/cella"
+done
+```

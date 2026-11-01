@@ -5,7 +5,7 @@
 # developer image's between the two markers, byte for byte, and this file's
 # own instructions are the COPY of the binary the release pipeline built,
 # checksummed, signed and attested, and the entry point. The image and the
-# archive therefore carry one compilation, which the release-verify job
+# archive therefore carry one compilation, which the install-release job
 # proves by pulling the binary back out and comparing it byte for byte.
 #
 # dist/cellad_linux_${TARGETARCH} is the file buildx substitutes per

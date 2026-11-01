@@ -1,0 +1,3 @@
+# latere-ai/ci's shared release steps, checked out beside the tree by the
+# release workflow; nothing in the image reads them.
+.latere-ci/

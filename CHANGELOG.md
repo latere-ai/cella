@@ -6,6 +6,29 @@ refused before it is pushed.
 
 ## Unreleased
 
+### Changed
+
+- **Releases are built, signed and published by the shared release stages
+  in latere-ai/ci.** The signatures on `cellad`, `cella-display` and
+  `checksums.txt` now name latere-ai/ci's `image-build.yml` and
+  `image-publish.yml`, run for this repository, so the verify commands
+  change. SECURITY.md and the install document give the new ones, and the
+  ones for releases up to v0.22.5; the release workflow runs the checks
+  against every release it publishes.
+- **`checksums.txt` lists every file the release carries.** The bills of
+  materials are in it beside the archives, where it listed the archives
+  alone.
+- **The release no longer carries `sbom-module.spdx.json`, the bill of
+  materials of the module graph.** Each image's bill of materials is
+  still attached and attested.
+- **`cella-stubs` is signed, attested and given a bill of materials like
+  the other images.** It is the test image the release's own checks run,
+  and it now gets its tag only once those checks pass.
+- **A release tag is checked before anything is built.** A tag whose
+  commit is not on `main`, or that carries SemVer build metadata, is
+  refused, and a tag with a prerelease suffix, such as `v1.2.3-rc.1`, is
+  published as a prerelease.
+
 ## v0.22.5 - 2026-10-30
 
 ### Added

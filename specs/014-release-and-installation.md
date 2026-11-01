@@ -9,7 +9,7 @@ depends_on:
 affects: [.github/workflows/release.yml, .github/workflows/verify.yml, Dockerfile.ci, deploy/, tools/release/, docs/install.md, docs/upgrades/, cmd/cellad/]
 effort: medium
 created: 2026-09-12
-updated: 2026-10-14
+updated: 2026-11-01
 author: changkun
 ---
 
@@ -43,9 +43,21 @@ Built:
   whose notes are the CHANGELOG section; then `install-release` and
   `release-verify` from clean runners ([[048-release-and-check]],
   v0.2.0). `cella-display` joined it, built and signed the same way
-  ([[064-k8s-display]], v0.4.0). `cella-stubs` is pushed under the tag
-  for amd64, neither signed nor attested, because nothing an operator
-  deploys names it.
+  ([[064-k8s-display]], v0.4.0). Through v0.22.5, `cella-stubs` was
+  pushed under the tag for amd64, neither signed nor attested, because
+  nothing an operator deploys names it.
+- From the release after v0.22.5, the build, publish and verify steps are
+  latere-ai/ci's shared stages, `image-build.yml`, `image-publish.yml`
+  and `release-verify.yml`, with `conformance` and `install-release`
+  cella's own jobs between and after them. The signatures name those
+  stages, run for this repository. `cella-stubs` is the build stage's
+  third image, so it is signed and attested like the other two and tagged
+  only in publish. `checksums.txt` covers every attached file. The module
+  graph's bill of materials is no longer attached, because the build
+  stage writes a bill of materials per image and none over the source
+  tree. The comparison of the image's `cellad` with the archive's moved
+  from `release-verify` into `install-release`, because the shared verify
+  stage does not make it.
 - `deploy/`, its base with the Pod security fields, the disruption
   budget, the network policy and the PrometheusRule, the bootstrap and
   the examples; `cellad check`; and `docs/install.md`, walked against a
@@ -73,7 +85,7 @@ Open:
 |---|---|
 | binaries | `cellad_<tag>_<os>_<arch>.tar.gz`, `cella_<tag>_<os>_<arch>.tar.gz` for linux and darwin, amd64 and arm64, plus `checksums.txt` |
 | images | `ghcr.io/<owner>/cellad:<tag>`, `ghcr.io/<owner>/cella-stubs:<tag>`, `ghcr.io/<owner>/cella-display:<tag>` (the desktop of [[023-computer-use-operations]]: an X server, a window manager, the capture tool), `cellad` and `cella-display` for amd64 and arm64 and `cella-stubs` for amd64, digest-pinned in the release notes |
-| attestations | cosign signatures over the images and the checksums; per-image SBOM and build-provenance attestations (`actions/attest-sbom`, `actions/attest-build-provenance`); an SPDX SBOM per image and one for the module graph, so `gh attestation verify oci://<image> --repo <owner>/<repo>` answers for an image before it runs |
+| attestations | cosign signatures over the images and the checksums; per-image SBOM and build-provenance attestations (`actions/attest-sbom`, `actions/attest-build-provenance`); an SPDX SBOM per image, so `gh attestation verify oci://<image> --repo <owner>/<repo>` answers for an image before it runs |
 | deploy archive | `deploy-<tag>.tar.gz`, the kustomize base and examples with the image references rewritten to the release |
 
 The image namespace derives from the repository owner running the
@@ -93,7 +105,7 @@ flowchart LR
   conformance[conformance: kind stack from the published images runs the suite]
   publish[publish: the GitHub release]
   install_release[install-release: docs/install.md against a bare kind cluster]
-  release_verify[release-verify: clean runner verifies sums, signatures, attestations]
+  release_verify[release-verify: the shared stage verifies sums, signatures, attestations from a clean runner]
   build --> conformance --> publish --> install_release --> release_verify
 ```
 
@@ -102,11 +114,14 @@ deploy archive; conformance brings up the kind stack of
 [[012-test-stubs-and-tiers]] from the published images and runs
 [[015-conformance-suite]]; publish cuts the GitHub release; install-release
 walks `docs/install.md` against a bare kind cluster using the published
-artifacts; release-verify, on a clean runner, downloads the archives,
-verifies the checksum signature with `cosign verify-blob`, the image
-signatures with `cosign verify`, and each image's attestations with
-`gh attestation verify`. A deploy to an operator's own cluster is not
-part of the public pipeline; the archive is the hand-off.
+artifacts, after comparing each platform's `cellad` in the published image
+with the archive's byte for byte; release-verify, on a clean runner,
+downloads the assets, verifies the checksum signature with
+`cosign verify-blob`, the image signatures with `cosign verify`, and each
+image's attestations with `gh attestation verify`. build, publish and
+release-verify are latere-ai/ci's shared stages. A deploy to an
+operator's own cluster is not part of the public pipeline; the archive is
+the hand-off.
 
 The every-push install walk is a separate `install` job in `verify.yml`,
 not in `release.yml`: no tag exists at push time, so it renders the
@@ -262,7 +277,7 @@ it, and nothing in the pipeline is a placeholder any more
 
 | Criterion | Test that proves it | State |
 |---|---|---|
-| Every artifact in the table is attached to the release of a tag | the `release-verify` job | built for the two binaries of [[001-architecture]]: `tools/release/build.sh` writes the four `cellad_*` and the four `cella_*` archives from one checkout, `release-verify` asserts all eight by name and counts nine checksum lines with the deploy archive, and `install-release` runs `./cella version` from the published archive ([[050-cella-command]]). The stubs image is pushed under the tag by the build job. The display image is built for amd64 and arm64 and pushed by digest, signed, given an attested bill of materials and provenance, tagged only in publish, its bill of materials attached, and verified by tag in `release-verify`, `TestReleasePublishesTheDisplayImage` ([[064-k8s-display]]); every release from v0.4.0 carries its bill of materials |
+| Every artifact in the table is attached to the release of a tag | the `release-verify` job | built for the two binaries of [[001-architecture]]: `tools/release/build.sh` writes the four `cellad_*` and the four `cella_*` archives from one checkout, `release-verify` checks that every attached file is in the signed `checksums.txt` and matches it, and `install-release` runs `./cella version` from the published archive ([[050-cella-command]]). The stubs image is the build stage's third image, for amd64 alone, `TestTheReleaseRunsTheStubsAndTheStack`. The display image is built for amd64 and arm64 and pushed by digest, signed, given an attested bill of materials and provenance, tagged only in publish, its bill of materials attached, and verified by tag in `release-verify`, `TestReleasePublishesTheDisplayImage` ([[064-k8s-display]]); every release from v0.4.0 carries its bill of materials. The module graph's bill of materials is no longer attached |
 | The workflow and the archive fix no image namespace | `TestReleasePublishesUnderTheOwnersNamespace` | passing |
 | `Dockerfile` and `Dockerfile.ci` share the runtime stage byte for byte | `TestRuntimeStagesMatch` | passing |
 | Every overlay renders and the base carries every Pod security field | `TestOverlaysRender`, `TestBaseIsConfined` | passing |

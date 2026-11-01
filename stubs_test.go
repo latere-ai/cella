@@ -194,21 +194,31 @@ func TestTheInstallJobWalksTheDocument(t *testing.T) {
 }
 
 // TestTheReleaseRunsTheStubsAndTheStack: the pipeline publishes the stubs
-// image spec 014 names and runs the kind stack in the two jobs that waited
-// on it, with no repository variable in the way.
+// image spec 014 names, the build stage's third image for amd64 alone, and
+// runs the kind stack in the two jobs that wait on it: the conformance job
+// from the digest the build stage pushed, the install walk from the tag the
+// publish stage gave it, with no repository variable in the way.
 func TestTheReleaseRunsTheStubsAndTheStack(t *testing.T) {
-	release, err := os.ReadFile(filepath.Join(".github", "workflows", "release.yml"))
-	if err != nil {
-		t.Fatal(err)
+	o, release := releaseWorkflow(t)
+	stubs := imageSlot(t, o, "image_3")
+	if stubs["name"] != "cella-stubs" || stubs["dockerfile"] != "Dockerfile.stubs" || stubs["platforms"] != "linux/amd64" {
+		t.Errorf("the third image is %v, want cella-stubs from Dockerfile.stubs for linux/amd64", stubs)
 	}
-	for _, want := range []string{"Dockerfile.stubs", "cella-stubs:${GITHUB_REF_NAME}"} {
-		if !strings.Contains(string(release), want) {
-			t.Errorf("release.yml does not build and push the stubs image (%q)", want)
-		}
+	if got := str(dig(o, "env", "STUBS_IMAGE")); got != stubs["name"] {
+		t.Errorf("cella's own jobs pull %q, and the build stage builds %q", got, stubs["name"])
+	}
+	if got := str(dig(o, "jobs", "conformance", "env", "STUBS_DIGEST")); got != "${{ needs.build.outputs.digest_3 }}" {
+		t.Errorf("the conformance job runs the stubs digest %q, not the one the build stage pushed", got)
 	}
 	for job, wants := range map[string][]string{
-		"conformance":     {"deploy/examples/kind-stubs/up.sh", "TestClusterLifecycle", "TestContract"},
-		"install-release": {"deploy/examples/kind-stubs/up.sh", "run-blocks.sh", "docs/install.md"},
+		"conformance": {
+			`docker tag "${REGISTRY}/${OWNER}/${STUBS_IMAGE}@${STUBS_DIGEST}" cella-stubs:dev`,
+			"deploy/examples/kind-stubs/up.sh", "TestClusterLifecycle", "TestContract",
+		},
+		"install-release": {
+			`docker tag "${REGISTRY}/${OWNER}/${STUBS_IMAGE}:${GITHUB_REF_NAME}" cella-stubs:dev`,
+			"deploy/examples/kind-stubs/up.sh", "run-blocks.sh", "docs/install.md",
+		},
 	} {
 		steps := jobSteps(t, filepath.Join(".github", "workflows", "release.yml"), job)
 		for _, want := range wants {
@@ -217,7 +227,7 @@ func TestTheReleaseRunsTheStubsAndTheStack(t *testing.T) {
 			}
 		}
 	}
-	if strings.Contains(string(release), "RELEASE_INSTALL_KIND") || strings.Contains(string(release), "RELEASE_INSTALL_ISSUER") {
+	if strings.Contains(release, "RELEASE_INSTALL_KIND") || strings.Contains(release, "RELEASE_INSTALL_ISSUER") {
 		t.Error("the walk is still behind a repository variable, and the stub issuer is what it was waiting for")
 	}
 }

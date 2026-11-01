@@ -8,8 +8,9 @@
 # document.
 #
 # It compiles the binary in the image, like the developer image and unlike
-# the release image: the stubs are never pinned by digest, never signed, and
-# never attested, because nothing an operator deploys depends on them.
+# the release image. A release builds it for amd64 alone, and signs and
+# attests it like every image it publishes, though nothing an operator
+# deploys depends on it.
 
 FROM golang:1.27-alpine AS build
 WORKDIR /src
