@@ -47,7 +47,6 @@ var pendingControls = []string{
 	"TestAdmissionCannotOpenABoundary",     // spec 007, a webhook that reopens a boundary
 	"TestArchiveFetchIsBounded",            // spec 019, the bounded archive fetch
 	"TestBodiesAndTypes",                   // spec 008, the body caps and the content types
-	"TestClusterPodIsConfined",             // spec 004, the cluster tier's Pod baseline
 	"TestControlPlaneWriter",               // spec 019, the one writer of a volume
 	"TestDecoratorCannotWeakenTheBaseline", // spec 004, a decorator against the baseline
 	"TestEgressMapCrossesOneHop",           // spec 021, a map that reaches one environment

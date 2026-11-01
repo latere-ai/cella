@@ -7,6 +7,7 @@ import (
 	"errors"
 	"maps"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -197,6 +198,51 @@ func TestPodCarriesTheBaseline(t *testing.T) {
 	}
 	if !reflect.DeepEqual(writable, []string{driver.DefaultWorkdir, "/tmp"}) {
 		t.Errorf("writable mounts %v", writable)
+	}
+}
+
+// TestPodSecurityFields is the sweep TestPodCarriesTheBaseline does not
+// reach: every container a Pod can carry at once, under every optional
+// field that adds one, carries the identical hardened security context,
+// and the Pod-level fields hold beside them. A field two containers share
+// and a third quietly drops, such as a decorator or a future container
+// skipping hardened(), is the gap this proves does not exist.
+func TestPodSecurityFields(t *testing.T) {
+	h := newHarnessWith(t, func(o *Options) {
+		withDisplay(o)
+		o.Home = "/etc/apk"
+	})
+	s := spec("sbx_security")
+	s.Display = &desk
+	pod, err := h.pod(s, h.clock.now(), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pod.Spec.InitContainers) != 1 || len(pod.Spec.Containers) != 2 {
+		t.Fatalf("the Pod carries %d init containers and %d containers, want the home fill, the workload and the desktop",
+			len(pod.Spec.InitContainers), len(pod.Spec.Containers))
+	}
+	for _, c := range slices.Concat(pod.Spec.InitContainers, pod.Spec.Containers) {
+		if !reflect.DeepEqual(c.SecurityContext, hardened()) {
+			t.Errorf("%s.securityContext = %+v, want the hardened baseline", c.Name, c.SecurityContext)
+		}
+	}
+	for _, row := range []struct {
+		field string
+		got   any
+		want  any
+	}{
+		{"hostNetwork", pod.Spec.HostNetwork, false},
+		{"hostPID", pod.Spec.HostPID, false},
+		{"hostIPC", pod.Spec.HostIPC, false},
+		{"shareProcessNamespace", *pod.Spec.ShareProcessNamespace, false},
+		{"automountServiceAccountToken", *pod.Spec.AutomountServiceAccountToken, false},
+		{"securityContext.runAsNonRoot", *pod.Spec.SecurityContext.RunAsNonRoot, true},
+		{"securityContext.seccompProfile.type", pod.Spec.SecurityContext.SeccompProfile.Type, corev1.SeccompProfileTypeRuntimeDefault},
+	} {
+		if !reflect.DeepEqual(row.got, row.want) {
+			t.Errorf("%s = %v, want %v", row.field, row.got, row.want)
+		}
 	}
 }
 
