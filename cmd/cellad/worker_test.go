@@ -16,6 +16,7 @@ import (
 	"time"
 
 	v1 "latere.ai/x/cella/manifest/v1"
+	driver "latere.ai/x/cella/runtime"
 )
 
 // TestWorkerEndToEnd runs both roles of spec 021 in one process over
@@ -74,6 +75,45 @@ func TestWorkerEndToEnd(t *testing.T) {
 	waitFor(t, "the environment to report the worker that came back",
 		func() bool { return p.environment(t).Status.Workers == 1 })
 	waitFor(t, "the stream of the worker that came back to open", func() bool { return p.streamsOpened() == 2 })
+}
+
+// TestWorkerNoInbound is spec 013's control plane model row 4: a worker
+// host with inbound refused still runs the whole lifecycle, because nothing
+// ever dials it. The worker here is the real `cellad worker` role (same as
+// startWorker uses in TestWorkerEndToEnd), not an embedded library call, so
+// the file descriptors this process holds are the role's own. A listener
+// the role opened would show up as a rise in listeningSockets; refusing
+// every inbound connection to the real deployment is simply never giving it
+// anything to refuse.
+func TestWorkerNoInbound(t *testing.T) {
+	p := startPlane(t, "", "")
+	key := p.environmentKey(t)
+	before := listeningSockets(t)
+
+	w := startWorker(t, p, key, nil)
+	waitFor(t, "the worker to announce itself",
+		func() bool { return strings.Contains(w.out.String(), "worker driver=native") })
+	waitFor(t, "the environment to report the worker", func() bool { return p.environment(t).Status.Workers == 1 })
+	during := listeningSockets(t)
+
+	id := sandboxOn(t, p, "default", "no-inbound")
+	waitFor(t, "the sandbox to run", func() bool { return sandboxNow(t, p, id).Status.Phase == driver.Running })
+	if status, answer := p.do(t, http.MethodPost, "/v1/sandboxes/"+id+"/exec?wait=1",
+		strings.NewReader(`{"command":["sh","-c","echo inbound-free"]}`)); status != http.StatusOK || !strings.Contains(answer, "inbound-free") {
+		t.Fatalf("the exec answered %d: %s", status, answer)
+	}
+	afterExec := listeningSockets(t)
+	if status, answer := p.do(t, http.MethodDelete, "/v1/sandboxes/"+id, nil); status != http.StatusNoContent && status != http.StatusAccepted {
+		t.Fatalf("the delete answered %d: %s", status, answer)
+	}
+
+	if code := w.stop(); code != 0 {
+		t.Errorf("the worker exited %d; stderr %q", code, w.errOut.String())
+	}
+	if during > before || afterExec > before {
+		t.Errorf("the process listened on %d sockets with the worker running (%d before, %d after the exec), which is a listener the worker role opened",
+			max(during, afterExec), before, afterExec)
+	}
 }
 
 // streamsOpened is how many worker streams the control plane has logged
