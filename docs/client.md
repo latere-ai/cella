@@ -27,11 +27,12 @@ c, err := client.New(client.Config{
 
 | Field | What it is |
 |---|---|
-| `URL` | The control plane's address, `http` or `https`: its `CELLA_PUBLIC_URL`. Required; nothing is read in its place. A path on it is where the control plane is served, and it takes the place of `/v1`: with `https://api.example.com/v1/environments` a sandbox is at `/v1/environments/sandboxes/{id}`. |
+| `URL` | The control plane's address, `http` or `https`: its `CELLA_PUBLIC_URL`. Required; nothing is read in its place. A path on it is where the control plane is served, and it takes the place of `/v1`: with `https://api.example.com/v1/environments` a sandbox is at `/v1/environments/sandboxes/{id}`. An `http://` address on a host other than loopback is refused unless `Insecure` is set. |
 | `Token` | Where each request's bearer comes from. `nil` sends no bearer. |
 | `HTTPClient` | Carries every call, including the exec, attach and dial sockets. `nil` uses the package's own transport. |
 | `RootCAs` | Certificate authorities the package's own transport trusts instead of the system roots. Ignored when you pass `HTTPClient`. |
 | `UserAgent` | Sent on every request. Defaults to `cella-client`. |
+| `Insecure` | Admits an `http://` address on a host other than loopback. `false` by default; `client.Environment` sets it from `CELLA_INSECURE_CONTROL_PLANE`. |
 
 `New` checks the address and nothing else; it does not contact the server.
 A `Client` is safe to share between goroutines.

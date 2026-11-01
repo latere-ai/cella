@@ -152,7 +152,7 @@ code in the `X-Cella-Error` trailer.
 | `quota_exceeded` | 422 | you run as many sandboxes as your limit allows; stop one to create or start another |
 | `volume_quota_exceeded` | 422 | you hold as many volumes as your limit allows; delete one to create another |
 | `admission_refused` | 422 | the admission step refused the manifest, with its reason in `detail` |
-| `boundary_exceeded` | 422 | a child asked for more than its parent has |
+| `boundary_exceeded` | 422 | a child asked for more than its parent has, or an update to a parent would leave a live child outside its boundary, naming the child |
 | `spawn_budget_exhausted` | 422 | the sandbox has no spawn budget left |
 | `secret_out_of_scope` | 422 | the secret does not cover the host it is used for |
 | `environment_mismatch` | 422 | a worker does not match the environment it registered on |

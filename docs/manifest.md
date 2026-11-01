@@ -147,10 +147,13 @@ sandbox may narrow its own boundary later and never widen it.
 | `spec.mesh.enabled` | `false` | on a sandbox a subject created, joins its whole tree to one private network, where peers reach each other at `<sandbox-name>.mesh`. A child inherits it and may not set it. Refused on the native runtime |
 
 Every child is a subset of its parent: its egress, its secrets, its
-resources, and its lifetime. A child that asks for more is refused with
-`boundary_exceeded` naming the field, and one that declares no boundary
-runs inside its parent's. Its budget and depth are at most the parent's
-remainder less one. Deleting a sandbox deletes the tree below it.
+volumes, its resources and their ceilings, and its lifetime. A child
+that asks for more is refused with `boundary_exceeded` naming the
+field, and one that declares no boundary runs inside its parent's. An
+update to the parent is held to the same rule: one that would narrow it
+below what a live child already holds is refused the same way, naming
+the child. Its budget and depth are at most the parent's remainder less
+one. Deleting a sandbox deletes the tree below it.
 
 ### Lifecycle
 
@@ -292,6 +295,7 @@ and either of two acts brings it back with every file:
 | `invalid_field` at `spec.resources.max.<resource>` | the ceiling is below the amount it bounds, or is not a quantity |
 | `ceiling_exceeded` at `spec.resources.max.<resource>` | the ceiling is above what this server allows, or an update puts memory's ceiling below what the sandbox already holds |
 | `capability_unsupported` at `spec.resources.max.<resource>` | the sandbox's environment does not size that resource. `GET /v1/environments` shows what each one sizes, as `status.capabilities.autosize` |
+| `boundary_exceeded` at `spec.resources.<resource>` or `spec.resources.max.<resource>` | an update to a parent puts either below what a live child already holds, naming the child |
 
 Which environments size what: Kubernetes sizes CPU always, and memory on a
 cluster that [serves what it needs](kubernetes.md#sizing-a-sandbox). No
@@ -307,9 +311,11 @@ A sandbox with a ceiling reports what it holds:
 | the `MemoryAtCeiling` condition | `True` while its memory is at `max.memory` and its workload uses 95% or more of it, or lost a process to the limit. `sandbox.at_ceiling` is recorded once each time that begins |
 | the `MemoryUnplaced` condition | `True` once the sandbox needed more memory, inside its ceiling, and no node had room for the larger size, which its `message` names. Its `reason` is `NoRoom` while the sandbox is kept running at the size it holds, and `RestartsExhausted` once it was killed for memory too often there and is left `Failed`. `False` with reason `MemoryRaised` once a later raise was given. Absent on a sandbox no raise ever failed for |
 
-A spawned child's ceilings may not exceed its parent's. An environment's
-warm pool keeps sandboxes of one fixed size, so a manifest with a ceiling
-is created fresh and takes no pool entry.
+A spawned child's ceilings may not exceed its parent's, and an update
+that would narrow a parent below a live child's ceiling is refused the
+same way, naming the child. An environment's warm pool keeps sandboxes
+of one fixed size, so a manifest with a ceiling is created fresh and
+takes no pool entry.
 
 ### Recovering a failed sandbox
 
