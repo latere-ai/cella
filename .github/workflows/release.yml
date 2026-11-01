@@ -213,6 +213,7 @@ jobs:
           grep -q -- '--- PASS: TestClusterEgressBoundary' /tmp/kind.log
           grep -q -- '--- PASS: TestClusterNoLateralMovement' /tmp/kind.log
           grep -q -- '--- PASS: TestClusterMeshReachability' /tmp/kind.log
+          grep -q -- '--- PASS: TestClusterWorkerNoInbound' /tmp/kind.log
       - name: The conformance suite against the published images
         shell: bash
         run: |

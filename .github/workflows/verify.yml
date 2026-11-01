@@ -172,6 +172,7 @@ jobs:
           grep -q -- '--- PASS: TestClusterEgressBoundary' kind.txt
           grep -q -- '--- PASS: TestClusterNoLateralMovement' kind.txt
           grep -q -- '--- PASS: TestClusterMeshReachability' kind.txt
+          grep -q -- '--- PASS: TestClusterWorkerNoInbound' kind.txt
       # The Kubernetes driver's own dial and port cases against the same
       # cluster, from the runner through the kubeconfig kind wrote. They run
       # in a namespace of their own, because the suite's cleanup deletes
@@ -192,6 +193,10 @@ jobs:
           # claim's ownership under the non-root user, and a restart.
           go test -count=1 -v -timeout 10m -run '^TestClusterTheImagesHomeIsWritable$' ./runtime/k8s 2>&1 | tee driver-home.txt
           grep -q -- '--- PASS: TestClusterTheImagesHomeIsWritable' driver-home.txt
+          # The Pod baseline read back from inside the running container:
+          # id, /proc/1/status, a refused mount and a refused write.
+          go test -count=1 -v -timeout 10m -run '^TestClusterPodIsConfined$' ./runtime/k8s 2>&1 | tee driver-confined.txt
+          grep -q -- '--- PASS: TestClusterPodIsConfined' driver-confined.txt
       # The contract of spec 015 against the cluster: the same cases, on the
       # Kubernetes environment, with the subjects minted at the stub issuer's
       # node port and the capabilities that driver declares. The stack names

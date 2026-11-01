@@ -40,6 +40,7 @@ resources:
   - service-stubs.yaml
   - gateway.yaml
   - upstream.yaml
+  - worker.yaml
 patches:
   - path: stubs-sidecar.yaml
     target:

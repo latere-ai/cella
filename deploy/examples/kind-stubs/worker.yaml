@@ -1,0 +1,118 @@
+# SPDX-FileCopyrightText: 2026 Latere AI
+# SPDX-License-Identifier: Apache-2.0
+#
+# A data plane worker beside the control plane: `cellad worker` with the
+# native driver, joined by a key up.sh mints at the control plane for the
+# Environment this file also declares. The NetworkPolicy admits no ingress
+# at all, which changes nothing the worker needs: it connects outbound with
+# its key and claims operations over that one stream, and nothing dials it
+# (spec 013, spec 021).
+#
+# The native driver forks the sandbox's own command inside this container,
+# which is this stack's own choice of host and not a boundary: the release
+# image is distroless and has no shell for a sandbox's command to run
+# under, so the init container stages the one binary it holds (`cellad fill
+# stage`, the same copy a volume's fill uses) onto a shared directory, and
+# the main container is a small userland that can run one.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cellad-worker
+  labels:
+    app.kubernetes.io/name: cellad-worker
+    app.kubernetes.io/component: worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cellad-worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cellad-worker
+        app.kubernetes.io/component: worker
+    spec:
+      # The worker drives no cluster API; the native driver forks processes
+      # of its own container and mounts nothing it was not given.
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: cellad-bin
+          image: cellad
+          command: ["/usr/local/bin/cellad", "fill", "stage", "/bin-shared/cellad"]
+          volumeMounts:
+            - name: bin
+              mountPath: /bin-shared
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      containers:
+        - name: cellad-worker
+          image: docker.io/library/alpine:3.22
+          command: ["/bin-shared/cellad", "worker"]
+          env:
+            - name: CELLA_URL
+              value: "http://cellad:8080"
+            - name: CELLA_INSECURE_CONTROL_PLANE
+              value: "true"
+            - name: CELLA_RUNTIME
+              value: "native"
+            # The native driver enforces no boundary, which is the explicit
+            # consent spec 002 asks for; this stack's own choice, never an
+            # installation's.
+            - name: CELLA_ALLOW_UNSAFE_NATIVE
+              value: "true"
+            - name: CELLA_DATA_DIR
+              value: "/var/lib/cella"
+            # Minted by up.sh at the control plane for the worker
+            # environment below. Until the Secret exists the container
+            # waits.
+            - name: CELLA_ENVIRONMENT_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: cellad-worker
+                  key: CELLA_ENVIRONMENT_KEY
+          volumeMounts:
+            - name: bin
+              mountPath: /bin-shared
+            - name: data
+              mountPath: /var/lib/cella
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: bin
+          emptyDir: {}
+        - name: data
+          emptyDir: {}
+---
+# No inbound connection reaches the worker from anywhere: the policy admits
+# no ingress at all, which is the proof TestClusterWorkerNoInbound reads
+# back.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cellad-worker
+  labels:
+    app.kubernetes.io/name: cellad-worker
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: cellad-worker
+  policyTypes: [Ingress]

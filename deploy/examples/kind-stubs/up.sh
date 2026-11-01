@@ -102,5 +102,32 @@ for _ in $(seq 1 60); do
 done
 [ -n "$connected" ] || { echo "the gateway did not connect to the control plane" >&2; exit 1; }
 
+# 6. The worker environment of spec 013's no-inbound proof: applied by name
+# in the native driver's own isolation class, keyed the way the gateway's
+# was, with its Pod behind a NetworkPolicy that admits no ingress at all.
+# Nothing dials a worker, so refusing every inbound connection to it changes
+# nothing it needs.
+curl -fsS --retry 10 --retry-delay 1 --retry-all-errors -X PUT http://localhost:30080/v1/environments/worker \
+  -H "authorization: Bearer $token" -H 'content-type: application/json' \
+  -d '{"apiVersion":"cella.latere.ai/v1beta1","kind":"Environment","metadata":{"name":"worker"},"spec":{"mode":"worker","isolation":"none","capacity":{"sandboxes":4}}}' \
+  >&2
+workerkey=$(curl -fsS --retry 10 --retry-delay 1 --retry-all-errors -X POST http://localhost:30080/v1/environments/worker/keys \
+  -H "authorization: Bearer $token" \
+  | sed -e 's/.*"token":"//' -e 's/".*//')
+[ -n "$workerkey" ] || { echo "the control plane minted no worker key" >&2; exit 1; }
+kubectl -n cella create secret generic cellad-worker \
+  --from-literal=CELLA_ENVIRONMENT_KEY="$workerkey" --dry-run=client -o yaml | kubectl apply -f - >&2
+kubectl -n cella rollout restart deploy/cellad-worker >&2
+kubectl -n cella rollout status deploy/cellad-worker --timeout=180s >&2
+workerconnected=""
+for _ in $(seq 1 60); do
+  if curl -fsS http://localhost:30080/v1/environments/worker -H "authorization: Bearer $token" | grep -q '"workers":[1-9]'; then
+    workerconnected=yes
+    break
+  fi
+  sleep 2
+done
+[ -n "$workerconnected" ] || { echo "the worker did not connect to the control plane" >&2; exit 1; }
+
 echo "CELLA_TEST_URL=http://localhost:30080"
 echo "CELLA_TEST_TOKEN=$token"
