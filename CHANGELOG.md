@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.22.6 - 2026-11-01
+
 ### Fixed
 
 - **An update that would leave a live child outside its parent's boundary
