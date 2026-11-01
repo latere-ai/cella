@@ -297,6 +297,16 @@ postgres:
   direct_env: CELLA_DB_URL
   pool_env: CELLA_DB_POOL_URL
 
+# The developer image of the Dockerfile builds and reports its version. It is
+# not started: cellad refuses to start until every issuer in CELLA_OIDC_ISSUERS
+# answers its discovery request (spec 006), and the gate brings up no issuer.
+image:
+  images:
+    - name: cellad
+      version_args: [-version]
+      version_expect: "cellad "
+      skip_start: needs an OpenID Connect issuer it can reach, which the gate does not bring up
+
 license:
   spdx: Apache-2.0
   holder: Latere AI

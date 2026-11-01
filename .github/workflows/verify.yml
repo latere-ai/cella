@@ -1,7 +1,7 @@
 # Every push to main and every pull request runs the gate, the shared
 # pipeline of latere-ai/ci, and the checks that need the tree and no
-# cluster: a tidy module file and the license notice on every source
-# file. The tiers that need a runtime backend beside them, a kind cluster
+# cluster: a tidy module file, the license notice on every source file and
+# the developer image, all of them gates of `go tool lateregate`. The tiers that need a runtime backend beside them, a kind cluster
 # or a container engine, are spec 012's and join here when that spec
 # lands. Every third-party action is pinned by commit.
 name: verify
@@ -30,21 +30,6 @@ jobs:
     with:
       runs_on: ubuntu-latest
       test_os: '["ubuntu-latest"]'
-
-  tidy:
-    name: go.mod and go.sum are tidy
-    if: "!startsWith(github.ref, 'refs/tags/')"
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-      # Spec 001's dependency invariant names the module's direct
-      # dependencies; go.mod is where a reader checks the claim, so it
-      # has to agree with the imports.
-      - run: go mod tidy -diff
 
   # The local runtime under the real sandbox on Linux: srt over bubblewrap,
   # which confines every command a sandbox on a person's own computer runs.
@@ -103,18 +88,6 @@ jobs:
             exit 1
           fi
           grep -q -- "^--- PASS: TestOwnPathsDenied " device.txt
-
-  image:
-    name: the developer image builds
-    if: "!startsWith(github.ref, 'refs/tags/')"
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - run: docker build -t cellad:candidate .
-      - name: The image reports its version
-        run: |
-          docker run --rm cellad:candidate -version | grep -q '^cellad '
 
   # The deploy tree of spec 014 on every push, and the walk of
   # docs/install.md against a kind cluster, which spec 014 puts in this job

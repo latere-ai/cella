@@ -258,8 +258,8 @@ markers, checked by a test in that spec.
 `verify.yml` runs on every push to `main`, every pull request, every
 tag, and on demand: the `gate` job calls
 `latere-ai/ci/.github/workflows/lateregate.yml@v1` on hosted runners,
-`tidy` checks `go mod tidy -diff`, and `image` builds the developer
-image and asks it for its version. The tiers that need a driver beside
+and its `tidy` and `image` gates check `go mod tidy -diff` and that the
+developer image builds and reports its version. The tiers that need a driver beside
 them join in [[012-test-stubs-and-tiers]]; the release pipeline is
 [[014-release-and-installation]]'s. Every third-party action is pinned
 by commit with its version in a comment.
