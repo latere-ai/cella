@@ -110,6 +110,7 @@ every spec in its `depends_on` is at `testing` or later, not `complete`.
 | [086](.archive/086-the-device-engine-as-a-library.md) | The device engine as a library: `latere.ai/x/cella/device` serves a person's own computer as one of their environments for any program that embeds it, unchanged on disk, with a hosted plane's labels, token and connect steps supplied by the embedder | large | complete | 081, 082, 083, 085 |
 | [087](087-ended-sandboxes-stay-readable.md) | Ended sandboxes stay readable: a deleted sandbox's spec, last status and events answered by its id with `deleted=1` for `CELLA_KEEP_DELETED`, and the tail of its main process output kept with it, sealed | medium | drafted | 008, 009, 010 |
 | [088](088-a-shell-over-served-files.md) | A shell over served files: `latere.ai/x/cella/shell` runs a POSIX command line in the calling process over a file system the caller serves when every program and path it names is one the package provides and serves, decided before anything runs, with GNU's output and dash's messages | medium | testing | 001, 004 |
+| [089](089-tls-on-the-public-listener.md) | TLS on the public listener: cellad serves https from a certificate and key file it reloads without a restart, and the client, the worker and the gateway trust a private CA beside the system roots | medium | drafted | 001, 002, 011, 013, 018, 021, 069 |
 
 ## Dependency graph
 
