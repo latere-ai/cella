@@ -200,7 +200,12 @@ at that field's path.
 The Kubernetes driver checks each condition at `Preflight`, through
 discovery and an access review, and declares only what holds. The two
 accesses are not required: a service account without them starts as
-before and declares no memory autosize. The `remote` driver declares
+before and declares no memory autosize. What `Preflight` found missing is
+looked for again every minute (`DefaultSizingRecheck`) for as long as the
+server runs, because the metrics API is served by a Pod that moves with
+its node and is often absent for a minute while cellad starts. A look
+only raises a declaration, never lowers one, and the environment takes
+the new capabilities on its next observation. The `remote` driver declares
 none of the three, because no frame of the worker stream carries a
 reading or a size.
 
@@ -620,3 +625,4 @@ The cause is on the feed, as `sandbox.resized` with `reason: oom`.
 | Podman raises a running container's memory in place and declares no disk autosize | `podman.TestMemoryUpdateInPlace` | not built: the Podman driver declares none of the three flags and refuses a change of size, held by the driver suite's `SizeChangeIsHonoredOrRefused` |
 | The Kubernetes driver declares each autosize flag only when its condition holds | `k8s.TestAutosizeCapabilities` | built for `cpu` and `memory`, with the two accesses optional at `Preflight` and in the base Role, `TestRoleMatchesTheDriversVerbs`; `disk` is never declared |
 | A sandbox that names no memory size takes the installation's small start and ceiling where its environment sizes memory, and every other case resolves as before | `TestASandboxThatNamesNoMemoryStartsSmallAndGrows`, `TestNoSizingDefaultsResolvesAsBefore`, `TestAnUpdateKeepsTheMemoryTheSandboxHolds`, `TestTheServersCeilingHoldsTheDefaults`, `TestAChildTakesNoMoreThanItsParentHolds`, `TestDefaultMemorySizing` | built |
+| A Kubernetes driver that found memory autosize unavailable at `Preflight` declares it once the cluster serves it, never lowers a declaration, and its environment follows | `k8s.TestMemoryAutosizeIsCheckedAgain`, `k8s.TestARecheckNeverLowersADeclaration`, `k8s.TestNoRecheckOnceMemoryIsDeclared`, `TestAnEnvironmentFollowsADriverThatDeclaresMemorySizingLater` | built |
