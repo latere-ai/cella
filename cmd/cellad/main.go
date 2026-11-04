@@ -577,7 +577,10 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 			Controller: control, Verifier: identity.Verifier, Authorizer: identity.Authorizer,
 			MaxBodyBytes: cfg.MaxBodyBytes, MaxUploadBytes: cfg.MaxUploadBytes, SpoolDir: spool,
 			Egress: hub, Events: emitter, Keys: keys, Workers: workers,
-			Admit: admit, Defaults: manifest.Defaults{Image: cfg.Admission.DefaultImage},
+			Admit: admit, Defaults: manifest.Defaults{
+				Image:       cfg.Admission.DefaultImage,
+				StartMemory: cfg.Sizing.StartMemory, MemoryCeiling: cfg.Sizing.MemoryCeiling,
+			},
 			Metrics: registry, PublicPath: cfg.PublicPath,
 		})
 		if err != nil {

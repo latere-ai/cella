@@ -139,6 +139,9 @@ type Config struct {
 	// calls, and the image default an installation without one falls back
 	// on.
 	Admission Admission
+	// Sizing is the start and ceiling of memory a sandbox that names none
+	// takes (spec 078).
+	Sizing Sizing
 	// Scheduling is spec 020's half: the default environment's mode and the
 	// pool it keeps prewarmed.
 	Scheduling Scheduling
@@ -187,6 +190,7 @@ func Load(getenv Getenv) (Config, error) {
 	c.SecretKey = secretKey(getenv, &problems)
 	c.loadEvents(getenv, &problems)
 	c.Admission = loadAdmission(getenv, &problems)
+	c.Sizing = loadSizing(getenv, &problems)
 	if raw := getenv("CELLA_ALLOW_UNSAFE_NATIVE"); raw != "" {
 		value, err := strconv.ParseBool(raw)
 		if err != nil {

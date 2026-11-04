@@ -6,6 +6,14 @@ refused before it is pushed.
 
 ## Unreleased
 
+### Added
+
+- **A sandbox that names no memory can start small and grow.** Set
+  `CELLA_DEFAULT_MEMORY` and `CELLA_DEFAULT_MAX_MEMORY` and a sandbox with no
+  `memory` and no `max.memory` starts at the first and may grow to the second,
+  where the environment sizes memory. A sandbox that names a memory keeps that
+  fixed size.
+
 ## v0.22.6 - 2026-11-01
 
 ### Fixed

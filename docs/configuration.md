@@ -63,6 +63,13 @@ answers with the manifest to run or a refusal.
 | `CELLA_ADMISSION_TOKEN` | required with the URL | the bearer `cellad` sends it |
 | `CELLA_ADMISSION_TIMEOUT` | `3s` | the deadline of one call, between `100ms` and `30s`. A call that does not answer fails the create |
 | `CELLA_DEFAULT_IMAGE` | unset | the image a manifest gets when it names none, on an environment that runs images. With an admission endpoint, the endpoint can supply it instead |
+| `CELLA_DEFAULT_MEMORY` | unset | the memory a sandbox starts with when its manifest names no memory and no memory ceiling, for example `128Mi`. Set it with `CELLA_DEFAULT_MAX_MEMORY` |
+| `CELLA_DEFAULT_MAX_MEMORY` | unset | the most that sandbox may grow to, for example `1Gi`, at least the start. Both unset, a sandbox that names no memory gets the runtime's fixed default |
+
+A sandbox that names a memory keeps exactly that fixed size. The two variables
+apply only on an environment that can grow a sandbox's memory; on any other it
+gets the fixed default, so no sandbox is held at the small start with no room
+to grow. The server's memory ceiling still applies to both amounts.
 
 ## The runtime
 

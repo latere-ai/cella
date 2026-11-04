@@ -65,6 +65,13 @@ type Defaults struct {
 	// no admission step; an installation with one lets that step supply
 	// the image instead, which is what an image catalog is (spec 007).
 	Image string
+	// StartMemory and MemoryCeiling size a sandbox that names no memory
+	// and no memory ceiling: it starts at StartMemory and grows inside
+	// MemoryCeiling (spec 078). They are set together or not at all, and
+	// they apply only where the environment sizes memory, so an
+	// environment that holds memory fixed never gets the small start.
+	// Memory, above, is the fixed default of every other sandbox.
+	StartMemory, MemoryCeiling v1.Quantity
 }
 
 // Ceilings are the values a resolved field may not exceed. An empty value is
@@ -223,6 +230,7 @@ func defaulting(ctx context.Context, obj *v1.Sandbox, o Options) (*v1.Environmen
 		return nil, err
 	}
 	obj.Spec.Environment = env.Metadata.Name
+	sizeMemory(obj, env, o)
 	for _, field := range resourceFields(&obj.Spec.Resources) {
 		if *field.value == "" {
 			*field.value = defaultQuantity(field.path, o.Defaults)
@@ -266,6 +274,64 @@ func defaulting(ctx context.Context, obj *v1.Sandbox, o Options) (*v1.Environmen
 		return nil, errors.New("manifest: this server's defaults are invalid: " + err.Error())
 	}
 	return env, nil
+}
+
+// sizeMemory gives a sandbox that names no memory size the operator's small
+// start and growth ceiling. A manifest that names a memory keeps exactly
+// that fixed size. One that names only a ceiling starts at the operator's
+// start, or at the ceiling where that is lower. An environment that holds
+// memory fixed is left to the fixed defaults, because a ceiling it cannot
+// honor is refused and a small start with no growth would strand the
+// workload. An update keeps the memory and ceiling the sandbox holds, so a
+// body that leaves them out is not read as a change and a change of the
+// operator's defaults reaches only sandboxes created after it. A child never
+// starts or ends above its parent's bound, which the mesh rule would refuse.
+func sizeMemory(obj *v1.Sandbox, env *v1.Environment, o Options) {
+	r := &obj.Spec.Resources
+	d := o.Defaults
+	if r.Memory != "" || !env.Status.Capabilities.Autosize.Memory {
+		return
+	}
+	if held := o.Existing; held != nil {
+		if held.Spec.Resources.Max.Memory != "" {
+			r.Memory = held.Spec.Resources.Memory
+			if r.Max.Memory == "" {
+				r.Max.Memory = held.Spec.Resources.Max.Memory
+			}
+		}
+		return
+	}
+	if d.StartMemory == "" || d.MemoryCeiling == "" {
+		return
+	}
+	start, ceiling := d.StartMemory, d.MemoryCeiling
+	if r.Max.Memory != "" {
+		ceiling = r.Max.Memory
+	} else if o.Parent != nil {
+		ceiling = lowerQuantity(ceiling, ceilingOf(o.Parent.Spec.Resources.Max.Memory, o.Parent.Spec.Resources.Memory))
+	}
+	start = lowerQuantity(start, ceiling)
+	r.Memory = start
+	if r.Max.Memory == "" {
+		r.Max.Memory = ceiling
+	}
+}
+
+// lowerQuantity is the smaller of two quantities. A side that is empty or
+// unreadable bounds nothing, and the readable side is returned; the field's
+// own validation reports the unreadable one.
+func lowerQuantity(a, b v1.Quantity) v1.Quantity {
+	x, errA := ParseQuantity(a)
+	y, errB := ParseQuantity(b)
+	switch {
+	case errB != nil || b == "":
+		return a
+	case errA != nil || a == "":
+		return b
+	case y < x:
+		return b
+	}
+	return a
 }
 
 func defaultQuantity(path string, d Defaults) v1.Quantity {

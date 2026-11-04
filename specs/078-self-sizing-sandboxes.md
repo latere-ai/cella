@@ -144,6 +144,39 @@ Against an environment's declared capacity
 guaranteed, `resources.cpu`, and at the memory it holds now. Growth is
 bounded by `max` and is not refused for capacity.
 
+### An installation default for memory
+
+A client that cannot know what a workload needs often names no size at
+all, and each such sandbox then reserves the driver's fixed default
+whether it uses it or not. An operator can give those sandboxes a small
+start and a ceiling instead, so they size themselves.
+
+| Variable | Default | Rule |
+|---|---|---|
+| `CELLA_DEFAULT_MEMORY` | unset | the memory a sandbox starts at; a quantity above zero |
+| `CELLA_DEFAULT_MAX_MEMORY` | unset | the memory it may grow to; a quantity at least the start |
+
+The two are set together or not at all, and a value that does not parse,
+is not above zero, or leaves the ceiling below the start is a start-up
+problem listed with the others. Unset, nothing changes.
+
+Resolve applies them to a sandbox that names neither `resources.memory`
+nor `resources.max.memory`, before the server's `Ceilings` are read, so the
+ceiling refuses a default above it at the field the default filled.
+
+- A sandbox that names a memory keeps exactly that size, with or without
+  a ceiling of its own.
+- A sandbox that names only `max.memory` starts at the default start, or
+  at its ceiling where that is lower.
+- An environment whose driver does not size memory is left alone and gets
+  the fixed default. The ceiling would be refused there as unsupported, and
+  a small start with no room to grow would strand the workload.
+- An update is not defaulted again. A body that leaves memory out keeps the
+  start and ceiling the sandbox holds when it has a ceiling, so a change
+  of the operator's defaults reaches only sandboxes created after it.
+- A child that names no memory is held to its parent's bound, so the
+  installation's ceiling never makes a spawn exceed its parent.
+
 ### The capability
 
 `autosize` is a member of the driver's capabilities, an object of three
@@ -586,3 +619,4 @@ The cause is on the feed, as `sandbox.resized` with `reason: oom`.
 | Every figure of the constants table is the constant, in the spec and on the pages | `TestTheSpecsTableIsTheConstants`, `TestThePagesStateTheConstants`, `TestNextMemory`, `TestASmallStartReachesItsCeilingInTwoSteps` | built |
 | Podman raises a running container's memory in place and declares no disk autosize | `podman.TestMemoryUpdateInPlace` | not built: the Podman driver declares none of the three flags and refuses a change of size, held by the driver suite's `SizeChangeIsHonoredOrRefused` |
 | The Kubernetes driver declares each autosize flag only when its condition holds | `k8s.TestAutosizeCapabilities` | built for `cpu` and `memory`, with the two accesses optional at `Preflight` and in the base Role, `TestRoleMatchesTheDriversVerbs`; `disk` is never declared |
+| A sandbox that names no memory size takes the installation's small start and ceiling where its environment sizes memory, and every other case resolves as before | `TestASandboxThatNamesNoMemoryStartsSmallAndGrows`, `TestNoSizingDefaultsResolvesAsBefore`, `TestAnUpdateKeepsTheMemoryTheSandboxHolds`, `TestTheServersCeilingHoldsTheDefaults`, `TestAChildTakesNoMoreThanItsParentHolds`, `TestDefaultMemorySizing` | built |
