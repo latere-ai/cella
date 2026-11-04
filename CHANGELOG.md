@@ -6,6 +6,13 @@ refused before it is pushed.
 
 ## Unreleased
 
+### Fixed
+
+- **Memory autosize found unavailable at start-up is checked again.** A metrics
+  API that was briefly down when `cellad` started no longer leaves memory
+  autosize off until a restart; the Kubernetes driver looks again every minute
+  and declares it once the cluster serves it.
+
 ### Added
 
 - **A sandbox that names no memory can start small and grow.** Set

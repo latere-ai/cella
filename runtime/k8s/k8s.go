@@ -172,6 +172,9 @@ type Options struct {
 	Client kubernetes.Interface
 	REST   *rest.Config
 	Now    func() time.Time
+	// SizingTicks, when set, paces the recheck of memory autosize in place
+	// of a timer of DefaultSizingRecheck.
+	SizingTicks <-chan time.Time
 }
 
 func (o Options) withDefaults() Options {
@@ -230,6 +233,8 @@ type Driver struct {
 	meter   meter
 	inPlace atomic.Bool
 	memory  atomic.Bool
+	// watching is true while a recheck of the two runs.
+	watching atomic.Bool
 }
 
 var _ driver.Driver = (*Driver)(nil)
@@ -429,6 +434,9 @@ func (d *Driver) Preflight(ctx context.Context) error {
 	// What the driver can size is read last and fails nothing: a cluster
 	// or a Role without it runs every sandbox at a fixed size, as before.
 	d.detectSizing(ctx)
+	// A cluster that did not serve the metrics API a moment ago is asked
+	// again, for as long as ctx lives.
+	d.startWatching(ctx)
 	return nil
 }
 

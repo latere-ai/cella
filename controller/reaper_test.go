@@ -74,9 +74,12 @@ type fakeDriver struct {
 	// pool says whether this fake declares the capability, adoptions counts
 	// the entries taken, and onAdopt runs inside the adoption under the
 	// driver's lock, which is where a test makes one adopter lose.
-	pool      bool
-	adoptions int
-	onAdopt   func(id string)
+	pool bool
+	// memorySizing is whether this fake declares memory autosize, which a
+	// test turns on after the control plane has first read the driver.
+	memorySizing bool
+	adoptions    int
+	onAdopt      func(id string)
 	// specs is the create spec each sandbox was made from, so a test reads
 	// back what the refill loop asked for.
 	specs map[string]driver.CreateSpec
@@ -147,7 +150,9 @@ func newDriver(clock *fakeClock) *fakeDriver {
 func (d *fakeDriver) Capabilities() driver.Capabilities {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	return driver.Capabilities{Pool: d.pool}
+	caps := driver.Capabilities{Pool: d.pool}
+	caps.Autosize.Memory = d.memorySizing
+	return caps
 }
 func (d *fakeDriver) Create(_ context.Context, s driver.CreateSpec) (driver.Ref, error) {
 	d.mu.Lock()

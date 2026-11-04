@@ -26,6 +26,7 @@ import (
 	"k8s.io/client-go/rest"
 	k8stesting "k8s.io/client-go/testing"
 
+	"latere.ai/x/cella/manifest"
 	v1 "latere.ai/x/cella/manifest/v1"
 	driver "latere.ai/x/cella/runtime"
 )
@@ -810,5 +811,92 @@ func TestAContainerThatEndedMidReadIsNotRunning(t *testing.T) {
 	}
 	if _, err := h.MemoryKills(t.Context(), id); !errors.Is(err, driver.ErrNotRunning) {
 		t.Fatalf("a container that ended mid-read: got %v, want ErrNotRunning", err)
+	}
+}
+
+// awaitMemory waits for the driver to declare memory autosize, which the
+// recheck does on its own goroutine once a tick has been read.
+func awaitMemory(t *testing.T, h *harness) {
+	t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(time.Millisecond) {
+		if h.Capabilities().Autosize.Memory {
+			return
+		}
+	}
+	t.Fatal("the driver never declared memory autosize")
+}
+
+// TestMemoryAutosizeIsCheckedAgain: a metrics API that was down at Preflight
+// is found when it comes back. The declaration only rises: a read that fails
+// after a resize subresource was found leaves that standing. A sandbox
+// resolved against the environment after the flip takes the installation's
+// small start and ceiling, and one before it the fixed default.
+func TestMemoryAutosizeIsCheckedAgain(t *testing.T) {
+	ticks := make(chan time.Time)
+	h := newHarnessWith(t, func(o *Options) { o.SizingTicks = ticks })
+	h.cs.Resources = served(true, false)
+	if err := h.Preflight(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	resolveOn := func() v1.Resources {
+		env := manifest.NativeEnvironment("default")
+		env.Spec.Isolation = v1.IsolationContainer
+		env.Status = v1.EnvironmentStatus{Driver: "k8s", Isolation: v1.IsolationContainer, Capabilities: v1.Capabilities{Autosize: h.Capabilities().Autosize}}
+		obj := v1.Sandbox{APIVersion: v1.APIVersion, Kind: "Sandbox", Metadata: v1.Metadata{Name: "work"}}
+		got, err := manifest.Resolve(t.Context(), &obj, manifest.Options{
+			Lookup:   manifest.FixedEnvironment(env),
+			Defaults: manifest.Defaults{Image: "registry.example/base:1", StartMemory: "128Mi", MemoryCeiling: "1Gi"},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got.Sandbox.Spec.Resources
+	}
+	if got := resolveOn(); got.Memory != "" || got.Max.Memory != "" {
+		t.Fatalf("before the flip a sandbox resolves to %q under %q, want the fixed default", got.Memory, got.Max.Memory)
+	}
+	// The watcher reads the cluster only when a tick arrives, so changing
+	// what the cluster serves while it waits races with nothing.
+	h.cs.Resources = served(true, true)
+	ticks <- time.Time{}
+	awaitMemory(t, h)
+	if got := resolveOn(); got.Memory != "128Mi" || got.Max.Memory != "1Gi" {
+		t.Fatalf("after the flip a sandbox resolves to %q under %q, want 128Mi under 1Gi", got.Memory, got.Max.Memory)
+	}
+}
+
+// TestNoRecheckOnceMemoryIsDeclared: a driver that declared both at Preflight
+// starts no watcher, and one that did not stops watching when its context
+// ends.
+func TestNoRecheckOnceMemoryIsDeclared(t *testing.T) {
+	h := sizing(t)
+	if h.watching.Load() {
+		t.Fatal("a driver that declared memory autosize watches for it")
+	}
+	ctx, stop := context.WithCancel(t.Context())
+	cold := newHarnessWith(t, func(o *Options) { o.SizingTicks = make(chan time.Time) })
+	cold.cs.Resources = served(true, false)
+	if err := cold.Preflight(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if !cold.watching.Load() {
+		t.Fatal("a driver that found no metrics API does not look again")
+	}
+	stop()
+	for deadline := time.Now().Add(5 * time.Second); cold.watching.Load() && time.Now().Before(deadline); time.Sleep(time.Millisecond) {
+	}
+	if cold.watching.Load() {
+		t.Fatal("the recheck outlives the context it was started with")
+	}
+}
+
+// TestARecheckNeverLowersADeclaration: a look that finds less than an earlier
+// one did leaves what was declared standing.
+func TestARecheckNeverLowersADeclaration(t *testing.T) {
+	h := sizing(t)
+	h.cs.Resources = served(false, false)
+	h.recheckSizing(t.Context())
+	if !h.Capabilities().Autosize.Memory || !h.inPlace.Load() {
+		t.Fatalf("declared %+v, in place %v; want both kept", h.Capabilities().Autosize, h.inPlace.Load())
 	}
 }

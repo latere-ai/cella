@@ -950,6 +950,36 @@ func TestTheLookupCarriesWhatThePhaseLoopWrote(t *testing.T) {
 	}
 }
 
+// TestAnEnvironmentFollowsADriverThatDeclaresMemorySizingLater: a driver
+// that finds it can size memory after the control plane first read it
+// reaches the environment on the next phase pass, so a resolve against the
+// lookup sees the declaration without a restart.
+func TestAnEnvironmentFollowsADriverThatDeclaresMemorySizingLater(t *testing.T) {
+	c, here, _, _ := twoEnvironments(t, Options{})
+	memory := func() bool {
+		env, err := c.Lookup().Environment(t.Context(), "default")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return env.Status.Capabilities.Autosize.Memory
+	}
+	if err := c.Phases(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if memory() {
+		t.Fatal("the environment declares memory autosize before its driver does")
+	}
+	here.mu.Lock()
+	here.memorySizing = true
+	here.mu.Unlock()
+	if err := c.Phases(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if !memory() {
+		t.Fatal("the environment does not follow its driver's declaration")
+	}
+}
+
 // TestAnEnvironmentIsClonedOutOfTheRegistry: what a caller reads carries
 // every reference the stored object holds, and writing through it changes
 // nothing the registry keeps.

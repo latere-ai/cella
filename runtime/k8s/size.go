@@ -115,20 +115,78 @@ func readWorkingSet(raw []byte, container string) (int64, time.Time, error) {
 
 var _ driver.MemoryReader = (*Driver)(nil)
 
+// DefaultSizingRecheck is how often a driver that found memory autosize
+// unavailable looks again. The metrics API is served by a Pod that moves with
+// its node, so its absence at start-up is often a minute long.
+const DefaultSizingRecheck = time.Minute
+
 // detectSizing reads what the cluster serves and what the service account
 // may do with it, and records what the driver can therefore declare. It runs
 // at Preflight and declares only what holds: the resize subresource for a
 // change in place, and that with the metrics API for memory autosize.
 func (d *Driver) detectSizing(ctx context.Context) {
+	inPlace, memory, why := d.sizingNow(ctx)
+	d.inPlace.Store(inPlace)
+	d.memory.Store(memory)
+	if !memory {
+		slog.InfoContext(ctx, "memory autosize is not declared", "namespace", d.opts.Namespace, "reasons", why)
+	}
+}
+
+// sizingNow reads the cluster once and returns what it supports, with the
+// reasons it does not.
+func (d *Driver) sizingNow(ctx context.Context) (inPlace, memory bool, why string) {
 	inPlace, whyNot := d.usable(ctx, "v1", "pods/"+resizeSubresource, sizingVerbs[0])
 	metrics, whyNoMetrics := d.usable(ctx, metricsGroup+"/"+metricsVersion, "pods", sizingVerbs[1])
-	d.inPlace.Store(inPlace)
-	d.memory.Store(inPlace && metrics)
-	if inPlace && metrics {
+	why = strings.Join(slices.DeleteFunc([]string{whyNot, whyNoMetrics}, func(s string) bool { return s == "" }), "; ")
+	return inPlace, inPlace && metrics, why
+}
+
+// watchSizing looks again, at each tick, while memory autosize is not
+// declared, and returns once it is or the context ends. It only ever raises a
+// declaration: a read that fails after one held leaves it standing, since a
+// sandbox already sized inside a ceiling would otherwise be refused its
+// updates. The control plane reads Capabilities on each observation, so a
+// declaration made here reaches the environment and the sandboxes resolved
+// after it.
+func (d *Driver) watchSizing(ctx context.Context) {
+	ticks := d.opts.SizingTicks
+	if ticks == nil {
+		ticker := time.NewTicker(DefaultSizingRecheck)
+		defer ticker.Stop()
+		ticks = ticker.C
+	}
+	for !d.inPlace.Load() || !d.memory.Load() {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticks:
+		}
+		d.recheckSizing(ctx)
+	}
+}
+
+// recheckSizing is one look. A declaration is raised and never lowered.
+func (d *Driver) recheckSizing(ctx context.Context) {
+	inPlace, memory, _ := d.sizingNow(ctx)
+	if inPlace {
+		d.inPlace.Store(true)
+	}
+	if memory && !d.memory.Swap(true) {
+		slog.InfoContext(ctx, "memory autosize is declared", "namespace", d.opts.Namespace)
+	}
+}
+
+// startWatching runs watchSizing for the life of ctx when something is still
+// undeclared. One watcher serves a driver however often it is preflighted.
+func (d *Driver) startWatching(ctx context.Context) {
+	if (d.inPlace.Load() && d.memory.Load()) || !d.watching.CompareAndSwap(false, true) {
 		return
 	}
-	slog.InfoContext(ctx, "memory autosize is not declared",
-		"namespace", d.opts.Namespace, "reasons", strings.Join(slices.DeleteFunc([]string{whyNot, whyNoMetrics}, func(s string) bool { return s == "" }), "; "))
+	go func() {
+		defer d.watching.Store(false)
+		d.watchSizing(ctx)
+	}()
 }
 
 // usable reports whether the cluster serves one resource and the service
