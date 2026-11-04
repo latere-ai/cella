@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.23.0 - 2026-11-05
+
 ### Fixed
 
 - **Memory autosize found unavailable at start-up is checked again.** A metrics
