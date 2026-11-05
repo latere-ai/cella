@@ -97,8 +97,10 @@ record there too.
 A record carries `id`, `seq`, `type`, `time`, the `object` it is about
 with its kind, id, name, owner and labels, the `subject` that acted, the
 `requestId` of the request that caused it, and `data` of a fixed shape per
-type. `data` never holds a command line, a file's content, an environment
-value, a secret's value or a token. These are the types:
+type. `data` never holds the command of an `exec`, a file's content, an
+environment value, a secret's value or a token. `sandbox.created` does
+carry the manifest's `command` and `args`, so pass a credential through
+a `Secret` rather than on a sandbox's command line. These are the types:
 
 | Object | Types |
 |---|---|
