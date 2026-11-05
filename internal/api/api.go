@@ -751,7 +751,7 @@ func (h *handler) list(w http.ResponseWriter, r *http.Request) {
 		if obj.Status.ID <= q.Get("cursor") || (q.Get("owner") != "" && q.Get("owner") != obj.Status.Owner) || (q.Get("environment") != "" && q.Get("environment") != obj.Spec.Environment) || !carries(obj.Metadata.Labels, labels) {
 			continue
 		}
-		if !admits(d.Filter, obj.Status.Owner, obj.Metadata.Labels) {
+		if !d.Filter.Admits(obj.Status.Owner, obj.Metadata.Labels) {
 			continue
 		}
 		if _, err = h.decide(r, authorizer.ActionSandboxRead, resource(obj)); err != nil {

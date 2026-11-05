@@ -64,22 +64,23 @@ type OwnerPolicy struct {
 // caller's token carries (infrastructure/identity id-13). A personal
 // access token, or a token minted from a service account's key, is
 // narrower than the principal who holds it: the policy says what the
-// principal may do, and authz.Restrict removes what the credential was not
+// principal may do, and authz.RestrictByClaims removes what the credential was not
 // granted. The conjunction turns an allow into a deny and never a deny into
 // an allow, so a grant is a restriction and never authority, and a token of
 // any other credential class is decided by the policy alone. An operator's endpoint on latere.ai/x/pkg/authz/server applies
 // the same function to whatever its decider returned; cellad reaches this
 // policy through no endpoint, so the intersection is here.
 //
-// Restrict reads the grants off req.Claims, which is the caller's token
+// RestrictByClaims reads the grants off req.Claims, which is the caller's token
 // verbatim: a request built with empty claims restricts nothing, which is
 // why Envelope carries the claims as they came.
 func (p *OwnerPolicy) Authorize(_ context.Context, req authz.Request) (authz.Decision, error) {
-	return p.restrict(p.decide(req), req), nil
+	return p.restrictByGrants(req), nil
 }
 
-// restrict is the intersection itself, the same shape the scaffold of
-// latere.ai/x/pkg/authz/server applies to its own decider's answer.
+// restrictByGrants is the policy's answer narrowed by the grants the token
+// carries, the same shape the scaffold of latere.ai/x/pkg/authz/server applies
+// to its own decider's answer.
 //
 // A claim that does not read as grants is a deny and not an error: an
 // error is a decision point that produced no decision, which a core reads
@@ -87,19 +88,11 @@ func (p *OwnerPolicy) Authorize(_ context.Context, req authz.Request) (authz.Dec
 // credential whose reach nobody can read, and the closed answer is the
 // only safe one. cellad's own verifier refuses such a token at the door,
 // so one that reaches here came through an endpoint an operator serves
-// from this policy.
-func (p *OwnerPolicy) restrict(d authz.Decision, req authz.Request) authz.Decision {
-	if !d.Allow {
-		// A deny keeps the reason the policy gave it. There is nothing
-		// for the grants to narrow, and the policy's reason is the one
-		// worth reading.
-		return d
-	}
-	grants, err := authz.ParseGrants(req.Claims)
-	if err != nil {
-		return authz.Decision{Reason: authz.ReasonGrant}
-	}
-	return authz.Restrict(authorizer.Core, d, req, grants)
+// from this policy. A deny keeps the reason the policy gave it: there is
+// nothing for the grants to narrow, and the policy's reason is the one worth
+// reading.
+func (p *OwnerPolicy) restrictByGrants(req authz.Request) authz.Decision {
+	return authz.RestrictByClaims(authorizer.Core, p.decide(req), req)
 }
 
 // decide is the policy's own answer, before the grants narrow it: the

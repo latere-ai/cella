@@ -61,6 +61,20 @@ func setup(t *testing.T, policy authz.Authorizer) *fixture { return setupDriver(
 // a test which wants one waits past it on purpose rather than by luck.
 const testTouchInterval = time.Millisecond
 
+// kindChecked fails the test for any request the vocabulary would refuse
+// before sending: an action asked about a resource of another kind, an empty
+// kind on a list or a create included. A production client holds that
+// vocabulary, so a handler that names the wrong kind is an outage there.
+func kindChecked(t *testing.T, inner authz.Authorizer) authz.Authorizer {
+	vocabulary := authorizer.Vocabulary()
+	return decisionFunc(func(ctx context.Context, r authz.Request) (authz.Decision, error) {
+		if err := vocabulary.Check(r); err != nil && !strings.EqualFold(r.Resource.ID, authz.ProbeID) {
+			t.Errorf("a handler asked %s about a %q resource: %v", r.Action, r.Resource.Kind, err)
+		}
+		return inner.Authorize(ctx, r)
+	})
+}
+
 func setupDriver(t *testing.T, policy authz.Authorizer, wrap func(runtime.Driver) runtime.Driver) *fixture {
 	t.Helper()
 	issuer := issuertest.New(t, issuertest.WithDefaultAudience("cella"))
@@ -90,7 +104,7 @@ func setupDriver(t *testing.T, policy authz.Authorizer, wrap func(runtime.Driver
 	}
 	rec := &apiRecorder{}
 	h, err := New(Options{
-		Controller: c, Verifier: verifier, Authorizer: auth.NewAuthorizer(policy),
+		Controller: c, Verifier: verifier, Authorizer: auth.NewAuthorizer(kindChecked(t, policy)),
 		Metrics: rec, Log: slog.New(slog.DiscardHandler), SpoolDir: t.TempDir(),
 	})
 	if err != nil {

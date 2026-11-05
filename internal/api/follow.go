@@ -315,7 +315,7 @@ func (g *recordGate) admits(filter *authz.Filter, o events.Object) bool {
 	if o.Kind == events.KindEnvironment {
 		return admitsEnvironment(filter, g.defaultEnvironment, o.Name, o.Owner, o.Labels)
 	}
-	return admits(filter, o.Owner, o.Labels)
+	return filter.Admits(o.Owner, o.Labels)
 }
 
 // actionsOf is the list and read actions of a record's kind and the resource

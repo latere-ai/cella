@@ -191,7 +191,7 @@ func (h *handler) listVolumes(w http.ResponseWriter, r *http.Request) {
 		if obj.Status.ID <= cursor || (owner != "" && owner != obj.Status.Owner) || !carries(obj.Metadata.Labels, labels) {
 			continue
 		}
-		if !admits(d.Filter, obj.Status.Owner, obj.Metadata.Labels) {
+		if !d.Filter.Admits(obj.Status.Owner, obj.Metadata.Labels) {
 			continue
 		}
 		if _, err = h.decide(r, authorizer.ActionVolumeRead, volumeResource(obj)); err != nil {
