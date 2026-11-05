@@ -346,6 +346,12 @@ e2e:
       a real kubelet, and docs/install.md walks block by block
     command: bash tools/kind/e2e.sh
     tools: [kind, kubectl, helm]
+    allow_skip: >-
+      the contract of spec 015 skips, by design, each case whose capability or
+      input the kind stack does not declare (the admission and authorizer
+      control endpoints, volumes, sets, an agent scenario, a second
+      environment) and each gap test/conformance/known.json records, with its
+      reason; the script asserts that the named tests passed
     reads: [deploy, docs/install.md, tools/kind, tools/docs, images, Dockerfile, Dockerfile.stubs]
     timeout: 50m
 
