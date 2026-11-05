@@ -26,9 +26,10 @@ Fork the repository, work on a branch, and open a pull request. Keep one
 logical change per commit, stage the files explicitly, and write the
 subject in the imperative, saying what changed for whoever reads the log.
 Maintainers push to `main` directly; the pipeline runs the gate on every
-push and pull request, and a `v*` tag cuts a release. A tag needs a
-section in [`CHANGELOG.md`](CHANGELOG.md), written for whoever runs
-`cellad` or builds on the packages.
+push and pull request, and a `v*` tag cuts a release. A maintainer cuts
+one with `go tool lateregate release vX.Y.Z`; the tag needs a section in
+[`CHANGELOG.md`](CHANGELOG.md), written for whoever runs `cellad` or
+builds on the packages.
 
 If you are planning something large, open an issue first. A design that
 lands without a spec is harder to review than one that arrives with the
