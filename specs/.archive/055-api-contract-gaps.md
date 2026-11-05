@@ -160,14 +160,11 @@ row stays open.
 `Content-Type: application/vnd.cella.exec-stream` and the frames of
 [[008-api]]:
 
-```
-+--------+------------------+------------------+
-| 1 byte | 4 bytes          | length bytes     |
-| channel| length, big end. | payload          |
-+--------+------------------+------------------+
-
-channel 1 stdout   2 stderr   3 exit   4 error
-```
+| Bytes | Field |
+|---|---|
+| 1 | the channel: 1 stdout, 2 stderr, 3 exit, 4 error |
+| 4 | the payload's length, big-endian |
+| the length | the payload |
 
 Both output channels are copied by one writer under a mutex, in pieces
 of at most 1 MiB, each frame flushed as it is written, so a caller reads
