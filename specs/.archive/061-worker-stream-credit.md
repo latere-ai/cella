@@ -110,7 +110,7 @@ grant that will never come:
 
 | What happened | What the writer returns |
 |---|---|
-| the caller closed the operation, or the far side cancelled it | `io.ErrClosedPipe` |
+| the caller closed the operation, or the far side canceled it | `io.ErrClosedPipe` |
 | the far side answered the operation, which ends it there | `io.ErrClosedPipe` |
 | the connection ended | `ErrLinkClosed` with the reason |
 

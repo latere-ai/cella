@@ -188,7 +188,7 @@ goes up on `SIGWINCH`, and `{"exit": n}` or `{"error": {...}}` comes
 down before the close. `-t`, or stdin being a terminal with `-i`,
 sends `cols` and `rows`, puts the terminal in raw mode and restores it
 on every exit path. The client answers the server's pings, masks every
-frame it sends, and serialises its writers.
+frame it sends, and serializes its writers.
 
 `logs -f` writes each line as it arrives. `cp` streams tar from `GET`
 to disk and from disk to `PUT` without a temporary file. Progress is

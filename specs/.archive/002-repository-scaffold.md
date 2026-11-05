@@ -239,7 +239,7 @@ holds only what this repository chose: the spec vocabulary and required
 frontmatter, the empty hermetic allowance (cellad forks no binary of
 its own), the `depcheck` allow lists of `./cmd/cellad` and `./cmd/cella`
 (the standard library and `pkg/httpjson`, [[011-agent-client]]), and the
-licence.
+license.
 The git hooks are two-line shims that call the gate. A coverage
 exemption or a waiver is a line in that file with a reason, never a
 tag in the code.

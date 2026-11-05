@@ -43,7 +43,7 @@ The suite is not built. `verify.yml`'s `install` job and `release.yml`'s
 it; both carry a comment naming this slice as what joins them.
 `internal/cellaclient` ([[050-cella-command]]) is a typed client
 over the routes this server serves, including the exec and attach
-sockets, and is what the suite speaks where a case is about behaviour
+sockets, and is what the suite speaks where a case is about behavior
 rather than about the wire.
 
 ## Design

@@ -22,7 +22,7 @@ author: changkun
 [[044-manifest-fields]] built stage 3 of `Resolve` and the `AdmitFunc`
 seam it calls. Nothing fills that seam: every `cellad` runs with
 `Options.Admit` nil, which is the identity, so an installation that wants
-an image catalogue, a plan shape or a policy profile has no way to express
+an image catalog, a plan shape or a policy profile has no way to express
 one. This slice of [[031-hosted-sandbox-consolidation]] builds the client
 half of [[007-admission]]'s webhook: one `POST` per `Sandbox` apply to
 `CELLA_ADMISSION_URL`, the mutated manifest back or a refusal, fail
@@ -35,7 +35,7 @@ what that endpoint reads rather than by what the Go type in
 the two disagreed.
 
 Two rules move with the client. `spec.image` becomes required after
-admission rather than before it, because a catalogue that pins an alias is
+admission rather than before it, because a catalog that pins an alias is
 exactly the thing that supplies one; and the per-subject count ceiling
 gets the single definition [[007-admission]] states, with the
 `authorizer` package's second definition withdrawn.
@@ -193,7 +193,7 @@ keyed on the environment's isolation class:
 The `none` row is the refusal [[026-direct-control-plane]] wrote after
 `Resolve` returned, moved inside it: an environment that runs no image
 neither requires one nor admits one. The other row is the required check,
-now after admission, so a catalogue may supply the image and a manifest
+now after admission, so a catalog may supply the image and a manifest
 that still names none after both the operator's default and the endpoint
 is `missing_field`.
 
@@ -380,5 +380,5 @@ stopped endpoint cannot count what it was not sent.
 | The six `CELLA_DEFAULT_*` figures and the four `CELLA_MAX_*` ceilings are read by nothing; `internal/api` passes `Defaults` with only the image set and `Ceilings` zero | The resolver has held both since [[044-manifest-fields]] and the loader is one function; it is [[002-repository-scaffold]]'s table and not the admission client. `TestCeilingsAreAFloorOnStrictness` proves the rule at the resolver |
 | `parent` and `set` are always `null` on the wire | The spawn of [[022-mesh-and-spawn]] and the replicas of [[020-scheduling-and-sets]] have no code to set them |
 | `existing` is always `null`: there is no update route | [[008-api]] has no `PUT /v1/sandboxes/{id}`. The client sends `existing` and the action `update` as soon as one exists, and `TestAdmitCarriesTheWorkloadAndTheExisting` drives that path already |
-| An image rewritten by an endpoint cannot be shown end to end | `internal/api` resolves every runtime against `manifest.NativeEnvironment`, whose isolation class runs no image. The image legs are proven in `manifest` and `internal/admission` against a container environment; the end-to-end tier proves the rest of the mutation. The API's environment modelling is the gap, and it belongs with the driver that needs it |
+| An image rewritten by an endpoint cannot be shown end to end | `internal/api` resolves every runtime against `manifest.NativeEnvironment`, whose isolation class runs no image. The image legs are proven in `manifest` and `internal/admission` against a container environment; the end-to-end tier proves the rest of the mutation. The API's environment modeling is the gap, and it belongs with the driver that needs it |
 | The stub admission endpoint of [[012-test-stubs-and-tiers]] and its `-fail-mode` flags | This slice drove every failure mode from an `httptest` server in-process; the standalone stub is the conformance tier's |

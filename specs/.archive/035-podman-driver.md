@@ -212,7 +212,7 @@ container's. `Stdin` and `TTY` are `ErrUnsupported` because `Attach` is
 not declared; an empty command is `ErrInvalid`; a sandbox that is not
 `Running` is `ErrNotRunning`.
 
-`Timeout`, a cancelled request context, and `Close` each end `Wait` with
+`Timeout`, a canceled request context, and `Close` each end `Wait` with
 the matching error and close both readers. They do not kill the process
 inside: libpod exposes no way to signal an exec session, and the pid it
 reports is the engine's, not the container's. The process is reaped when

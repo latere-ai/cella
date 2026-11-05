@@ -158,7 +158,7 @@ entry's path on every driver, and on both container drivers the path is
 the mount destination the container was started with. The controller
 reads that refusal as a mismatch and falls back to a real create; its
 match rule holds the path as well, so the refusal is the second line of
-defence and not the first.
+defense and not the first.
 
 ### The match rule
 

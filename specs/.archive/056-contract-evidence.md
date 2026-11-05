@@ -28,7 +28,7 @@ them. [[016-building-a-plane]] promises a guide and an example a
 platform composes the exported packages from, and neither exists.
 
 This slice builds the evidence. It adds no field to any kind, no route,
-and no behaviour: every change is a test, a fixture, a document, or a
+and no behavior: every change is a test, a fixture, a document, or a
 spec cell corrected to name the test that really exists.
 
 ## Current state
@@ -242,7 +242,7 @@ the one file allowed to hold it.
 example: a server that composes `manifest`, `runtime/native` and
 `controller` behind an API of its own, with the three places a platform
 fills marked, and its own suite over create, read, delete, the plan's
-ceilings, the catalogue and every refusal.
+ceilings, the catalog and every refusal.
 
 Coverage of the packages this slice touched: `manifest` 97.5%,
 `cmd/cellad` 90.5%, `examples/plane` 91.5%. The root test package has no

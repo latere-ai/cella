@@ -239,7 +239,7 @@ gets.
   worker, and fall through to an operation when the observed index has
   no row.
 - Every other method is one operation, awaited under the caller's own
-  context; a cancelled context sends `cancel`.
+  context; a canceled context sends `cancel`.
 
 ### What each half may reach
 

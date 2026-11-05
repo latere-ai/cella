@@ -139,7 +139,7 @@ framing and the driver's existing demultiplexer reads it.
 
 The engine has no exec kill and the pid it reports is its own, so
 `Close` drops the connection and the process inside keeps running until
-the sandbox stops or is deleted. That is the engine's behaviour, stated
+the sandbox stops or is deleted. That is the engine's behavior, stated
 here so the conformance case asserts what holds on every driver and the
 stronger claim is made where it is true.
 
@@ -290,7 +290,7 @@ The suite ran on macOS. Linux is compiled, not run: `go vet` for
 `linux/amd64` over `runtime/`, `internal/api` and `controller`, which
 type-checks the test files too, and a `linux/arm64` build of the module.
 A `freebsd` build of `runtime/native` holds the other half of the build
-tags, where the driver declares no `Attach`. The one behaviour only Linux
+tags, where the driver declares no `Attach`. The one behavior only Linux
 shows is a finished terminal reporting `EIO` where darwin reports the end
 of the file, which the session maps to `io.EOF` either way.
 
@@ -326,7 +326,7 @@ the native package.
    the design; the gap belongs to 008.
 2. Podman's abandoned session, above. Ending it needs an exec kill the
    libpod API does not have; killing by the reported pid is a guess about
-   namespaces, not a design, so the driver states the behaviour instead.
+   namespaces, not a design, so the driver states the behavior instead.
 3. `sandbox/internal/pkg/streamcast` is still unported, as this spec's
    Overview says, and slice 041 carries it.
 4. The k8s driver's `Attach` over SPDY lands with the driver (slice 036).

@@ -182,7 +182,7 @@ subresource. The subresource carries no environment and no working
 directory, so the driver wraps the argv the way the hosted driver did:
 `env K=V ... sh -c 'cd "$0" && exec "$@"' <workdir> <argv...>`, with the
 stored environment merged under the request's, both sorted. Exit codes
-come from the executor's coded error; a request timeout and a cancelled
+come from the executor's coded error; a request timeout and a canceled
 context surface from `Wait` as `context.DeadlineExceeded` and
 `context.Canceled`; `Stdin` and `TTY` are refused with `ErrUnsupported`
 because `Attach` is not declared; a sandbox with no Pod is
@@ -247,7 +247,7 @@ names a deployment.
 `Mesh`, `Ingress`, `Volumes`, `Snapshots`, `Resize` and the egress modes
 are the cluster's to give and this driver's to declare, and each waits
 for the slice that builds it. A capability declared without its
-behaviour fails the suite, which is the point of declaring none.
+behavior fails the suite, which is the point of declaring none.
 
 ## Not in this spec
 
@@ -303,7 +303,7 @@ stamping, and the preflight an operator reads before the first sandbox.
 - **No informer cache.** The hosted driver read Pods and claims through
   shared informers and carried `InspectFresh` for the reads that could
   not be stale. Every read here is a live one: `Inspect` after `Update`
-  has to show the update, and a cache is an optimisation a later slice
+  has to show the update, and a cache is an optimization a later slice
   can add behind the same methods.
 - **A derived object name.** A sandbox id holds `_` and upper case and
   an object name may not, so the name is the id when the id is already
@@ -332,7 +332,7 @@ stamping, and the preflight an operator reads before the first sandbox.
   only a Pod that never starts spends the budget.
 - **Archives are rewritten on both sides.** The container's `tar`
   writes `./x` and `dir/`; the contract's other drivers write `x` and
-  `dir`. Export normalises every name, and import validates every entry
+  `dir`. Export normalizes every name, and import validates every entry
   in this process before it reaches the container, so a traversal, an
   absolute name, a link of either kind and a special file are refused
   where the check still holds.
@@ -357,7 +357,7 @@ kind create cluster --name cella
 KUBECONFIG=$(kind get kubeconfig-path --name cella) go test ./runtime/k8s -run TestClusterConformance -v
 ```
 
-### Hosted behaviour deliberately dropped
+### Hosted behavior deliberately dropped
 
 The warm pool (`AcquireWarm`, the bucket ordering, the warm-to-leased
 JSON patch) waits for 038; the Cilium network policies, the egress CA

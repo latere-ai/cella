@@ -138,7 +138,7 @@ operator applies once by hand: `CELLA_TOKEN_KEY`, the authorizer's URL
 and bearer, the sink's URL and secret, `CELLA_DB_URL` with
 `CELLA_SECRET_KEY`, and the gateway's `CELLA_ENVIRONMENT_KEY` with
 `CELLA_EGRESS_CA_KEY`. Each template carries the command that mints its
-value. A bearer and the URL it authorises are one Secret, because a URL
+value. A bearer and the URL it authorizes are one Secret, because a URL
 without its bearer is a start-up failure and the pair is rotated
 together.
 

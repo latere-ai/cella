@@ -31,7 +31,7 @@ The fields are the hosted product's, ported rather than lifted: the
 hosted manifest carried `tier`, `policy`, `mesh` as a string,
 `deadline` beside `ttl`, and `mounts` keyed by a drive workspace id,
 and parsed its quantities with the Kubernetes API machinery. None of
-those cross. What crosses is the behaviour its regressions pin: the
+those cross. What crosses is the behavior its regressions pin: the
 quantity subset, the duration rules, the reserved label prefix, the
 label syntax, and the annotation size limit.
 
@@ -298,7 +298,7 @@ Divergences from the design above, each deliberate:
   a field of its own, so the field keeps the name `Detail` the tree
   already uses. `Paths` carries every path of a multi-path refusal.
 - `ResolveNative` takes the caller's context, so a resolve that reaches
-  a lookup is cancelled with its request.
+  a lookup is canceled with its request.
 - An operator's invalid default or ceiling returns a plain error, not a
   contract error, so a server misconfiguration cannot surface to a
   caller as a 400 about a field the caller did not write.

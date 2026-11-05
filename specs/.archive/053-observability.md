@@ -35,7 +35,7 @@ drift in either direction is a test failure.
 The hosted source ([[031-hosted-sandbox-consolidation]], the row for
 `internal/platform/metrics` and `internal/platform/traffic`) pushed
 dotted OTel instruments and served no scrape surface. What ports is the
-behaviour, not the shape: the counts an operator read (sandboxes by
+behavior, not the shape: the counts an operator read (sandboxes by
 state, warm pool depth, create time cold against warm, idle stops, cap
 hits) become 017's rows, and the route taxonomy that bounded the
 hosted `path` label becomes 017's `route`, which is the `http.ServeMux`
@@ -57,7 +57,7 @@ pattern and needs no taxonomy of its own.
 ### Where the registry lives and who may reach it
 
 `internal/metrics` holds one `*Registry`, built over
-`latere.ai/x/pkg/metrics`: labelled counters, histograms with declared
+`latere.ai/x/pkg/metrics`: labeled counters, histograms with declared
 bounds and a `+Inf` bucket, and scrape-time gauge callbacks, written in
 the Prometheus text exposition format. It is the one package that
 registers, and `cmd/cellad` builds it once.
@@ -93,7 +93,7 @@ the loop pushes it.
 
 Twenty-one of 017's twenty-nine rows have an owning spec that has
 landed. Each is registered at start-up, so a series exists before the
-first observation, and every labelled histogram is initialised over its
+first observation, and every labeled histogram is initialized over its
 closed vocabulary.
 
 | Metric | Type | Labels | Buckets | Recorded at |
@@ -128,7 +128,7 @@ Bucket sets, each twelve bounds, named once and shared:
 | create, 0.5s to 300s | 0.5, 1, 2, 5, 10, 20, 30, 60, 90, 120, 180, 300 |
 | store, 1ms to 5s | 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5 |
 
-Closed vocabularies, initialised at start so a scrape before the first
+Closed vocabularies, initialized at start so a scrape before the first
 event carries the series:
 
 | Label | Values |
@@ -288,7 +288,7 @@ loops.
 | Criterion | Test that proves it | State |
 |---|---|---|
 | The registered metrics match 017's table row for row in name, type, labels and buckets, and the unregistered rows are exactly the declared awaiting set | `TestMetricsTable` reading `017-observability.md` through `runtime.Caller`, `TestAwaitingRowsAreRegisteredByNobody` | built |
-| Every labelled histogram has a series before its first observation, and no label value is a sandbox id, a subject, a name or a path | `TestSeriesExistAtStart`, `TestLabelValuesAreBounded`, and the scrape the end-to-end run reads | built |
+| Every labeled histogram has a series before its first observation, and no label value is a sandbox id, a subject, a name or a path | `TestSeriesExistAtStart`, `TestLabelValuesAreBounded`, and the scrape the end-to-end run reads | built |
 | Each counter and histogram is moved by the code path that owns it | one test per owner package against a fake recorder, and `TestCountersRecordWhatTheyOwn` over the registry | built |
 | `/metrics` on the internal listener serves the exposition and the public listener does not | `TestScrapeSurfaceIsTheInternalListener` | built |
 | The egress role opens no listener beyond its doors | `TestEgressRoleServesNoScrapeSurface` | built |

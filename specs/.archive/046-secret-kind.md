@@ -100,7 +100,7 @@ The rules, each with the code it is refused under:
 | `oauth` is set if and only if `spec.kind` is `oauth_client_credentials`, and carries an `https://` `tokenUrl` | `exclusive_fields`, `missing_field`, `invalid_field` |
 | `value` is required on create, optional on update, at most 64 KiB, and carries no CR or LF | `missing_field`, `invalid_field` |
 | a `basic` or `oauth_client_credentials` value splits on a colon into two non-empty halves | `invalid_field` |
-| `status` on apply is ignored | — |
+| `status` on apply is ignored | none |
 
 `value` is write-only. Every read, single and list, returns the object
 with `spec.value` absent; no event, record or log carries it. The

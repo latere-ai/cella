@@ -36,7 +36,7 @@ jobs that walk the document against that stack.
 
 It does not build the whole of 012. The upstream stub, the gateway and
 worker tiers, the Postgres and local tiers, and `make run-worker` stay
-with the slices whose behaviour they exercise.
+with the slices whose behavior they exercise.
 
 ## Current state
 
@@ -338,7 +338,7 @@ to pull a digest it may not be able to reach.
 
 - The upstream stub, the gateway and worker tiers, `make run-worker`, the
   native, postgres and local tiers, and Cilium in the kind cluster: each
-  waits on the spec whose behaviour it exercises
+  waits on the spec whose behavior it exercises
   ([[018-egress-and-secrets]], [[021-data-plane-workers]]).
 - The admission role runs and nothing dials it. This tree reads no
   admission variable; slice 047 brings the client, `CELLA_ADMISSION_URL`

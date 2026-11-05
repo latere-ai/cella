@@ -120,7 +120,7 @@ An `Error` carries a stable `Code`, a sentence, a hint and the detail; a
 latere command's words, kept as the defaults so a terminal reads the same
 whichever embedder answers. An application with its own surface shows its
 own words keyed on the code and the kind. The command's refusals that
-concern only the command (an unverified build, a sign-out it cancelled or
+concern only the command (an unverified build, a sign-out it canceled or
 refused) stay in the command.
 
 ### What stays in the latere command

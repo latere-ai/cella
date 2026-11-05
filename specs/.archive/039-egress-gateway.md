@@ -96,7 +96,7 @@ Stage 7 holds the mode against the environment's
 `status.capabilities.egress`: a mode the list omits is
 `capability_unsupported`, and an empty list is the warning that
 `EgressEnforced` will be false. A warning says what the environment
-could not honour, so the boundary that asks for nothing to be kept out,
+could not honor, so the boundary that asks for nothing to be kept out,
 `open` with no denied host, produces none: an environment that keeps
 nothing out has honoured it exactly. Any other boundary on an
 environment that declares no enforcement warns.
@@ -154,7 +154,7 @@ multiple violations sorted by name then host, and wildcard subsumption.
 Two entries scoping one host is `secret_host_conflict`, refused rather
 than silently collapsed, which is the first of the two defects
 [[018-egress-and-secrets]] names. The second, a placeholder derived
-from a name a neighbour could guess, is answered by minting per sandbox
+from a name a neighbor could guess, is answered by minting per sandbox
 per secret from `placeholder.Mint`.
 
 ### The create order
@@ -416,7 +416,7 @@ creating a sandbox whose boundary only a connected gateway can admit.
 3. **The unenforced-boundary warning.** 003 warns whenever
    `capabilities.egress` is empty. Here the warning is written only for
    a boundary that asked for something to be kept out, because a warning
-   names what the environment could not honour.
+   names what the environment could not honor.
 4. **The gate owns the proxy door's tunnel.** 018 describes the gate as
    a policy in front of `pkg/egress.Gateway`. A decision taken before
    any dial cannot be taken by a handler that dials inside itself, and a
