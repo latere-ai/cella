@@ -277,8 +277,8 @@ const securityPolicy = "SECURITY.md"
 
 // The headings of the policy this check reads.
 const (
-	policyCommitments = "## Commitments"
-	policyAssets      = "## What is protected, and what proves it"
+	policyCommitments = "### Commitments"
+	policyAssets      = "### What proves it"
 )
 
 // commitments pairs each promise the policy makes with a phrase of the

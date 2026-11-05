@@ -186,7 +186,8 @@ what a correctly configured control plane refuses.
 
 ### The root file
 
-`SECURITY.md` names the address, the response times, and four
+`SECURITY.md` names the private reporting routes, links the
+organization's policy for the response times, and makes four
 commitments, each a row above: every `/v1` request carries a token
 from a listed issuer or one the control plane minted, and nothing acts
 before the authorizer has decided, with a refusal indistinguishable
