@@ -20,7 +20,7 @@ import (
 	"latere.ai/x/cella/egress"
 	"latere.ai/x/cella/internal/config"
 	"latere.ai/x/cella/internal/events"
-	"latere.ai/x/cella/internal/store/postgres/migrations"
+	"latere.ai/x/cella/internal/store/postgres"
 )
 
 // notConfigured is the sentence an optional dependency's line carries when
@@ -97,7 +97,7 @@ func store(ctx context.Context, cfg config.Config) Line {
 		return Line{Name: "store", State: Skipped,
 			Detail: notConfigured("CELLA_DB_URL") + "; every state is in memory and recovery is off"}
 	}
-	highest, err := migrations.Highest()
+	highest, err := postgres.Highest()
 	if err != nil {
 		return Line{Name: "store", State: Failed, Detail: err.Error()}
 	}

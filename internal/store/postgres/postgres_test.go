@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net/url"
 	"os"
@@ -24,10 +25,13 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 	"latere.ai/x/ci-gate/reap"
 
+	"latere.ai/x/pkg/pgxmigrate"
+
 	"latere.ai/x/cella/controller"
 	"latere.ai/x/cella/internal/events"
 	"latere.ai/x/cella/internal/store"
 	"latere.ai/x/cella/internal/store/postgres"
+	"latere.ai/x/cella/internal/store/postgres/migrations"
 	"latere.ai/x/cella/internal/store/storetest"
 	v1 "latere.ai/x/cella/manifest/v1"
 )
@@ -159,6 +163,58 @@ func TestSchemaGuards(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("the failure does not name %q: %v", tc.want, err)
+			}
+		})
+	}
+}
+
+// TestReplicasStartingTogetherAllStart: two replicas opening a fresh database
+// at once both come up, because the second waits for the first's migration
+// under the migrator's lock instead of reading it as a failed one.
+func TestReplicasStartingTogetherAllStart(t *testing.T) {
+	admin := server(t)
+	dsn := database(t, admin)
+	errs := make(chan error, 4)
+	stores := make(chan *postgres.Store, 4)
+	for range 4 {
+		go func() {
+			s, err := postgres.Open(t.Context(), postgres.Options{URL: dsn, Key: storetest.Key})
+			errs <- err
+			stores <- s
+		}()
+	}
+	for range 4 {
+		if err := <-errs; err != nil {
+			t.Errorf("a replica starting with others refused: %v", err)
+		}
+		if s := <-stores; s != nil {
+			if err := s.Close(); err != nil {
+				t.Errorf("closing: %v", err)
+			}
+		}
+	}
+}
+
+// TestSchemaGuardsWrapTheMigratorsSentinels: the refusal names the migrator's
+// sentinel so a caller can branch on it.
+func TestSchemaGuardsWrapTheMigratorsSentinels(t *testing.T) {
+	admin := server(t)
+	for _, tc := range []struct {
+		name, statement string
+		want            error
+	}{
+		{"ahead", `update schema_migrations set version = 9999, dirty = false`, pgxmigrate.ErrNewer},
+		{"dirty", `update schema_migrations set dirty = true`, pgxmigrate.ErrDirty},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dsn := database(t, admin)
+			if err := open(t, dsn, storetest.Key, time.Hour).Close(); err != nil {
+				t.Fatalf("closing the first store: %v", err)
+			}
+			execute(t, dsn, tc.statement)
+			_, err := postgres.Open(t.Context(), postgres.Options{URL: dsn, Key: storetest.Key})
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("Open = %v, want %v", err, tc.want)
 			}
 		})
 	}
@@ -767,5 +823,21 @@ func TestAStartSweepsThenLabels(t *testing.T) {
 	start()
 	if got := strings.Join(*calls, ","); got != "sweep,run" {
 		t.Fatalf("calls = %s, want a sweep before the start", got)
+	}
+}
+
+// TestHighestIsWhatIsEmbedded: the number the store guards against is read
+// from the files this binary carries, not written down beside them.
+func TestHighestIsWhatIsEmbedded(t *testing.T) {
+	highest, err := postgres.Highest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := fs.ReadDir(migrations.FS, ".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) == 0 || highest != uint(len(entries)/2) {
+		t.Fatalf("the highest migration is %d over %d file(s)", highest, len(entries))
 	}
 }

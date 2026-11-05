@@ -8,9 +8,9 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/golang-migrate/migrate/v4"
-	"github.com/golang-migrate/migrate/v4/source/iofs"
 	"github.com/jackc/pgx/v5"
+
+	"latere.ai/x/pkg/pgxmigrate"
 
 	"latere.ai/x/cella/controller"
 	"latere.ai/x/cella/internal/store"
@@ -128,7 +128,7 @@ func (s *Store) whileWriter(ctx context.Context, what string, fn func(context.Co
 // schemaVersion reads the version the database's schema is at, zero for one
 // with no schema, under the same refusals Open applies.
 func schemaVersion(ctx context.Context, rawURL string) (uint, error) {
-	highest, err := migrations.Highest()
+	highest, err := Highest()
 	if err != nil {
 		return 0, fmt.Errorf("store: %w", err)
 	}
@@ -159,25 +159,12 @@ func schemaVersion(ctx context.Context, rawURL string) (uint, error) {
 // above it in order. A down migration that refuses leaves the schema where it
 // stopped and reports why.
 func downTo(rawURL string, version uint) error {
-	dsn, err := migrationURL(rawURL)
+	dsn, err := pgxmigrate.DriverURL(rawURL)
 	if err != nil {
-		return err
+		return fmt.Errorf("store: CELLA_DB_URL: %w", err)
 	}
-	src, err := iofs.New(migrations.FS, ".")
-	if err != nil {
-		return fmt.Errorf("store: the embedded migrations: %w", err)
+	if err := pgxmigrate.To(dsn, migrations.FS, ".", version); err != nil {
+		return fmt.Errorf("store: migrating the schema down to %d: %w", version, err)
 	}
-	m, err := migrate.NewWithSourceInstance("iofs", src, dsn)
-	if err != nil {
-		return fmt.Errorf("store: opening the migrator: %w", err)
-	}
-	err = m.Migrate(version)
-	if errors.Is(err, migrate.ErrNoChange) {
-		err = nil
-	}
-	if err != nil {
-		err = fmt.Errorf("store: migrating the schema down to %d: %w", version, err)
-	}
-	sourceErr, dbErr := m.Close()
-	return errors.Join(err, sourceErr, dbErr)
+	return nil
 }

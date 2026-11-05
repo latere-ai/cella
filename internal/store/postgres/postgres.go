@@ -15,8 +15,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"net/url"
-	"strings"
 	"sync"
 	"time"
 
@@ -127,7 +125,7 @@ func Open(ctx context.Context, o Options) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("store: opening the pool: %w", err)
 	}
-	if err := prepare(ctx, pool, o.URL); err != nil {
+	if err := prepare(o.URL); err != nil {
 		pool.Close()
 		return nil, err
 	}
@@ -163,51 +161,34 @@ func renewEvery(d time.Duration) time.Duration {
 	return d
 }
 
-// prepare reads the schema this database is at, refuses one this binary does
-// not know, and applies what is pending.
-func prepare(ctx context.Context, pool *pgxpool.Pool, rawURL string) error {
-	highest, err := migrations.Highest()
-	if err != nil {
-		return fmt.Errorf("store: %w", err)
-	}
-	if err := guard(ctx, pool, highest); err != nil {
-		return err
-	}
-	dsn, err := migrationURL(rawURL)
-	if err != nil {
-		return err
-	}
-	if err := pgxmigrate.Up(dsn, migrations.FS, "."); err != nil {
-		return fmt.Errorf("store: applying the schema: %w", err)
-	}
-	return nil
-}
+// Highest is the newest migration this binary carries. The store refuses to
+// start against a schema above it: the migrator would report no change and
+// then serve statements against columns it does not know.
+func Highest() (uint, error) { return pgxmigrate.HighestOf(migrations.FS, ".") }
 
-// guard reads schema_migrations before the migrator runs.
+// prepare applies what is pending. A schema that is dirty or above the newest
+// migration this binary carries is refused, and the refusal comes from the
+// migrator under its own lock, so a replica that starts while another one
+// migrates waits for it instead of reading its migration as a failed one.
 //
 // A dirty flag means a migration failed halfway and the schema is in neither
 // version; an operator repairs it, and a binary that ran Up over it would
 // report the same failure with less information. A version above the newest
-// migration this binary carries means an older binary met a newer schema: Up
-// reports no change and every statement afterwards runs against columns this
-// code does not know.
-func guard(ctx context.Context, pool *pgxpool.Pool, highest uint) error {
-	var (
-		version int64
-		dirty   bool
-	)
-	err := pool.QueryRow(ctx, "select version, dirty from schema_migrations").Scan(&version, &dirty)
+// migration means an older binary met a newer schema: every statement
+// afterwards would run against columns this code does not know.
+func prepare(rawURL string) error {
+	dsn, err := pgxmigrate.DriverURL(rawURL)
+	if err != nil {
+		return fmt.Errorf("store: CELLA_DB_URL: %w", err)
+	}
+	err = pgxmigrate.Up(dsn, migrations.FS, ".")
 	switch {
-	case errors.Is(err, pgx.ErrNoRows):
-		return nil // migrated to nothing yet
-	case isUndefinedTable(err):
-		return nil // a database with no schema at all
+	case errors.Is(err, pgxmigrate.ErrDirty):
+		return fmt.Errorf("store: a migration failed halfway and an operator repairs it before this process starts: %w", err)
+	case errors.Is(err, pgxmigrate.ErrNewer):
+		return fmt.Errorf("store: the schema is newer than this binary: run the version of cellad that wrote the schema, or migrate down to this binary's newest migration: %w", err)
 	case err != nil:
-		return fmt.Errorf("store: reading the schema version: %w", err)
-	case dirty:
-		return fmt.Errorf("store: the schema is dirty at version %d: a migration failed halfway and an operator repairs it before this process starts", version)
-	case version > int64(highest):
-		return fmt.Errorf("store: the schema is at version %d and this binary carries %d: run the version of cellad that wrote the schema, or migrate down to %d", version, highest, highest)
+		return fmt.Errorf("store: applying the schema: %w", err)
 	}
 	return nil
 }
@@ -216,21 +197,6 @@ func guard(ctx context.Context, pool *pgxpool.Pool, highest uint) error {
 func isUndefinedTable(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "42P01"
-}
-
-// migrationURL is the store's URL under the scheme golang-migrate's pgx/v5
-// driver registers. pgxmigrate imports no driver, so the scheme is what
-// selects one.
-func migrationURL(raw string) (string, error) {
-	u, err := url.Parse(raw)
-	if err != nil {
-		return "", fmt.Errorf("store: CELLA_DB_URL is not a URL: %w", err)
-	}
-	if !strings.HasPrefix(u.Scheme, "postgres") {
-		return "", fmt.Errorf("store: CELLA_DB_URL has the scheme %q, not postgres", u.Scheme)
-	}
-	u.Scheme = "pgx5"
-	return u.String(), nil
 }
 
 // Tx runs fn in one transaction and commits it when fn returns nil.
