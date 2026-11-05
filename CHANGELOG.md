@@ -20,6 +20,18 @@ refused before it is pushed.
   `deploy-<tag>.tar.gz` archive carries neither, so what you install from it
   is unchanged.
 
+### Changed
+
+- **A replica that starts during another's migration waits.** It waits up to
+  five minutes for the migration lock, where it used to refuse the schema as
+  dirty and restart.
+
+### Fixed
+
+- **A request id carrying a space is replaced, not echoed back.**
+- **Ids made in the same millisecond sort in the order they were made.** This
+  covers resource ids, event ids and token ids.
+
 ## v0.23.0 - 2026-11-05
 
 ### Fixed
