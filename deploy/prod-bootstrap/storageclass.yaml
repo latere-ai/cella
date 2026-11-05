@@ -1,0 +1,24 @@
+# The class every sandbox workspace claim is provisioned from, named in
+# CELLA_K8S_STORAGE_CLASS.
+#
+# reclaimPolicy: Delete, so deleting a claim deletes the volume behind it.
+# Spec 62 step 4.4 deletes a namespace and expects the volumes to go with it;
+# a class edited to Retain leaves them behind and they are removed by hand.
+#
+# volumeBindingMode: WaitForFirstConsumer, where the hosted class used
+# Immediate. Immediate existed for the warm pool, which provisioned a claim
+# before any Pod asked for one. The driver of cella spec 036 declares no Pool
+# capability and creates the claim and the Pod in one call, so binding at the
+# first consumer provisions the volume on the node the Pod was scheduled to
+# and costs nothing. It also removes the zone assumption the hosted comment
+# had to make.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: cella-block-storage
+provisioner: dobs.csi.digitalocean.com
+parameters:
+  type: ext4
+reclaimPolicy: Delete
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true

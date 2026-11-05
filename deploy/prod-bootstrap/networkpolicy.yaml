@@ -1,0 +1,112 @@
+# The boundary of the sandboxes, in plain NetworkPolicy, in the workloads
+# namespace, and the policy that admits cellad to platformd's listener.
+# Operator-applied: the rollout identity writes in `latere` alone, and the
+# platformd policy selects platformd's Pods.
+# Sandboxes reach nothing. This is the rule the whole boundary rests on: a
+# Pod in cella-workloads has no ingress and no egress until a rule names one.
+# The selector is empty, so it covers the file-transfer helper Pod the driver
+# creates for a stopped sandbox as well as the sandbox itself. Most services in
+# `latere`, where the gateway runs, carry no ingress policy of their own; the
+# egress half of this rule is what keeps them out of a sandbox's reach.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cella-workloads-default-deny
+  namespace: cella-workloads
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  egress: []
+  ingress: []
+---
+# The one hole outwards: the gateway's two doors. A sandbox's HTTPS_PROXY
+# points at the proxy door and CELLA_GATEWAY_URL at the reverse door, and the
+# credential each carries is worthless anywhere else.
+#
+# The selector is the label the driver stamps, cella.latere.ai/managed-by=cella.
+# The hosted selector, sandbox.latere.ai/managed-by=sandboxd, matches nothing
+# here.
+#
+# The gateway runs in `latere`, beside every other service. The namespace
+# selector and the pod selector are one peer, one element of `to`, which
+# NetworkPolicy reads as both: a Pod in `latere` that is the gateway. Split
+# into two elements they would be either, and every Pod in `latere` would be
+# open to sandbox code on these two ports.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cella-workloads-to-gateway
+  namespace: cella-workloads
+spec:
+  podSelector:
+    matchLabels:
+      cella.latere.ai/managed-by: cella
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: latere
+          podSelector:
+            matchLabels:
+              app: cellad-egress
+      ports:
+        - protocol: TCP
+          port: 3128
+        - protocol: TCP
+          port: 8080
+---
+# Cluster DNS. Without it a sandbox cannot resolve the gateway's Service name,
+# so this is not a convenience: it is what makes the one hole usable. Nothing
+# else in kube-system is reachable.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cella-workloads-dns
+  namespace: cella-workloads
+spec:
+  podSelector:
+    matchLabels:
+      cella.latere.ai/managed-by: cella
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+# platformd's own pods: the internal TLS listener admits the Cella control
+# plane, whose authorizer call, admission call and every event delivery are
+# dropped packets without this rule.
+#
+# It selects platformd's Pods, not cellad's, so it is not in deploy/prod: a
+# rollout identity may select only its own service's Pods. It is a second
+# object beside the policy that admits the Lux core to the same listener;
+# allow rules add across objects. The peer is a pod selector with no
+# namespace selector, which is this namespace, where cellad runs.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cellad-platformd-tls
+  namespace: latere
+spec:
+  podSelector:
+    matchLabels:
+      app: platformd
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: cellad
+      ports:
+        - protocol: TCP
+          port: 8443

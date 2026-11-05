@@ -1,0 +1,41 @@
+# The control plane's public listener. ClusterIP: the Ingress routes the
+# origin's /v1/environments here, platformd's console proxy dials it in the
+# cluster as http://cellad.latere.svc.cluster.local, and nothing routes the
+# probe listener on 8081.
+apiVersion: v1
+kind: Service
+metadata:
+  name: cellad
+  namespace: latere
+  labels:
+    app: cellad
+spec:
+  type: ClusterIP
+  selector:
+    app: cellad
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+# The gateway's two doors, reachable from cella-workloads and from nothing
+# else; the network policy is what holds that, not this Service. Nothing about
+# the gateway is publicly routable and no Ingress names it.
+apiVersion: v1
+kind: Service
+metadata:
+  name: cellad-egress
+  namespace: latere
+  labels:
+    app: cellad-egress
+spec:
+  type: ClusterIP
+  selector:
+    app: cellad-egress
+  ports:
+    - name: proxy
+      port: 3128
+      targetPort: proxy
+    - name: reverse
+      port: 8080
+      targetPort: reverse

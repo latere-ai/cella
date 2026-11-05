@@ -1,0 +1,111 @@
+# The boundary around the two control-plane workloads, in plain NetworkPolicy.
+# The policies of the workloads namespace, and the one that selects platformd's
+# Pods, are operator-applied; deploy/prod-bootstrap/ holds them.
+#
+# Allow rules are additive across objects and across both kinds.
+# The control plane's public listener admits three callers and nothing else:
+# the ingress controller, which carries every caller of the origin's
+# /v1/environments; platformd's Pods, whose console proxy dials the cellad
+# Service in the cluster; and cellad's own Pods, since a standby forwards
+# every request to the writer at the address the writer lease names (cella
+# spec 076). The listener is plain HTTP, as it is behind the ingress, so this
+# rule is what bounds who reaches it unencrypted; the platformd and cellad
+# peers are pod selectors with no namespace selector, which is this
+# namespace, and no other Pod of `latere` is admitted. The probe listener on
+# 8081 is reached by the kubelet, which no NetworkPolicy governs. The Topos
+# core is admitted by toposd-cellad, below.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cellad
+  namespace: latere
+  labels:
+    app: cellad
+spec:
+  podSelector:
+    matchLabels:
+      app: cellad
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+        - podSelector:
+            matchLabels:
+              app: platformd
+        - podSelector:
+            matchLabels:
+              app: cellad
+        # insulad, which creates, drives and deletes the sandboxes Insula's
+        # static builds run in (spec 133). The namespace selector and the pod
+        # selector are one peer, so a Pod must be in `insula` and be insulad;
+        # no other Pod of that namespace is admitted.
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: insula
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: insulad
+      ports:
+        - protocol: TCP
+          port: 8080
+---
+# The gateway admits sandboxes on its two doors and nothing else, the other
+# Pods of `latere` included. The control plane never dials it: the gateway
+# opens the stream outbound, which is what lets the doors stay closed to
+# everything but a workload. As on the sandbox side, the two selectors are one
+# peer, so a Pod must be in cella-workloads and carry the driver's label.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cellad-egress
+  namespace: latere
+  labels:
+    app: cellad-egress
+spec:
+  podSelector:
+    matchLabels:
+      app: cellad-egress
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: cella-workloads
+          podSelector:
+            matchLabels:
+              cella.latere.ai/managed-by: cella
+      ports:
+        - protocol: TCP
+          port: 3128
+        - protocol: TCP
+          port: 8080
+---
+# cellad's public listener admits the Topos core on 8080: a hosted session's
+# sandbox is created, opened and driven there with the agent's token.
+#
+# This is cellad's side of the Topos core's egress. It is here because it
+# selects cellad's Pods, which this tree's rollout identity may select and the
+# Topos core's may not. A second object rather than a fifth peer of
+# `cellad`, so the core's admission keeps its own test; allow rules add across
+# objects. The peer is a pod selector with no namespace selector, which is
+# this namespace, where the core runs.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: toposd-cellad
+  namespace: latere
+spec:
+  podSelector:
+    matchLabels:
+      app: cellad
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: toposd
+      ports:
+        - protocol: TCP
+          port: 8080

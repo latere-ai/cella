@@ -1,0 +1,68 @@
+# Sandbox Pods run on the sandbox pool and nowhere else. The driver applies the
+# pool's node selector and toleration to every Pod it writes, from
+# CELLA_K8S_NODE_SELECTOR and CELLA_K8S_TOLERATIONS; this policy is the
+# cluster's own check of the same fact, so a driver defect, a changed variable
+# or a hand-written Pod cannot place user code on a node that runs services.
+#
+# The selector is what pins a Pod to the pool: the scheduler places it on a
+# node carrying node-role/sandbox=true, and the kubelet refuses a Pod whose
+# selector its node does not match, so a Pod that sets spec.nodeName directly
+# is held too. The toleration is what lets it run there under the pool's
+# sandbox-only=true:NoSchedule taint; the driver renders it as
+# {key: sandbox-only, operator: Equal, value: "true", effect: NoSchedule}.
+#
+# The rule matches `pods` alone. Status writes, scheduling bindings, exec,
+# attach and eviction are subresources and are not held to it. A label or
+# annotation patch on an existing Pod is an UPDATE of `pods` and passes,
+# because the Pod still carries both; an UPDATE that drops either is refused.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: cella-workloads-sandbox-pool
+spec:
+  # An expression that cannot be evaluated refuses the Pod.
+  failurePolicy: Fail
+  matchConstraints:
+    # Scoped here rather than on the binding alone, so no second binding can
+    # widen the policy past the workloads namespace.
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: cella-workloads
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods"]
+  validations:
+    - expression: >-
+        has(object.spec.nodeSelector) &&
+        'node-role/sandbox' in object.spec.nodeSelector &&
+        object.spec.nodeSelector['node-role/sandbox'] == 'true'
+      message: >-
+        A Pod in cella-workloads runs on the sandbox pool: spec.nodeSelector
+        must carry node-role/sandbox=true.
+      reason: Forbidden
+    - expression: >-
+        has(object.spec.tolerations) &&
+        object.spec.tolerations.exists(t,
+          has(t.key) && t.key == 'sandbox-only' &&
+          has(t.value) && t.value == 'true' &&
+          has(t.effect) && t.effect == 'NoSchedule')
+      message: >-
+        A Pod in cella-workloads runs on the sandbox pool: spec.tolerations
+        must tolerate sandbox-only=true:NoSchedule.
+      reason: Forbidden
+---
+# Deny: a refused Pod is not created. Warn or Audit would record the breach and
+# let the Pod schedule wherever it asked.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: cella-workloads-sandbox-pool
+spec:
+  policyName: cella-workloads-sandbox-pool
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: cella-workloads

@@ -1,0 +1,430 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cellad
+  namespace: latere
+  labels:
+    app: cellad
+    # Out of the Dash0 operator's injection, on the workload and on its
+    # Pods. The injection adds an init container that copies a preload
+    # library into the Pod, which a static Go binary never loads, and on a
+    # busy node that copy took twenty of the thirty-four seconds a rollout
+    # left the core unanswered. cellad names the collector itself below.
+    dash0.com/enable: "false"
+spec:
+  # Two replicas, rolled one at a time (cella spec 076). One is the writer: it
+  # holds the writer lease in the store, runs the loops, holds the gateways'
+  # streams and answers the API. The other is a standby that forwards every
+  # request to the writer at the address the lease names. A rollout starts a
+  # new Pod, which joins as a standby, before it stops an old one, and a
+  # writer that is stopped hands the lease to a standby within about a
+  # second; requests that arrive meanwhile are held and answered. Readiness
+  # does not read the lease, so the new Pod is ready while the old writer
+  # still holds it. The disruption budget below keeps one replica through a
+  # node drain.
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: cellad
+  template:
+    metadata:
+      labels:
+        app: cellad
+        dash0.com/enable: "false"
+    spec:
+      serviceAccountName: cellad
+      # The token is mounted, unlike platformd's, because the k8s driver
+      # builds its client from the in-cluster configuration: no token, no
+      # API server, and Preflight fails at start.
+      automountServiceAccountToken: true
+      # Above the stop's whole length: the five second preStop pause, the
+      # server's three second drain, a writer's handoff of at most
+      # CELLA_HANDOFF_TIMEOUT (ten seconds), and up to sixty seconds for
+      # in-flight requests to finish. The default of thirty would kill a drain
+      # that is still finishing a synchronous delete.
+      terminationGracePeriodSeconds: 85
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: cellad
+          # The Pod keeps serving for five seconds after Kubernetes decides to
+          # stop it, the time the ingress and the Service endpoints take to
+          # drop its address, so a request routed to it in that time is still
+          # answered, by it or by the writer it forwards to. The stop signal,
+          # and a writer's handoff, come after the pause.
+          lifecycle:
+            preStop:
+              sleep:
+                seconds: 5
+          # One image carries both roles and the subcommand selects. The
+          # placeholder tag never resolves; the kustomization's images entry
+          # names the release this target runs, and the release pipeline pins
+          # it by digest when it rolls this Deployment.
+          image: ghcr.io/latere-ai/cellad:unreleased
+          imagePullPolicy: IfNotPresent
+          args: ["serve"]
+          env:
+            # The backend of the default environment and the namespace it
+            # writes in. The namespace is set rather than defaulted: the
+            # driver's default is `cella`, and sandboxes belong in the one
+            # namespace whose pod security level, default-deny policy and
+            # RoleBinding are theirs alone, never beside the control plane in
+            # `latere`.
+            - name: CELLA_RUNTIME
+              value: "k8s"
+            - name: CELLA_K8S_NAMESPACE
+              value: "cella-workloads"
+            # The tainted pool the hosted product ran user code on
+            # (terraform: digitalocean_kubernetes_node_pool.sandbox_pool). The
+            # label and the taint are the pool's own and stay as they are; the
+            # driver applies the selector and the toleration to every sandbox
+            # Pod. cellad itself carries neither and lands on general-purpose
+            # capacity, as sandboxd did.
+            - name: CELLA_K8S_NODE_SELECTOR
+              value: "node-role/sandbox=true"
+            - name: CELLA_K8S_TOLERATIONS
+              value: "sandbox-only=true:NoSchedule"
+            - name: CELLA_K8S_STORAGE_CLASS
+              value: "cella-block-storage"
+            # The desktop of a sandbox that asks for one: the image the core
+            # publishes with each release, at the same tag as cellad. It runs
+            # as a second container of the sandbox's Pod and is pulled with
+            # the same pull secret, so it pins with the control plane.
+            - name: CELLA_K8S_DISPLAY_IMAGE
+              value: "ghcr.io/latere-ai/cella-display:v0.23.0"
+            # The image a volume is filled from an image with: this
+            # container's own, at the same release. The driver fills such a
+            # volume with a short-lived Pod in the workloads namespace whose
+            # init container copies cellad out of this image and whose main
+            # container runs the volume's image with `cellad fill`, so the
+            # program and the control plane are one build. The kustomization
+            # sets this value from the image above. Unset, every
+            # volume with an image source is refused. The Pod carries the
+            # sandboxes' node selector, toleration and pull secret, and
+            # needs no network and no verb the Role does not already grant.
+            # CELLA_K8S_VOLUME_CLASS is left unset, so volumes are claims on
+            # CELLA_K8S_STORAGE_CLASS, the one class cellad-storageclass lets
+            # Preflight read.
+            - name: CELLA_K8S_FILL_IMAGE
+              value: "ghcr.io/latere-ai/cellad:unreleased"
+            # The catalog images (sandbox-images) keep their user's home in
+            # /home/agent, where they set npm's global prefix and pip's
+            # user bin. The root file system is read only, so the driver
+            # keeps that directory in the workspace's .home, filled from the
+            # image on a sandbox's first start, and HOME names it:
+            # `npm install -g` then puts a command on PATH, and it survives
+            # a restart.
+            - name: CELLA_K8S_HOME
+              value: "/home/agent"
+            # Sandboxes pull from ghcr.io/latere-ai, so the claim's namespace
+            # holds the pull secret and the driver names it on every Pod.
+            - name: CELLA_K8S_IMAGE_PULL_SECRETS
+              value: "ghcr-pull"
+            # The driver's own defaults, stated so the density they set is
+            # read where the pool is sized: a request of a tenth of the CPU
+            # limit and all of the memory limit.
+            - name: CELLA_K8S_CPU_REQUEST_RATIO
+              value: "0.1"
+            - name: CELLA_K8S_MEMORY_REQUEST_RATIO
+              value: "1"
+            # A sandbox that names no memory, a Topos session or an Examen
+            # check, starts at 128 MiB and grows to 1 GiB as it uses it
+            # (cella spec 078). The small start is what lets several share
+            # the 2 GB sandbox-small node, which leaves pods about 860 MiB
+            # after its per-node agents; one that grows past the node's room
+            # moves to sandbox-large with its files. A sandbox that names a
+            # memory, an Insula build or capture, keeps that fixed size.
+            - name: CELLA_DEFAULT_MEMORY
+              value: "128Mi"
+            - name: CELLA_DEFAULT_MAX_MEMORY
+              value: "1Gi"
+            # Where the other replicas reach this one's public listener
+            # (cella spec 076): the Pod's own address and the public port,
+            # written into the writer lease by whichever replica holds it.
+            # A standby dials it directly, which the network policies admit.
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: CELLA_ADVERTISE_URL
+              value: "http://$(POD_IP):8080"
+            # The listeners. The public one serves the API and the key set
+            # under CELLA_BASE_PATH, in plain HTTP: TLS ends at the ingress,
+            # and platformd's console proxy dials the Service in the cluster.
+            # The internal one serves the probes for the cluster.
+            - name: CELLA_PUBLIC_ADDR
+              value: ":8080"
+            - name: CELLA_INTERNAL_ADDR
+              value: ":8081"
+            # Local disk: the readiness write test. The root filesystem is
+            # read only, so this is an emptyDir. Nothing durable lives here;
+            # state is in Postgres.
+            - name: CELLA_DATA_DIR
+              value: "/var/lib/cella"
+            # The environment the owner policy and the platform's default both
+            # name. It equals PLATFORM_CELLA_DEFAULT_ENVIRONMENT in the
+            # platformd-cella Secret, and the gateway's environment key is
+            # minted for it.
+            - name: CELLA_DEFAULT_ENVIRONMENT
+              value: "default"
+            # The gateway's two doors as a sandbox of this environment dials
+            # them. The proxy door is what HTTPS_PROXY points at; the reverse
+            # door is CELLA_GATEWAY_URL, the path for a runtime that ignores
+            # the proxy variables, which arbitrary user code often does.
+            - name: CELLA_GATEWAY
+              value: "cellad-egress.latere.svc.cluster.local:3128"
+            - name: CELLA_GATEWAY_REVERSE
+              value: "cellad-egress.latere.svc.cluster.local:8080"
+            # The gateway's Pods, which the driver's per-sandbox
+            # NetworkPolicy names as the one destination besides cluster DNS
+            # and the sandbox's own mesh peers. With the selector set the
+            # environment declares the none, allowlist and open boundaries as
+            # enforced. The gateway runs in `latere`, not in the workloads
+            # namespace, so the namespace is stated; its container ports are
+            # the driver's default 3128 and 8080, and CoreDNS carries the
+            # default k8s-app=kube-dns label in kube-system.
+            - name: CELLA_K8S_GATEWAY_SELECTOR
+              value: "app=cellad-egress"
+            # How long a sandbox may take to start before Cella fails it with
+            # CreateFailed. Insula's builds and captures run on sandbox-large,
+            # which keeps no node while idle, so the first one after a quiet
+            # spell waits for the autoscaler to add one: a node took 84
+            # seconds from droplet to Ready on 2026-11-04, before the
+            # autoscaler's reaction, the pull of Insula's 250 MB static build
+            # image (spec 133) and the workspace volume's provisioning. Six
+            # minutes holds all of that with room. It bounds only a sandbox
+            # that never starts.
+            - name: CELLA_K8S_READY_TIMEOUT
+              value: "360s"
+            - name: CELLA_K8S_GATEWAY_NAMESPACE
+              value: "latere"
+            # The client connections each replica opens to the pooler at
+            # CELLA_DB_POOL_URL. They claim nothing on the cluster: the pool's
+            # own size, two server connections for every replica together, is
+            # the core's line in the cluster's connection budget. Two per
+            # replica keeps the writer's lease renewals from queueing behind a
+            # write; its writes are serialized by its controller's lock.
+            - name: CELLA_DB_MAX_CONNS
+              value: "2"
+            # The private CA of platformd's internal listener is added to the trust
+            # store rather than replacing it: the three webhook URLs below are
+            # https on platformd's internal listener, whose certificate that
+            # CA issued, and the OIDC issuer is a public https host whose
+            # roots must keep working. SSL_CERT_FILE would replace the root
+            # set and break the second; SSL_CERT_DIR appends. Go reads every
+            # file in these directories once per process, at the first
+            # verification, so a renewed CA takes a restart to be trusted.
+            - name: SSL_CERT_DIR
+              value: "/etc/ssl/certs:/var/run/cella-trust"
+            # The prefix the platform origin assigns to the core: every route
+            # of the public listener is served under it, /v1/sandboxes at
+            # /v1/environments/sandboxes, the key set at
+            # /v1/environments/.well-known/jwks.json. It equals the path of
+            # the Ingress rule, which forwards without a rewrite. The probes
+            # are the internal listener's and do not move.
+            - name: CELLA_BASE_PATH
+              value: "/v1/environments"
+            # The absolute URL callers reach the public listener at: the
+            # origin's host and the base path. It is the iss of every token
+            # cellad mints and the base of every URL in a response, so it
+            # names the Ingress rule exactly.
+            - name: CELLA_PUBLIC_URL
+              value: "https://api.latere.ai/v1/environments"
+            # Identity (cella spec 006). The issuer is auth; the audience list
+            # carries cella's own name first, which is what locally minted
+            # workload tokens and environment keys are addressed to, and the
+            # platform audience second, which is what the console's proxy
+            # sends. Both must be accepted or one caller of the two is
+            # refused.
+            - name: CELLA_OIDC_ISSUERS
+              valueFrom:
+                secretKeyRef:
+                  name: cellad-oidc
+                  key: CELLA_OIDC_ISSUERS
+            - name: CELLA_OIDC_AUDIENCE
+              value: "cella,api.latere.ai"
+            # The RSA key cellad signs workload tokens and environment keys
+            # with. Required in every mode; one or two PEM blocks, the first
+            # signing and both served in the key set, so a rotation is two
+            # applies and no outage.
+            - name: CELLA_TOKEN_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: cellad-token
+                  key: CELLA_TOKEN_KEY
+            # The authorizer of platform spec 47. The URL is https because
+            # cellad refuses an http:// authorizer on a host other than
+            # loopback: the decision and the bearer that authorizes it do not
+            # travel in the clear. The token equals PLATFORM_AUTHZ_TOKEN_CELLA
+            # in the platformd-cella Secret. A URL without a token is a
+            # start-up failure, so both are in one Secret.
+            - name: CELLA_AUTHORIZER_URL
+              valueFrom:
+                secretKeyRef:
+                  name: cellad-authz
+                  key: CELLA_AUTHORIZER_URL
+            - name: CELLA_AUTHORIZER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: cellad-authz
+                  key: CELLA_AUTHORIZER_TOKEN
+            # The admission webhook of platform spec 58, cella spec 007's
+            # contract: every apply is one call to it, which fails closed and
+            # is never retried. The token equals PLATFORM_ADMISSION_TOKEN_CELLA.
+            # The URL takes the authorizer's rule, https off loopback, and a
+            # URL without its token is a start-up failure, so both are in one
+            # Secret.
+            - name: CELLA_ADMISSION_URL
+              valueFrom:
+                secretKeyRef:
+                  name: cellad-admission
+                  key: CELLA_ADMISSION_URL
+            - name: CELLA_ADMISSION_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: cellad-admission
+                  key: CELLA_ADMISSION_TOKEN
+            # The event sink of platform spec 59, cella spec 009's contract.
+            # The secret is the HMAC key of Cella-Signature and equals
+            # PLATFORM_EVENTS_TOKEN_CELLA in the platformd-cella-events
+            # Secret; during a rotation it carries both halves comma
+            # separated and cellad signs each delivery under both. A URL
+            # without a secret, and a secret without a URL, are both start-up
+            # failures, so the pair is one Secret.
+            - name: CELLA_EVENTS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: cellad-events
+                  key: CELLA_EVENTS_URL
+            - name: CELLA_EVENTS_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: cellad-events
+                  key: CELLA_EVENTS_SECRET
+            # The store (cella spec 010) and the key every secret value's data
+            # key is wrapped under (spec 018). CELLA_DB_URL is the direct
+            # endpoint, which the core uses only for its migrations at start: a
+            # migration holds a session-scoped lock across its statements and
+            # a transaction-mode pooler reassigns the backend between
+            # transactions. Every other query goes through CELLA_DB_POOL_URL
+            # below. This is the same split platformd's own database URLs
+            # follow.
+            - name: CELLA_DB_URL
+              valueFrom:
+                secretKeyRef:
+                  name: cellad-db
+                  key: CELLA_DB_URL
+            - name: CELLA_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: cellad-db
+                  key: CELLA_SECRET_KEY
+            # The transaction-mode pool of the database `cella`, as the
+            # terraform repository's application-secrets module writes it for
+            # every service. Direct connections share the few slots the
+            # cluster leaves outside its pools, and the rollout's three Pods
+            # holding them directly would pass the ceiling. The pooled URL
+            # names no schema; the role's default for this database is
+            # `cellad`, set once by an operator.
+            - name: CELLA_DB_POOL_URL
+              valueFrom:
+                secretKeyRef:
+                  name: cella-db
+                  key: DATABASE_POOL_URL
+            # Telemetry from pkg/otel is a noop until the endpoint is set.
+            # The Dash0 operator does not inject into cellad (the label
+            # above), so cellad names the node-local collector itself, with
+            # the values the operator injects everywhere else: the node's
+            # address and the collector's OTLP over HTTP host port.
+            - name: OTEL_NODE_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://$(OTEL_NODE_IP):40318"
+            - name: OTEL_EXPORTER_OTLP_PROTOCOL
+              value: "http/protobuf"
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: internal
+              containerPort: 8081
+          # The probes of cella spec 002. /readyz runs the draining flag, the
+          # disk write test, the driver's cheap namespace list and the store,
+          # and answers 503 the moment a stop signal arrives; /livez answers
+          # while the process runs. They are separate on purpose: a dependency
+          # outage must take the Pod out of rotation and not restart it.
+          # Asked every two seconds, so the new Pod joins the Service within
+          # about two seconds of answering rather than five; the check is
+          # cheap and runs on the internal listener.
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: internal
+            initialDelaySeconds: 1
+            periodSeconds: 2
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: internal
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/cella
+            - name: internal-ca
+              mountPath: /var/run/cella-trust
+              readOnly: true
+      volumes:
+        # CELLA_DATA_DIR under a read-only root. cellad creates it at start
+        # and the readiness probe writes to it, so it cannot be the image's.
+        - name: data
+          emptyDir: {}
+        # ca.crt of the platformd-internal-ca authority, and only ca.crt. The
+        # Secret cert-manager keeps in this namespace also holds tls.key, the
+        # CA's signing key; a secret volume with items writes the listed keys
+        # alone, so the signing key never reaches the container. The file
+        # follows the Secret as cert-manager renews it, and no copy of it
+        # exists to go stale.
+        - name: internal-ca
+          secret:
+            secretName: platformd-internal-ca
+            items:
+              - key: ca.crt
+                path: platformd-internal-ca.crt
+---
+# The core's disruption budget: a node drain leaves one replica, which is the
+# writer or a standby that becomes the writer within a second of the other's
+# handoff.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: cellad
+  namespace: latere
+  labels:
+    app: cellad
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: cellad

@@ -1,0 +1,160 @@
+# The egress gateway of cella spec 039: two doors over the boundary map the
+# control plane pushes it, and one stream it opens outbound to receive them.
+# It holds no store, no issuer and no authorizer, and reads none of the
+# control plane's variables.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cellad-egress
+  namespace: latere
+  labels:
+    app: cellad-egress
+spec:
+  # Two replicas. The registry is in memory and recoverable: the control plane
+  # broadcasts every map to every connected gateway and returns once one has
+  # acknowledged, a gateway whose queue is full has its stream closed and is
+  # made whole by the snapshot on its next hello, and both replicas terminate
+  # TLS with the one authority CELLA_EGRESS_CA_KEY carries, which spec 039
+  # names as the way an environment runs several. The map is pushed before the
+  # sandbox Pod is created and a Pod takes seconds to become ready, so the
+  # window in which one replica holds a map its peer does not closes before a
+  # sandbox can dial either.
+  #
+  # The environment key both replicas read is minted at the control plane
+  # once it is up, so the first apply precedes the key and the gateway waits
+  # at zero until it is in the Secret; deploy/prod-bootstrap/README.md holds the order.
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: cellad-egress
+  template:
+    metadata:
+      labels:
+        app: cellad-egress
+    spec:
+      serviceAccountName: cellad-egress
+      # The gateway drives no cluster API.
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: cellad-egress
+          # The pod keeps serving for five seconds after Kubernetes decides to
+          # stop it, the time the ingress and Service endpoints take to drop its
+          # address. Without the pause the server closes its listener the
+          # moment the stop signal arrives while traffic is still routed to it,
+          # and a rollout answers 502 for about a second. The native sleep
+          # action needs no binary in the image.
+          lifecycle:
+            preStop:
+              sleep:
+                seconds: 5
+          # One image for both roles, pinned to the same release as the
+          # control plane's manifest, so the gateway and the node it serves
+          # speak one protocol. The placeholder tag never resolves; the
+          # kustomization's images entry names the release.
+          image: ghcr.io/latere-ai/cellad:unreleased
+          imagePullPolicy: IfNotPresent
+          args: ["egress"]
+          env:
+            # The two doors' listen addresses, the role's own defaults stated
+            # so the Service and the network policies read against a value in
+            # the manifest rather than against a default in the binary.
+            - name: CELLA_EGRESS_PROXY_ADDR
+              value: ":3128"
+            - name: CELLA_EGRESS_REVERSE_ADDR
+              value: ":8080"
+            # The control plane the gateway opens its one stream to, the
+            # core's public URL: the origin's host and the base path, equal to
+            # CELLA_PUBLIC_URL. It takes the same rule as the webhook URLs:
+            # https, or http on loopback, because the environment key travels
+            # on it. cellad serves no TLS listener of its own, so the only
+            # https path is the origin through the ingress. Where a Pod cannot
+            # reach the load balancer's address, api.latere.ai can be pinned to the
+            # in-cluster ingress-nginx ClusterIP with hostAliases.
+            - name: CELLA_URL
+              value: "https://api.latere.ai/v1/environments"
+            # What authenticates the stream and names the environment it
+            # serves. Minted at the core for CELLA_DEFAULT_ENVIRONMENT through
+            # the Environment kind's key route under the base path,
+            # POST /v1/environments/environments/{id}/keys, and expiring after
+            # the core's CELLA_ENVIRONMENT_KEY_TTL, a year by default.
+            - name: CELLA_ENVIRONMENT_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: cellad-egress
+                  key: CELLA_ENVIRONMENT_KEY
+            # The authority the gateway terminates TLS with, as one PEM value
+            # carrying a CERTIFICATE block and an EC PRIVATE KEY block. The
+            # name says key and the loader reads both: a gateway given only a
+            # key could not tell a sandbox what to trust. Absent, an authority
+            # is generated per process and the two replicas would present
+            # different ones, so the value is set and shared.
+            - name: CELLA_EGRESS_CA_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: cellad-egress
+                  key: CELLA_EGRESS_CA_KEY
+            # The audiences of this installation, stated as the control
+            # plane's Deployment states them. The gateway verifies no
+            # token, so nothing here reads it; it keeps the two Deployments of
+            # one installation naming one pair.
+            - name: CELLA_OIDC_AUDIENCE
+              value: "cella,api.latere.ai"
+            # No OTEL_EXPORTER_OTLP_ENDPOINT here; the Dash0 operator injects
+            # it and skips a container that already sets it.
+          ports:
+            - name: proxy
+              containerPort: 3128
+            - name: reverse
+              containerPort: 8080
+          # The egress role serves no HTTP probe: it starts two doors and no
+          # health handler. A door that accepts a connection is the only
+          # readiness signal the role gives.
+          readinessProbe:
+            tcpSocket:
+              port: proxy
+            initialDelaySeconds: 2
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: proxy
+            initialDelaySeconds: 5
+            periodSeconds: 20
+          # The pods use close to no CPU at rest and burst when a sandbox
+          # starts, so the request is what they use and the burst is left to
+          # the limit. Each pod holds about 70 MiB of memory, and the limit
+          # holds the peak.
+          resources:
+            requests:
+              cpu: 25m
+              memory: 96Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: cellad-egress
+  namespace: latere
+  labels:
+    app: cellad-egress
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: cellad-egress

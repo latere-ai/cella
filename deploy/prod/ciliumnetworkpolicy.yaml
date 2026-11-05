@@ -1,0 +1,158 @@
+# The three rules plain NetworkPolicy cannot express: the API server as a
+# cluster entity, and two reaches stated as CIDR rather than as a pod.
+#
+# A CiliumNetworkPolicy with an egress section makes the endpoints it selects
+# default-deny outbound, so each of these lists everything its workload dials.
+# A destination that is a cluster Pod is named as an endpoint, because Cilium
+# decides on the destination's identity after any DNAT and not on the address
+# the workload dialed. That is why the collector rule names the collector Pod
+# on 4318 and not the node address the Dash0 operator injects, and why a
+# public hostname served by this cluster's own ingress is the ingress
+# controller's identity on 443.
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: cellad-control-plane
+  namespace: latere
+spec:
+  endpointSelector:
+    matchLabels:
+      app: cellad
+  egress:
+    # The Kubernetes API: the k8s driver's every call, and the access reviews
+    # Preflight runs at start. The entity covers the API server whether it is
+    # reached through the in-cluster Service address or the external one.
+    - toEntities:
+        - kube-apiserver
+    # Cluster DNS.
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    # platformd's internal TLS listener: the authorizer, the admission webhook
+    # and the event sink. The matching ingress rule is in
+    # deploy/prod-bootstrap/networkpolicy.yaml.
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: latere
+            app: platformd
+      toPorts:
+        - ports:
+            - port: "8443"
+              protocol: TCP
+    # The OIDC issuer's discovery document and key set. auth.latere.ai is
+    # served by this cluster's own ingress, so the packet is rewritten to the
+    # controller's Pod before policy is evaluated and the rule names that Pod.
+    # A rule written against the load balancer's address matches nothing.
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: ingress-nginx
+            app.kubernetes.io/name: ingress-nginx
+            app.kubernetes.io/component: controller
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    # The managed Postgres cluster, which is not a cluster endpoint and has no
+    # identity to name. The allowance is by port rather than by address: the
+    # database's private address is assigned by the provider and an address
+    # written here would be a value that goes stale silently, where a port
+    # that is wrong fails at the first connection.
+    - toCIDRSet:
+        - cidr: 0.0.0.0/0
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+            - port: "25060"
+              endPort: 25065
+              protocol: TCP
+    # The other replicas' public listener: a standby forwards every API
+    # request to the writer at the Pod address the writer lease names (cella
+    # spec 076). The matching ingress rule is in networkpolicy.yaml.
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: latere
+            app: cellad
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+    # OTLP export to the Dash0 operator's collector.
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: dash0-system
+      toPorts:
+        - ports:
+            - port: "4318"
+              protocol: TCP
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: cellad-egress-internet
+  namespace: latere
+spec:
+  endpointSelector:
+    matchLabels:
+      app: cellad-egress
+  egress:
+    # The upstreams the gateway tunnels to and substitutes into. The private
+    # ranges are excluded so a sandbox cannot use the gateway as a route into
+    # the cluster or to the provider's metadata endpoint; the gateway itself
+    # dials no address that is not public, judged by the address each
+    # connection dials, and this is the second enforcement point behind that
+    # decision.
+    - toCIDRSet:
+        - cidr: 0.0.0.0/0
+          except:
+            - 10.0.0.0/8
+            - 172.16.0.0/12
+            - 192.168.0.0/16
+            - 169.254.0.0/16
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "80"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    # The public hosts this cluster's ingress serves: CELLA_URL, the one
+    # stream the gateway opens to the control plane, and api.latere.ai and
+    # its siblings when a sandbox's boundary admits them. The gateway dials
+    # the load balancer's public address, and the packet is rewritten to the
+    # controller's Pod before policy is evaluated, which the excepted private
+    # ranges above put out of reach of the internet rule, so it is named as
+    # the controller's own endpoint.
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: ingress-nginx
+            app.kubernetes.io/name: ingress-nginx
+            app.kubernetes.io/component: controller
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: dash0-system
+      toPorts:
+        - ports:
+            - port: "4318"
+              protocol: TCP

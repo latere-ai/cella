@@ -1,0 +1,44 @@
+# The core's one rule at the platform origin: /v1/environments on
+# api.latere.ai, beside /v1/storage, /v1/repos and /v1/models, forwarded
+# without a rewrite, because the core serves every route under
+# CELLA_BASE_PATH. Three values name one address, and an apply that moves one
+# alone is a plane whose tokens name an address the core does not answer on:
+#
+#   this rule                 = api.latere.ai, Prefix /v1/environments
+#   CELLA_PUBLIC_URL (cellad) = https://api.latere.ai/v1/environments
+#   CELLA_URL (cellad-egress) = https://api.latere.ai/v1/environments
+#
+# There is no tls block and no issuer annotation: the host's certificate is
+# the origin's, which arcad's Ingress holds for every rule on api.latere.ai.
+# ingress-nginx merges the rules of every Ingress on one host into one server
+# and routes a request to the longest matching path, so each core's
+# annotations apply to its own path alone.
+#
+# The console does not come through here: platformd reaches the core in the
+# cluster, at the Service, under the same path.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: cellad
+  namespace: latere
+  annotations:
+    # A tar stream of a workspace goes through this Ingress, and cellad's own
+    # ceiling is CELLA_MAX_UPLOAD_BYTES, 1Gi by default. The controller's
+    # default of 1m would refuse an import long before the core did.
+    nginx.ingress.kubernetes.io/proxy-body-size: "1024m"
+    # exec and attach are WebSocket streams and a log follow is long lived.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: api.latere.ai
+      http:
+        paths:
+          - path: /v1/environments
+            pathType: Prefix
+            backend:
+              service:
+                name: cellad
+                port:
+                  name: http

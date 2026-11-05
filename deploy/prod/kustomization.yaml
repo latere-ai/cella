@@ -1,0 +1,53 @@
+# SPDX-FileCopyrightText: 2026 Latere AI
+# SPDX-License-Identifier: Apache-2.0
+#
+# The production target: the Cella control plane as Latere runs it, behind the
+# capability Environments on api.latere.ai. It names the installation it
+# serves, so it is declared in .lateregate.yaml under both identity.skip and
+# identity.overlays, and the gate reads the addresses set here rather than
+# refusing them.
+#
+# Everything here is safe to apply again, because the release pipeline applies
+# it on every release with `kubectl apply -k deploy/prod` and pins the image
+# to the digest it built. What cannot be applied again, or what the pipeline's
+# rollout identity may not write, is in deploy/prod-bootstrap/, which the
+# pipeline never reads: the workloads namespace and everything in it, the
+# cluster-scoped objects, the policy that selects platformd's Pods, the
+# Secrets, and the identity itself.
+#
+# Every object here is in `latere` and carries its namespace.
+#
+# The Deployments name the image with the placeholder tag `unreleased`, which
+# never resolves, so a target that pins nothing fails to pull rather than
+# running an unknown build. The images entry below names the release this
+# target runs. `lateregate release` rewrites the version in the same commit as
+# the changelog section, under the release.stamp entries in .lateregate.yaml,
+# so these lines never lag a tag.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - serviceaccount.yaml
+  - deployment.yaml
+  - egress.yaml
+  - service.yaml
+  - ingress.yaml
+  - networkpolicy.yaml
+  - ciliumnetworkpolicy.yaml
+images:
+  - name: ghcr.io/latere-ai/cellad
+    newTag: v0.23.0
+# The image a volume is filled from is the control plane's own, so it follows
+# the images entry above: the tag in a checkout and the digest the pipeline
+# pinned after `kustomize edit set image`. The value in deployment.yaml is
+# overwritten.
+replacements:
+  - source:
+      kind: Deployment
+      name: cellad
+      fieldPath: spec.template.spec.containers.[name=cellad].image
+    targets:
+      - select:
+          kind: Deployment
+          name: cellad
+        fieldPaths:
+          - spec.template.spec.containers.[name=cellad].env.[name=CELLA_K8S_FILL_IMAGE].value

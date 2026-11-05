@@ -1,0 +1,22 @@
+# The one namespace this tree owns. The control plane runs in `latere`, beside
+# platformd, and that namespace is not declared here: deleting what this tree
+# declares would take every service in `latere` along. Its pod security label
+# is an operator step in deploy/prod-bootstrap/README.md.
+#
+# Sandboxes run arbitrary code, so they do not share a namespace with anything
+# else: the level below, the default-deny policy in networkpolicy.yaml and the
+# RoleBinding that scopes cellad's pod-create rights all hold here and nowhere
+# else. The name is set in CELLA_K8S_NAMESPACE rather than taken from the
+# driver's default, which is `cella`.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cella-workloads
+  labels:
+    # Restricted: every Pod the k8s driver renders carries runAsNonRoot, a
+    # uid above zero, allowPrivilegeEscalation false, all capabilities
+    # dropped and the RuntimeDefault seccomp profile, on the sandbox Pod and
+    # on the file-transfer helper alike. The level is the cluster's check
+    # that the driver's hardening was not weakened by a manifest.
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest

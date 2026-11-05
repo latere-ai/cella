@@ -307,6 +307,17 @@ image:
       version_expect: "cellad "
       skip_start: needs an OpenID Connect issuer it can reach, which the gate does not bring up
 
+# The tags the production overlay runs are rewritten in the same commit as the
+# changelog section, so deploy/prod never lags a release. The control plane's
+# image is pinned by newTag; the desktop image is named in an environment value
+# the images entry does not reach.
+release:
+  stamp:
+    - file: deploy/prod/kustomization.yaml
+      pattern: 'newTag: v\d+\.\d+\.\d+'
+    - file: deploy/prod/deployment.yaml
+      pattern: 'cella-display:v\d+\.\d+\.\d+'
+
 license:
   spdx: Apache-2.0
   holder: Latere AI
@@ -322,3 +333,13 @@ identity:
   reached_by: self-hosted
   # Access is by role: the roles rule runs, and it is one way once set.
   roles_only: true
+  # deploy/prod is Latere's own overlay inside the core's tree, and
+  # deploy/prod-bootstrap its operator-applied half; both name the
+  # installation they serve, so the no-latere-value rule reads the addresses
+  # they set and does not refuse them.
+  skip:
+    - deploy/prod
+    - deploy/prod-bootstrap
+  overlays:
+    - deploy/prod
+    - deploy/prod-bootstrap

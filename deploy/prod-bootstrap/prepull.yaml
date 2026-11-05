@@ -1,0 +1,133 @@
+# Every image the catalog marks warm, pulled onto every node of the sandbox
+# pool (platform spec 211). A warm entry is one the node pool pre-pulls, so a
+# sandbox on it starts without a registry round trip; this DaemonSet is what
+# pulls it. A node the pool adds pulls the images before its first sandbox
+# rather than during it.
+#
+# Each warm image is one init container, named after its catalog entry, that
+# runs /bin/true: the kubelet pulls the image and the container exits at once.
+# The list is the catalog's, which lives in Postgres and moves by migrations;
+# internal/admission's TestThePrepullPullsEveryWarmImage runs every migration
+# and fails while these containers and the warm entries differ by name or
+# reference. A migration that moves a warm entry changes this file with it.
+# base comes first: a sandbox that names no image runs it.
+#
+# The Pod then runs the pause image and stays. The kubelet's image garbage
+# collection keeps an image a container on the node uses, and the init
+# containers of a running Pod count, so the images stay while the Pod does.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: cella-prepull
+  namespace: cella-workloads
+  labels:
+    app.kubernetes.io/name: cella-prepull
+    app.kubernetes.io/part-of: cella
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cella-prepull
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cella-prepull
+        app.kubernetes.io/part-of: cella
+    spec:
+      # The sandbox pool's own label and taint, the values cellad's driver
+      # puts on every sandbox Pod. The admission policy in admissionpolicy.yaml
+      # refuses a Pod in cella-workloads without both.
+      nodeSelector:
+        node-role/sandbox: "true"
+      tolerations:
+        - key: sandbox-only
+          operator: Equal
+          value: "true"
+          effect: NoSchedule
+      # The Secret sandboxes pull with, the one CELLA_K8S_IMAGE_PULL_SECRETS
+      # names.
+      imagePullSecrets:
+        - name: ghcr-pull
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 5
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      # Each init container runs from /, so an image's own working directory,
+      # which this user may not be allowed to enter, is never entered.
+      initContainers:
+        - name: base
+          image: ghcr.io/latere-ai/sandbox-base@sha256:2ed15011bf66677614c3b7f42b3969c5551e79a357f5c9a3147819ec8fcc5627
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/true"]
+          workingDir: /
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 1m
+              memory: 8Mi
+            limits:
+              cpu: 100m
+              memory: 32Mi
+        - name: gui
+          image: ghcr.io/latere-ai/sandbox-gui@sha256:ed334f1fce9b78c241ee072b1c5ce67e8d42a68035b8b6c3683d2f174bbef497
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/true"]
+          workingDir: /
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 1m
+              memory: 8Mi
+            limits:
+              cpu: 100m
+              memory: 32Mi
+        - name: science
+          image: ghcr.io/latere-ai/sandbox-science@sha256:11422ff25797a0aac3f845a5484b10f326a1fb5b696e1849091109120ceefbcc
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/true"]
+          workingDir: /
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 1m
+              memory: 8Mi
+            limits:
+              cpu: 100m
+              memory: 32Mi
+      containers:
+        # registry.k8s.io/pause 3.10.1, by the digest of its image index.
+        - name: pause
+          image: registry.k8s.io/pause:3.10.2@sha256:f548e0e8e3dc1896ca956272154dde3314e8cc4fde0a57577ee9fa1c63f5baf4
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 1m
+              memory: 8Mi
+            limits:
+              cpu: 100m
+              memory: 32Mi

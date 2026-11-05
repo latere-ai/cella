@@ -19,8 +19,8 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// kustomizations are every directory `kubectl kustomize` is run over: the
-// base and one per example. A directory added under deploy/ without a row
+// kustomizations are every directory `kubectl kustomize` is run over by the
+// loop below: the base and one per example. A directory added under deploy/ without a row
 // here fails TestEveryKustomizationIsRendered.
 var kustomizations = []string{
 	"deploy/base",
@@ -28,6 +28,13 @@ var kustomizations = []string{
 	"deploy/examples/kind-stubs",
 	"deploy/examples/generic",
 }
+
+// productionTree is Latere's own installation, as a tree of its own: a
+// kustomization the release pipeline applies, with its operator-applied half
+// beside it (deploy/prod-bootstrap) that no kustomization names. It is
+// rendered by the tests of deploy_prod_test.go and not by the loop over
+// kustomizations, which expects an installation's ConfigMap and check Job.
+const productionTree = "deploy/prod"
 
 // object is one rendered Kubernetes document, read as a tree so a test
 // asserts over the fields it names and nothing else.
@@ -138,7 +145,7 @@ func TestEveryKustomizationIsRendered(t *testing.T) {
 		t.Fatal(err)
 	}
 	slices.Sort(found)
-	want := slices.Clone(kustomizations)
+	want := append(slices.Clone(kustomizations), productionTree)
 	slices.Sort(want)
 	if !slices.Equal(found, want) {
 		t.Fatalf("deploy/ holds the kustomizations %v and the tests render %v", found, want)
