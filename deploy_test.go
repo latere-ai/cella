@@ -78,8 +78,8 @@ func list(v any) []any {
 // render runs `kubectl kustomize` over a directory and returns the
 // documents. kubectl is on every runner the workflows use and on a
 // developer's machine; where it is absent the test skips by name rather
-// than passing quietly, and the `install` job of verify.yml is the run
-// that always has it.
+// than passing quietly, and the `deploy-render` suite of .lateregate.yaml is
+// the run that always has it.
 func render(t *testing.T, dir string) []object {
 	t.Helper()
 	bin, err := exec.LookPath("kubectl")

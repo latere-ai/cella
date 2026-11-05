@@ -105,21 +105,18 @@ func TestKindRunsTheGateway(t *testing.T) {
 		t.Fatalf("the upstream publishes %d ports", len(ports))
 	}
 	want := fmt.Sprintf("cella-upstream.%s.svc:%v", namespace, dig(ports[0], "port"))
-	for _, run := range []struct{ file, job, log string }{
-		{"verify.yml", "install", "kind.txt"},
-		{"release.yml", "conformance", "/tmp/kind.log"},
-	} {
-		steps := jobSteps(t, filepath.Join(".github", "workflows", run.file), run.job)
+	for _, run := range kindRuns() {
+		steps := run.steps(t)
 		declared, _ := flagValue(steps, "-capabilities")
 		if !slices.Contains(strings.Split(declared, ","), "egress") {
-			t.Errorf("the %s job of %s declares %q to the suite, without egress", run.job, run.file, declared)
+			t.Errorf("%s declares %q to the suite, without egress", run.name, declared)
 		}
 		if got, _ := flagValue(steps, "-upstream"); got != want {
-			t.Errorf("the %s job of %s passes the upstream %q, want the stack's %q", run.job, run.file, got, want)
+			t.Errorf("%s passes the upstream %q, want the stack's %q", run.name, got, want)
 		}
 		for _, test := range []string{"TestClusterEgressBoundary", "TestClusterNoLateralMovement", "TestClusterMeshReachability"} {
-			if !strings.Contains(steps, "--- PASS: "+test+"' "+run.log) {
-				t.Errorf("the %s job of %s does not require %s to pass", run.job, run.file, test)
+			if !run.requiresPass(steps, test) {
+				t.Errorf("%s does not require %s to pass", run.name, test)
 			}
 		}
 	}

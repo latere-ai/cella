@@ -133,8 +133,9 @@ job after it run whether it ran or was skipped. A failed deploy stops the
 release before anything is tagged. `deploy/prod` and `deploy/prod-bootstrap`
 are not in the archive.
 
-The every-push install walk is a separate `install` job in `verify.yml`,
-not in `release.yml`: no tag exists at push time, so it renders the
+The every-push install walk is the `kind-stack` suite of `.lateregate.yaml`
+(`tools/kind/e2e.sh`, run by the shared gate's `lateregate e2e`), not a job in
+`release.yml`: no tag exists at push time, so it renders the
 `deploy/examples/kind` overlay with the image references overridden to
 the branch's development image built earlier in the same run. On a tag,
 `install-release` supersedes it against the published artifacts.

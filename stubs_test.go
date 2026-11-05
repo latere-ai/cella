@@ -164,32 +164,50 @@ func TestMakeRunNeedsNoIssuerOfYourOwn(t *testing.T) {
 
 // TestTheInstallJobWalksTheDocument is the every-push half of spec 014,
 // which slice 048 left gated: the walk runs against a kind cluster with the
-// stubs, and the kind tier runs against the cluster it left standing.
+// stubs, and the kind tier runs against the cluster it left standing. The
+// shared gate runs the script as the kind-stack suite of .lateregate.yaml,
+// which is the install job this test is named for, and the development
+// stack's two tests as suites of their own.
 func TestTheInstallJobWalksTheDocument(t *testing.T) {
-	steps := jobSteps(t, filepath.Join(".github", "workflows", "verify.yml"), "install")
+	steps := readKindScript(t)
 	for _, want := range []string{
 		"docs/install.md",
 		"deploy/examples/kind-stubs/up.sh",
-		"Dockerfile.stubs",
 		"TestClusterLifecycle",
-		"TestRunBootstrap",
-		// The contract of spec 015, against both stacks this job brings up.
-		"TestRunConformance",
+		// The contract of spec 015, against the cluster this script brings up.
 		"TestContract",
 	} {
 		if !strings.Contains(steps, want) {
-			t.Errorf("the install job does not run %q", want)
+			t.Errorf("the kind script does not run %q", want)
+		}
+	}
+	// The images the stack runs are built by the overlay's script, from this
+	// checkout, unless the caller turned the build off.
+	up, err := os.ReadFile(filepath.Join("deploy", "examples", "kind-stubs", "up.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(up), "Dockerfile.stubs") {
+		t.Error("up.sh does not build the stubs image")
+	}
+	gate, err := os.ReadFile(".lateregate.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"TestRunBootstrap", "TestRunConformance", "bash tools/kind/e2e.sh"} {
+		if !strings.Contains(string(gate), want) {
+			t.Errorf(".lateregate.yaml declares no e2e suite that runs %q", want)
 		}
 	}
 	// The walk waits on a check Job of its own, not on the stack's, whose
 	// time to live can end during a long run of the tiers before it.
 	if del, walk := strings.Index(steps, "delete job cellad-check"), strings.Index(steps, "run-blocks.sh"); del < 0 || del > walk {
-		t.Error("the install job does not remove the stack's check Job before the walk")
+		t.Error("the kind script does not remove the stack's check Job before the walk")
 	}
 	// One cluster per run: the stack's own script creates it and the walk
 	// and the tier share it.
 	if got := strings.Count(steps, "kind create cluster"); got != 0 {
-		t.Errorf("the install job creates a cluster in %d step(s) of its own; up.sh creates the one cluster", got)
+		t.Errorf("the kind script creates a cluster in %d place(s) of its own; up.sh creates the one cluster", got)
 	}
 }
 
@@ -294,25 +312,22 @@ func TestKindStackRunsTheDesktop(t *testing.T) {
 	if got := str(dig(config, "data", "CELLA_K8S_DISPLAY_IMAGE")); got != "cella-display:dev" {
 		t.Errorf("the stack's CELLA_K8S_DISPLAY_IMAGE is %q, want the image up.sh loads", got)
 	}
-	for _, run := range []struct{ workflow, job string }{
-		{"verify.yml", "install"},
-		{"release.yml", "conformance"},
-	} {
-		steps := jobSteps(t, filepath.Join(".github", "workflows", run.workflow), run.job)
+	for _, run := range kindRuns() {
+		steps := run.steps(t)
 		declared, _ := flagValue(steps, "-capabilities")
 		for _, want := range []string{"display", "input"} {
 			if !slices.Contains(strings.Split(declared, ","), want) {
-				t.Errorf("the kind conformance run of %s %s declares %q, without %s", run.workflow, run.job, declared, want)
+				t.Errorf("the kind conformance run of %s declares %q, without %s", run.name, declared, want)
 			}
 		}
 		if image, _ := flagValue(steps, "-display-image"); image != "cella-display:dev" {
-			t.Errorf("the kind conformance run of %s %s passes the display image %q, want the one up.sh loads", run.workflow, run.job, image)
+			t.Errorf("the kind conformance run of %s passes the display image %q, want the one up.sh loads", run.name, image)
 		}
 	}
-	// Each job that brings the stack up supplies the image up.sh loads: a
-	// build from the checkout in verify, the published bytes in release.
+	// Each job that brings the stack up supplies the image up.sh loads: the
+	// release pipeline the published bytes, and the kind script the build
+	// from the checkout that up.sh does itself, asserted above.
 	for _, run := range []struct{ workflow, job, want string }{
-		{"verify.yml", "install", "docker build -f images/display/Dockerfile -t cella-display:dev ."},
 		{"release.yml", "conformance", `docker tag "${REGISTRY}/${OWNER}/${DISPLAY_IMAGE}@${DISPLAY_DIGEST}" cella-display:dev`},
 		{"release.yml", "install-release", `docker tag "${REGISTRY}/${OWNER}/${DISPLAY_IMAGE}:${GITHUB_REF_NAME}" cella-display:dev`},
 	} {

@@ -13,12 +13,12 @@ import (
 	"testing"
 )
 
-// TestTheLocalJobRunsUnderBubblewrap is spec 012's local tier in the verify
+// TestTheLocalJobRunsUnderBubblewrap is spec 012's local tier in the device
 // workflow: the job installs the sandbox runtime on Linux, runs every local
 // runtime test under it, fails on a test it skipped, and names the cases
 // that only the real runtime proves.
 func TestTheLocalJobRunsUnderBubblewrap(t *testing.T) {
-	steps := jobSteps(t, filepath.Join(".github", "workflows", "verify.yml"), "e2e-local")
+	steps := jobSteps(t, filepath.Join(".github", "workflows", "device.yml"), "e2e-local")
 	for _, want := range []string{
 		"bubblewrap", "@anthropic-ai/sandbox-runtime", "kernel.apparmor_restrict_unprivileged_userns=0", "srt echo ok",
 		"-run '^TestLocal' ./runtime/local ./cmd/cellad", "'^--- SKIP'",

@@ -525,11 +525,12 @@ func TestTheReleaseRunsSpec014sJobsInOrder(t *testing.T) {
 	}
 }
 
-// TestVerifyRendersTheDeployTreeOnEveryPush is spec 014's every-push
-// half: the overlays render on a runner that has kubectl, so the Go test
-// that skips without it cannot be the one nobody runs.
-func TestVerifyRendersTheDeployTreeOnEveryPush(t *testing.T) {
-	data, err := os.ReadFile(filepath.Join(".github", "workflows", "verify.yml"))
+// TestTheGateRendersTheDeployTreeOnEveryPush is spec 014's every-push
+// half: the overlays render in an e2e suite that has kubectl, so the Go test
+// that skips without it cannot be the one nobody runs. The gate fails a suite
+// whose test skipped.
+func TestTheGateRendersTheDeployTreeOnEveryPush(t *testing.T) {
+	data, err := os.ReadFile(".lateregate.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -537,41 +538,38 @@ func TestVerifyRendersTheDeployTreeOnEveryPush(t *testing.T) {
 	if err := unmarshalYAML(data, &o); err != nil {
 		t.Fatal(err)
 	}
-	jobs, _ := o["jobs"].(map[string]any)
-	job, ok := jobs["install"].(map[string]any)
-	if !ok {
-		t.Fatal("verify.yml has no install job; spec 014 walks the deploy tree on every push")
-	}
-	var steps string
-	piped := false
-	for _, s := range list(job["steps"]) {
-		run := str(dig(s, "run"))
-		steps += run + "\n"
-		// A step whose command is a pipe needs a shell with pipefail: the
-		// default is `bash -e`, `tee` exits 0, and a failing `go test`
-		// would be swallowed by the pipe.
-		if strings.Contains(run, "| tee ") {
-			piped = true
-			if str(dig(s, "shell")) != "bash" || !strings.Contains(run, "set -o pipefail") {
-				t.Error("a step pipes into tee without `shell: bash` and `set -o pipefail`, so a failing command would pass")
-			}
+	for _, suite := range list(o["e2e"]) {
+		if str(dig(suite, "name")) != "deploy-render" {
+			continue
 		}
-	}
-	if !piped {
-		t.Error("the install job runs no test whose output is read, so the skip check has nothing to read")
-	}
-	for _, want := range []string{"kubectl version --client", "--- SKIP"} {
-		if !strings.Contains(steps, want) {
-			t.Errorf("the install job does not run %q, so a skipped render would pass unnoticed", want)
+		if !slices.Contains(strs(dig(suite, "tools")), "kubectl") {
+			t.Error("the deploy-render suite does not list kubectl, so the render tests would skip")
 		}
+		if !slices.Contains(strs(dig(suite, "test", "packages")), ".") {
+			t.Error("the deploy-render suite does not run the root package, where the render tests live")
+		}
+		if str(dig(suite, "allow_skip")) != "" {
+			t.Error("the deploy-render suite allows a skip, so a skipped render would pass unnoticed")
+		}
+		return
 	}
+	t.Fatal(".lateregate.yaml has no deploy-render suite; spec 014 walks the deploy tree on every push")
+}
+
+// strs reads a field that holds a sequence of strings.
+func strs(v any) []string {
+	var out []string
+	for _, e := range list(v) {
+		out = append(out, str(e))
+	}
+	return out
 }
 
 // TestEveryPipedStepFailsOnTheCommandAndNotTheTee is the same rule over the
 // release pipeline: a step that reads a command's output through a pipe
 // reports the command's exit code and not the reader's.
 func TestEveryPipedStepFailsOnTheCommandAndNotTheTee(t *testing.T) {
-	for _, name := range []string{"release.yml", "verify.yml", "conformance.yml"} {
+	for _, name := range []string{"release.yml", "verify.yml", "device.yml", "conformance.yml"} {
 		data, err := os.ReadFile(filepath.Join(".github", "workflows", name))
 		if err != nil {
 			t.Fatal(err)

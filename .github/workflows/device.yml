@@ -1,0 +1,103 @@
+# The local runtime and the device engine under the real sandbox on Linux.
+# The shared gate's runners have no sandbox runtime, so this workflow installs
+# one, which `lateregate e2e` cannot provide: it needs apt packages, a
+# sysctl and an npm package. The shared gate and this workflow run on the
+# same pushes, and the release check waits for both. Every third-party
+# action is pinned by commit.
+name: device
+
+# A push or pull request that changes only markdown outside the exceptions
+# starts no run, because no build or test reads it. The exceptions are specs/,
+# whose acceptance tables and threat model the suite holds to the tests; docs/,
+# which tests hold to the code; skills/, which a test holds to the CLI; and
+# SECURITY.md, which the spec test reads. A tag is never filtered by paths.
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+    paths:
+      - "**"
+      - "!**.md"
+      - "specs/**"
+      - "docs/**"
+      - "skills/**"
+      - "SECURITY.md"
+  pull_request:
+    paths:
+      - "**"
+      - "!**.md"
+      - "specs/**"
+      - "docs/**"
+      - "skills/**"
+      - "SECURITY.md"
+  workflow_dispatch:
+
+# A newer push to the same ref supersedes this run: its commit carries every
+# change this one would verify, and the runner is better spent on it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Every job runs on GitHub's hosted runners. The repository is public,
+  # so they cost nothing, and a hosted runner is a fresh machine per job.
+  # The local runtime under the real sandbox on Linux: srt over bubblewrap,
+  # which confines every command a sandbox on a person's own computer runs.
+  # The gate's runners have no sandbox runtime, so each test that needs one
+  # skips there; this job installs it and fails on any such skip. Ubuntu's
+  # AppArmor blocks the unprivileged user namespaces bubblewrap needs until
+  # they are allowed.
+  e2e-local:
+    name: the local runtime under bubblewrap
+    if: "!startsWith(github.ref, 'refs/tags/')"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: The sandbox runtime and what it uses
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap socat ripgrep netcat-openbsd
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          npm install -g @anthropic-ai/sandbox-runtime
+          srt echo ok
+      # Every local runtime test, the ones the stand-in already runs in the
+      # gate among them. A test is skipped only where the sandbox runtime is
+      # missing, so a skip of one here is a runtime this job failed to
+      # install; a subtest skipped for a capability the runtime does not
+      # declare is indented and not matched.
+      - name: The local runtime's tests under the sandbox runtime
+        shell: bash
+        run: |
+          set -o pipefail
+          go test -count=1 -v -timeout 15m -run '^TestLocal' ./runtime/local ./cmd/cellad 2>&1 | tee local.txt
+          if grep -- '^--- SKIP' local.txt; then
+            echo "a local runtime test was skipped: the sandbox runtime is not usable here" >&2
+            exit 1
+          fi
+          for name in TestLocalConformanceUnderSRT TestLocalGrantsNeverReachTheDenyTable \
+            TestLocalReadsOutsideGrantsAreRefused TestLocalDataDirInsideHome \
+            TestLocalEndsAnOrphanedAttachedCommandUnderSRT TestLocalWorkerEndToEnd; do
+            grep -q -- "^--- PASS: ${name} " local.txt
+          done
+      # The device engine serves a person's computer through the same
+      # runtime, so its tests run under the real sandbox too: the paths it
+      # denies a session (its own state, its keys) are proven here, where the
+      # gate's stand-in proves nothing. A skip fails the job for the same
+      # reason as above.
+      - name: The device engine's tests under the sandbox runtime
+        shell: bash
+        run: |
+          set -o pipefail
+          go test -count=1 -v -timeout 15m ./device 2>&1 | tee device.txt
+          if grep -E -- '^--- SKIP|under a stand-in' device.txt; then
+            echo "a device test skipped or ran under the stand-in, so the real sandbox did not run it" >&2
+            exit 1
+          fi
+          grep -q -- "^--- PASS: TestOwnPathsDenied " device.txt
