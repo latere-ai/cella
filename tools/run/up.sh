@@ -154,7 +154,7 @@ One sandbox:
          "spec":{"command":["sleep","3600"]}}'
 
 The backend is native, which runs a command on this host and no image, so
-the manifest names none. docs/native.md is what it can and cannot do.
+the manifest names none. docs/local.md is what it can and cannot do.
 
 The stubs: the issuer at $issuer, the authorizer at $authorizer, the sink
 at $sink with its records at $sink/events, and the admission endpoint at

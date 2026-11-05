@@ -18,13 +18,15 @@ The control plane never dials a worker. There is one connection, the
 worker opens it, and everything travels on it: the work down, the results
 and the state up.
 
-```
-   your network                          the control plane
- ┌────────────────┐                     ┌──────────────────┐
- │ cellad worker  │ ──── outbound ────▶ │  cellad serve    │
- │   + sandboxes  │      HTTPS/WSS      │  /v1, identity   │
- └────────────────┘                     └──────────────────┘
-        no inbound port, no public address, no firewall hole
+```mermaid
+flowchart LR
+  subgraph yours["your network: no inbound port, no public address, no firewall hole"]
+    worker["cellad worker and its sandboxes"]
+  end
+  subgraph theirs["the control plane"]
+    serve["cellad serve: /v1 and identity"]
+  end
+  worker -->|"outbound HTTPS or WSS"| serve
 ```
 
 A worker needs outbound access to the control plane's public URL and
@@ -35,7 +37,7 @@ nothing else. It listens on no port of its own.
 - A control plane you can reach, and an administrator's bearer for it.
 - A machine with the engine your driver needs: Podman, a Kubernetes
   cluster, the sandbox runtime for `local` ([on your own
-  computer](local.md)), or nothing at all for `native`.
+  computer](local-runtime.md)), or nothing at all for `native`.
 - The `cellad` binary from the release archive.
 
 ## Apply the environment
@@ -304,7 +306,7 @@ holds no database, no issuer and no authorizer.
 | `CELLA_PODMAN_SOCKET` | no | the rootless socket, then the system one | the Podman API to drive |
 | `CELLA_K8S_*` | no | in-cluster | the cluster to drive, read only with `CELLA_RUNTIME=k8s` |
 | `CELLA_ALLOW_UNSAFE_NATIVE` | with `native` | `false` | explicit consent to run without isolation |
-| `CELLA_LOCAL_*` | no | unset | the folders, read paths, denied paths and network a `local` worker allows ([on your own computer](local.md)) |
+| `CELLA_LOCAL_*` | no | unset | the folders, read paths, denied paths and network a `local` worker allows ([on your own computer](local-runtime.md)) |
 | `CELLA_CAPACITY_CPU`, `_MEMORY`, `_DISK`, `_SANDBOXES` | no | unset | what this worker declares it can hold |
 | `CELLA_WORKER_LABELS` | no | unset | `key=value` pairs describing this worker, comma separated |
 | `CELLA_INSECURE_CONTROL_PLANE` | no | unset | `1` admits an `http://` control plane that is not on loopback |

@@ -128,7 +128,7 @@ Read when `CELLA_RUNTIME` is `local`. Each sandbox is a host process
 confined by the operating system's own sandbox, on macOS or Linux, with
 its scratch directories under `CELLA_DATA_DIR/local`. These variables are
 the host's own policy: no manifest widens them.
-[Run sandboxes on your own computer](local.md) is the walkthrough.
+[Run sandboxes on your own computer](local-runtime.md) is the walkthrough.
 
 | Variable | Default | What it is |
 |---|---|---|
