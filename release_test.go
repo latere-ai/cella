@@ -593,6 +593,44 @@ func TestEveryPipedStepFailsOnTheCommandAndNotTheTee(t *testing.T) {
 	}
 }
 
+// TestTheKindScriptFailsOnTheCommandAndNotTheTee holds the pipe rule over
+// tools/kind/e2e.sh, which runs the kind tier, the driver cases and the
+// contract as `go test | tee`: a `set` line that turns on pipefail must come
+// before the first pipe into tee, or a failing go test is swallowed by the
+// tee and the suite passes on the PASS lines already printed.
+func TestTheKindScriptFailsOnTheCommandAndNotTheTee(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("tools", "kind", "e2e.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pipefail := false
+	piped := false
+	for line := range strings.SplitSeq(string(data), "\n") {
+		code := strings.TrimSpace(line)
+		if strings.HasPrefix(code, "#") {
+			continue
+		}
+		if strings.HasPrefix(code, "set ") {
+			for _, f := range strings.Fields(code)[1:] {
+				// `set -o pipefail`, or pipefail named by -o in a combined
+				// form such as `set -euo pipefail`.
+				if f == "pipefail" {
+					pipefail = true
+				}
+			}
+		}
+		if strings.Contains(code, "| tee ") {
+			piped = true
+			if !pipefail {
+				t.Errorf("tools/kind/e2e.sh pipes into tee before any `set -o pipefail`: %q", code)
+			}
+		}
+	}
+	if !piped {
+		t.Error("tools/kind/e2e.sh pipes nothing into tee any more; drop this test or point it at the script that does")
+	}
+}
+
 // TestTheExternalRunIsTheDocumentedCommand holds the conformance workflow to
 // docs/conformance.md: on dispatch, a clean checkout runs the command the page
 // documents against the address given, with the same go test flags, the same
