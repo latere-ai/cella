@@ -24,6 +24,10 @@ refused before it is pushed.
   sent empty. It is now the id the answer carries in `X-Request-Id` and the
   logs name, the caller's own when it sent one.
 
+- **`CELLA_AUTHORIZER_CACHE` takes effect.** An allow whose answer names no
+  `ttl` was kept for sixty seconds whatever the variable said. It is now
+  kept for the variable's value, at most 600 seconds.
+
 ## v0.24.0 - 2026-11-05
 
 ### Added

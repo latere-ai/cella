@@ -136,7 +136,7 @@ The answer is `200` either way:
 |---|---|
 | `allow` | required; the decision |
 | `reason` | on a deny, a short reason for the log |
-| `ttl` | seconds `cellad` may reuse an allow for the same question; 60 when absent, at most 600. A deny is reused for 5 seconds. A question about a resource with no id, such as a create, is never reused |
+| `ttl` | seconds `cellad` may reuse an allow for the same question; `CELLA_AUTHORIZER_CACHE` when absent (60 seconds unless you set it), at most 600. A deny is reused for 5 seconds. A question about a resource with no id, such as a create, is never reused |
 | `limits` | the ceilings an allow carries, below |
 | `filter` | on a list action, narrows the list to the named `owners` and `labels` |
 

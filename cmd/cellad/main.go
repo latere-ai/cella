@@ -421,6 +421,7 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 		AuthorizerURL:      cfg.AuthorizerURL,
 		AuthorizerToken:    cfg.AuthorizerToken,
 		AuthorizerTimeout:  cfg.AuthorizerTimeout,
+		AuthorizerCache:    cfg.AuthorizerCache,
 		AdminSubjects:      cfg.AdminSubjects,
 		DefaultEnvironment: cfg.DefaultEnvironment,
 		OwnedEnvironments:  cfg.OwnedEnvironments,

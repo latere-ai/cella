@@ -40,6 +40,7 @@ type Options struct {
 	AuthorizerURL      string
 	AuthorizerToken    string
 	AuthorizerTimeout  time.Duration
+	AuthorizerCache    time.Duration
 	AdminSubjects      []string
 	DefaultEnvironment string
 	// OwnedEnvironments is CELLA_OWNED_ENVIRONMENTS=worker, the owner
@@ -110,7 +111,7 @@ func Start(ctx context.Context, o Options) (*Identity, error) {
 	}
 	asking, err := NewClient(ClientOptions{
 		URL: o.AuthorizerURL, Token: o.AuthorizerToken, HTTP: client,
-		Timeout: o.AuthorizerTimeout, Now: o.Now, Observe: o.Observe,
+		Timeout: o.AuthorizerTimeout, Cache: o.AuthorizerCache, Now: o.Now, Observe: o.Observe,
 	})
 	if err != nil {
 		return nil, err

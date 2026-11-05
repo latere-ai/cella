@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"latere.ai/x/pkg/authkit/issuertest"
 	"latere.ai/x/pkg/authz"
@@ -213,5 +214,44 @@ func TestTheDefaultEnvironmentIsMatchedByNameOrByID(t *testing.T) {
 	res := auth.Environment{ID: "env_01J9", Name: defaultEnvironment}.Resource()
 	if d := decide(t, unnamed, bob, authorizer.ActionEnvironmentUse, res); d.Allow {
 		t.Error("with CELLA_DEFAULT_ENVIRONMENT unset an environment was still every subject's")
+	}
+}
+
+// TestStartHoldsAnAllowForTheConfiguredCache is CELLA_AUTHORIZER_CACHE: an
+// allow whose answer names no ttl is held for the configured time, not for
+// the shared default, and reports that time as its TTL.
+func TestStartHoldsAnAllowForTheConfiguredCache(t *testing.T) {
+	s := stub.New(t, stub.WithVocabulary(authorizer.Vocabulary()))
+	s.SetRules(stub.Rule{Allow: true})
+	at := time.Date(2026, 11, 6, 0, 0, 0, 0, time.UTC)
+	o := options(t)
+	o.AuthorizerURL, o.AuthorizerToken = s.URL(), s.Token()
+	o.AuthorizerCache = 90 * time.Second
+	o.Now = func() time.Time { return at }
+	id, err := auth.Start(t.Context(), o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	read := auth.Sandbox{ID: "sbx_01J9", Owner: alice}.Resource()
+	ask := func() auth.Decision {
+		t.Helper()
+		d, err := id.Authorizer.Decide(t.Context(), caller(alice, "alice", nil), info, authorizer.ActionSandboxRead, read)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return d
+	}
+	if d := ask(); d.TTL != 90*time.Second {
+		t.Errorf("an allow without a ttl reports %v, want the configured 90s", d.TTL)
+	}
+	at = at.Add(authz.DefaultTTL + time.Second)
+	ask()
+	if n := len(s.Requests()); n != 1 {
+		t.Fatalf("the endpoint saw %d call(s); the allow expired at the shared default, not at CELLA_AUTHORIZER_CACHE", n)
+	}
+	at = at.Add(30 * time.Second)
+	ask()
+	if n := len(s.Requests()); n != 2 {
+		t.Fatalf("the endpoint saw %d call(s); the allow outlived CELLA_AUTHORIZER_CACHE", n)
 	}
 }

@@ -96,7 +96,7 @@ by new code would not be caught by it.
 | A workload token | revoked when its sandbox is deleted. Its revocation row stays until the token's own expiry and is removed on the reaper's tick |
 | An environment key's row | removed on the reaper's tick once the key's expiry has passed, whether or not it was revoked. A key lives `CELLA_ENVIRONMENT_KEY_TTL` (8760 hours by default) |
 | A sandbox's spawn count | removed when the sandbox is deleted |
-| A cached allow from your authorizer | in each replica's memory for the answer's `ttl`, at most 600 seconds, or 60 seconds when the answer names none. A deny is kept for 5 seconds |
+| A cached allow from your authorizer | in each replica's memory for the answer's `ttl`, at most 600 seconds, or `CELLA_AUTHORIZER_CACHE` (60 seconds by default, also at most 600) when the answer names none. A deny is kept for 5 seconds |
 | Logs, traces and metrics | `cellad` removes none. Standard error, your collector and your scraper keep them as you configured them |
 | Records at your sink, and questions at your authorizer and admission endpoint | whatever you write those to do |
 

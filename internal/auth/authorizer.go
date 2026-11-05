@@ -21,14 +21,16 @@ import (
 const ProbeID = authz.ProbeID
 
 // ClientOptions configures the client that asks the operator's endpoint.
-// URL and Token are CELLA_AUTHORIZER_URL and CELLA_AUTHORIZER_TOKEN, and
+// URL and Token are CELLA_AUTHORIZER_URL and CELLA_AUTHORIZER_TOKEN,
 // Timeout is CELLA_AUTHORIZER_TIMEOUT, which bounds one call, its retry
-// included.
+// included, and Cache is CELLA_AUTHORIZER_CACHE, how long an allow whose
+// answer names no ttl is held. A zero Cache holds it for authz.DefaultTTL.
 type ClientOptions struct {
 	URL     string
 	Token   string
 	HTTP    *http.Client
 	Timeout time.Duration
+	Cache   time.Duration
 	Now     func() time.Time
 	// Observe receives every call's result and its duration in seconds,
 	// for the metric of spec 017. Optional.
@@ -42,7 +44,7 @@ type ClientOptions struct {
 // along, so an action outside Cella's table costs no round trip.
 func NewClient(o ClientOptions) (*authz.Client, error) {
 	opts := authz.Options{
-		URL: o.URL, Token: o.Token, HTTP: o.HTTP, Timeout: o.Timeout, Now: o.Now,
+		URL: o.URL, Token: o.Token, HTTP: o.HTTP, Timeout: o.Timeout, DefaultTTL: o.Cache, Now: o.Now,
 		Observe: o.Observe, Vocabulary: authorizer.Vocabulary(),
 	}
 	return authz.NewClient(opts)
