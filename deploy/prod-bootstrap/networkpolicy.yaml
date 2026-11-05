@@ -1,7 +1,5 @@
 # The boundary of the sandboxes, in plain NetworkPolicy, in the workloads
-# namespace, and the policy that admits cellad to platformd's listener.
-# Operator-applied: the rollout identity writes in `latere` alone, and the
-# platformd policy selects platformd's Pods.
+# namespace. Operator-applied: the rollout identity writes in `latere` alone.
 # Sandboxes reach nothing. This is the rule the whole boundary rests on: a
 # Pod in cella-workloads has no ingress and no egress until a rule names one.
 # The selector is empty, so it covers the file-transfer helper Pod the driver
@@ -80,31 +78,3 @@ spec:
           port: 53
         - protocol: TCP
           port: 53
----
-# platformd's own pods: the internal TLS listener admits the Cella control
-# plane, whose authorizer call, admission call and every event delivery are
-# dropped packets without this rule.
-#
-# It selects platformd's Pods, not cellad's, so it is not in deploy/prod: a
-# rollout identity may select only its own service's Pods. It is a second
-# object beside the policy that admits the Lux core to the same listener;
-# allow rules add across objects. The peer is a pod selector with no
-# namespace selector, which is this namespace, where cellad runs.
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: cellad-platformd-tls
-  namespace: latere
-spec:
-  podSelector:
-    matchLabels:
-      app: platformd
-  policyTypes: [Ingress]
-  ingress:
-    - from:
-        - podSelector:
-            matchLabels:
-              app: cellad
-      ports:
-        - protocol: TCP
-          port: 8443

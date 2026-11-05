@@ -37,8 +37,8 @@ spec:
             - port: "53"
               protocol: TCP
     # platformd's internal TLS listener: the authorizer, the admission webhook
-    # and the event sink. The matching ingress rule is in
-    # deploy/prod-bootstrap/networkpolicy.yaml.
+    # and the event sink. The matching ingress rule is applied by platform's
+    # release (latere-ai/platform, deploy/prod).
     - toEndpoints:
         - matchLabels:
             io.kubernetes.pod.namespace: latere

@@ -18,7 +18,7 @@ It is Latere's own installation. The install path for everyone else is
 | `storageclass.yaml` | StorageClass `cella-block-storage` | cluster scoped |
 | `admissionpolicy.yaml` | ValidatingAdmissionPolicy and binding `cella-workloads-sandbox-pool` | cluster scoped |
 | `rbac.yaml` | ServiceAccount `default`, Role and RoleBinding `cellad-workloads` in `cella-workloads`; ClusterRole and ClusterRoleBinding `cellad-storageclass` | the grant of the control plane over the sandboxes' namespace, and two cluster scoped objects; an identity that applied them could grant itself anything |
-| `networkpolicy.yaml` | `cella-workloads-default-deny`, `cella-workloads-dns` and `cella-workloads-to-gateway` in `cella-workloads`; `cellad-platformd-tls` in `latere` | the first three are the sandboxes' boundary in another namespace; the last selects platformd's Pods, which this service's identity may not select |
+| `networkpolicy.yaml` | `cella-workloads-default-deny`, `cella-workloads-dns` and `cella-workloads-to-gateway` in `cella-workloads` | the sandboxes' boundary, in another namespace |
 | `prepull.yaml` | DaemonSet `cella-prepull` in `cella-workloads` | another namespace, and its list of images follows the image catalog, which moves on platformd's release, not on this one |
 | `rollout-identity.yaml` | ServiceAccount, Role, RoleBinding and token Secret `cellad-rollout` in `latere` | the credential of the pipeline itself |
 
@@ -28,6 +28,11 @@ The Secrets the Deployments read (`cellad-oidc`, `cellad-token`,
 `ghcr-pull` in `cella-workloads`) are created outside this repository and
 keep their names. `cellad` runs its database migrations at start, so there is
 no migration Job to run before a release.
+
+The policy that admits `cellad` to platformd's internal TLS listener,
+`cellad-platformd-tls`, is not here. It selects platformd's Pods, so platform's
+release applies it (`latere-ai/platform`, `deploy/prod`) and no operator step
+remains for it.
 
 Apply a file with `kubectl apply -f deploy/prod-bootstrap/<file>`, once, and
 again only when the file changes. `kubectl diff -f` shows what an apply

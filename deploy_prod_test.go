@@ -204,7 +204,7 @@ func TestProdIsNamespacedAndHoldsNoCredential(t *testing.T) {
 // TestProdSelectsOnlyItsOwnPods: a rollout identity may write an object that
 // selects its own service's Pods and no other's, so every selector at the top
 // of a policy in deploy/prod names cellad or its gateway. The policy that
-// selects platformd's Pods is in deploy/prod-bootstrap.
+// selects platformd's Pods is platform's, in its deploy/prod.
 func TestProdSelectsOnlyItsOwnPods(t *testing.T) {
 	own := map[string]bool{"cellad": true, "cellad-egress": true}
 	policies := 0
@@ -225,10 +225,6 @@ func TestProdSelectsOnlyItsOwnPods(t *testing.T) {
 	}
 	if policies == 0 {
 		t.Fatal("deploy/prod renders no policy, so the selectors are unchecked")
-	}
-	tls := readFile(t, prodBootstrap+"/networkpolicy.yaml")
-	if !strings.Contains(tls, "name: cellad-platformd-tls") || !strings.Contains(tls, "      app: platformd\n") {
-		t.Error("deploy/prod-bootstrap does not hold the policy that admits cellad to platformd")
 	}
 }
 
@@ -448,7 +444,7 @@ func TestEverythingProdLeavesOutIsInProdBootstrap(t *testing.T) {
 		"admissionpolicy.yaml":  {"kind: ValidatingAdmissionPolicy\n", "kind: ValidatingAdmissionPolicyBinding"},
 		"rbac.yaml":             {"kind: Role\n", "kind: RoleBinding", "kind: ClusterRole\n", "kind: ClusterRoleBinding"},
 		"prepull.yaml":          {"kind: DaemonSet"},
-		"networkpolicy.yaml":    {"name: cella-workloads-default-deny", "name: cellad-platformd-tls"},
+		"networkpolicy.yaml":    {"name: cella-workloads-default-deny"},
 		"rollout-identity.yaml": {"kind: Role\n", "kind: Secret"},
 	} {
 		body := readFile(t, prodBootstrap+"/"+file)
