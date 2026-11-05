@@ -10,14 +10,15 @@ refused before it is pushed.
 
 - **A release can deploy itself.** The release workflow has a `deploy` job
   between the conformance run and the publish, which applies `deploy/prod`
-  with the image pinned by digest, waits for both Deployments to roll and runs
-  `tools/smoke/release.sh` against the live origin. It runs only where the
-  repository variable `CELLA_RELEASE_DEPLOY` is set, so a fork publishes every
-  artifact and deploys nothing. `deploy/prod` holds Latere's production
-  manifests and `deploy/prod-bootstrap` what an operator applies by hand: the
-  workloads namespace and its policies, the cluster-scoped objects, and the
-  identity the job deploys with. The `deploy-<tag>.tar.gz` archive carries
-  neither, so what you install from it is unchanged.
+  with the control plane and the desktop image pinned by digest, waits for
+  both Deployments to roll and runs `tools/smoke/release.sh` against the live
+  origin. It runs only where the repository variable `CELLA_RELEASE_DEPLOY` is
+  set, so a fork publishes every artifact and deploys nothing. `deploy/prod`
+  holds Latere's production manifests and `deploy/prod-bootstrap` what an
+  operator applies by hand: the workloads namespace and its policies, the
+  cluster-scoped objects, and the identity the job deploys with. The
+  `deploy-<tag>.tar.gz` archive carries neither, so what you install from it
+  is unchanged.
 
 ## v0.23.0 - 2026-11-05
 

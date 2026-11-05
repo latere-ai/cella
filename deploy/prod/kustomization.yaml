@@ -17,12 +17,13 @@
 #
 # Every object here is in `latere` and carries its namespace.
 #
-# The Deployments name the image with the placeholder tag `unreleased`, which
+# The Deployments name each image with the placeholder tag `unreleased`, which
 # never resolves, so a target that pins nothing fails to pull rather than
-# running an unknown build. The images entry below names the release this
-# target runs. `lateregate release` rewrites the version in the same commit as
-# the changelog section, under the release.stamp entries in .lateregate.yaml,
-# so these lines never lag a tag.
+# running an unknown build. The images entries below name the release this
+# target runs, one for the control plane and one for the desktop it starts
+# beside a sandbox. `lateregate release` rewrites the version in the same
+# commit as the changelog section, under the release.stamp entries in
+# .lateregate.yaml, so these lines never lag a tag.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
@@ -36,18 +37,15 @@ resources:
 images:
   - name: ghcr.io/latere-ai/cellad
     newTag: v0.23.0
-# The image a volume is filled from is the control plane's own, so it follows
-# the images entry above: the tag in a checkout and the digest the pipeline
-# pinned after `kustomize edit set image`. The value in deployment.yaml is
-# overwritten.
-replacements:
-  - source:
-      kind: Deployment
-      name: cellad
-      fieldPath: spec.template.spec.containers.[name=cellad].image
-    targets:
-      - select:
-          kind: Deployment
-          name: cellad
-        fieldPaths:
-          - spec.template.spec.containers.[name=cellad].env.[name=CELLA_K8S_FILL_IMAGE].value
+  - name: ghcr.io/latere-ai/cella-display
+    newTag: v0.23.0
+# Two images are named in environment values, not only in a container: the
+# desktop CELLA_K8S_DISPLAY_IMAGE and the image a volume is filled from,
+# CELLA_K8S_FILL_IMAGE, which is the control plane's own. The image
+# transformer reads the environment values of a Deployment too, so both
+# follow the entries above: the tag in a checkout, and the digest the
+# pipeline pins with `kustomize edit set image`. The desktop is built in the
+# same run as the control plane and carries no tag until publish, so a
+# digest is the only name that resolves while the rollout runs.
+configurations:
+  - imageconfig.yaml

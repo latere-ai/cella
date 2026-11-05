@@ -159,10 +159,10 @@ func TestReleasePublishesUnderTheOwnersNamespace(t *testing.T) {
 		for i, line := range strings.Split(body, "\n") {
 			for _, m := range imageRef.FindAllStringSubmatch(line, -1) {
 				// The deploy job gives the shared stage the digest the
-				// build pushed under the overlay's own name for the image,
+				// build pushed under the overlay's own name for each image,
 				// which the stage matches against deploy/prod. It is not
 				// a reference anything pulls.
-				if path == ".github/workflows/release.yml" && strings.Contains(line, "=${{ needs.build.outputs.ref_1 }}@") {
+				if path == ".github/workflows/release.yml" && (strings.Contains(line, "=${{ needs.build.outputs.ref_1 }}@") || strings.Contains(line, "=${{ needs.build.outputs.ref_2 }}@")) {
 					continue
 				}
 				if !derived(m[1]) {

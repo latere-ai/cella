@@ -95,18 +95,20 @@ spec:
             - name: CELLA_K8S_STORAGE_CLASS
               value: "cella-block-storage"
             # The desktop of a sandbox that asks for one: the image the core
-            # publishes with each release, at the same tag as cellad. It runs
-            # as a second container of the sandbox's Pod and is pulled with
-            # the same pull secret, so it pins with the control plane.
+            # publishes with each release. It runs as a second container of
+            # the sandbox's Pod and is pulled with the same pull secret. The
+            # kustomization sets this value from its images entry, so it is
+            # the digest the release built while a rollout runs and the
+            # release tag in a checkout.
             - name: CELLA_K8S_DISPLAY_IMAGE
-              value: "ghcr.io/latere-ai/cella-display:v0.23.0"
+              value: "ghcr.io/latere-ai/cella-display:unreleased"
             # The image a volume is filled from an image with: this
             # container's own, at the same release. The driver fills such a
             # volume with a short-lived Pod in the workloads namespace whose
             # init container copies cellad out of this image and whose main
             # container runs the volume's image with `cellad fill`, so the
             # program and the control plane are one build. The kustomization
-            # sets this value from the image above. Unset, every
+            # sets this value from its cellad images entry. Unset, every
             # volume with an image source is refused. The Pod carries the
             # sandboxes' node selector, toleration and pull secret, and
             # needs no network and no verb the Role does not already grant.

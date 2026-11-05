@@ -1,0 +1,10 @@
+# SPDX-FileCopyrightText: 2026 Latere AI
+# SPDX-License-Identifier: Apache-2.0
+#
+# Field specs for the image transformer of kustomization.yaml, beyond the
+# containers it reads by default: the environment values of a Deployment's
+# containers, which name the desktop and the fill image. A value that is not
+# one of the images the kustomization names is left as it is.
+images:
+  - path: spec/template/spec/containers/env/value
+    kind: Deployment

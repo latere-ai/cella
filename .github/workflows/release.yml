@@ -12,8 +12,9 @@
 # deploy archive with cellad pinned by digest. The candidate is exercised
 # before anything is tagged. The deploy stage then rolls Latere's own
 # installation, only where the repository variable CELLA_RELEASE_DEPLOY is
-# set: deploy/prod applied with cellad pinned by digest, both Deployments
-# waited for, and tools/smoke/release.sh repeated against the live origin.
+# set: deploy/prod applied with cellad and cella-display pinned by digest,
+# both Deployments waited for, and tools/smoke/release.sh repeated against
+# the live origin.
 # Only then does the publish stage tag the digests, sign checksums.txt over
 # every file the release attaches, and publish the GitHub release with the
 # CHANGELOG section as its body and the smoke evidence appended. After that
@@ -242,11 +243,12 @@ jobs:
   # Deployments page. It runs after conformance, so production never rolls
   # before the candidate has passed its own tests. The repository variable
   # and the kubeconfig secret are set on this repository and on no fork, so
-  # a tag on a fork publishes every artifact and skips this job. The image
+  # a tag on a fork publishes every artifact and skips this job. Each image
   # is given by digest, as the overlay's own name for it, because it carries
-  # no tag until publish. The desktop and the test stubs are not rolled here:
-  # the desktop is named by tag in an environment value, which publish makes
-  # resolve, and the stubs are never deployed. deploy/prod holds only
+  # no tag until publish. The control plane and the desktop are both given,
+  # because the desktop is named in an environment value of the control
+  # plane's Deployment and the tag that value would otherwise name exists only
+  # after publish. The test stubs are never deployed. deploy/prod holds only
   # manifests that can be applied again; deploy/prod-bootstrap is never read.
   deploy:
     name: deploy and smoke
@@ -258,7 +260,9 @@ jobs:
     permissions:
       contents: read
     with:
-      images: ghcr.io/latere-ai/cellad=${{ needs.build.outputs.ref_1 }}@${{ needs.build.outputs.digest_1 }}
+      images: |
+        ghcr.io/latere-ai/cellad=${{ needs.build.outputs.ref_1 }}@${{ needs.build.outputs.digest_1 }}
+        ghcr.io/latere-ai/cella-display=${{ needs.build.outputs.ref_2 }}@${{ needs.build.outputs.digest_2 }}
       deployments: |
         cellad
         cellad-egress

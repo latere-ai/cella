@@ -124,7 +124,7 @@ release-verify are latere-ai/ci's shared stages. A deploy to an
 operator's own cluster is not part of the public pipeline; the archive is
 the hand-off. The one exception is Latere's own installation: a `deploy` job
 between conformance and publish applies `deploy/prod` through
-`image-deploy.yml` with cellad pinned by digest, waits for the `cellad` and
+`image-deploy.yml` with cellad and cella-display pinned by digest, waits for the `cellad` and
 `cellad-egress` Deployments, and runs `tools/smoke/release.sh` against
 `https://api.latere.ai/v1/environments`. It runs only while the repository
 variable `CELLA_RELEASE_DEPLOY` is set, as the identity the operator-applied
@@ -295,7 +295,7 @@ it, and nothing in the pipeline is a placeholder any more
 | Criterion | Test that proves it | State |
 |---|---|---|
 | Every artifact in the table is attached to the release of a tag | the `release-verify` job | built for the two binaries of [[001-architecture]]: `tools/release/build.sh` writes the four `cellad_*` and the four `cella_*` archives from one checkout, `release-verify` checks that every attached file is in the signed `checksums.txt` and matches it, and `install-release` runs `./cella version` from the published archive ([[050-cella-command]]). The stubs image is the build stage's third image, for amd64 alone, `TestTheReleaseRunsTheStubsAndTheStack`. The display image is built for amd64 and arm64 and pushed by digest, signed, given an attested bill of materials and provenance, tagged only in publish, its bill of materials attached, and verified by tag in `release-verify`, `TestReleasePublishesTheDisplayImage` ([[064-k8s-display]]); every release from v0.4.0 carries its bill of materials. The module graph's bill of materials is no longer attached |
-| A release deploys Latere's installation when `CELLA_RELEASE_DEPLOY` is set, after conformance, and publish runs either way | `TestTheDeployJobIsGatedAndCallsTheDeployStage`, `TestTheDeployWaitsForEveryJobThatProvesTheImage`, `TestEveryJobAfterTheDeployToleratesASkippedDeploy`, `TestProdTakesTheDigestTheDeployPins`, `TestTheRolloutIdentityCoversExactlyWhatProdApplies` | built; the variable and the `CELLA_KUBECONFIG` secret are set by an operator, per `deploy/prod-bootstrap/README.md` |
+| A release deploys Latere's installation when `CELLA_RELEASE_DEPLOY` is set, after conformance, and publish runs either way | `TestTheDeployJobIsGatedAndCallsTheDeployStage`, `TestTheDeployWaitsForEveryJobThatProvesTheImage`, `TestEveryJobAfterTheDeployToleratesASkippedDeploy`, `TestProdTakesTheDigestsTheDeployPins`, `TestProdAppliedWithNoDigestsRunsTheStampedTag`, `TestTheRolloutIdentityCoversExactlyWhatProdApplies` | built; the variable and the `CELLA_KUBECONFIG` secret are set by an operator, per `deploy/prod-bootstrap/README.md` |
 | The workflow and the archive fix no image namespace | `TestReleasePublishesUnderTheOwnersNamespace` | passing |
 | `Dockerfile` and `Dockerfile.ci` share the runtime stage byte for byte | `TestRuntimeStagesMatch` | passing |
 | Every overlay renders and the base carries every Pod security field | `TestOverlaysRender`, `TestBaseIsConfined` | passing |

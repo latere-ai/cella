@@ -87,20 +87,27 @@ func TestTheDeployWaitsForEveryJobThatProvesTheImage(t *testing.T) {
 	}
 }
 
-// TestTheDeployPassesOnlyCelladByDigest: the build pushes the images by
-// digest under no tag, and the publish stage gives the tag only after the
-// deploy has passed, so the stage is given the digest and never the tag,
-// under the name the overlay gives the image. The desktop and the stubs are
-// not rolled by it.
-func TestTheDeployPassesOnlyCelladByDigest(t *testing.T) {
+// TestTheDeployPassesTheControlPlaneAndTheDesktopByDigest: the build pushes
+// the images by digest under no tag, and the publish stage gives the tag only
+// after the deploy has passed, so the stage is given the digests and never the
+// tag, under the names the overlay gives the images. The desktop is named in
+// an environment value of the control plane's Deployment, so without its
+// digest a desktop could not pull its image between the deploy and the
+// publish. The test stubs are never deployed.
+func TestTheDeployPassesTheControlPlaneAndTheDesktopByDigest(t *testing.T) {
 	block := jobBlock(t, "deploy")
-	want := "\n      images: ghcr.io/latere-ai/cellad=${{ needs.build.outputs.ref_1 }}@${{ needs.build.outputs.digest_1 }}\n"
-	if !strings.Contains(block, want) {
-		t.Error("the deploy job does not pass cellad as the overlay's name for it, pinned by digest")
+	for _, want := range []string{
+		"\n      images: |\n",
+		"\n        ghcr.io/latere-ai/cellad=${{ needs.build.outputs.ref_1 }}@${{ needs.build.outputs.digest_1 }}\n",
+		"\n        ghcr.io/latere-ai/cella-display=${{ needs.build.outputs.ref_2 }}@${{ needs.build.outputs.digest_2 }}\n",
+	} {
+		if !strings.Contains(block, want) {
+			t.Errorf("the deploy job does not pass %q", strings.TrimSpace(want))
+		}
 	}
-	for _, not := range []string{"needs.build.outputs.images", "ref_2", "digest_2", "ref_3", "digest_3", "github.ref_name"} {
+	for _, not := range []string{"needs.build.outputs.images", "ref_3", "digest_3", "github.ref_name"} {
 		if strings.Contains(block, not) {
-			t.Errorf("the deploy job names %q; it passes only the cellad image, by digest", not)
+			t.Errorf("the deploy job names %q; it passes the control plane and the desktop, by digest", not)
 		}
 	}
 	if n := strings.Count(block, "\n      images:"); n != 1 {
@@ -225,29 +232,39 @@ func TestProdSelectsOnlyItsOwnPods(t *testing.T) {
 	}
 }
 
-// TestProdTakesTheDigestTheDeployPins: the deploy stage runs `kustomize edit
-// set image <name>=<ref>@<digest>` in deploy/prod and then requires the
-// render to hold that reference. So the overlay names the image the way the
-// Deployments write it, every Deployment runs it, and the image a volume is
-// filled from follows it.
-func TestProdTakesTheDigestTheDeployPins(t *testing.T) {
-	const name = "ghcr.io/latere-ai/cellad"
+// TestProdTakesTheDigestsTheDeployPins: the deploy stage runs `kustomize edit
+// set image <name>=<ref>@<digest>` in deploy/prod for the control plane and
+// for the desktop, and then requires the render to hold each reference. So
+// the overlay names the images the way the Deployments write them, every
+// Deployment runs the control plane's digest, the image a volume is filled
+// from follows it, and the desktop in the environment value is the desktop's
+// own digest.
+func TestProdTakesTheDigestsTheDeployPins(t *testing.T) {
+	const (
+		name          = "ghcr.io/latere-ai/cellad"
+		displayName   = "ghcr.io/latere-ai/cella-display"
+		displayDigest = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+	)
 	dir := t.TempDir()
 	copyTree(t, productionTree, dir)
 	path := filepath.Join(dir, "kustomization.yaml")
 	text := readFile(t, path)
-	pinned := regexp.MustCompile(`(?m)^(\s+- name: ` + regexp.QuoteMeta(name) + `)\n\s+newTag: \S+$`)
-	if !pinned.MatchString(text) {
-		t.Fatalf("deploy/prod/kustomization.yaml has no images entry named %s with a newTag", name)
+	for _, pin := range []struct{ name, digest string }{{name, nullDigest}, {displayName, displayDigest}} {
+		pinned := regexp.MustCompile(`(?m)^(\s+- name: ` + regexp.QuoteMeta(pin.name) + `)\n\s+newTag: \S+$`)
+		if !pinned.MatchString(text) {
+			t.Fatalf("deploy/prod/kustomization.yaml has no images entry named %s with a newTag", pin.name)
+		}
+		// What `kustomize edit set image` writes for a digest.
+		text = pinned.ReplaceAllString(text, "$1\n    newName: "+pin.name+"\n    digest: "+pin.digest)
 	}
-	// What `kustomize edit set image` writes for a digest.
-	text = pinned.ReplaceAllString(text, "$1\n    newName: "+name+"\n    digest: "+nullDigest)
 	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	objects := render(t, dir)
 	want := name + "@" + nullDigest
+	wantDisplay := displayName + "@" + displayDigest
 	deployments := 0
+	seen := map[string]string{}
 	for _, o := range objects {
 		if o.kind() != "Deployment" {
 			continue
@@ -261,14 +278,57 @@ func TestProdTakesTheDigestTheDeployPins(t *testing.T) {
 				continue
 			}
 			for _, e := range list(dig(c, "env")) {
-				if str(dig(e, "name")) == "CELLA_K8S_FILL_IMAGE" && str(dig(e, "value")) != want {
-					t.Errorf("the fill image is %q, want the control plane's %q", str(dig(e, "value")), want)
+				switch str(dig(e, "name")) {
+				case "CELLA_K8S_FILL_IMAGE", "CELLA_K8S_DISPLAY_IMAGE":
+					seen[str(dig(e, "name"))] = str(dig(e, "value"))
 				}
 			}
 		}
 	}
+	if got := seen["CELLA_K8S_FILL_IMAGE"]; got != want {
+		t.Errorf("the fill image is %q, want the control plane's %q", got, want)
+	}
+	if got := seen["CELLA_K8S_DISPLAY_IMAGE"]; got != wantDisplay {
+		t.Errorf("the desktop image is %q, want the digest the release built, %q", got, wantDisplay)
+	}
 	if deployments != 2 {
 		t.Errorf("deploy/prod renders %d Deployments, want cellad and cellad-egress", deployments)
+	}
+}
+
+// TestProdAppliedWithNoDigestsRunsTheStampedTag: applying the committed tree
+// by hand, with nothing pinned, runs the release the stamp wrote for the
+// control plane, the fill image and the desktop, and never the placeholder.
+func TestProdAppliedWithNoDigestsRunsTheStampedTag(t *testing.T) {
+	text := readFile(t, productionTree+"/kustomization.yaml")
+	tag := regexp.MustCompile(`newTag: (v\d+\.\d+\.\d+)`).FindStringSubmatch(text)
+	if tag == nil {
+		t.Fatal("deploy/prod/kustomization.yaml pins no release tag")
+	}
+	want := map[string]string{
+		"CELLA_K8S_FILL_IMAGE":    "ghcr.io/latere-ai/cellad:" + tag[1],
+		"CELLA_K8S_DISPLAY_IMAGE": "ghcr.io/latere-ai/cella-display:" + tag[1],
+	}
+	got := map[string]string{}
+	for _, o := range render(t, productionTree) {
+		if o.kind() != "Deployment" {
+			continue
+		}
+		for _, c := range containers(o) {
+			if image := "ghcr.io/latere-ai/cellad:" + tag[1]; str(dig(c, "image")) != image {
+				t.Errorf("Deployment %s runs %q, want %q", o.name(), str(dig(c, "image")), "ghcr.io/latere-ai/cellad:"+tag[1])
+			}
+			for _, e := range list(dig(c, "env")) {
+				if _, ok := want[str(dig(e, "name"))]; ok {
+					got[str(dig(e, "name"))] = str(dig(e, "value"))
+				}
+			}
+		}
+	}
+	for name, w := range want {
+		if got[name] != w {
+			t.Errorf("%s is %q, want %q", name, got[name], w)
+		}
 	}
 }
 
