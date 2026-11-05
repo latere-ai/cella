@@ -8,7 +8,6 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
-	"io/fs"
 	"log/slog"
 	"net/url"
 	"os"
@@ -31,7 +30,6 @@ import (
 	"latere.ai/x/cella/internal/events"
 	"latere.ai/x/cella/internal/store"
 	"latere.ai/x/cella/internal/store/postgres"
-	"latere.ai/x/cella/internal/store/postgres/migrations"
 	"latere.ai/x/cella/internal/store/storetest"
 	v1 "latere.ai/x/cella/manifest/v1"
 )
@@ -823,21 +821,5 @@ func TestAStartSweepsThenLabels(t *testing.T) {
 	start()
 	if got := strings.Join(*calls, ","); got != "sweep,run" {
 		t.Fatalf("calls = %s, want a sweep before the start", got)
-	}
-}
-
-// TestHighestIsWhatIsEmbedded: the number the store guards against is read
-// from the files this binary carries, not written down beside them.
-func TestHighestIsWhatIsEmbedded(t *testing.T) {
-	highest, err := postgres.Highest()
-	if err != nil {
-		t.Fatal(err)
-	}
-	entries, err := fs.ReadDir(migrations.FS, ".")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(entries) == 0 || highest != uint(len(entries)/2) {
-		t.Fatalf("the highest migration is %d over %d file(s)", highest, len(entries))
 	}
 }

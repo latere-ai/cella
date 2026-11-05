@@ -161,11 +161,6 @@ func renewEvery(d time.Duration) time.Duration {
 	return d
 }
 
-// Highest is the newest migration this binary carries. The store refuses to
-// start against a schema above it: the migrator would report no change and
-// then serve statements against columns it does not know.
-func Highest() (uint, error) { return pgxmigrate.HighestOf(migrations.FS, ".") }
-
 // prepare applies what is pending. A schema that is dirty or above the newest
 // migration this binary carries is refused, and the refusal comes from the
 // migrator under its own lock, so a replica that starts while another one

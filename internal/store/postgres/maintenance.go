@@ -128,7 +128,7 @@ func (s *Store) whileWriter(ctx context.Context, what string, fn func(context.Co
 // schemaVersion reads the version the database's schema is at, zero for one
 // with no schema, under the same refusals Open applies.
 func schemaVersion(ctx context.Context, rawURL string) (uint, error) {
-	highest, err := Highest()
+	highest, err := migrations.Highest()
 	if err != nil {
 		return 0, fmt.Errorf("store: %w", err)
 	}
