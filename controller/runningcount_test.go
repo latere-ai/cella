@@ -21,10 +21,7 @@ import (
 // the count that no driver reaches on demand.
 func holding(t *testing.T, c *Controller, owner, name, phase string) {
 	t.Helper()
-	id, err := newID()
-	if err != nil {
-		t.Fatal(err)
-	}
+	id := newID()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.objects[id] = v1.Sandbox{APIVersion: v1.APIVersion, Kind: "Sandbox", Metadata: v1.Metadata{Name: name},

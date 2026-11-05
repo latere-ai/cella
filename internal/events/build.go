@@ -4,7 +4,6 @@
 package events
 
 import (
-	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -12,6 +11,7 @@ import (
 	"time"
 
 	"latere.ai/x/pkg/audit"
+	"latere.ai/x/pkg/ulid"
 
 	v1 "latere.ai/x/cella/manifest/v1"
 )
@@ -19,42 +19,14 @@ import (
 // IDPrefix is the kind prefix design 001 gives an event.
 const IDPrefix = "evt_"
 
-// alphabet is Crockford's base32, the ULID encoding.
-const alphabet = "0123456789abcdefghjkmnpqrstvwxyz"
+// ids mints every record id: the prefix and a lowercase ULID.
+var ids ulid.Generator
 
 // NewID is a record's id: the prefix and a ULID, so ids sort by the instant
-// they were made. Order within an object is still the sequence; the id
-// orders records of different objects for a reader with no other key.
-func NewID() string { return IDPrefix + ULID() }
-
-// ULID is the twenty-six Crockford base32 characters of a ULID: the
-// millisecond of the mint in the high bits and eighty random bits behind it,
-// so two ids made in order sort in that order. It is exported because design
-// 001 gives every prefixed id of this system the same body, and design 008's
-// request id is one of them.
-func ULID() string {
-	var b [16]byte
-	ms := uint64(time.Now().UTC().UnixMilli())
-	for i := 5; i >= 0; i-- {
-		b[i] = byte(ms)
-		ms >>= 8
-	}
-	// crypto/rand.Read fills the slice entirely and never reports an error,
-	// which is what the standard library documents.
-	_, _ = rand.Read(b[6:])
-	// 26 characters of five bits hold 130, so the 128 are read behind two
-	// zero bits.
-	var out [26]byte
-	acc, bits, pos := uint32(0), 2, 0
-	for _, x := range b {
-		acc = acc<<8 | uint32(x)
-		for bits += 8; bits >= 5; pos++ {
-			bits -= 5
-			out[pos] = alphabet[(acc>>uint(bits))&31]
-		}
-	}
-	return string(out[:])
-}
+// they were made, and by minting order within one millisecond. Order within an
+// object is still the sequence; the id orders records of different objects
+// for a reader with no other key.
+func NewID() string { return ids.New(IDPrefix) }
 
 // OfSandbox is the record object for one sandbox: its identity and the
 // labels the sink files it under.

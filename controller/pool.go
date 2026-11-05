@@ -252,10 +252,7 @@ func (c *Controller) prewarm(ctx context.Context, environment string, pool v1.Po
 	if err != nil {
 		return "", err
 	}
-	id, err := newID()
-	if err != nil {
-		return "", err
-	}
+	id := newID()
 	_, err = d.Create(ctx, driver.CreateSpec{
 		ID:        id,
 		Image:     pool.Image,

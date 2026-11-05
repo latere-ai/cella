@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"latere.ai/x/pkg/authkit/issuertest"
+	"latere.ai/x/pkg/ulid"
 
 	"latere.ai/x/cella/internal/auth"
 )
@@ -242,6 +243,9 @@ func TestTwoKeysOnOneEnvironmentAreTwoJTIs(t *testing.T) {
 		}
 		if len(tok.JTI) != 26 {
 			t.Fatalf("the jti %q is %d characters; a ULID is 26", tok.JTI, len(tok.JTI))
+		}
+		if tok.JTI != strings.ToUpper(tok.JTI) || !ulid.Valid("", tok.JTI) {
+			t.Fatalf("the jti %q is not an uppercase ULID", tok.JTI)
 		}
 		if seen[tok.JTI] {
 			t.Fatalf("the jti %q was minted twice", tok.JTI)

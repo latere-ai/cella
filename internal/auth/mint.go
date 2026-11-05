@@ -9,7 +9,6 @@ import (
 	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +16,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"latere.ai/x/pkg/ulid"
 )
 
 // WorkloadTokenLifetime caps a workload token: the sandbox's own expiry
@@ -185,10 +186,7 @@ type minted struct {
 
 // mint signs one payload with the first configured key.
 func (s *Signer) mint(payload minted, now, exp time.Time) (Token, error) {
-	jti, err := newJTI(now)
-	if err != nil {
-		return Token{}, err
-	}
+	jti := newJTI(now)
 	payload.Iss = s.issuer
 	payload.Aud = []string{s.audience}
 	payload.Iat = now.Unix()
@@ -250,36 +248,15 @@ func Thumbprint(pub *rsa.PublicKey) string {
 	return b64(sum[:])
 }
 
-// crockford is the alphabet of a ULID, RFC-free and case-insensitive.
-const crockford = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
-
-// newJTI mints the jti of one token: a ULID, the millisecond of the mint
-// and eighty random bits, so two tokens minted in one millisecond are
+// newJTI mints the jti of one token: an uppercase ULID, the millisecond of the
+// mint and eighty random bits, so two tokens minted in one millisecond are
 // two jtis and a revocation list sorts by time.
 //
 // The prefixed ids of spec 001 are the store's ([[010-state]]); this
 // mints the one id spec 006 owns.
-func newJTI(now time.Time) (string, error) {
-	var raw [16]byte
-	binary.BigEndian.PutUint64(raw[:8], uint64(now.UnixMilli())<<16)
-	if _, err := rand.Read(raw[6:]); err != nil {
-		return "", err
-	}
-	// The first character carries the top three bits of the first byte;
-	// the remaining 125 bits are twenty-five characters of five, which
-	// is the whole of the 128 over twenty-six characters.
-	var out [26]byte
-	out[0] = crockford[raw[0]>>5]
-	value, bits, i := uint16(raw[0]&0x1f), 5, 1
-	for _, b := range raw[1:] {
-		value, bits = value<<8|uint16(b), bits+8
-		for bits >= 5 {
-			bits -= 5
-			out[i] = crockford[(value>>bits)&0x1f]
-			i++
-		}
-	}
-	return string(out[:]), nil
+func newJTI(now time.Time) string {
+	g := ulid.Generator{Now: func() time.Time { return now }, Upper: true}
+	return g.New("")
 }
 
 // b64 renders bytes the way every JOSE segment is rendered.

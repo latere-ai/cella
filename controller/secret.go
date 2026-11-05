@@ -77,15 +77,12 @@ func (c *Controller) CreateSecret(ctx context.Context, obj v1.Secret, owner stri
 			return obj, ErrNameTaken
 		}
 	}
-	id, err := newSecretID()
-	if err != nil {
-		return obj, err
-	}
+	id := newSecretID()
 	now := time.Now().UTC()
 	plaintext := []byte(obj.Spec.Value)
 	obj.Spec.Value = ""
 	obj.Status = v1.SecretStatus{ID: id, Owner: owner, CreatedAt: now, UpdatedAt: now}
-	if err = c.persistSecret(ctx, obj, plaintext, MutationSecretCreated); err != nil {
+	if err := c.persistSecret(ctx, obj, plaintext, MutationSecretCreated); err != nil {
 		return obj, err
 	}
 	return c.secretRead(id), nil
@@ -390,10 +387,4 @@ func (c *Controller) mountingLocked(id string) []v1.Sandbox {
 // newSecretID is a Secret's id: the kind's prefix and the same ULID a sandbox
 // takes, so every object of this control plane sorts by the instant it was
 // made.
-func newSecretID() (string, error) {
-	id, err := newID()
-	if err != nil {
-		return "", err
-	}
-	return v1.SecretIDPrefix + strings.TrimPrefix(id, "sbx_"), nil
-}
+func newSecretID() string { return ids.New(v1.SecretIDPrefix) }

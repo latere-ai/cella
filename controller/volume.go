@@ -137,10 +137,7 @@ func (c *Controller) CreateVolume(ctx context.Context, obj v1.Volume, owner stri
 	if _, err := c.volumeDriver(obj.Spec.Environment); err != nil {
 		return obj, err
 	}
-	id, err := newVolumeID()
-	if err != nil {
-		return obj, err
-	}
+	id := newVolumeID()
 	now := time.Now().UTC()
 	obj.Status = v1.VolumeStatus{ID: id, Owner: owner, Phase: v1.VolumePending, CreatedAt: now, UpdatedAt: now}
 	if err := c.persistVolume(ctx, VolumeAct{Type: MutationVolumeCreated, Object: obj}); err != nil {
@@ -765,10 +762,4 @@ func (c *Controller) wakeVolumes() {
 // newVolumeID is a Volume's id: the kind's prefix and the same ULID a
 // sandbox takes, so every object of this control plane sorts by the instant
 // it was made.
-func newVolumeID() (string, error) {
-	id, err := newID()
-	if err != nil {
-		return "", err
-	}
-	return v1.VolumeIDPrefix + strings.TrimPrefix(id, "sbx_"), nil
-}
+func newVolumeID() string { return ids.New(v1.VolumeIDPrefix) }

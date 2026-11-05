@@ -86,11 +86,7 @@ func (c *Controller) spawnStatus(obj *v1.Sandbox, parent *v1.Sandbox) error {
 		// for a mesh is where the id is minted.
 		obj.Status.Root = obj.Status.ID
 		if obj.Spec.Mesh.Enabled {
-			id, err := newMeshID()
-			if err != nil {
-				return err
-			}
-			obj.Status.Mesh = id
+			obj.Status.Mesh = newMeshID()
 		}
 		return nil
 	}
@@ -290,10 +286,4 @@ func (c *Controller) narrowingRefusal(updated v1.Sandbox) error {
 
 // newMeshID mints the id of one mesh: the prefix of design 022 and a ULID, so
 // ids sort by the instant the mesh was made and no two collide.
-func newMeshID() (string, error) {
-	raw, err := newULID()
-	if err != nil {
-		return "", err
-	}
-	return manifest.MeshIDPrefix + crockfordULID(raw), nil
-}
+func newMeshID() string { return ids.New(manifest.MeshIDPrefix) }

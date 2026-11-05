@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"latere.ai/x/pkg/ulid"
+
 	"latere.ai/x/cella/autosize"
 	"latere.ai/x/cella/controller"
 	v1 "latere.ai/x/cella/manifest/v1"
@@ -197,6 +199,9 @@ func TestRecordShapes(t *testing.T) {
 			}
 			if !strings.HasPrefix(record.ID, IDPrefix) || len(record.ID) != len(IDPrefix)+26 {
 				t.Errorf("the id is %q, want the prefix and a 26 character ULID", record.ID)
+			}
+			if record.ID != strings.ToLower(record.ID) || !ulid.Valid(IDPrefix, record.ID) {
+				t.Errorf("the id %q is not a lowercase ULID under %s", record.ID, IDPrefix)
 			}
 			record.ID = "evt_fixed"
 			body, err := Body(record)

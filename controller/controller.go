@@ -7,16 +7,16 @@ package controller
 import (
 	"cmp"
 	"context"
-	"crypto/rand"
 	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
-	"math/big"
 	"slices"
 	"sort"
 	"sync"
 	"time"
+
+	"latere.ai/x/pkg/ulid"
 
 	"latere.ai/x/cella/autosize"
 	"latere.ai/x/cella/egress"
@@ -771,9 +771,7 @@ func (c *Controller) createLocked(ctx context.Context, obj v1.Sandbox, owner str
 	if entry != nil {
 		id = entry.ID
 	} else {
-		if id, err = newID(); err != nil {
-			return obj, err
-		}
+		id = newID()
 	}
 	if obj.Metadata.Name == "" {
 		obj.Metadata.Name = "sandbox-" + id[len(id)-10:]
@@ -1662,45 +1660,12 @@ func clone(obj v1.Sandbox) v1.Sandbox {
 	return obj
 }
 
-// newID mints one sandbox's id: the prefix of design 001 and a ULID, so ids
-// sort by the instant the sandbox was made.
-func newID() (string, error) {
-	raw, err := newULID()
-	if err != nil {
-		return "", err
-	}
-	return "sbx_" + crockfordULID(raw), nil
-}
+// ids mints every prefixed id of this control plane: the prefix of design 001
+// and a lowercase ULID, so ids sort by the instant the object was made.
+var ids ulid.Generator
 
-// newULID is the 128 bits of a ULID: the millisecond of the mint in the first
-// six bytes and eighty random bits behind them.
-func newULID() ([16]byte, error) {
-	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return b, err
-	}
-	ms := uint64(time.Now().UnixMilli())
-	for i := 5; i >= 0; i-- {
-		b[i] = byte(ms)
-		ms >>= 8
-	}
-	return b, nil
-}
-
-// crockfordULID renders those bits the way every prefixed id of design 001 is
-// rendered: twenty-six lowercase Crockford characters, which sort as the bits
-// sort.
-func crockfordULID(b [16]byte) string {
-	n := new(big.Int).SetBytes(b[:])
-	mask := big.NewInt(31)
-	var out [26]byte
-	const alphabet = "0123456789abcdefghjkmnpqrstvwxyz"
-	for i := 25; i >= 0; i-- {
-		out[i] = alphabet[new(big.Int).And(n, mask).Int64()]
-		n.Rsh(n, 5)
-	}
-	return string(out[:])
-}
+// newID mints one sandbox's id.
+func newID() string { return ids.New("sbx_") }
 
 // Update replaces one sandbox's desired state with what an apply resolved.
 // The status is the controller's and is carried over whole: an apply writes
