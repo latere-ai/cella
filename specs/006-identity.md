@@ -8,7 +8,7 @@ depends_on:
 affects: [authorizer/, internal/auth/, internal/config/, internal/api/, test/stubs/]
 effort: medium
 created: 2026-09-12
-updated: 2026-10-18
+updated: 2026-11-06
 author: changkun
 ---
 
@@ -239,6 +239,17 @@ the other members are the stored Secret's, and the proposed `spec`
 never carries `value`, since no authorization request carries a
 secret's value (amended 2026-09-29).
 
+`request` is `{"id", "ip", "user_agent"}`, read once per request. `id` is
+the request id of [[008-api]] the answer carries, so the authorizer's log
+and `cellad`'s name one request. `ip` is the peer's address, or, from a
+peer inside a range of `CELLA_TRUSTED_PROXIES` (comma-separated CIDR
+ranges, unset by default), the rightmost `X-Forwarded-For` entry outside
+the ranges; an entry that is no address, or a chain of trusted hops only,
+keeps the peer, and the header from any other peer is never read. A
+standby that forwards a request to the writer ([[076-rolling-replicas]])
+passes the chain on with its own peer appended, so the writer reads the
+caller as a request that reached it directly is read (amended 2026-11-06).
+
 `volume.create` carries `proposed` as well: the Volume the create would
 store, which the apply resolves before it asks, so `spec.source.kind`,
 `spec.access` and `spec.retain` carry their defaults where the body left
@@ -456,6 +467,7 @@ the HTTP envelope of 401 and 403 ([[008-api]]); the revocation store
 | Every action in the table reaches the authorizer with the resource shape in its row, `workload` set for a sandbox caller, `issuer` and `sub` apart, and every claim of the token in `claims` verbatim | `TestAuthorizerRequestShapes` against the stub; `TestAVolumeCreateCarriesItsProposal`, `TestAVolumeCreateIsDecidedOnItsProposal` | built ([[040-mesh-and-spawn]]): every row's shape holds, and `workload` carries the caller's sandbox with its `parent`, `root`, `mesh` and `spawn` read from the store; `volume.create` carries the resolved Volume as `proposed`, and an authorizer refuses a create on its source or size |
 | A deny on an own action is `forbidden`; a deny through `Lookup` is `not_found` and identical to a missing object | `TestDenyMapping` | built: the two codes hold at the guard; the 403 and the 404 they render as are [[008-api]]'s |
 | The cache serves a second identical decision without a call, expires an allow at the answer's `ttl` and at the `600s` cap, a deny at `5s`, never caches unavailability, and keys `create` and `list` without a resource id | `TestDecisionCache` | built |
+| The request block names the id the answer carries and the caller's address: the peer, or, from a peer inside `CELLA_TRUSTED_PROXIES`, the rightmost `X-Forwarded-For` entry outside the ranges; the header from any other peer is never read, and a standby's forward keeps the chain | `TestTheAuthorizerHearsTheRequestID`, `TestClientIPReadsThroughTrustedProxiesOnly`, `TestAForwardKeepsTheChainItArrivedWith`, `TestTrustedProxiesAreCIDRRanges`, `TestTheAuthorizerHearsTheCallerBehindAProxy` | built |
 | The probe id is denied by the stub authorizer and by the owner policy for every subject and action, and `cellad check` reports an authorizer that allows it | `TestProbeIdIsAlwaysDenied`, `TestAuthorizerConformance`, `TestTheAuthorizerDeniesTheProbe`, `TestCheckNamesEachFailure`, `TestCheckHoldsUnderTheOwnerPolicyAndAnEndpoint` | built: the owner policy denies it for every subject and action, `TestProbeIdIsAlwaysDenied`; the stub denies it for every action through the probe case of the shared suite, `TestAuthorizerConformance`, and the authorizer of `cella-stubs` for every action, `TestTheAuthorizerDeniesTheProbe`; `cellad check` fails its `authorizer` line against an endpoint that allows the probe, `TestCheckNamesEachFailure`, and passes it, naming the probe id, under the owner policy and under the stub, `TestCheckHoldsUnderTheOwnerPolicyAndAnEndpoint` ([[048-release-and-check]]) |
 | `limits` override the rate limit, the count ceiling, the volume ceiling, and the priority cap; `filter` narrows a list | `TestLimitsAndFilterReachTheCaller`, `TestCountCeilingCountsRunningSandboxes`, `TestAVolumeCreatePastTheCeilingIsVolumeQuotaExceeded`, `TestEnvironmentListAppliesTheFilter`, `TestTheDefaultEnvironmentIsListedByItsRead`, `TestSecretListAppliesTheWholeFilter` | partial: `max_sandboxes` is honored at create and at start as the count [[007-admission]] defines, `max_volumes` at a volume create as [[019-volumes]] defines, and the filter narrows the sandbox, secret and environment lists by owners and labels, with the default environment decided by its read alone ([[067-environment-list-ports-redirect-keys]]); there is still no rate limit ([[008-api]]), and `cellad` passes no `max_priority` to `Resolve`, whose `Limits.MaxPriority` caps `scheduling.priority` for a plane that sets it ([[003-manifest-contract]]) |
 | The owner policy's rules hold for every kind and action, including that only an admin creates an environment and only the default environment is usable by a non-admin | `TestOwnerPolicy`, table-driven | built |

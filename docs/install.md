@@ -296,6 +296,14 @@ answers `404`. The probes are not public under a path: the Deployment
 reads `/livez` and `/readyz` on the internal listener, which does not
 change.
 
+Behind that proxy, every request reaches the control plane from the
+proxy's address, and an authorization endpoint that audits or limits by
+`request.ip` sees only the proxy. Set `CELLA_TRUSTED_PROXIES` to the range
+the proxy runs in, and the range the replicas run in when there is more
+than one, and the address is read from the `X-Forwarded-For` the proxy
+appends ([Identity](configuration.md#identity)). The proxy must set that
+header with the address it heard from as its last entry.
+
 `CELLA_PUBLIC_URL` is the issuer of every token the control plane mints,
 so moving an installation under a path changes the issuer. Mint each
 worker's and gateway's environment key again after the move; a running

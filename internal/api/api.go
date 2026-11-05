@@ -14,8 +14,8 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
-	"net"
 	"net/http"
+	"net/netip"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -80,6 +80,12 @@ type Options struct {
 	// Metrics is design 017's recorder. It is optional: with none the API
 	// counts nothing and answers the same.
 	Metrics Metrics
+	// TrustedProxies is CELLA_TRUSTED_PROXIES: the ranges of the proxies in
+	// front of the public listener. A request whose peer is inside one names
+	// its caller to the authorizer by X-Forwarded-For, the rightmost entry
+	// outside them; empty, the caller is the peer and the header is never
+	// read.
+	TrustedProxies []netip.Prefix
 	// PublicPath is the path of CELLA_PUBLIC_URL, empty at the root. The
 	// handler serves the rooted routes whatever it is, because the listener
 	// in front rewrites a request under a base to the route it names; every
@@ -221,7 +227,15 @@ func New(o Options) (http.Handler, error) {
 
 type callerKey struct{}
 
+// ServeHTTP decides the request id once, at the door, and serves the request
+// with its request block on the context, so every question the authorizer is
+// asked about it names the id its answer carries.
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	id := requestID(r)
+	h.serve(w, r.WithContext(withRequestInfo(r.Context(), r, id, h.TrustedProxies)), id)
+}
+
+func (h *handler) serve(w http.ResponseWriter, r *http.Request, id string) {
 	// Design 017's count is one per request, including the ones refused
 	// before the mux chose an endpoint. The slot rides the context so the
 	// wrapper behind the mux can tell this one which route it reached.
@@ -229,7 +243,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	rw := &observed{ResponseWriter: w}
 	defer h.observe(r.Context(), slot, rw, time.Now())
 	w = rw
-	w.Header().Set(RequestIDHeader, requestID(r))
+	w.Header().Set(RequestIDHeader, id)
 	token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 	if !ok || strings.TrimSpace(token) == "" {
 		respondError(w, &auth.Error{Code: auth.CodeUnauthenticated, Detail: "missing bearer"})
@@ -285,13 +299,6 @@ func (h *handler) public(route string) string { return cellaclient.Route(h.Publi
 func caller(r *http.Request) auth.Caller {
 	c, _ := r.Context().Value(callerKey{}).(auth.Caller)
 	return c
-}
-func requestInfo(r *http.Request) authz.Caller {
-	ip, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		ip = r.RemoteAddr
-	}
-	return authz.Caller{IP: ip, UserAgent: r.UserAgent()}
 }
 func resource(obj v1.Sandbox) authz.Resource {
 	return (auth.Sandbox{ID: obj.Status.ID, Name: obj.Metadata.Name, Owner: obj.Status.Owner,

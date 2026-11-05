@@ -9,6 +9,8 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"maps"
+	"net/netip"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -268,4 +270,30 @@ func equal(got, want []string) bool {
 		}
 	}
 	return true
+}
+
+// TestTrustedProxiesAreCIDRRanges: CELLA_TRUSTED_PROXIES is a comma
+// separated list of ranges, each masked to its network, unset is none, and an
+// entry that is no range, a bare address among them, is named.
+func TestTrustedProxiesAreCIDRRanges(t *testing.T) {
+	c, err := Load(env(identity(t, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.TrustedProxies) != 0 {
+		t.Fatalf("unset, TrustedProxies = %v; no proxy is trusted unless one is named", c.TrustedProxies)
+	}
+	c, err = Load(env(identity(t, map[string]string{"CELLA_TRUSTED_PROXIES": " 10.150.0.7/16, fd00::/8 ,"})))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []netip.Prefix{netip.MustParsePrefix("10.150.0.0/16"), netip.MustParsePrefix("fd00::/8")}; !slices.Equal(c.TrustedProxies, want) {
+		t.Fatalf("TrustedProxies = %v, want %v", c.TrustedProxies, want)
+	}
+	for _, value := range []string{"10.150.0.7", "the-ingress", "10.0.0.0/33"} {
+		_, err := Load(env(identity(t, map[string]string{"CELLA_TRUSTED_PROXIES": value})))
+		if want := "CELLA_TRUSTED_PROXIES entry \"" + value + "\" is not a CIDR range"; err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("CELLA_TRUSTED_PROXIES=%s: Load() = %v, want a message carrying %q", value, err, want)
+		}
+	}
 }

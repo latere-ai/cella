@@ -6,6 +6,24 @@ refused before it is pushed.
 
 ## Unreleased
 
+### Added
+
+- **`CELLA_TRUSTED_PROXIES` names the proxies in front of the public
+  listener.** A request from a peer in one of its CIDR ranges reaches your
+  authorization endpoint with `request.ip` set to the rightmost
+  `X-Forwarded-For` address outside the ranges, so behind an ingress it is
+  the caller and no longer the ingress. A request from any other peer is
+  named by the peer, and its header is never read. Unset, every request is
+  named by its peer, as before. A replica that passes a request on to the
+  writer now keeps the `X-Forwarded-For` it arrived with, so list the range
+  the replicas run in as well.
+
+### Fixed
+
+- **Your authorization endpoint hears the request id.** `request.id` was
+  sent empty. It is now the id the answer carries in `X-Request-Id` and the
+  logs name, the caller's own when it sent one.
+
 ## v0.24.0 - 2026-11-05
 
 ### Added

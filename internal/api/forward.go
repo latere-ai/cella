@@ -208,6 +208,10 @@ func rewrite(pr *httputil.ProxyRequest) {
 	}
 	pr.Out.URL = &url.URL{Scheme: u.Scheme, Host: u.Host, Path: sent.Path, RawPath: sent.RawPath, RawQuery: sent.RawQuery}
 	pr.Out.Host = pr.In.Host
+	// The chain the hops before this one wrote goes on with this hop's peer
+	// appended, so the writer reads the caller's address through
+	// CELLA_TRUSTED_PROXIES as it reads a request that reached it directly.
+	pr.Out.Header["X-Forwarded-For"] = pr.In.Header["X-Forwarded-For"]
 	pr.SetXForwarded()
 }
 

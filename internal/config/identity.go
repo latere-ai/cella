@@ -9,6 +9,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"net"
+	"net/netip"
 	"net/url"
 	"slices"
 	"strconv"
@@ -83,6 +84,13 @@ type Identity struct {
 	// an allow whose answer names no ttl is held.
 	AuthorizerTimeout time.Duration
 	AuthorizerCache   time.Duration
+	// TrustedProxies is CELLA_TRUSTED_PROXIES, the ranges of the proxies in
+	// front of the public listener, such as an ingress controller and, with
+	// more than one replica, the replicas themselves. A request whose peer is
+	// inside one names its caller to the authorizer by X-Forwarded-For, the
+	// rightmost entry outside the ranges. Empty, the caller is the peer and
+	// the header is never read.
+	TrustedProxies []netip.Prefix
 	// AdminSubjects is CELLA_ADMIN_SUBJECTS, the rendered subjects the
 	// owner policy lets act on every object. Read and unused with an
 	// authorizer set.
@@ -149,6 +157,7 @@ func (i *Identity) loadIdentity(getenv Getenv) []string {
 	i.AuthorizerTimeout = duration(getenv, "CELLA_AUTHORIZER_TIMEOUT", DefaultAuthorizerTimeout, &problems)
 	i.AuthorizerCache = duration(getenv, "CELLA_AUTHORIZER_CACHE", DefaultAuthorizerCache, &problems)
 	i.EnvironmentKeyTTL = duration(getenv, "CELLA_ENVIRONMENT_KEY_TTL", DefaultEnvironmentKeyTTL, &problems)
+	i.TrustedProxies = cidrList(getenv, "CELLA_TRUSTED_PROXIES", &problems)
 
 	i.AdminSubjects = authz.ParseSubjects(getenv("CELLA_ADMIN_SUBJECTS"))
 	for _, s := range i.AdminSubjects {
@@ -273,6 +282,22 @@ func duration(getenv Getenv, name string, def time.Duration, problems *[]string)
 		return def
 	}
 	return d
+}
+
+// cidrList reads a comma-separated variable of CIDR ranges, each masked to
+// its network, and names every entry that is not one. A bare address is not
+// a range: a proxy's address is written as one, such as 10.0.0.7/32.
+func cidrList(getenv Getenv, name string, problems *[]string) []netip.Prefix {
+	var out []netip.Prefix
+	for _, raw := range splitList(getenv(name)) {
+		p, err := netip.ParsePrefix(raw)
+		if err != nil {
+			*problems = append(*problems, name+" entry "+strconv.Quote(raw)+" is not a CIDR range such as 10.0.0.0/8")
+			continue
+		}
+		out = append(out, p.Masked())
+	}
+	return out
 }
 
 // splitList reads a comma-separated variable, trimming each entry and

@@ -92,8 +92,9 @@ for historical reasons; secrets answer `412`, the status HTTP gives a
 failed `If-Match`.
 
 **Request ids.** Every answer carries `X-Request-Id`. Send your own and it
-is carried through the answer, the events, and the logs; otherwise the
-server makes one starting `req_`.
+is carried through the answer, the events, the logs, and the question an
+authorization endpoint is asked; otherwise the server makes one starting
+`req_`.
 
 ## Refusals
 

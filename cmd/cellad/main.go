@@ -581,7 +581,7 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 				Image:       cfg.Admission.DefaultImage,
 				StartMemory: cfg.Sizing.StartMemory, MemoryCeiling: cfg.Sizing.MemoryCeiling,
 			},
-			Metrics: registry, PublicPath: cfg.PublicPath,
+			Metrics: registry, PublicPath: cfg.PublicPath, TrustedProxies: cfg.TrustedProxies,
 		})
 		if err != nil {
 			return fmt.Errorf("API: %w", err)

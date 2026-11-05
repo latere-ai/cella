@@ -32,7 +32,7 @@ A question for `sandbox.create`:
   "claims": {"aud": "cella", "exp": 1793982589, "iss": "https://login.example.com", "sub": "alice"},
   "action": "sandbox.create",
   "resource": {"environment": "default", "kind": "Sandbox", "labels": {"team": "web"}, "name": "build-7", "owner": "https://login.example.com|alice"},
-  "request": {"id": "", "ip": "203.0.113.4", "user_agent": "curl/8.7"}
+  "request": {"id": "req_7m2xq4ahk3vd5gplw6ycn3tzre", "ip": "203.0.113.4", "user_agent": "curl/8.7"}
 }
 ```
 
@@ -63,8 +63,13 @@ A question for `sandbox.create`:
     would write: its `owner`, its `metadata` and its `spec`. [The
     answer](#updates-and-volume-creates-are-decided-on-the-change)
     says how to read it.
-- `request` is the caller's address and user agent. Its `id` is sent
-  empty in this release.
+- `request` is the request the question is about. `id` is the request id
+  the answer carries in `X-Request-Id` and `cellad` logs, the caller's own
+  when it sent one, so your log and `cellad`'s name the same request. `ip`
+  is the caller's address: the connection's peer, or, behind a proxy whose
+  range is in `CELLA_TRUSTED_PROXIES`, the address that proxy heard from
+  ([the configuration](configuration.md#identity)). `user_agent` is the
+  caller's `User-Agent`.
 
 An answer is cached on everything in the question except `request.id`
 ([the answer](#the-answer) says for how long).
