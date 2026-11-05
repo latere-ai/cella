@@ -307,6 +307,48 @@ image:
       version_expect: "cellad "
       skip_start: needs an OpenID Connect issuer it can reach, which the gate does not bring up
 
+# The suites that need more than the plain test has: a tool on PATH, a
+# process of their own, or a cluster. `lateregate e2e` runs them with the
+# machine's full PATH, and a test that skips fails its suite, so a missing
+# tool is a failure and never a silent pass.
+e2e:
+  - name: deploy-render
+    why: >-
+      the deploy base and every example overlay render with kubectl, and the
+      rendered objects keep the invariants deploy_test.go asserts over them
+    test: {packages: ["."]}
+    tools: [kubectl]
+  - name: run-bootstrap
+    why: >-
+      the development stack of `make run` comes up on a clean state directory
+      with no issuer of the developer's own, mints a token and creates a
+      sandbox with it, even when a port it might have picked is taken
+    test: {tags: [e2e], packages: [./test/run/...], run: '^TestRunBootstrap$'}
+  - name: run-conformance
+    why: >-
+      the contract of spec 015 holds against the development stack, with the
+      gaps test/conformance/known.json declares read as declarations and not
+      as passes
+    test: {tags: [e2e], packages: [./test/run/...], run: '^TestRunConformance$'}
+    timeout: 25m
+    allow_skip: >-
+      the suite skips, by design, the cases for a capability the native
+      driver does not declare and the gaps test/conformance/known.json
+      records, each with its reason; the run asserts that cases passed
+  # The kind half builds the three images, brings up one cluster and runs
+  # every cluster test against it, so it is a script that owns the order:
+  # the document walk deletes the cluster and has to come last.
+  - name: kind-stack
+    why: >-
+      the kind tier (lifecycle, dial, egress boundary, no lateral movement,
+      mesh reachability, worker without inbound), the Kubernetes driver's
+      cluster cases, the contract of spec 015 and the install document hold on
+      a real kubelet, and docs/install.md walks block by block
+    command: bash tools/kind/e2e.sh
+    tools: [kind, kubectl, helm]
+    reads: [deploy, docs/install.md, tools/kind, tools/docs, images, Dockerfile, Dockerfile.stubs]
+    timeout: 50m
+
 # The tags the production overlay runs are rewritten in the same commit as the
 # changelog section, so deploy/prod never lags a release. The control plane and
 # the desktop are two entries of one images list, and each pattern ends at its
