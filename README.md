@@ -18,6 +18,34 @@ This repository is the whole control plane, and anyone can run it.
 [![Go](https://img.shields.io/github/go-mod/go-version/latere-ai/cella)](go.mod)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
+## Status
+
+Cella is before 1.0: its manifests are `cella.latere.ai/v1beta1`, a
+release may still change the API or a manifest field, and the
+[changelog](CHANGELOG.md) names every change in each
+[release](https://github.com/latere-ai/cella/releases). A release
+carries the signed `cellad` and `cella-display` images, the `cellad` and
+`cella` binaries for Linux and macOS, and the Kubernetes manifests.
+
+Everything under [What you get](#what-you-get) is served today. These are
+designed and not built yet, and a manifest that asks for one is refused
+with `capability_unsupported` or `unsupported_kind`, never accepted and
+ignored:
+
+| | |
+|---|---|
+| `SandboxSet` | the kind; the authorizer vocabulary names its actions, and the API does not serve it |
+| More volume sources | a volume filled from a snapshot or an archive, on a named storage class, one that grows, and changing a sandbox's mounts after it is created |
+| Workspace sources | a workspace filled from git or from a volume; `spec.workspace.source` takes `empty` |
+| Public ports | `expose: public` on a port; no runtime provides one |
+| Egress confined outside Kubernetes | the Podman and native runtimes declare no enforced egress mode, and neither does Kubernetes until its operator names the gateway's Pods; there a boundary other than `open` is recorded, the sandbox reports `EgressEnforced` false, and the create answers with a warning. The gateway still decides and records every connection that reaches it, and substitutes secret values |
+| Ports and the desktop on a worker | for an environment a self-hosted worker serves |
+| Virtual machines | a virtual machine runtime |
+
+Cella has had no external security audit. The
+[security policy](SECURITY.md#what-is-protected) names the test behind
+each control it claims.
+
 ## The problem
 
 An agent needs somewhere to run code that is not your machine and not
@@ -118,59 +146,76 @@ server writes.
 - **Signed releases.** Images, binaries, and a deploy archive, with SPDX
   bills of materials and build provenance.
 
-## What is not in this release
+## Quickstart
 
-The design covers more than this release serves. A manifest that asks
-for one of these is refused with `capability_unsupported` or
-`unsupported_kind`, never accepted and ignored.
-
-- The `SandboxSet` kind. The authorizer vocabulary names its actions;
-  the API does not serve it.
-- A volume filled from a snapshot or an archive, a volume on a named
-  storage class, a volume that grows, and a change of a sandbox's mounts
-  after it is created.
-- A workspace filled from git or from a volume. `spec.workspace.source`
-  takes `empty`.
-- A public endpoint for a port (`expose: public`). No runtime provides
-  one.
-- Egress confined to the gateway outside Kubernetes. The Podman and native
-  runtimes declare no enforced egress mode, and neither does Kubernetes
-  until its operator names the gateway's Pods; there a boundary other than
-  `open` is recorded, the sandbox reports `EgressEnforced` false, and the
-  create answers with a warning. The gateway still decides and records
-  every connection that reaches it, and substitutes secret values.
-- Ports and the desktop on an environment a self-hosted worker serves.
-- A virtual machine runtime.
-
-## Try it
-
-You need Go 1.27 or newer, `openssl`, and `curl`.
+You need Go 1.27 or newer, `git`, `openssl` and `curl`. This starts the
+control plane on your machine with stand-ins for the identity provider
+and the endpoints you would write, creates a sandbox, and runs a command
+in it:
 
 ```sh
-make run   # the stubs and cellad on loopback, with a token to call it with
-make       # the quality gate
+git clone https://github.com/latere-ai/cella.git && cd cella
+mkdir -p out
+make run > out/run.log 2>&1 &
+until grep -q 'export CELLA_TOKEN' out/run.log; do sleep 2; done
+eval "$(grep '^  export CELLA_' out/run.log)"
+curl --fail-with-body "$CELLA_URL/v1/sandboxes?wait=1" \
+  -H "Authorization: Bearer $CELLA_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox","metadata":{"name":"demo"},"spec":{"env":{"TASK":"hello"}}}'
+curl --fail-with-body "$CELLA_URL/v1/sandboxes/demo/exec?wait=1" \
+  -H "Authorization: Bearer $CELLA_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"command":["sh","-c","printf %s \"$TASK\""],"timeout":"10s"}'
 ```
 
-`make run` needs nothing of your own. It starts `cella-stubs`, which
-serves an OpenID Connect issuer, an authorization endpoint, an admission
-endpoint, and an event sink on loopback, then starts `cellad serve` wired
-to the issuer, the authorization endpoint, and the sink, and prints the command that mints a caller token and the `curl`
-that creates the first sandbox. Interrupt it to stop both. The signing
-key and the sink's secret are generated once under `out/run/` and kept,
-so a restart does not invalidate the token you are holding; `make clean`
-removes them. A second clone runs beside the first with
-`CELLA_RUN_PORT=8090 make run`. `CELLA_RUN_PORT=0` lets the kernel pick
-the ports, and the stack writes the addresses it got to
-`out/run/cellad.addrs`.
+The create answers with the manifest as it runs, every default filled
+in and a `status` the server writes, and the command's output comes back
+as one object:
 
-`cella-stubs` is a test binary. It answers what a flag tells it to
-answer, holds nothing across a restart, and belongs in no installation:
-in a real one, each of those four endpoints is yours.
+```
+{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox","metadata":{"name":"demo"},"spec":{...},"status":{"id":"sbx_01m6ptw3vmkrjctvy2s8dr9a43","driver":"native","isolation":"none","phase":"Running",...}}
+{"exitCode":0,"stdout":"hello","stderr":"","truncated":false,"durationMs":5}
+```
 
-`make run` uses the native runtime, which runs commands on this host with
-no isolation and no image. [The native quickstart](docs/native.md) is
-what it can and cannot do. To develop against an isolated runtime on a
-laptop, start `cellad serve` yourself with `CELLA_RUNTIME=podman`.
+`make run` starts `cella-stubs`, which serves an OpenID Connect issuer,
+an authorization endpoint, an admission endpoint and an event sink on
+loopback, then `cellad serve` wired to the issuer, the authorization
+endpoint and the sink, and prints the lines that
+set `CELLA_URL` and mint a token for the subject `dev`, which the fifth
+line runs. `kill %1` stops both, and `make clean` removes the keys and
+records it keeps under `out/run/`. Port 8080 is the default; another
+clone runs beside it with `CELLA_RUN_PORT=8090 make run`.
+
+`make run` uses the native runtime, which runs commands on this host
+with no isolation and no image, and `cella-stubs` is a test binary that
+belongs in no installation. [Running it locally](docs/local.md) is what
+the native runtime can and cannot do, and the rest of the API on it.
+
+## How it fits
+
+```mermaid
+flowchart LR
+  callers["the cella command, agents, your platform"] -->|"/v1 with a bearer"| cellad
+  worker["cellad worker on your infrastructure"] -->|"connects outbound"| cellad
+  cellad -->|"verifies tokens"| issuer["OpenID Connect issuers"]
+  cellad -->|"asks each decision"| authorizer["your authorizer, optional"]
+  cellad -->|"sends each manifest"| admission["your admission endpoint, optional"]
+  cellad -->|"a signed event per change"| sink["your event sink, optional"]
+  cellad -->|"desired state"| db[("Postgres, optional")]
+  cellad -->|"runs sandboxes"| runtimes["Kubernetes, Podman, native or local runtime"]
+  runtimes --- sandbox["a sandbox"]
+  sandbox -->|"every connection"| gateway["egress gateway, optional"]
+  gateway -->|"allowed hosts, with secret values substituted"| hosts["the hosts a manifest allows"]
+  prometheus["Prometheus"] -->|"scrapes metrics"| cellad
+```
+
+`cellad serve` is the control plane: it verifies every caller against
+the issuers you list, asks your authorizer what they may do, lets your
+admission endpoint rewrite or refuse each manifest, and sends your event
+sink a signed record of each change. It runs sandboxes itself on a
+cluster or a machine, or hands them to a `cellad worker` that runs them
+on infrastructure it does not reach. `cellad egress` is the gateway a
+sandbox's connections go through, and the only component a secret's
+value is sent to.
 
 ## Install it
 
@@ -184,8 +229,7 @@ digest.
 You supply an OpenID Connect issuer, a signing key, a secret key, and a
 hostname. An authorization endpoint, an event sink, Postgres, and an
 egress gateway are each optional, and the manifests turn each one on with
-one Secret.
-An admission endpoint is optional too.
+one Secret. An admission endpoint is optional too.
 
 ## Identity
 
@@ -203,6 +247,7 @@ There is no anonymous access and no API key.
   not a decision refuses the request. Unset, the built-in owner policy
   applies: you create anything but an environment, you act on what you
   own, and the subjects in `CELLA_ADMIN_SUBJECTS` act on everything.
+  [Writing an authorizer](docs/authorizer.md) is the contract, and
   [`latere.ai/x/cella/authorizer`](authorizer) publishes the actions, so
   an endpoint written in Go keeps no copy of the strings.
 - **What cellad signs.** `CELLA_TOKEN_KEY` is one or two RSA keys. The
@@ -229,7 +274,7 @@ endpoint, and the event sink fit a platform of your own.
 
 | | |
 |---|---|
-| [Native quickstart](docs/native.md) | create and drive a sandbox on your own machine |
+| [Running it locally](docs/local.md) | `make run`, and a sandbox on your own machine with no cluster and no isolation |
 | [Install](docs/install.md) | a cluster, the release's manifests, the first sandbox, and `cellad check` |
 | [Configuration](docs/configuration.md) | every environment variable, its default, and which role reads it |
 | [The cella command](docs/cli.md) | the client: commands, output, and exit codes |
@@ -237,9 +282,12 @@ endpoint, and the event sink fit a platform of your own.
 | [API](docs/api.md) | the `/v1` routes, authentication, errors, and the OpenAPI document |
 | [Sandboxes on Kubernetes](docs/kubernetes.md) | what a sandbox on a cluster can do, what it can reach, and what the Role allows |
 | [Self-hosting a data plane](docs/workers.md) | running sandboxes on your own machines with `cellad worker` |
+| [Sandboxes on your own computer](docs/local-runtime.md) | the local runtime: a worker on a person's computer, the folders it grants, and the network it allows |
 | [Capacity and queues](docs/scheduling.md) | capacity, queues, priority, preemption, and warm pools |
 | [Following events](docs/events.md) | an object's history and the live feed |
 | [Observability](docs/observability.md) | metrics, traces, logs, and alert rules |
+| [Security](docs/security.md) | what Cella guarantees, what it sees and keeps, what it does not defend, and what an operator keeps safe |
+| [Writing an authorizer](docs/authorizer.md) | the question `cellad` asks, the actions, the answer, and failing closed |
 | [Building a plane](docs/plane.md) | a platform on top of Cella, through the webhooks or the packages |
 | [Conformance](docs/conformance.md) | running the suite against an installation |
 
