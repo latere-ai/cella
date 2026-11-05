@@ -29,14 +29,16 @@ const module = "latere.ai/x/cella"
 // interface, the boundary compiler, the sizing policy, the host-pattern
 // grammar the contract's host rule names (spec 003), and the YAML parser its
 // decoder reads a body with, each of which the manifest carries into
-// everything that imports it.
-// Every entry is itself held to this rule: a parser and a pattern matcher
-// compute over bytes, so importing one opens no connection.
+// everything that imports it; and the minter of the time-ordered ids the
+// controller gives what it creates.
+// Every entry is itself held to this rule: a parser, a pattern matcher and a
+// minter compute over bytes and the clock, so importing one opens no
+// connection.
 var shared = []string{
 	module + "/manifest", module + "/manifest/v1", module + "/runtime",
 	module + "/runtime/display", module + "/egress", module + "/autosize",
 	"latere.ai/x/pkg/hostmatch", "latere.ai/x/pkg/egress/placeholder",
-	"go.yaml.in/yaml/v3",
+	"latere.ai/x/pkg/ulid", "go.yaml.in/yaml/v3",
 }
 
 // engines is the client each package may reach beyond shared, one entry per
