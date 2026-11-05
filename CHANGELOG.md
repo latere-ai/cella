@@ -36,13 +36,6 @@ refused before it is pushed.
 
 ## v0.23.0 - 2026-11-05
 
-### Fixed
-
-- **Memory autosize found unavailable at start-up is checked again.** A metrics
-  API that was briefly down when `cellad` started no longer leaves memory
-  autosize off until a restart; the Kubernetes driver looks again every minute
-  and declares it once the cluster serves it.
-
 ### Added
 
 - **A sandbox that names no memory can start small and grow.** Set
@@ -51,22 +44,14 @@ refused before it is pushed.
   where the environment sizes memory. A sandbox that names a memory keeps that
   fixed size.
 
-## v0.22.6 - 2026-11-01
-
 ### Fixed
 
-- **An update that would leave a live child outside its parent's boundary
-  is refused.** `Controller.Update` never called the check that holds a
-  parent to what a spawned child needs; a CPU, memory or disk ceiling
-  lowered below what a child was granted was accepted instead of refused
-  with `boundary_exceeded`, naming the child.
-- **`client.New` refuses a non-loopback `http://` control plane address,
-  as the worker and the gateway already did.** This is a client-visible
-  change: code that built a `Client` against a plain `http://` host other
-  than `localhost` or `127.0.0.1` now gets an error from `New` where it
-  used to connect. Set `Config.Insecure`, or `CELLA_INSECURE_CONTROL_PLANE`
-  for `client.Environment`, as the explicit consent; loopback and
-  `https://` need neither.
+- **Memory autosize found unavailable at start-up is checked again.** A metrics
+  API that was briefly down when `cellad` started no longer leaves memory
+  autosize off until a restart; the Kubernetes driver looks again every minute
+  and declares it once the cluster serves it.
+
+## v0.22.6 - 2026-11-01
 
 ### Changed
 
@@ -90,6 +75,21 @@ refused before it is pushed.
   commit is not on `main`, or that carries SemVer build metadata, is
   refused, and a tag with a prerelease suffix, such as `v1.2.3-rc.1`, is
   published as a prerelease.
+
+### Fixed
+
+- **An update that would leave a live child outside its parent's boundary
+  is refused.** `Controller.Update` never called the check that holds a
+  parent to what a spawned child needs; a CPU, memory or disk ceiling
+  lowered below what a child was granted was accepted instead of refused
+  with `boundary_exceeded`, naming the child.
+- **`client.New` refuses a non-loopback `http://` control plane address,
+  as the worker and the gateway already did.** This is a client-visible
+  change: code that built a `Client` against a plain `http://` host other
+  than `localhost` or `127.0.0.1` now gets an error from `New` where it
+  used to connect. Set `Config.Insecure`, or `CELLA_INSECURE_CONTROL_PLANE`
+  for `client.Environment`, as the explicit consent; loopback and
+  `https://` need neither.
 
 ## v0.22.5 - 2026-10-30
 
@@ -417,7 +417,7 @@ refused before it is pushed.
   either attaches to an engine the other started. What a hosted plane
   decides (its session labels, its token's audience and claims, its part
   of connecting a computer) the embedder supplies. See
-  [the local runtime](docs/local.md#a-persons-computer-as-one-device).
+  [the local runtime](docs/local-runtime.md#a-persons-computer-as-one-device).
 - With `OTEL_EXPORTER_OTLP_ENDPOINT` set, `cellad` also exports the Go
   runtime's metrics: memory, goroutines, GOGC, GOMAXPROCS and scheduling
   latency, as `go.memory.*`, `go.goroutine.count`, `go.config.gogc`,
@@ -597,7 +597,7 @@ refused before it is pushed.
   one without runs detached and survives the worker's process ending
   unexpectedly. The file routes hold the same lines in the worker. A
   worker started as root refuses to start with `local_runs_as_root`.
-  [Sandboxes on your own computer](docs/local.md) is the walkthrough, and
+  [Sandboxes on your own computer](docs/local-runtime.md) is the walkthrough, and
   `latere.ai/x/cella/runtime/local` opens it in a program that embeds the
   worker.
 - **`status.paths`.** A sandbox on a runtime that cannot move paths
@@ -1848,7 +1848,7 @@ refused before it is pushed.
   endpoint you write, give it the bearer in `CELLA_ADMISSION_TOKEN`, and
   `cellad` sends it the defaulted manifest, the verified caller and the
   environment on every apply; it answers with the manifest to run or with
-  a refusal. That is where an image catalogue pins an alias to a digest,
+  a refusal. That is where an image catalog pins an alias to a digest,
   where a plan fills in resources and lifetimes and refuses what exceeds
   them, and where a boundary is narrowed before anything starts. What the
   endpoint returns is what the caller reads back and what the sandbox
@@ -1859,7 +1859,7 @@ refused before it is pushed.
   and never lets one through, and nothing is ever resent. Leave the URL
   unset and the step is the identity, as before. `spec.image` moves with
   it: it is now required after your endpoint has run rather than before,
-  so a catalogue can supply it, and `CELLA_DEFAULT_IMAGE` fills it in on
+  so a catalog can supply it, and `CELLA_DEFAULT_IMAGE` fills it in on
   an installation with no endpoint. A manifest that names no image after
   both is refused with `missing_field`, and an environment that runs no
   image, such as the native one, still refuses an image whoever named it.
