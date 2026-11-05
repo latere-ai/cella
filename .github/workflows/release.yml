@@ -157,7 +157,7 @@ jobs:
           go test -race -count=1 -v -run '^TestPodmanConformance$' ./runtime/podman/... 2>&1 | tee /tmp/podman-suite.log
           grep -q -- '--- PASS: TestPodmanConformance' /tmp/podman-suite.log \
             || { echo "the container driver's suite did not run; no engine answered" >&2; exit 1; }
-      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -188,7 +188,7 @@ jobs:
             echo "$out" | grep -q "^$line *skip" || { echo "$line is not reported as not configured" >&2; exit 1; }
           done
           echo "$out" | grep -q '^data directory *ok' || { echo "the data directory is not writable in the image" >&2; exit 1; }
-      - uses: helm/kind-action@1544676c07bb3570fcb70166beaa07c4528fd4aa # v1.15.1
+      - uses: helm/kind-action@ea822c7bf1874f08e5a491df991c228edffc3376 # v1.15.2
         with:
           install_only: true
       # The cluster runs the bytes this tag published, under the names the
@@ -321,7 +321,7 @@ jobs:
       DIGEST: ${{ needs.build.outputs.digest_1 }}
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -389,7 +389,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: checkout
-      - uses: helm/kind-action@1544676c07bb3570fcb70166beaa07c4528fd4aa # v1.15.1
+      - uses: helm/kind-action@ea822c7bf1874f08e5a491df991c228edffc3376 # v1.15.2
         with:
           install_only: true
       - name: The published images under the names the archive's overlay runs
