@@ -10,11 +10,15 @@
 # cellad reports the version the tag pins, signs each, and gives each a bill
 # of materials and SBOM and provenance attestations; then it writes the
 # deploy archive with cellad pinned by digest. The candidate is exercised
-# before anything is tagged. Only then does the publish stage tag the
-# digests, sign checksums.txt over every file the release attaches, and
-# publish the GitHub release with the CHANGELOG section as its body. After
-# that the install document is walked against the published artifacts, and
-# the verify stage checks the release from a runner with no checkout.
+# before anything is tagged. The deploy stage then rolls Latere's own
+# installation, only where the repository variable CELLA_RELEASE_DEPLOY is
+# set: deploy/prod applied with cellad pinned by digest, both Deployments
+# waited for, and tools/smoke/release.sh repeated against the live origin.
+# Only then does the publish stage tag the digests, sign checksums.txt over
+# every file the release attaches, and publish the GitHub release with the
+# CHANGELOG section as its body and the smoke evidence appended. After that
+# the install document is walked against the published artifacts, and the
+# verify stage checks the release from a runner with no checkout.
 #
 # The image namespace is the repository owner's, so a fork's tag publishes
 # under the fork's. Each job is granted only what it needs. Every
@@ -72,7 +76,8 @@ jobs:
       # base with cellad pinned to this release by digest, the bootstrap
       # templates and the examples, under one deploy/ directory. The
       # overlays are rendered here, so an archive that does not build
-      # never reaches the release page.
+      # never reaches the release page. deploy/prod and deploy/prod-bootstrap
+      # are Latere's own installation and stay out of the archive.
       after_images_command: |
         rm -f dist/cellad_linux_amd64 dist/cellad_linux_arm64
         ref="${IMAGE_1%@*}"
@@ -84,7 +89,7 @@ jobs:
           grep -qF "image: ${IMAGE_1}" <<< "$rendered" \
             || { echo "$overlay does not render the published image" >&2; exit 1; }
         done
-        tar -czf "dist/deploy-${TAG}.tar.gz" deploy
+        tar -czf "dist/deploy-${TAG}.tar.gz" --exclude=deploy/prod --exclude=deploy/prod-bootstrap deploy
       runs_on: ubuntu-latest
 
   # 2. The candidate exercised before anything is tagged.
@@ -232,11 +237,44 @@ jobs:
           kubectl -n cella logs deploy/cellad -c stubs --tail=200 || true
           kubectl -n cella logs deploy/cellad-egress --tail=200 || true
 
-  # 3. Only now do the digests get the :<tag> reference, and the release is
+  # 3. The shared deploy stage, under the production environment, so the
+  # rollout is a GitHub deployment with a URL on the repository's
+  # Deployments page. It runs after conformance, so production never rolls
+  # before the candidate has passed its own tests. The repository variable
+  # and the kubeconfig secret are set on this repository and on no fork, so
+  # a tag on a fork publishes every artifact and skips this job. The image
+  # is given by digest, as the overlay's own name for it, because it carries
+  # no tag until publish. The desktop and the test stubs are not rolled here:
+  # the desktop is named by tag in an environment value, which publish makes
+  # resolve, and the stubs are never deployed. deploy/prod holds only
+  # manifests that can be applied again; deploy/prod-bootstrap is never read.
+  deploy:
+    name: deploy and smoke
+    # build is named for its outputs: a job reads the outputs of the jobs it
+    # needs directly, and of no other.
+    needs: [build, conformance]
+    if: ${{ vars.CELLA_RELEASE_DEPLOY != '' }}
+    uses: latere-ai/ci/.github/workflows/image-deploy.yml@v1
+    permissions:
+      contents: read
+    with:
+      images: ghcr.io/latere-ai/cellad=${{ needs.build.outputs.ref_1 }}@${{ needs.build.outputs.digest_1 }}
+      deployments: |
+        cellad
+        cellad-egress
+      url: https://api.latere.ai/v1/environments
+    secrets:
+      DEPLOY_KUBECONFIG: ${{ secrets.CELLA_KUBECONFIG }}
+
+  # 4. Only now do the digests get the :<tag> reference, and the release is
   # published with every file the build wrote and the CHANGELOG section as
   # its body.
   publish:
-    needs: [build, conformance]
+    needs: [build, conformance, deploy]
+    # deploy is skipped on every repository that sets no CELLA_RELEASE_DEPLOY,
+    # and a job that leans on the implicit success() is skipped whenever a
+    # job above it in the graph is, so each result is named here.
+    if: ${{ always() && needs.build.result == 'success' && needs.conformance.result == 'success' && needs.deploy.result != 'failure' && needs.deploy.result != 'cancelled' }}
     uses: latere-ai/ci/.github/workflows/image-publish.yml@v1
     permissions:
       contents: write
@@ -244,9 +282,14 @@ jobs:
       id-token: write
     with:
       images: ${{ needs.build.outputs.images }}
+      # The smoke evidence is the run artifact the deploy stage uploads. A
+      # release whose deploy was skipped has none, and the publish stage
+      # refuses an evidence pattern that names no file, so it is named only
+      # when the deploy ran.
+      evidence: ${{ needs.deploy.result == 'success' && 'smoke-evidence' || '' }}
       runs_on: ubuntu-latest
 
-  # 4. The install document against the published artifacts: the deploy
+  # 5. The install document against the published artifacts: the deploy
   # archive unpacked on a runner that has nothing of the checkout but the
   # document, and the image pulled by tag.
   #
@@ -261,6 +304,9 @@ jobs:
   install-release:
     name: the install document against the published artifacts
     needs: [build, publish]
+    # deploy sits above publish in the graph and is skipped on a fork, so
+    # the results this job waits on are named, as on publish.
+    if: ${{ always() && needs.build.result == 'success' && needs.publish.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -381,11 +427,14 @@ jobs:
           kubectl -n cella logs deploy/cellad -c stubs --tail=200 || true
           kubectl -n cella logs deploy/cellad-egress --tail=200 || true
 
-  # 5. From a clean runner with no checkout: checksums.txt and its
+  # 6. From a clean runner with no checkout: checksums.txt and its
   # signature, every asset against it, each image's signature and
   # attestations, and the body against the CHANGELOG section at the tag.
   release-verify:
     needs: publish
+    # deploy sits above this job in the graph and is skipped on a fork, so
+    # the result this job waits on is named, as on publish.
+    if: ${{ always() && needs.publish.result == 'success' }}
     uses: latere-ai/ci/.github/workflows/release-verify.yml@v1
     permissions:
       contents: read

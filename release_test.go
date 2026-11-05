@@ -151,8 +151,20 @@ func sources(t *testing.T) map[string]string {
 // variable overrides it for an installation that publishes elsewhere.
 func TestReleasePublishesUnderTheOwnersNamespace(t *testing.T) {
 	for path, body := range sources(t) {
+		// Latere's own installation names the image it runs, and the tests
+		// of it name that image to check it.
+		if ownInstallation(path) || path == "deploy_prod_test.go" {
+			continue
+		}
 		for i, line := range strings.Split(body, "\n") {
 			for _, m := range imageRef.FindAllStringSubmatch(line, -1) {
+				// The deploy job gives the shared stage the digest the
+				// build pushed under the overlay's own name for the image,
+				// which the stage matches against deploy/prod. It is not
+				// a reference anything pulls.
+				if path == ".github/workflows/release.yml" && strings.Contains(line, "=${{ needs.build.outputs.ref_1 }}@") {
+					continue
+				}
 				if !derived(m[1]) {
 					t.Errorf("a fixed image namespace: %s:%s: %s", path, strconv.Itoa(i+1), m[0])
 				}
@@ -245,6 +257,18 @@ var released = []string{"deploy", "docs", ".github", "internal", "tools", "skill
 // is not its own finding, and are the one place a needle may be spelled out.
 var needleFiles = map[string]bool{
 	"runtime/coordinates_test.go": true, "manifest/imports_test.go": true, "rules_test.go": true,
+	// It tests Latere's own installation, whose objects it has to name.
+	"deploy_prod_test.go": true,
+}
+
+// ownInstallation reports whether a path is Latere's own installation of the
+// control plane: the production overlay the release applies and the
+// operator-applied half beside it. They name the installation they serve, so
+// they are the one place its coordinates may be written. They are declared
+// under identity.skip in .lateregate.yaml, and the release leaves them out of
+// the deploy archive (TestTheDeployArchiveLeavesOutTheOwnInstallation).
+func ownInstallation(path string) bool {
+	return strings.HasPrefix(path, "deploy/prod/") || strings.HasPrefix(path, "deploy/prod-bootstrap/")
 }
 
 // schemaGroup reports whether every occurrence of the API group on a line is
@@ -280,7 +304,7 @@ func TestNoLatereCoordinatesInReleasedArtifacts(t *testing.T) {
 				covered[root] = true
 			}
 		}
-		if needleFiles[path] {
+		if needleFiles[path] || ownInstallation(path) {
 			continue
 		}
 		for _, c := range coordinates {
@@ -362,7 +386,9 @@ func TestTheReleaseNamesEveryArtifactItBuilds(t *testing.T) {
 		"rm -f dist/cellad_linux_amd64 dist/cellad_linux_arm64",
 		// The deploy archive pins the digest the build stage pushed.
 		`digest="${IMAGE_1#*@}"`,
-		`tar -czf "dist/deploy-${TAG}.tar.gz" deploy`,
+		// Latere's own installation stays out of the archive an operator
+		// downloads.
+		`tar -czf "dist/deploy-${TAG}.tar.gz" --exclude=deploy/prod --exclude=deploy/prod-bootstrap deploy`,
 	} {
 		if !strings.Contains(after, want) {
 			t.Errorf("the command run after the images does not carry %q", want)
@@ -422,7 +448,9 @@ func TestTheReleaseRunsSpec014sJobsInOrder(t *testing.T) {
 			map[string]string{"contents": "read", "actions": "read", "packages": "write", "id-token": "write", "attestations": "write"}},
 		"conformance": {"", []string{"build"},
 			map[string]string{"contents": "read", "packages": "read"}},
-		"publish": {"image-publish.yml", []string{"build", "conformance"},
+		"deploy": {"image-deploy.yml", []string{"build", "conformance"},
+			map[string]string{"contents": "read"}},
+		"publish": {"image-publish.yml", []string{"build", "conformance", "deploy"},
 			map[string]string{"contents": "write", "packages": "write", "id-token": "write"}},
 		"install-release": {"", []string{"build", "publish"},
 			map[string]string{"contents": "read", "packages": "read"}},
@@ -443,7 +471,9 @@ func TestTheReleaseRunsSpec014sJobsInOrder(t *testing.T) {
 		if got := permissionsOf(job["permissions"]); !maps.Equal(got, w.permissions) {
 			t.Errorf("%s holds %v, want %v", name, got, w.permissions)
 		}
-		if dig(job, "secrets") != nil {
+		// The deploy stage reads one secret, the rollout identity's
+		// kubeconfig; every other job reads none.
+		if dig(job, "secrets") != nil && name != "deploy" {
 			t.Errorf("%s passes secrets, and nothing it runs reads one", name)
 		}
 		if w.stage == "" {
@@ -469,7 +499,9 @@ func TestTheReleaseRunsSpec014sJobsInOrder(t *testing.T) {
 		if job["steps"] != nil {
 			t.Errorf("%s runs steps of its own beside the stage it calls", name)
 		}
-		if got := str(dig(job, "with", "runs_on")); got != "ubuntu-latest" {
+		// The deploy stage is given no runner and takes the organization's
+		// runner policy.
+		if got := str(dig(job, "with", "runs_on")); got != "ubuntu-latest" && name != "deploy" {
 			t.Errorf("%s runs on %q, want a hosted runner, ubuntu-latest", name, got)
 		}
 		for key, value := range permissionsOf(dig(job, "with")) {
