@@ -24,8 +24,6 @@ spec:
 # credential each carries is worthless anywhere else.
 #
 # The selector is the label the driver stamps, cella.latere.ai/managed-by=cella.
-# The hosted selector, sandbox.latere.ai/managed-by=sandboxd, matches nothing
-# here.
 #
 # The gateway runs in `latere`, beside every other service. The namespace
 # selector and the pod selector are one peer, one element of `to`, which

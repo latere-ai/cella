@@ -38,7 +38,7 @@ spec:
             matchLabels:
               app: cellad
         # insulad, which creates, drives and deletes the sandboxes Insula's
-        # static builds run in (spec 133). The namespace selector and the pod
+        # static builds run in. The namespace selector and the pod
         # selector are one peer, so a Pod must be in `insula` and be insulad;
         # no other Pod of that namespace is admitted.
         - namespaceSelector:
@@ -82,7 +82,7 @@ spec:
         - protocol: TCP
           port: 8080
 ---
-# cellad's public listener admits the Topos core on 8080: a hosted session's
+# cellad's public listener admits the Topos core on 8080: a session's
 # sandbox is created, opened and driven there with the agent's token.
 #
 # This is cellad's side of the Topos core's egress. It is here because it

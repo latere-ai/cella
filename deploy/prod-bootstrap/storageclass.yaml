@@ -2,16 +2,15 @@
 # CELLA_K8S_STORAGE_CLASS.
 #
 # reclaimPolicy: Delete, so deleting a claim deletes the volume behind it.
-# Spec 62 step 4.4 deletes a namespace and expects the volumes to go with it;
-# a class edited to Retain leaves them behind and they are removed by hand.
+# Deleting a sandbox namespace expects the volumes to go with it; a class
+# edited to Retain leaves them behind and they are removed by hand.
 #
-# volumeBindingMode: WaitForFirstConsumer, where the hosted class used
-# Immediate. Immediate existed for the warm pool, which provisioned a claim
-# before any Pod asked for one. The driver of cella spec 036 declares no Pool
-# capability and creates the claim and the Pod in one call, so binding at the
-# first consumer provisions the volume on the node the Pod was scheduled to
-# and costs nothing. It also removes the zone assumption the hosted comment
-# had to make.
+# volumeBindingMode: WaitForFirstConsumer, not Immediate. Immediate suits a
+# warm pool, which provisions a claim before any Pod asks for one. The driver
+# of cella spec 036 declares no Pool capability and creates the claim and the
+# Pod in one call, so binding at the first consumer provisions the volume on
+# the node the Pod was scheduled to and costs nothing. It also removes any
+# assumption about which zone a volume is in.
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:

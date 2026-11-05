@@ -14,7 +14,7 @@ spec:
   # broadcasts every map to every connected gateway and returns once one has
   # acknowledged, a gateway whose queue is full has its stream closed and is
   # made whole by the snapshot on its next hello, and both replicas terminate
-  # TLS with the one authority CELLA_EGRESS_CA_KEY carries, which spec 039
+  # TLS with the one authority CELLA_EGRESS_CA_KEY carries, which cella spec 039
   # names as the way an environment runs several. The map is pushed before the
   # sandbox Pod is created and a Pod takes seconds to become ready, so the
   # window in which one replica holds a map its peer does not closes before a

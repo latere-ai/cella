@@ -31,8 +31,8 @@ imagePullSecrets:
 # Pod reads every variable from it: no claim or Pod carries a value. A
 # headless Service and a NetworkPolicy per mesh
 # admit peers to each other; the egress boundary stays the gateway's. The
-# retired hosted Role's `cilium.io/ciliumnetworkpolicies` is not here: the
-# driver writes no Cilium object.
+# driver writes no Cilium object, so `cilium.io/ciliumnetworkpolicies` is not
+# here.
 #
 # `watch` is not here either. The driver lists and gets; it opens no watch.
 apiVersion: rbac.authorization.k8s.io/v1
@@ -104,8 +104,7 @@ roleRef:
 # class named in CELLA_K8S_STORAGE_CLASS, so a misspelled class is a start-up
 # failure and not a claim that never binds. StorageClass is cluster scoped and
 # cannot be reached by a Role, so this is a ClusterRole narrowed to the one
-# class by name. The hosted tree granted get, list and update on `nodes`
-# cluster-wide for its warm pool; nothing here needs a node.
+# class by name. Nothing here needs `nodes`, so no rule grants them.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:

@@ -82,12 +82,11 @@ spec:
               value: "k8s"
             - name: CELLA_K8S_NAMESPACE
               value: "cella-workloads"
-            # The tainted pool the hosted product ran user code on
-            # (terraform: digitalocean_kubernetes_node_pool.sandbox_pool). The
-            # label and the taint are the pool's own and stay as they are; the
-            # driver applies the selector and the toleration to every sandbox
-            # Pod. cellad itself carries neither and lands on general-purpose
-            # capacity, as sandboxd did.
+            # The tainted node pool that runs user code. The label and the
+            # taint are the pool's own and stay as they are; the driver
+            # applies the selector and the toleration to every sandbox Pod.
+            # cellad itself carries neither and lands on general-purpose
+            # capacity.
             - name: CELLA_K8S_NODE_SELECTOR
               value: "node-role/sandbox=true"
             - name: CELLA_K8S_TOLERATIONS
@@ -117,7 +116,7 @@ spec:
             # Preflight read.
             - name: CELLA_K8S_FILL_IMAGE
               value: "ghcr.io/latere-ai/cellad:unreleased"
-            # The catalog images (sandbox-images) keep their user's home in
+            # The catalog images keep their user's home in
             # /home/agent, where they set npm's global prefix and pip's
             # user bin. The root file system is read only, so the driver
             # keeps that directory in the workspace's .home, filled from the
@@ -172,9 +171,9 @@ spec:
             - name: CELLA_DATA_DIR
               value: "/var/lib/cella"
             # The environment the owner policy and the platform's default both
-            # name. It equals PLATFORM_CELLA_DEFAULT_ENVIRONMENT in the
-            # platformd-cella Secret, and the gateway's environment key is
-            # minted for it.
+            # name. It equals the default environment platformd is configured
+            # with for this core, and the gateway's environment key is minted
+            # for it.
             - name: CELLA_DEFAULT_ENVIRONMENT
               value: "default"
             # The gateway's two doors as a sandbox of this environment dials
@@ -201,7 +200,7 @@ spec:
             # spell waits for the autoscaler to add one: a node took 84
             # seconds from droplet to Ready on 2026-11-04, before the
             # autoscaler's reaction, the pull of Insula's 250 MB static build
-            # image (spec 133) and the workspace volume's provisioning. Six
+            # image and the workspace volume's provisioning. Six
             # minutes holds all of that with room. It bounds only a sandbox
             # that never starts.
             - name: CELLA_K8S_READY_TIMEOUT
@@ -262,12 +261,12 @@ spec:
                 secretKeyRef:
                   name: cellad-token
                   key: CELLA_TOKEN_KEY
-            # The authorizer of platform spec 47. The URL is https because
-            # cellad refuses an http:// authorizer on a host other than
+            # The authorizer that decides who may do what. The URL is https
+            # because cellad refuses an http:// authorizer on a host other than
             # loopback: the decision and the bearer that authorizes it do not
-            # travel in the clear. The token equals PLATFORM_AUTHZ_TOKEN_CELLA
-            # in the platformd-cella Secret. A URL without a token is a
-            # start-up failure, so both are in one Secret.
+            # travel in the clear. The token is the one the authorizer holds
+            # for this core. A URL without a token is a start-up failure, so
+            # both are in one Secret.
             - name: CELLA_AUTHORIZER_URL
               valueFrom:
                 secretKeyRef:
@@ -278,10 +277,9 @@ spec:
                 secretKeyRef:
                   name: cellad-authz
                   key: CELLA_AUTHORIZER_TOKEN
-            # The admission webhook of platform spec 58, cella spec 007's
-            # contract: every apply is one call to it, which fails closed and
-            # is never retried. The token equals PLATFORM_ADMISSION_TOKEN_CELLA.
-            # The URL takes the authorizer's rule, https off loopback, and a
+            # The admission webhook, cella spec 007's contract: every apply is
+            # one call to it, which fails closed and is never retried. The
+            # token is the one the webhook holds for this core. The URL takes the authorizer's rule, https off loopback, and a
             # URL without its token is a start-up failure, so both are in one
             # Secret.
             - name: CELLA_ADMISSION_URL
@@ -294,11 +292,10 @@ spec:
                 secretKeyRef:
                   name: cellad-admission
                   key: CELLA_ADMISSION_TOKEN
-            # The event sink of platform spec 59, cella spec 009's contract.
-            # The secret is the HMAC key of Cella-Signature and equals
-            # PLATFORM_EVENTS_TOKEN_CELLA in the platformd-cella-events
-            # Secret; during a rotation it carries both halves comma
-            # separated and cellad signs each delivery under both. A URL
+            # The event sink, cella spec 009's contract. The secret is the
+            # HMAC key of Cella-Signature and equals the key the sink verifies
+            # with; during a rotation it carries both halves comma separated
+            # and cellad signs each delivery under both. A URL
             # without a secret, and a secret without a URL, are both start-up
             # failures, so the pair is one Secret.
             - name: CELLA_EVENTS_URL
@@ -312,7 +309,7 @@ spec:
                   name: cellad-events
                   key: CELLA_EVENTS_SECRET
             # The store (cella spec 010) and the key every secret value's data
-            # key is wrapped under (spec 018). CELLA_DB_URL is the direct
+            # key is wrapped under (cella spec 018). CELLA_DB_URL is the direct
             # endpoint, which the core uses only for its migrations at start: a
             # migration holds a session-scoped lock across its statements and
             # a transaction-mode pooler reassigns the backend between
@@ -329,9 +326,8 @@ spec:
                 secretKeyRef:
                   name: cellad-db
                   key: CELLA_SECRET_KEY
-            # The transaction-mode pool of the database `cella`, as the
-            # terraform repository's application-secrets module writes it for
-            # every service. Direct connections share the few slots the
+            # The transaction-mode pool of the database `cella`, provisioned
+            # the way every service's pooled URL is. Direct connections share the few slots the
             # cluster leaves outside its pools, and the rollout's three Pods
             # holding them directly would pass the ceiling. The pooled URL
             # names no schema; the role's default for this database is

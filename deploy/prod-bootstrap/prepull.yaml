@@ -1,15 +1,15 @@
 # Every image the catalog marks warm, pulled onto every node of the sandbox
-# pool (platform spec 211). A warm entry is one the node pool pre-pulls, so a
+# pool. A warm entry is one the node pool pre-pulls, so a
 # sandbox on it starts without a registry round trip; this DaemonSet is what
 # pulls it. A node the pool adds pulls the images before its first sandbox
 # rather than during it.
 #
 # Each warm image is one init container, named after its catalog entry, that
 # runs /bin/true: the kubelet pulls the image and the container exits at once.
-# The list is the catalog's, which lives in Postgres and moves by migrations;
-# internal/admission's TestThePrepullPullsEveryWarmImage runs every migration
-# and fails while these containers and the warm entries differ by name or
-# reference. A migration that moves a warm entry changes this file with it.
+# The list is the catalog's, which lives in Postgres and moves by migrations,
+# and the platform's own tests fail while these containers and the warm
+# entries differ by name or reference. A migration that moves a warm entry
+# changes this file with it.
 # base comes first: a sandbox that names no image runs it.
 #
 # The Pod then runs the pause image and stays. The kubelet's image garbage
