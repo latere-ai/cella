@@ -21,106 +21,11 @@ the second, and nothing is rewritten in between: the packages are what
 ### Who may do what
 
 `CELLA_AUTHORIZER_URL` points at an endpoint that answers one question per
-request: may this subject take this action on this object? Import
-`latere.ai/x/cella/authorizer` for the action table and
-`latere.ai/x/pkg/authz/server` for the envelope, and the endpoint is about
-twenty lines:
-
-```go
-package main
-
-import (
-	"context"
-	"log"
-	"net/http"
-	"os"
-	"time"
-
-	"latere.ai/x/cella/authorizer"
-	"latere.ai/x/pkg/authz"
-	"latere.ai/x/pkg/authz/server"
-)
-
-type plans struct{}
-
-func (plans) Decide(_ context.Context, req authz.Request) (authz.Decision, error) {
-	if req.Subject == "" || req.Resource.ID == authz.ProbeID {
-		return authz.Decision{Reason: "no_subject"}, nil // the reserved probe is always denied
-	}
-	if owner := req.Resource.String("owner"); owner != "" && owner != req.Subject {
-		return authz.Decision{Reason: "not_the_owner"}, nil
-	}
-	return authz.Decision{Allow: true, TTL: time.Minute}, nil
-}
-
-func main() {
-	endpoint := server.New(server.Options{
-		Bearer:     os.Getenv("AUTHZ_TOKEN"),
-		Vocabulary: authorizer.Vocabulary(),
-		Decider:    plans{},
-	})
-	log.Fatal(http.ListenAndServe(":8081", endpoint))
-}
-```
-
-Three rules the core holds you to. Deny the reserved probe id: an endpoint
-that allows it is one that does not read the request, and `cellad check`
-fails on it. Answer a deny as a decision and not as an error, because an
-error is read as "no decision" and refuses the request either way. Carry
-your plan's sandbox limit on the allow of `sandbox.create` and of
-`sandbox.update`, as `max_sandboxes` in `authorizer.WireLimits`, rather
-than enforcing it in a proxy in front: a create or a start past it is
-refused with `quota_exceeded`. The limit counts the sandboxes that run,
-so a stopped one holds no slot and starting it again takes one; bound
-what your subjects keep stopped with `ttl` or `autoDelete` from your
-admission endpoint. Carry your plan's volume limit the same way, as
-`max_volumes` on the allow of `volume.create`: a create past it is
-refused with `volume_quota_exceeded`. The volume limit counts every
-volume the subject holds that is not being deleted, a failed one
-included, so a subject frees a slot by deleting a volume. Leave a figure
-out for no limit. Of the
-other two figures the type carries, this release does not apply
-`max_priority`, and refuses any request whose allow carries
-`requests_per_minute` with `capability_unsupported`, so leave both out.
-
-A list is decided in two steps. The list action (`sandbox.list`,
-`secret.list`, `volume.list`, `environment.list`) answers an allow that may carry a
-`filter` of `owners` and `labels`. The core holds every object to that
-filter, then asks the kind's read (`sandbox.read`, and so on) for each
-object the filter lets through, and leaves out the ones the read refuses.
-The filter narrows the list and the read decides each object, so an
-object your filter excludes is never read. A read that fails to answer
-fails the whole list rather than dropping one object from it.
-
-The default environment is the one exception. Every subject may place a
-sandbox in it, and it carries no caller's owner or labels, so no filter can
-name it. The core lists it whenever your `environment.read` on it allows.
-To show a tenant's members their own environments and the shared default,
-narrow `environment.list` to the tenant and allow `environment.read` on the
-default for them; to hide the default from someone, deny that read, which
-hides it from a read by name as well.
-
-An update is decided on the change. `sandbox.update`, `secret.update` and
-`volume.update` carry, under `resource.proposed`, the object the request would write: its
-`owner`, its `metadata` and its `spec`. Compare it with the object to refuse
-a change you do not allow, such as a label your tenancy is read from being
-dropped or rewritten. The proposal's labels are the ones the request sent,
-because an apply replaces the object, so a request that leaves a label out
-proposes removing it. The body is read and validated before you are asked,
-so a request that would be refused for its body never reaches you. On
-`secret.update` the rest of the resource is the stored Secret, and the
-proposed `spec` never carries the value.
-
-A volume's create is decided on what it would store. `volume.create`
-carries `resource.proposed` too, the Volume as it will be written: the
-defaults are filled, so `spec.source.kind` is `empty` or `image` even when
-the request left it out, and an image source is the digest-pinned
-reference your admission endpoint answered. To allow image volumes of at
-most 10Gi, refuse a proposal whose `spec.source.kind` is not `image`, or
-whose `spec.size` is above `10Gi`. The size is the Kubernetes quantity the
-request wrote, such as `10Gi` or `10240Mi`, so compare it parsed; in Go,
-`manifest.ParseQuantity` from `latere.ai/x/cella/manifest` parses it the
-way the core does.
+request: may this subject take this action on this object? It is also where
+your plan's sandbox and volume limits ride, on an allow. The endpoint is
+optional, and [Writing an authorizer](authorizer.md) is its contract: the
+question, the actions, the answer, what happens when it fails, and a Go
+example.
 
 ### What a manifest becomes
 
