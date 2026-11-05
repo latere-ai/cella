@@ -354,3 +354,8 @@ snapshot.
 never forwards: it waits for the writer lease and then serves. After a crash
 that left the lease held, the next process waits up to the lease's 15 second
 term before it serves.
+
+**After a rollout.** `tools/smoke/release.sh` is the live check: with
+`BASE_URL` set to the public origin and base path, and `TAG` to the release
+just rolled, it fails until the build line and `/version` answer and the
+served version is the tag.
