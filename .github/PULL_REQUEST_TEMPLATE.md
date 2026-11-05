@@ -1,6 +1,6 @@
 ## What this changes
 
-<!-- What behaviour is different after this, for whoever writes a manifest, runs cellad, or builds on the packages. -->
+<!-- What behavior is different after this, for whoever writes a manifest, runs cellad, or builds on the packages. -->
 
 ## Why
 
