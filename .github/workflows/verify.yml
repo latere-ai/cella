@@ -5,11 +5,33 @@
 # or a container engine, are spec 012's and join here when that spec
 # lands. Every third-party action is pinned by commit.
 name: verify
+
+# A push or pull request that changes only markdown outside the exceptions
+# starts no run, because no build or test reads it. The exceptions are specs/,
+# whose acceptance tables and threat model the suite holds to the tests; docs/,
+# which tests hold to the code and the install job walks; skills/, which a test
+# holds to the CLI; and SECURITY.md, which the spec test reads. `lateregate
+# release` runs the whole bar before every tag. A tag is never filtered by
+# paths.
 on:
   push:
     branches: [main]
     tags: ['v*']
+    paths:
+      - "**"
+      - "!**.md"
+      - "specs/**"
+      - "docs/**"
+      - "skills/**"
+      - "SECURITY.md"
   pull_request:
+    paths:
+      - "**"
+      - "!**.md"
+      - "specs/**"
+      - "docs/**"
+      - "skills/**"
+      - "SECURITY.md"
   workflow_dispatch:
 
 # A newer push to the same ref supersedes this run: its commit carries every
