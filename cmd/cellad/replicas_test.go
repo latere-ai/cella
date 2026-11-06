@@ -340,6 +340,9 @@ type probeResult struct {
 	status int
 	code   string
 	err    error
+	// unwritten marks a read of a secret whose write was refused, so not
+	// found is its right answer.
+	unwritten bool
 }
 
 // TestARollingHandoffAnswersEveryRequest is spec 076 end to end: two `cellad
@@ -348,8 +351,8 @@ type probeResult struct {
 // which is where a Service sends traffic once the writer stops being ready,
 // while the writer is stopped as SIGTERM stops it. The writer hands off, the
 // standby promotes and serves, and every request of the probe is answered: a
-// success, or control_plane_unavailable inside the hold, and never a refused
-// or reset connection. The standby stays ready throughout, the old writer
+// success, or control_plane_unavailable inside the hold (and not found for
+// the read of a write so refused), and never a refused or reset connection. The standby stays ready throughout, the old writer
 // exits zero, and what it wrote before the handoff is what its successor
 // reads after.
 func TestARollingHandoffAnswersEveryRequest(t *testing.T) {
@@ -422,10 +425,13 @@ func TestARollingHandoffAnswersEveryRequest(t *testing.T) {
 			default:
 			}
 			name := fmt.Sprintf("probe-%d", n)
-			for _, r := range []probeResult{
-				call(http.MethodPut, "/v1/secrets/"+name, secret(name)),
-				call(http.MethodGet, "/v1/secrets/"+name, ""),
-			} {
+			put := call(http.MethodPut, "/v1/secrets/"+name, secret(name))
+			get := call(http.MethodGet, "/v1/secrets/"+name, "")
+			// A write refused inside the hold never happened, so the read
+			// that follows it answers not found. A write that succeeded
+			// must still read back.
+			get.unwritten = put.code == "control_plane_unavailable"
+			for _, r := range []probeResult{put, get} {
 				mu.Lock()
 				results = append(results, r)
 				mu.Unlock()
@@ -467,6 +473,7 @@ func TestARollingHandoffAnswersEveryRequest(t *testing.T) {
 			t.Errorf("a request at %v failed on the wire: %v", r.at.Sub(handoffStarted), r.err)
 		case r.status >= 200 && r.status < 300:
 		case r.status == http.StatusServiceUnavailable && r.code == "control_plane_unavailable":
+		case r.unwritten && r.status == http.StatusNotFound && r.code == "not_found":
 		default:
 			t.Errorf("a request at %v was answered %d %s", r.at.Sub(handoffStarted), r.status, r.code)
 		}
