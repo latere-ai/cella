@@ -5,7 +5,8 @@ package api
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"net/http"
 	"slices"
@@ -194,7 +195,7 @@ func TestListsRefuseWhatTheyCannotApply(t *testing.T) {
 		case failRead && (r.Action == authorizer.ActionEnvironmentRead || r.Action == authorizer.ActionSandboxRead):
 			return authz.Decision{}, errors.New("the authorizer is down")
 		case rateLimited && authz.IsList(r.Action):
-			return authz.Decision{Allow: true, Limits: json.RawMessage(`{"requests_per_minute":10}`)}, nil
+			return authz.Decision{Allow: true, Limits: jsontext.Value(`{"requests_per_minute":10}`)}, nil
 		}
 		return authz.Decision{Allow: true}, nil
 	})

@@ -16,7 +16,7 @@ package storetest
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"slices"
 	"sync"
@@ -1177,11 +1177,11 @@ func sameJSON(t TB, got, want []byte, what string) {
 	if err := json.Unmarshal(want, &expected); err != nil {
 		t.Fatalf("the expected %s is not JSON: %q", what, want)
 	}
-	left, err := json.Marshal(read)
+	left, err := json.Marshal(read, json.Deterministic(true))
 	if err != nil {
 		t.Fatalf("re-encoding %s: %v", what, err)
 	}
-	right, err := json.Marshal(expected)
+	right, err := json.Marshal(expected, json.Deterministic(true))
 	if err != nil {
 		t.Fatalf("re-encoding the expected %s: %v", what, err)
 	}

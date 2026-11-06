@@ -43,10 +43,10 @@ const (
 // started, a connection refused, or a notice the person should read.
 type Event struct {
 	Kind     string          `json:"kind"`
-	Status   *Status         `json:"status,omitempty"`
-	Activity *Entry          `json:"activity,omitempty"`
-	Approval *Approval       `json:"approval,omitempty"`
-	Refusal  *NetworkRefusal `json:"refusal,omitempty"`
+	Status   *Status         `json:"status,omitzero"`
+	Activity *Entry          `json:"activity,omitzero"`
+	Approval *Approval       `json:"approval,omitzero"`
+	Refusal  *NetworkRefusal `json:"refusal,omitzero"`
 	// Answer and By are an answered create's: the answer and the client
 	// that gave it.
 	Answer string `json:"answer,omitempty"`
@@ -90,7 +90,7 @@ type Status struct {
 	Upgrade string `json:"upgrade,omitempty"`
 	// Credentials is set on an engine that takes its tokens from a client
 	// (`serve --credentials client`): for each audience, valid or needed.
-	Credentials *CredentialsState `json:"credentials,omitempty"`
+	Credentials *CredentialsState `json:"credentials,omitzero"`
 }
 
 // subscriberBuffer is how many events a client may fall behind by before it

@@ -4,8 +4,7 @@
 package api
 
 import (
-	"bytes"
-	"encoding/json"
+	"encoding/json/v2"
 	"slices"
 	"strings"
 	"testing"
@@ -195,9 +194,7 @@ var requests = map[string]func([]byte) error{
 // strict decodes one JSON document and refuses a field the type does not
 // have.
 func strict(raw []byte, into any) error {
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.DisallowUnknownFields()
-	return dec.Decode(into)
+	return json.Unmarshal(raw, into, json.RejectUnknownMembers(true))
 }
 
 // TestTheExamplesAreTheHandlersOwnShapes holds every JSON example to the type

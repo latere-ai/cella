@@ -4,7 +4,8 @@
 package api
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"mime"
 	"net/http"
 	"slices"
@@ -131,7 +132,7 @@ func yamlOf(raw []byte) ([]byte, error) {
 // the server's own failure and is answered as one, because a half-written
 // document would be read as the whole.
 func respondYAML(w http.ResponseWriter, status int, body any) {
-	raw, err := json.Marshal(body)
+	raw, err := json.Marshal(body, json.Deterministic(true), jsontext.AllowInvalidUTF8(true))
 	if err == nil {
 		var out []byte
 		if out, err = yamlOf(raw); err == nil {

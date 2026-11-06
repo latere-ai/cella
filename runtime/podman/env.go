@@ -6,7 +6,7 @@ package podman
 import (
 	"archive/tar"
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -37,7 +37,7 @@ func (d *Driver) putEnv(ctx context.Context, id string, env map[string]string) e
 	if env == nil {
 		env = map[string]string{}
 	}
-	body, err := json.Marshal(env)
+	body, err := json.Marshal(env, outboundJSON)
 	if err != nil {
 		return fmt.Errorf("podman: encoding the environment of %s: %w", id, err)
 	}
@@ -80,7 +80,7 @@ func (d *Driver) readEnv(ctx context.Context, id string) (map[string]string, err
 			return nil, fmt.Errorf("podman: reading the environment of %s: %w", id, err)
 		}
 		env := map[string]string{}
-		if err := json.Unmarshal(body, &env); err != nil {
+		if err := json.Unmarshal(body, &env, foreignJSON); err != nil {
 			return nil, fmt.Errorf("%w: the environment of %s: %w", driver.ErrInvalid, id, err)
 		}
 		return env, nil

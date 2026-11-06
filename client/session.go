@@ -5,7 +5,7 @@ package client
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"io"
 	"sync"
@@ -67,7 +67,7 @@ func (c *Client) session(ctx context.Context, path string, req ExecRequest) (*Se
 	if err != nil {
 		return nil, err
 	}
-	first, err := json.Marshal(req)
+	first, err := json.Marshal(req, requestJSON)
 	if err != nil {
 		_ = conn.close()
 		return nil, err

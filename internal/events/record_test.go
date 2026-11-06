@@ -4,7 +4,8 @@
 package events
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"strings"
 	"testing"
@@ -390,15 +391,46 @@ func sameJSON(t *testing.T, got, want []byte) {
 	if err := json.Unmarshal(want, &w); err != nil {
 		t.Fatalf("the golden is not JSON: %v", err)
 	}
-	gs, err := json.MarshalIndent(g, "", "  ")
+	gs, err := json.Marshal(g, json.Deterministic(true), jsontext.WithIndent("  "))
 	if err != nil {
 		t.Fatal(err)
 	}
-	ws, err := json.MarshalIndent(w, "", "  ")
+	ws, err := json.Marshal(w, json.Deterministic(true), jsontext.WithIndent("  "))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if string(gs) != string(ws) {
 		t.Errorf("the record is\n%s\nwant\n%s", gs, ws)
+	}
+}
+
+// TestBodyBytesAreFixed: the body is signed, so labels come in key order, a
+// data member that is an empty object is still written, an absent one is
+// omitted, and a path that is not valid UTF-8 is replaced rather than losing
+// the record.
+func TestBodyBytesAreFixed(t *testing.T) {
+	record := Record{
+		ID: "evt_1", Seq: 3, Type: TypeCreated, Time: at,
+		Object:  Object{Kind: "Sandbox", ID: "sbx_1", Name: "w\xff", Owner: "o", Labels: map[string]string{"b": "2", "a": "1"}},
+		Subject: "s", RequestID: "r",
+		Data: jsontext.Value(`{}`),
+	}
+	got, err := Body(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"id":"evt_1","seq":3,"type":"sandbox.created","time":"` + at.UTC().Format(time.RFC3339Nano) +
+		`","object":{"kind":"Sandbox","id":"sbx_1","name":"w` + "�" + `","owner":"o","labels":{"a":"1","b":"2"}},` +
+		`"subject":"s","requestId":"r","data":{}}`
+	if string(got) != want {
+		t.Errorf("the body is\n%s\nwant\n%s", got, want)
+	}
+	record.Data = nil
+	got, err = Body(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(got), `"data"`) {
+		t.Errorf("an absent data member was written: %s", got)
 	}
 }

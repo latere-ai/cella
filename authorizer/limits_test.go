@@ -4,7 +4,8 @@
 package authorizer
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"testing"
 
 	"latere.ai/x/pkg/authz"
@@ -38,7 +39,7 @@ func TestDecodeLimits(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			d := authz.Decision{Allow: true}
 			if tc.limits != "" {
-				d.Limits = json.RawMessage(tc.limits)
+				d.Limits = jsontext.Value(tc.limits)
 			}
 			got, err := DecodeLimits(d)
 			if tc.bad {

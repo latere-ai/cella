@@ -7,7 +7,8 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -57,7 +58,7 @@ type SinkOptions struct {
 type sink struct {
 	o       SinkOptions
 	mu      sync.Mutex
-	records []json.RawMessage
+	records []jsontext.Value
 	seqs    []int64
 	failed  int
 	status  int
@@ -113,7 +114,7 @@ func (s *sink) deliver(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.mu.Lock()
-	s.records = append(s.records, json.RawMessage(slices.Clone(body)))
+	s.records = append(s.records, jsontext.Value(slices.Clone(body)))
 	s.seqs = append(s.seqs, record.Seq)
 	s.mu.Unlock()
 	w.WriteHeader(http.StatusNoContent)
@@ -191,7 +192,7 @@ func (s *sink) list(w http.ResponseWriter, r *http.Request) {
 		order[i] = i
 	}
 	slices.SortStableFunc(order, func(a, b int) int { return int(s.seqs[a] - s.seqs[b]) })
-	out := []json.RawMessage{}
+	out := []jsontext.Value{}
 	object := strings.TrimSpace(r.URL.Query().Get("object"))
 	for _, i := range order {
 		if object != "" && objectOf(s.records[i]) != object {
@@ -212,7 +213,7 @@ func (s *sink) clear(w http.ResponseWriter, _ *http.Request) {
 }
 
 // objectOf is the id of the object a record is about.
-func objectOf(record json.RawMessage) string {
+func objectOf(record jsontext.Value) string {
 	var body struct {
 		Object struct {
 			ID string `json:"id"`

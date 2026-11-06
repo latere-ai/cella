@@ -4,9 +4,10 @@
 package api
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -101,11 +102,11 @@ func TestAcceptNegotiation(t *testing.T) {
 		if err := json.Unmarshal(asJSON, &fromJSON); err != nil {
 			t.Fatal(err)
 		}
-		left, err := json.Marshal(fromYAML)
+		left, err := json.Marshal(fromYAML, json.Deterministic(true))
 		if err != nil {
 			t.Fatal(err)
 		}
-		right, err := json.Marshal(fromJSON)
+		right, err := json.Marshal(fromJSON, json.Deterministic(true))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -171,5 +172,20 @@ func TestStreamRoutesNegotiateNothing(t *testing.T) {
 	}
 	if status, contentType, body := f.answer("POST", base+"/exec?wait=1", f.alice, "text/yaml", `{"command":["true"]}`); status != 200 || !strings.Contains(contentType, "yaml") {
 		t.Errorf("the bounded exec answered %d %q: %s", status, contentType, body)
+	}
+}
+
+// TestYAMLAnswerKeepsMapKeyOrderAndForeignText: a YAML answer lists a map's
+// keys in key order every time, and text that is not valid UTF-8, as exec
+// output can be, is replaced and not refused.
+func TestYAMLAnswerKeepsMapKeyOrderAndForeignText(t *testing.T) {
+	w := httptest.NewRecorder()
+	respondYAML(w, http.StatusOK, map[string]any{"b": "2", "a": "1", "out": "x\xffy"})
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", w.Code, w.Body)
+	}
+	want := "{\"a\": \"1\", \"b\": \"2\", \"out\": \"x\ufffdy\"}\n"
+	if w.Body.String() != want {
+		t.Errorf("the answer is %q, want %q", w.Body.String(), want)
 	}
 }

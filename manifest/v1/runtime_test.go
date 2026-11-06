@@ -4,7 +4,8 @@
 package v1
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"testing"
 )
 
@@ -65,7 +66,7 @@ func TestAutosizeIsThreeFlagsOnTheWire(t *testing.T) {
 			t.Fatal(err)
 		}
 		var read struct {
-			Autosize json.RawMessage `json:"autosize"`
+			Autosize jsontext.Value `json:"autosize"`
 		}
 		if err := json.Unmarshal(encoded, &read); err != nil {
 			t.Fatal(err)
@@ -102,9 +103,9 @@ func TestASandboxWithNoCeilingWritesNone(t *testing.T) {
 	}
 	var plain struct {
 		Spec struct {
-			Resources map[string]json.RawMessage `json:"resources"`
+			Resources map[string]jsontext.Value `json:"resources"`
 		} `json:"spec"`
-		Status map[string]json.RawMessage `json:"status"`
+		Status map[string]jsontext.Value `json:"status"`
 	}
 	if err := json.Unmarshal(encoded, &plain); err != nil {
 		t.Fatal(err)

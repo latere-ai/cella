@@ -4,7 +4,7 @@
 package events_test
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"log/slog"
 	"testing"
 	"time"

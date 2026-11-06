@@ -63,7 +63,7 @@ type SandboxSpec struct {
 	Scheduling Scheduling `json:"scheduling,omitzero"`
 	// Display asks for a virtual desktop of this size. Absent, the sandbox
 	// has no screen and none of the computer-use operations answer for it.
-	Display *Display `json:"display,omitempty"`
+	Display *Display `json:"display,omitzero"`
 }
 
 // Scheduling is a sandbox's place in its environment's queues (spec 020).
@@ -71,10 +71,10 @@ type SandboxSpec struct {
 // StartDeadline bounds how long it may wait before it fails; Preemptible lets
 // a higher priority stop it to make room.
 type Scheduling struct {
-	Priority      int      `json:"priority,omitempty"`
+	Priority      int      `json:"priority,omitzero"`
 	Queue         string   `json:"queue,omitempty"`
 	StartDeadline Duration `json:"startDeadline,omitempty"`
-	Preemptible   bool     `json:"preemptible,omitempty"`
+	Preemptible   bool     `json:"preemptible,omitzero"`
 }
 
 // Display is a virtual desktop's geometry, as a sandbox declares it in
@@ -85,8 +85,8 @@ type Scheduling struct {
 // entry's resolution and a running one cannot be resized into another
 // (spec 023).
 type Display struct {
-	Width  int `json:"width,omitempty"`
-	Height int `json:"height,omitempty"`
+	Width  int `json:"width,omitzero"`
+	Height int `json:"height,omitzero"`
 }
 
 // Mesh is what the sandbox composes with: the peers it reaches and the
@@ -95,7 +95,7 @@ type Display struct {
 type Mesh struct {
 	// Enabled joins a mesh. It is a root's declaration: a spawned child
 	// inherits its parent's mesh and may not set this field.
-	Enabled bool `json:"enabled,omitempty"`
+	Enabled bool `json:"enabled,omitzero"`
 	// Spawn is what this sandbox may create through its own workload token.
 	Spawn Spawn `json:"spawn,omitzero"`
 }
@@ -105,8 +105,8 @@ type Mesh struct {
 // remainder minus one on each axis, so the tree is bounded by what the root
 // declared.
 type Spawn struct {
-	Budget int `json:"budget,omitempty"`
-	Depth  int `json:"depth,omitempty"`
+	Budget int `json:"budget,omitzero"`
+	Depth  int `json:"depth,omitzero"`
 }
 
 // SpawnStatus is the sandbox's position on both axes: the budget it was
@@ -203,7 +203,7 @@ type SandboxStatus struct {
 	// Paths are the host paths of the sandbox's own scratch directories,
 	// on a driver that cannot remap paths: a caller that places a file of
 	// its own, such as a helper program, writes it there (spec 081).
-	Paths *SandboxPaths `json:"paths,omitempty"`
+	Paths *SandboxPaths `json:"paths,omitzero"`
 	// Ports is one entry per declared port with the driver's own probe of it
 	// at the last read.
 	Ports []PortStatus `json:"ports,omitempty"`
@@ -218,21 +218,21 @@ type SandboxStatus struct {
 	StoppedAt      time.Time          `json:"stoppedAt,omitzero"`
 	LastActivityAt time.Time          `json:"lastActivityAt,omitzero"`
 	ExpiresAt      time.Time          `json:"expiresAt,omitzero"`
-	ExitCode       *int               `json:"exitCode,omitempty"`
+	ExitCode       *int               `json:"exitCode,omitzero"`
 	Reason         string             `json:"reason,omitempty"`
 	// Preemptions is how many times the scheduler stopped this sandbox to
 	// place one of higher priority (spec 020). It is status and not a
 	// label or a table of its own because the bound it is held to must
 	// survive a restart and a change of the replica that schedules.
-	Preemptions int `json:"preemptions,omitempty"`
+	Preemptions int `json:"preemptions,omitzero"`
 	// Resources is the size the sandbox has now, Usage the last reading of
 	// what its workload uses, and Moves how many times raising its memory
 	// took a restart on a node with room (spec 078). All three are absent
 	// for a sandbox whose manifest names no spec.resources.max, which is
 	// fixed at spec.resources.
 	Resources Size     `json:"resources,omitzero"`
-	Usage     *Usage   `json:"usage,omitempty"`
-	Moves     int      `json:"moves,omitempty"`
+	Usage     *Usage   `json:"usage,omitzero"`
+	Moves     int      `json:"moves,omitzero"`
 	Warnings  []string `json:"warnings,omitempty"`
 	// EgressState is the control plane's own record of the sandbox's
 	// boundary: the credential both gateway doors authenticate and the
@@ -240,7 +240,7 @@ type SandboxStatus struct {
 	// something a caller reads, so the API strips it from every response
 	// and it lives here only because it must survive a restart with the
 	// object it belongs to.
-	EgressState *EgressState `json:"egressState,omitempty"`
+	EgressState *EgressState `json:"egressState,omitzero"`
 	// TokenState is the control plane's own record of the workload token
 	// the sandbox holds: what a revocation is keyed by, when it was minted
 	// and when it stops verifying. The token itself is never here; it is
@@ -248,7 +248,7 @@ type SandboxStatus struct {
 	// state rather than something a caller reads, so the API strips it from
 	// every response, and it lives here so that a control plane that
 	// restarted can still end the token a running sandbox holds.
-	TokenState *TokenState `json:"tokenState,omitempty"`
+	TokenState *TokenState `json:"tokenState,omitzero"`
 }
 
 // TokenState is one sandbox's identity as the control plane tracks it. The
@@ -270,7 +270,7 @@ type TokenState struct {
 // the sandbox holds it in its own environment and nothing re-reads it.
 type EgressState struct {
 	Credential string `json:"credential,omitempty"`
-	Version    int64  `json:"version,omitempty"`
+	Version    int64  `json:"version,omitzero"`
 	// Secrets is one record per mounted secret: which Secret this sandbox
 	// was bound to, under which environment key, and the placeholder minted
 	// for it. It lives here because a placeholder the workload already holds

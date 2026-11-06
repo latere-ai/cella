@@ -9,7 +9,7 @@ import (
 	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/json"
+	"encoding/json/v2"
 	"encoding/pem"
 	"io"
 	"maps"
@@ -452,7 +452,9 @@ func (p *plane) create(t *testing.T, egressJSON string) string {
 		Status struct {
 			ID         string `json:"id"`
 			Conditions []struct {
-				Type, Status, Reason string
+				Type   string `json:"type"`
+				Status string `json:"status"`
+				Reason string `json:"reason"`
 			} `json:"conditions"`
 		} `json:"status"`
 	}

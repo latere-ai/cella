@@ -4,7 +4,8 @@
 package cellacli
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"strconv"
@@ -47,13 +48,18 @@ func writeRaw(w io.Writer, raw []byte) error {
 	return nil
 }
 
+// outputJSONOptions fixes the member order of what --json prints and
+// replaces text that is not valid UTF-8, as a name or a message from the
+// server can be, rather than failing the command.
+var outputJSONOptions = json.JoinOptions(json.Deterministic(true), jsontext.AllowInvalidUTF8(true))
+
 // writeItems writes a list as one envelope: every item's bytes unchanged and
 // the cursor empty, because the pages have all been followed.
-func writeItems(w io.Writer, items []json.RawMessage) error {
+func writeItems(w io.Writer, items []jsontext.Value) error {
 	if items == nil {
-		items = []json.RawMessage{}
+		items = []jsontext.Value{}
 	}
-	body, err := json.Marshal(map[string]any{"items": items, "next": ""})
+	body, err := json.Marshal(map[string]any{"items": items, "next": ""}, outputJSONOptions)
 	if err != nil {
 		return err
 	}
@@ -63,7 +69,7 @@ func writeItems(w io.Writer, items []json.RawMessage) error {
 // writeValue writes a value the command composed rather than received,
 // which is what --json answers for a route whose answer carries nothing.
 func writeValue(w io.Writer, v any) error {
-	body, err := json.Marshal(v)
+	body, err := json.Marshal(v, outputJSONOptions)
 	if err != nil {
 		return err
 	}

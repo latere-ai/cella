@@ -3,7 +3,7 @@
 
 package client
 
-import "encoding/json"
+import "encoding/json/v2"
 
 // The media types a manifest travels in. The server decodes both syntaxes to
 // one object, so a caller sends the bytes it wrote in the syntax it wrote

@@ -6,7 +6,8 @@ package native
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"io"
 	"os"
@@ -168,11 +169,11 @@ func TestLogFiltersAndErrors(t *testing.T) {
 	logPath := filepath.Join(root, "one", "logs.jsonl")
 	f, err := os.Create(logPath)
 	check(t, err)
-	encoder := json.NewEncoder(f)
+	encoder := jsontext.NewEncoder(f)
 	before := time.Now().Add(-time.Minute)
 	after := time.Now()
 	for _, chunk := range []logChunk{{At: before, Data: []byte("old\n")}, {At: after, Data: []byte("one\ntwo\n")}, {At: after, Data: []byte("three\n")}} {
-		check(t, encoder.Encode(chunk))
+		check(t, json.MarshalEncode(encoder, chunk))
 	}
 	check(t, f.Close())
 	if got := readLogs(t, d, "one", driver.LogsRequest{Since: after, TailLines: 2}); got != "two\nthree\n" {
@@ -326,9 +327,9 @@ func TestLogTailRejectsOversizedUnterminatedLine(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "log")
 	f, err := os.Create(path)
 	check(t, err)
-	encoder := json.NewEncoder(f)
+	encoder := jsontext.NewEncoder(f)
 	for range 66 {
-		check(t, encoder.Encode(logChunk{At: time.Now(), Data: bytes.Repeat([]byte("x"), 16<<10)}))
+		check(t, json.MarshalEncode(encoder, logChunk{At: time.Now(), Data: bytes.Repeat([]byte("x"), 16<<10)}))
 	}
 	check(t, f.Close())
 	f, err = os.Open(path)

@@ -4,9 +4,8 @@
 package api
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -463,9 +462,7 @@ func (h *handler) keyLifetime(w http.ResponseWriter, r *http.Request) (time.Dura
 	var asked time.Duration
 	if strings.TrimSpace(string(body)) != "" {
 		var request keyRequest
-		decoder := json.NewDecoder(bytes.NewReader(body))
-		decoder.DisallowUnknownFields()
-		if err = decoder.Decode(&request); err != nil {
+		if err = json.Unmarshal(body, &request, json.RejectUnknownMembers(true)); err != nil {
 			return 0, &manifest.Error{Code: "bad_request", Detail: err.Error()}
 		}
 		if request.TTL != "" {

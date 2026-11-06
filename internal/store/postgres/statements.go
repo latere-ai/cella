@@ -5,7 +5,8 @@ package postgres
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"slices"
@@ -262,7 +263,8 @@ const upsertObserved = `insert into observed (id, environment, owner, phase, lab
 		phase = excluded.phase, labels = excluded.labels, state = excluded.state, updated_at = now()`
 
 func (x observed) Put(ctx context.Context, environment string, s driver.State) error {
-	body, err := json.Marshal(s)
+	s = validUTF8State(s)
+	body, err := json.Marshal(s, json.Deterministic(true))
 	if err != nil {
 		return fmt.Errorf("store: encoding the observed state: %w", err)
 	}
@@ -274,6 +276,43 @@ func (x observed) Put(ctx context.Context, environment string, s driver.State) e
 		return fmt.Errorf("store: writing the observed state: %w", err)
 	}
 	return nil
+}
+
+// validUTF8State replaces bytes that are not valid UTF-8 in the text a driver
+// reports from its substrate. driver.State encodes through its own
+// MarshalJSON, which no call-site option reaches, so the text is cleaned
+// before the encoder sees it.
+func validUTF8State(s driver.State) driver.State {
+	clean := func(v string) string { return strings.ToValidUTF8(v, "\uFFFD") }
+	s.ID, s.Name, s.Owner, s.Phase = clean(s.ID), clean(s.Name), clean(s.Owner), clean(s.Phase)
+	s.Reason, s.Isolation, s.MeshID, s.Parent = clean(s.Reason), clean(s.Isolation), clean(s.MeshID), clean(s.Parent)
+	if s.Labels != nil {
+		labels := make(map[string]string, len(s.Labels))
+		for k, v := range s.Labels {
+			labels[clean(k)] = clean(v)
+		}
+		s.Labels = labels
+	}
+	s.Ports = slices.Clone(s.Ports)
+	for i := range s.Ports {
+		s.Ports[i].Name, s.Ports[i].State, s.Ports[i].URL = clean(s.Ports[i].Name), clean(s.Ports[i].State), clean(s.Ports[i].URL)
+	}
+	s.Conditions = slices.Clone(s.Conditions)
+	for i := range s.Conditions {
+		c := &s.Conditions[i]
+		c.Type, c.Status, c.Reason, c.Message = clean(c.Type), clean(c.Status), clean(c.Reason), clean(c.Message)
+	}
+	if s.Resize != nil {
+		r := *s.Resize
+		r.Reason, r.Message = clean(r.Reason), clean(r.Message)
+		s.Resize = &r
+	}
+	if s.Paths != nil {
+		p := *s.Paths
+		p.Home, p.Tmp = clean(p.Home), clean(p.Tmp)
+		s.Paths = &p
+	}
+	return s
 }
 
 func (x observed) Get(ctx context.Context, id string) (driver.State, string, error) {
@@ -1187,7 +1226,7 @@ func labelsText(labels map[string]string) (string, error) {
 	if labels == nil {
 		return "{}", nil
 	}
-	b, err := json.Marshal(labels)
+	b, err := json.Marshal(labels, json.Deterministic(true), jsontext.AllowInvalidUTF8(true))
 	if err != nil {
 		return "", fmt.Errorf("store: encoding the labels: %w", err)
 	}

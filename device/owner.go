@@ -6,7 +6,7 @@
 package device
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"os"
 	"path/filepath"
@@ -47,7 +47,7 @@ func readOwner(path, device string) (string, error) {
 
 // writeOwner records subject as the owner of device, mode 0600.
 func writeOwner(path, device, subject string) error {
-	raw, err := json.Marshal(owner{Device: device, Subject: subject})
+	raw, err := json.Marshal(owner{Device: device, Subject: subject}, storedJSON)
 	if err != nil {
 		return err
 	}

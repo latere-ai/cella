@@ -4,7 +4,8 @@
 package stubs_test
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"net/http"
 	"testing"
 
@@ -146,7 +147,7 @@ func TestTheAuthorizerProducesEachOutage(t *testing.T) {
 				t.Fatalf("the mode %s answered %d, want %d", tc.mode, code, tc.status)
 			}
 			if tc.verdict == noDecision && code == http.StatusOK {
-				if _, err := authz.ParseDecision(body); err == nil && json.Valid(body) && hasAllow(body) {
+				if _, err := authz.ParseDecision(body); err == nil && jsontext.Value(body).IsValid() && hasAllow(body) {
 					t.Errorf("the mode %s answered a decision: %s", tc.mode, body)
 				}
 			}

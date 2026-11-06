@@ -6,7 +6,7 @@ package api
 import (
 	"bytes"
 	"encoding/binary"
-	"encoding/json"
+	"encoding/json/v2"
 	"io"
 	"net/http"
 	"strconv"

@@ -32,7 +32,7 @@ type networkCreate struct {
 // inside that network.
 type networkConnect struct {
 	Container      string          `json:"container"`
-	EndpointConfig *networkAliases `json:"endpoint_config,omitempty"`
+	EndpointConfig *networkAliases `json:"endpoint_config,omitzero"`
 }
 
 type networkAliases struct {

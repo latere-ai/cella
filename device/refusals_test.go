@@ -6,7 +6,7 @@
 package device
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -63,7 +63,7 @@ func TestControlTellsAnOrganizationsToken(t *testing.T) {
 			Code string `json:"code"`
 		} `json:"error"`
 	}
-	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+	if err := json.UnmarshalRead(rec.Body, &body); err != nil {
 		t.Fatal(err)
 	}
 	if rec.Code != http.StatusBadRequest || body.Error.Code != CodeCredentialsOrg {

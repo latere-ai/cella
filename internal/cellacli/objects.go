@@ -5,7 +5,8 @@ package cellacli
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"os"
@@ -65,7 +66,7 @@ func apply(ctx context.Context, c *invocation, args []string) error {
 		return err
 	}
 	var header document
-	if err = json.Unmarshal(body, &header); err != nil {
+	if err = json.Unmarshal(body, &header, foreignJSON); err != nil {
 		return usagef("the manifest is not one JSON object: %v", err)
 	}
 	if header.APIVersion == "" || header.Kind == "" {
@@ -169,7 +170,7 @@ func withValue(body []byte, c *invocation, fromEnv, fromFile string) ([]byte, er
 		return nil, usagef("%s holds no value", fromEnv)
 	}
 	var object map[string]any
-	if err := json.Unmarshal(body, &object); err != nil {
+	if err := json.Unmarshal(body, &object, foreignJSON); err != nil {
 		return nil, usagef("the manifest is not one JSON object: %v", err)
 	}
 	spec, _ := object["spec"].(map[string]any)
@@ -178,7 +179,7 @@ func withValue(body []byte, c *invocation, fromEnv, fromFile string) ([]byte, er
 	}
 	spec["value"] = value
 	object["spec"] = spec
-	out, err := json.Marshal(object)
+	out, err := json.Marshal(object, json.Deterministic(true), jsontext.AllowInvalidUTF8(true))
 	if err != nil {
 		return nil, err
 	}
@@ -505,3 +506,12 @@ func kindList() string {
 	}
 	return strings.Join(out, ", ")
 }
+
+// foreignJSON reads a manifest a person wrote: duplicate names, invalid
+// UTF-8 and any letter case in a member name are accepted here, and the
+// server decides what it refuses.
+var foreignJSON = json.JoinOptions(
+	jsontext.AllowDuplicateNames(true),
+	jsontext.AllowInvalidUTF8(true),
+	json.MatchCaseInsensitiveNames(true),
+)

@@ -6,7 +6,7 @@ package egressd
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
+	"encoding/json/v2"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"

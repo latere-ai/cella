@@ -19,7 +19,8 @@ package kind_test
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"net/http"
@@ -265,7 +266,7 @@ func waitForRecord(t *testing.T, client *http.Client, sink, id string) {
 	for time.Now().Before(deadline) {
 		code, body := call(t, client, http.MethodGet, sink+"/events?object="+id, "", nil)
 		if code == http.StatusOK {
-			var records []json.RawMessage
+			var records []jsontext.Value
 			if err := json.Unmarshal(body, &records); err == nil && len(records) > 0 {
 				return
 			}

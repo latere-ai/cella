@@ -5,7 +5,7 @@ package api
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"net/http"
 	"slices"
 	"strings"
@@ -113,7 +113,7 @@ func TestVolumeRoutes(t *testing.T) {
 	res := f.proxied(http.MethodPut, "/v1/volumes/grader", f.alice,
 		strings.NewReader(volumeBody("grader", v1.VolumeAccessSharedRead, pinnedGrader)), http.Header{"Content-Type": {jsonMedia}})
 	var created v1.Volume
-	if err := json.NewDecoder(res.Body).Decode(&created); err != nil {
+	if err := json.UnmarshalRead(res.Body, &created); err != nil {
 		t.Fatal(err)
 	}
 	_ = res.Body.Close()

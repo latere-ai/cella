@@ -13,7 +13,8 @@
 package events
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"slices"
 	"time"
@@ -33,19 +34,19 @@ type Record struct {
 	// under. Sandbox names the sandbox in context where the object is not
 	// itself the whole story, which is every operation.
 	Object  Object  `json:"object"`
-	Sandbox *Object `json:"sandbox,omitempty"`
+	Sandbox *Object `json:"sandbox,omitzero"`
 	// Subject is the rendered subject of design 006, or SubjectController
 	// for an act the control plane took on its own. Workload is set where
 	// the bearer was a sandbox's own token.
 	Subject  string    `json:"subject"`
-	Workload *Workload `json:"workload,omitempty"`
+	Workload *Workload `json:"workload,omitzero"`
 	// RequestID is the X-Request-ID of the request that caused the act, and
 	// empty for the reaper and the recovery loop.
 	RequestID string `json:"requestId"`
 	// Reason is set on every terminal transition and empty elsewhere.
 	Reason Reason `json:"reason,omitempty"`
 	// Data is the per-type shape of design 009's table, redacted.
-	Data json.RawMessage `json:"data,omitempty"`
+	Data jsontext.Value `json:"data,omitzero"`
 }
 
 // Object is what a record is about: the identity of one object of one kind,
@@ -210,10 +211,19 @@ func (r Record) Valid() error {
 	return nil
 }
 
+// encodeOptions fixes the member order of everything a record carries, so
+// the journal, the feed and the wire hold the same bytes and a retry signs
+// what the first attempt did. A path or a name a caller sent that is not
+// valid UTF-8 is replaced rather than losing the record.
+var encodeOptions = json.JoinOptions(
+	json.Deterministic(true),
+	jsontext.AllowInvalidUTF8(true),
+)
+
 // Body is the exact bytes delivered and signed. It is one function so the
 // journal, the feed and the wire agree.
 func Body(r Record) ([]byte, error) {
-	return json.Marshal(r)
+	return json.Marshal(r, encodeOptions)
 }
 
 // Payload is the half of a record the journal stores outside its columns.
@@ -221,7 +231,7 @@ func Body(r Record) ([]byte, error) {
 // them here keeps one fact in one place, and Rebuild puts them back.
 func Payload(r Record) ([]byte, error) {
 	r.ID, r.Seq, r.Type, r.Time = "", 0, "", time.Time{}
-	return json.Marshal(r)
+	return json.Marshal(r, encodeOptions)
 }
 
 // Rebuild is Payload's inverse: one journal row becomes the record it was

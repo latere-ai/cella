@@ -7,7 +7,8 @@ package device
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"net"
@@ -469,7 +470,7 @@ func ControlPost(ctx context.Context, socket, route string) (Status, error) {
 	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusOK {
 		var refusal httpjson.ErrorEnvelope
-		if err := json.NewDecoder(res.Body).Decode(&refusal); err != nil {
+		if err := json.UnmarshalRead(res.Body, &refusal); err != nil {
 			return Status{}, Fail(CodeControlUnavailable, "POST "+route+" answered "+res.Status, err)
 		}
 		if refusal.Error.Code == "not_serving" {
@@ -478,7 +479,7 @@ func ControlPost(ctx context.Context, socket, route string) (Status, error) {
 		return Status{}, Fail(CodeControlUnavailable, fmt.Sprintf("POST %s answered %s: %s: %s", route, res.Status, refusal.Error.Code, refusal.Error.Message), nil)
 	}
 	var status Status
-	if err := json.NewDecoder(res.Body).Decode(&status); err != nil {
+	if err := json.UnmarshalRead(res.Body, &status); err != nil {
 		return Status{}, Fail(CodeControlUnavailable, "read the status POST "+route+" answered", err)
 	}
 	return status, nil
@@ -487,20 +488,20 @@ func ControlPost(ctx context.Context, socket, route string) (Status, error) {
 // stream writes one JSON value per line and flushes each.
 type stream struct {
 	w   http.ResponseWriter
-	enc *json.Encoder
+	enc *jsontext.Encoder
 	rc  *http.ResponseController
 }
 
 func newStream(w http.ResponseWriter) *stream {
 	w.WriteHeader(http.StatusOK)
-	s := &stream{w: w, enc: json.NewEncoder(w), rc: http.NewResponseController(w)}
+	s := &stream{w: w, enc: jsontext.NewEncoder(w, jsontext.AllowInvalidUTF8(true)), rc: http.NewResponseController(w)}
 	_ = s.rc.Flush()
 	return s
 }
 
 // send writes v, and reports whether the client is still there.
 func (s *stream) send(v any) bool {
-	if err := s.enc.Encode(v); err != nil {
+	if err := json.MarshalEncode(s.enc, v); err != nil {
 		return false
 	}
 	return s.rc.Flush() == nil

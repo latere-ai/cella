@@ -34,7 +34,7 @@ package podman
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -250,10 +250,10 @@ type specGenerator struct {
 	WorkDir        string            `json:"work_dir,omitempty"`
 	User           string            `json:"user,omitempty"`
 	RestartPolicy  string            `json:"restart_policy,omitempty"`
-	StopTimeout    *uint             `json:"stop_timeout,omitempty"`
+	StopTimeout    *uint             `json:"stop_timeout,omitzero"`
 	Volumes        []namedVolume     `json:"volumes,omitempty"`
-	ResourceLimits *resourceLimits   `json:"resource_limits,omitempty"`
-	Netns          *namespace        `json:"netns,omitempty"`
+	ResourceLimits *resourceLimits   `json:"resource_limits,omitzero"`
+	Netns          *namespace        `json:"netns,omitzero"`
 	PortMappings   []portMapping     `json:"portmappings,omitempty"`
 }
 
@@ -275,15 +275,15 @@ type namedVolume struct {
 }
 
 type resourceLimits struct {
-	CPU    *cpuLimit    `json:"cpu,omitempty"`
-	Memory *memoryLimit `json:"memory,omitempty"`
+	CPU    *cpuLimit    `json:"cpu,omitzero"`
+	Memory *memoryLimit `json:"memory,omitzero"`
 }
 type cpuLimit struct {
-	Quota  int64  `json:"quota,omitempty"`
-	Period uint64 `json:"period,omitempty"`
+	Quota  int64  `json:"quota,omitzero"`
+	Period uint64 `json:"period,omitzero"`
 }
 type memoryLimit struct {
-	Limit int64 `json:"limit,omitempty"`
+	Limit int64 `json:"limit,omitzero"`
 }
 
 type volumeCreate struct {
@@ -465,7 +465,7 @@ func recordOf(l map[string]string) record {
 	}
 	if raw := l[labelEnv]; raw != "" {
 		env := map[string]string{}
-		if json.Unmarshal([]byte(raw), &env) == nil {
+		if json.Unmarshal([]byte(raw), &env, foreignJSON) == nil {
 			r.env = env
 		}
 	}
@@ -611,7 +611,7 @@ func (d *Driver) localDigest(ctx context.Context, image string) (string, error) 
 
 // records returns every record generation of one sandbox, highest first.
 func (d *Driver) records(ctx context.Context, id string) ([]record, error) {
-	filter, err := json.Marshal(map[string][]string{"label": {labelID + "=" + id, labelKind + "=" + kindRecord}})
+	filter, err := json.Marshal(map[string][]string{"label": {labelID + "=" + id, labelKind + "=" + kindRecord}}, outboundJSON)
 	if err != nil {
 		return nil, err
 	}

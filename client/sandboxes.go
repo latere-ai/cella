@@ -5,7 +5,8 @@ package client
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"net/http"
@@ -55,7 +56,7 @@ func (k Kind) item(ref string) string { return k.Path() + "/" + url.PathEscape(r
 // the API's bytes can keep them.
 type Page struct {
 	// Items are the page's objects, each its own bytes.
-	Items []json.RawMessage `json:"items"`
+	Items []jsontext.Value `json:"items"`
 	// Next is the cursor of the following page, empty on the last.
 	Next string `json:"next"`
 }
@@ -201,16 +202,16 @@ func (c *Client) act(ctx context.Context, ref, verb string) (v1.Sandbox, []byte,
 // returns the decoded objects and the same objects' own bytes, in order, so
 // a caller that prints columns and a caller that prints the API's JSON read
 // one call.
-func (c *Client) ListSandboxes(ctx context.Context, o ListOptions) ([]v1.Sandbox, []json.RawMessage, error) {
+func (c *Client) ListSandboxes(ctx context.Context, o ListOptions) ([]v1.Sandbox, []jsontext.Value, error) {
 	return listAll[v1.Sandbox](ctx, c, KindSandbox, o)
 }
 
 // listAll pages a collection. A page is asked for at the API's ceiling or
 // at what is left of the caller's limit, whichever is smaller, so a limit
 // above the ceiling pages instead of being refused.
-func listAll[T any](ctx context.Context, c *Client, kind Kind, o ListOptions) ([]T, []json.RawMessage, error) {
+func listAll[T any](ctx context.Context, c *Client, kind Kind, o ListOptions) ([]T, []jsontext.Value, error) {
 	var items []T
-	var raws []json.RawMessage
+	var raws []jsontext.Value
 	cursor := ""
 	for {
 		page := maxPage
@@ -260,8 +261,8 @@ type ExecRequest struct {
 	Timeout string `json:"timeout,omitempty"`
 	// Cols and Rows are the terminal's window; set on a session, they ask
 	// for a terminal.
-	Cols int `json:"cols,omitempty"`
-	Rows int `json:"rows,omitempty"`
+	Cols int `json:"cols,omitzero"`
+	Rows int `json:"rows,omitzero"`
 }
 
 // ExecResult is the synchronous route's answer: design 008 caps each output
@@ -281,7 +282,7 @@ type ExecResult struct {
 // Exec runs a command and waits for it. This is the ?wait=1 answer of
 // design 008; a command with input or a terminal is ExecSession.
 func (c *Client) Exec(ctx context.Context, ref string, req ExecRequest) (ExecResult, []byte, error) {
-	body, err := json.Marshal(execBody{Command: req.Command, Env: req.Env, Workdir: req.Workdir, Timeout: req.Timeout})
+	body, err := json.Marshal(execBody{Command: req.Command, Env: req.Env, Workdir: req.Workdir, Timeout: req.Timeout}, requestJSON)
 	if err != nil {
 		return ExecResult{}, nil, err
 	}
@@ -351,12 +352,12 @@ type EgressRecord struct {
 	// request; the path carries no query string.
 	Method string `json:"method,omitempty"`
 	Path   string `json:"path,omitempty"`
-	Status int    `json:"status,omitempty"`
+	Status int    `json:"status,omitzero"`
 	// BytesOut and BytesIn are what the connection carried each way, and
 	// DurationMS how long it was open, in milliseconds.
-	BytesOut   int64 `json:"bytesOut,omitempty"`
-	BytesIn    int64 `json:"bytesIn,omitempty"`
-	DurationMS int64 `json:"durationMs,omitempty"`
+	BytesOut   int64 `json:"bytesOut,omitzero"`
+	BytesIn    int64 `json:"bytesIn,omitzero"`
+	DurationMS int64 `json:"durationMs,omitzero"`
 }
 
 // EgressRecords reads what the gateway reported for one sandbox, newest

@@ -5,7 +5,7 @@ package store
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"maps"
@@ -130,11 +130,11 @@ func encodeVolume(obj v1.Volume) (Object, error) {
 	status := obj.Status
 	status.AttachedTo = nil
 	obj.Status = v1.VolumeStatus{}
-	data, err := json.Marshal(obj)
+	data, err := json.Marshal(obj, json.Deterministic(true))
 	if err != nil {
 		return Object{}, fmt.Errorf("store: encoding the volume: %w", err)
 	}
-	encoded, err := json.Marshal(status)
+	encoded, err := json.Marshal(status, json.Deterministic(true))
 	if err != nil {
 		return Object{}, fmt.Errorf("store: encoding the volume status: %w", err)
 	}

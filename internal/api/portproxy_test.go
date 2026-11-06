@@ -6,7 +6,7 @@ package api
 import (
 	"bufio"
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"maps"
@@ -74,7 +74,7 @@ func upstream(t *testing.T, name string) *httptest.Server {
 		}
 		body, _ := io.ReadAll(r.Body)
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(seen{
+		_ = json.MarshalWrite(w, seen{
 			Method: r.Method, RequestURI: r.RequestURI, Host: r.Host, Header: r.Header,
 			Body: string(body), Sandbox: name,
 		})
@@ -111,7 +111,7 @@ func decodeSeen(t *testing.T, res *http.Response) seen {
 		t.Fatalf("the proxy answered %d: %s", res.StatusCode, body)
 	}
 	var s seen
-	if err := json.NewDecoder(res.Body).Decode(&s); err != nil {
+	if err := json.UnmarshalRead(res.Body, &s); err != nil {
 		t.Fatal(err)
 	}
 	return s
@@ -126,7 +126,7 @@ func envelopeOf(t *testing.T, res *http.Response) (string, string) {
 			Message string `json:"message"`
 		} `json:"error"`
 	}
-	if err := json.NewDecoder(res.Body).Decode(&env); err != nil {
+	if err := json.UnmarshalRead(res.Body, &env); err != nil {
 		t.Fatalf("the answer is no envelope: %v", err)
 	}
 	return env.Error.Code, env.Error.Message

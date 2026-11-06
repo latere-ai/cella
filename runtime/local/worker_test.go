@@ -5,7 +5,7 @@ package local
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"io"
 	"net/http"
@@ -43,7 +43,7 @@ func newStubPlane(t *testing.T) *stubPlane {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/environments/{id}/workers", func(w http.ResponseWriter, r *http.Request) {
 		var registration remote.Registration
-		if err := json.NewDecoder(r.Body).Decode(&registration); err != nil {
+		if err := json.UnmarshalRead(r.Body, &registration); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -55,7 +55,7 @@ func newStubPlane(t *testing.T) *stubPlane {
 		registered.Environment = "env_laptop"
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		_ = json.NewEncoder(w).Encode(registered)
+		_ = json.MarshalWrite(w, registered)
 	})
 	mux.HandleFunc("GET /v1/environments/{id}/operations", func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)

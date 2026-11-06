@@ -5,7 +5,8 @@ package conformance
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"net/http"
 	"os"
@@ -132,8 +133,8 @@ func case021EnvironmentRead(ctx context.Context, e *Env) error {
 		Items []struct {
 			Metadata objectMetadata `json:"metadata"`
 			Status   struct {
-				ID           string          `json:"id"`
-				Capabilities json.RawMessage `json:"capabilities"`
+				ID           string         `json:"id"`
+				Capabilities jsontext.Value `json:"capabilities"`
 			} `json:"status"`
 		} `json:"items"`
 	}
@@ -400,11 +401,11 @@ func jsonEqual(a, b []byte, ignore ...string) bool {
 		delete(left, name)
 		delete(right, name)
 	}
-	x, err := json.Marshal(left)
+	x, err := json.Marshal(left, json.Deterministic(true))
 	if err != nil {
 		return false
 	}
-	y, err := json.Marshal(right)
+	y, err := json.Marshal(right, json.Deterministic(true))
 	if err != nil {
 		return false
 	}

@@ -5,7 +5,7 @@ package api
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"net/http"
 	"strings"
 	"testing"
@@ -50,7 +50,7 @@ func (f *fixture) createdAs(path, body string, status int) (v1.Sandbox, string) 
 	}
 	var obj v1.Sandbox
 	if status == http.StatusCreated {
-		if err := json.NewDecoder(res.Body).Decode(&obj); err != nil {
+		if err := json.UnmarshalRead(res.Body, &obj); err != nil {
 			f.t.Fatal(err)
 		}
 	}

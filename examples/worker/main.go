@@ -15,7 +15,8 @@ package main
 import (
 	"bufio"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"os"
@@ -101,7 +102,7 @@ func (*terminal) Check(context.Context, worker.Operation) worker.Verdict {
 // record prints one operation as a line of JSON. A record carries no file
 // content, no stdin and no output.
 func (t *terminal) record(r worker.Record) {
-	line, err := json.Marshal(r)
+	line, err := json.Marshal(r, jsontext.AllowInvalidUTF8(true))
 	if err != nil {
 		return
 	}

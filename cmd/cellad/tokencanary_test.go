@@ -5,7 +5,8 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"io"
 	"log/slog"
 	"net/http"
@@ -72,8 +73,8 @@ func TestWorkloadTokenNeverLeavesItsSandbox(t *testing.T) {
 		// looked for.
 		var read struct {
 			Status struct {
-				ID         string          `json:"id"`
-				TokenState json.RawMessage `json:"tokenState"`
+				ID         string         `json:"id"`
+				TokenState jsontext.Value `json:"tokenState"`
 			} `json:"status"`
 		}
 		if err := json.Unmarshal(asSandbox(t, plane, sandbox, token), &read); err != nil {

@@ -6,7 +6,8 @@ package conformance
 import (
 	"bufio"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"net"
 	"net/http"
@@ -478,7 +479,7 @@ func case018EgressRecords(ctx context.Context, e *Env) error {
 		return err
 	}
 	var page struct {
-		Items []json.RawMessage `json:"items"`
+		Items []jsontext.Value `json:"items"`
 	}
 	if err := json.Unmarshal(x.Body, &page); err != nil {
 		return x.disagree("a list of connection records", err.Error())

@@ -4,7 +4,7 @@
 package admission
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"net/http"
 	"testing"
@@ -60,7 +60,7 @@ func ceilingEndpoint(t *testing.T, max map[string]any) func(http.ResponseWriter,
 			spec["resources"] = map[string]any{"cpu": "50m", "memory": "256Mi", "max": granted}
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"allow": true, "manifest": in.Manifest})
+		_ = json.MarshalWrite(w, map[string]any{"allow": true, "manifest": in.Manifest})
 	}
 }
 

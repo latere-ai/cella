@@ -6,7 +6,7 @@ package conformance
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"net/http"
 	"os"
@@ -73,7 +73,7 @@ func Minter(issuer string) func(context.Context, string) (string, error) {
 		var minted struct {
 			Token string `json:"token"`
 		}
-		if err := json.NewDecoder(resp.Body).Decode(&minted); err != nil {
+		if err := json.UnmarshalRead(resp.Body, &minted); err != nil {
 			return "", fmt.Errorf("the issuer's answer for %s is no token: %w", subject, err)
 		}
 		if minted.Token == "" {
@@ -103,9 +103,7 @@ func LoadDeclaration(path string) (map[string]string, error) {
 		return nil, fmt.Errorf("reading the declared gaps: %w", err)
 	}
 	var declaration Declaration
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&declaration); err != nil {
+	if err := json.Unmarshal(data, &declaration, json.RejectUnknownMembers(true)); err != nil {
 		return nil, fmt.Errorf("%s is no declaration: %w", path, err)
 	}
 	names := Names()

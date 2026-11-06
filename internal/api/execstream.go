@@ -6,7 +6,8 @@ package api
 import (
 	"context"
 	"encoding/binary"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"io"
 	"net/http"
@@ -122,7 +123,7 @@ func (f *execFrames) write(channel byte, payload []byte) error {
 // what a failure says once the status has been sent.
 func (f *execFrames) fail(err error, requestID string) {
 	_, envelope := errorEnvelope(err, requestID)
-	body, marshalErr := json.Marshal(errorFrame{Error: envelope})
+	body, marshalErr := json.Marshal(errorFrame{Error: envelope}, jsontext.AllowInvalidUTF8(true))
 	if marshalErr != nil {
 		// The envelope is two strings and a map of strings, so this is
 		// unreachable; an empty frame still ends the stream on channel 4,

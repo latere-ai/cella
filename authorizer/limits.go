@@ -51,10 +51,10 @@ type Limits struct {
 // are pointers, so a member deliberately set to zero is still sent and
 // decodes to zero, the same grant as absence.
 type WireLimits struct {
-	RequestsPerMinute *int `json:"requests_per_minute,omitempty"`
-	MaxSandboxes      *int `json:"max_sandboxes,omitempty"`
-	MaxPriority       *int `json:"max_priority,omitempty"`
-	MaxVolumes        *int `json:"max_volumes,omitempty"`
+	RequestsPerMinute *int `json:"requests_per_minute,omitzero"`
+	MaxSandboxes      *int `json:"max_sandboxes,omitzero"`
+	MaxPriority       *int `json:"max_priority,omitzero"`
+	MaxVolumes        *int `json:"max_volumes,omitzero"`
 }
 
 // DecodeLimits reads a decision's limits object. A decision with no

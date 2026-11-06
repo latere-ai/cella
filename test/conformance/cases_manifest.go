@@ -6,7 +6,8 @@ package conformance
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"net/http"
 	"slices"
@@ -275,7 +276,7 @@ func case007AdmissionUnavailable(ctx context.Context, e *Env) error {
 // holdsLiteralDefaults reads each literal default off a resolved
 // specification and reports the first that differs, naming the field, the
 // literal and what the apply answered.
-func holdsLiteralDefaults(spec json.RawMessage) error {
+func holdsLiteralDefaults(spec jsontext.Value) error {
 	var resolved map[string]any
 	if err := json.Unmarshal(spec, &resolved); err != nil {
 		return &Disagreement{Method: http.MethodPost, Path: "/v1/sandboxes", Want: "a specification that is a JSON object", Got: err.Error(), Body: string(spec)}
@@ -324,7 +325,7 @@ func replaceField(body []byte, field, value string) []byte {
 		return body
 	}
 	m[field] = value
-	out, err := json.Marshal(m)
+	out, err := json.Marshal(m, json.Deterministic(true))
 	if err != nil {
 		return body
 	}
@@ -333,12 +334,12 @@ func replaceField(body []byte, field, value string) []byte {
 
 // canonical re-encodes JSON so two bodies are compared by content and not by
 // the order two encoders chose.
-func canonical(raw json.RawMessage) []byte {
+func canonical(raw jsontext.Value) []byte {
 	var v any
 	if json.Unmarshal(raw, &v) != nil {
 		return raw
 	}
-	out, err := json.Marshal(v)
+	out, err := json.Marshal(v, json.Deterministic(true))
 	if err != nil {
 		return raw
 	}

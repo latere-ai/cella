@@ -5,7 +5,7 @@ package client
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"net/http"
 
 	v1 "latere.ai/x/cella/manifest/v1"
@@ -35,6 +35,6 @@ func (c *Client) GetSecret(ctx context.Context, ref string) (v1.Secret, []byte, 
 // the decoded objects with their own bytes, in order. Owner and Labels
 // narrow the list; a secret has no phase and no environment, so the server
 // ignores those two selectors.
-func (c *Client) ListSecrets(ctx context.Context, o ListOptions) ([]v1.Secret, []json.RawMessage, error) {
+func (c *Client) ListSecrets(ctx context.Context, o ListOptions) ([]v1.Secret, []jsontext.Value, error) {
 	return listAll[v1.Secret](ctx, c, KindSecret, o)
 }

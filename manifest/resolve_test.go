@@ -5,7 +5,7 @@ package manifest
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"slices"
 	"strings"
@@ -523,16 +523,16 @@ func TestResolveIsDeterministic(t *testing.T) {
 	in.Spec.Command, in.Spec.Args = []string{"/bin/bash"}, []string{"-l"}
 	in.Spec.Env = map[string]string{"LOG_LEVEL": "debug", "REGION": "eu"}
 	in.Spec.User = "1000:1000"
-	before, err := json.Marshal(in)
+	before, err := json.Marshal(in, json.Deterministic(true))
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, err := json.Marshal(resolve(t, in, o).Sandbox)
+	first, err := json.Marshal(resolve(t, in, o).Sandbox, json.Deterministic(true))
 	if err != nil {
 		t.Fatal(err)
 	}
 	for range 8 {
-		next, err := json.Marshal(resolve(t, in, o).Sandbox)
+		next, err := json.Marshal(resolve(t, in, o).Sandbox, json.Deterministic(true))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -540,7 +540,7 @@ func TestResolveIsDeterministic(t *testing.T) {
 			t.Fatalf("resolve is not deterministic:\n%s\n%s", first, next)
 		}
 	}
-	after, err := json.Marshal(in)
+	after, err := json.Marshal(in, json.Deterministic(true))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -552,7 +552,7 @@ func TestResolveIsDeterministic(t *testing.T) {
 	got.Sandbox.Metadata.Labels["team"] = "mutated"
 	got.Sandbox.Spec.Command[0] = "/bin/sh"
 	got.Warnings = append(got.Warnings, "mutated")
-	again, err := json.Marshal(resolve(t, in, o).Sandbox)
+	again, err := json.Marshal(resolve(t, in, o).Sandbox, json.Deterministic(true))
 	if err != nil {
 		t.Fatal(err)
 	}

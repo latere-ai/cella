@@ -8,7 +8,8 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"io"
 	"log/slog"
@@ -247,7 +248,7 @@ func TestPolicyFiltersAndFailures(t *testing.T) {
 			return authz.Decision{Allow: r.Action != authorizer.ActionEnvironmentUse}, nil
 		}, 404},
 		{"unsupported rate limit", func(context.Context, authz.Request) (authz.Decision, error) {
-			return authz.Decision{Allow: true, Limits: json.RawMessage(`{"requests_per_minute":10}`)}, nil
+			return authz.Decision{Allow: true, Limits: jsontext.Value(`{"requests_per_minute":10}`)}, nil
 		}, 422},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -259,7 +260,7 @@ func TestPolicyFiltersAndFailures(t *testing.T) {
 		})
 	}
 	f = setup(t, decisionFunc(func(context.Context, authz.Request) (authz.Decision, error) {
-		return authz.Decision{Allow: true, Limits: json.RawMessage(`{"max_sandboxes":1}`)}, nil
+		return authz.Decision{Allow: true, Limits: jsontext.Value(`{"max_sandboxes":1}`)}, nil
 	}))
 	f.request("POST", "/v1/sandboxes?wait=1", f.alice, createBody, 201)
 	f.request("POST", "/v1/sandboxes?wait=1", f.alice, strings.Replace(createBody, `"work"`, `"other"`, 1), 422)
@@ -520,7 +521,11 @@ func TestNativeManifestFieldsEndToEnd(t *testing.T) {
 		{"workspace path", `{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox","metadata":{"name":"bad"},"spec":{"workspace":{"path":"/srv/work"}}}`, "capability_unsupported", 422},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			var body struct{ Error struct{ Code string } }
+			var body struct {
+				Error struct {
+					Code string `json:"code"`
+				} `json:"error"`
+			}
 			if err := json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice, tc.body, tc.status), &body); err != nil {
 				t.Fatal(err)
 			}
@@ -549,11 +554,11 @@ func TestResolverErrorStatuses(t *testing.T) {
 		}
 		var body struct {
 			Error struct {
-				Code    string
+				Code    string `json:"code"`
 				Details struct {
-					Paths []string
-				}
-			}
+					Paths []string `json:"paths"`
+				} `json:"details"`
+			} `json:"error"`
 		}
 		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
 			t.Fatal(err)

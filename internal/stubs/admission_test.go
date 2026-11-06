@@ -4,7 +4,8 @@
 package stubs_test
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"net/http"
 	"testing"
 
@@ -39,10 +40,10 @@ func envelope(image string) map[string]any {
 
 // answer is the 200 body of spec 007.
 type answer struct {
-	Allow    *bool           `json:"allow"`
-	Manifest json.RawMessage `json:"manifest"`
-	Reason   string          `json:"reason"`
-	Warnings []string        `json:"warnings"`
+	Allow    *bool          `json:"allow"`
+	Manifest jsontext.Value `json:"manifest"`
+	Reason   string         `json:"reason"`
+	Warnings []string       `json:"warnings"`
 }
 
 // admit posts one envelope and reads the answer.
@@ -117,7 +118,7 @@ func TestTheAdmissionEndpointAnswersTheEnvelope(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("the request log answered %d", code)
 	}
-	var seen []json.RawMessage
+	var seen []jsontext.Value
 	if err := json.Unmarshal(read, &seen); err != nil || len(seen) != 2 {
 		t.Fatalf("the endpoint recorded %s (%v)", read, err)
 	}
@@ -133,7 +134,7 @@ func TestTheAdmissionEndpointAnswersTheEnvelope(t *testing.T) {
 	if code, _ := postNoBody(t, url+"/requests", http.MethodDelete); code != http.StatusNoContent {
 		t.Errorf("the request log was not cleared: %d", code)
 	}
-	if _, read := get(t, url+"/requests"); string(read) != "[]\n" {
+	if _, read := get(t, url+"/requests"); string(read) != "[]" {
 		t.Errorf("the cleared log is %s", read)
 	}
 }
@@ -205,7 +206,7 @@ func TestTheAdmissionEndpointProducesEachOutage(t *testing.T) {
 			if code != tc.status {
 				t.Fatalf("the mode %s answered %d, want %d", tc.mode, code, tc.status)
 			}
-			if tc.mode != stubs.FailMalformed && json.Valid(body) {
+			if tc.mode != stubs.FailMalformed && jsontext.Value(body).IsValid() {
 				var out answer
 				if err := json.Unmarshal(body, &out); err == nil && out.Allow != nil {
 					t.Errorf("the mode %s answered a verdict: %s", tc.mode, body)

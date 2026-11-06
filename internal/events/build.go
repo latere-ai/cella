@@ -4,7 +4,7 @@
 package events
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"maps"
 	"slices"
@@ -83,7 +83,7 @@ func build(t Type, reason Reason, obj Object, sandbox *Object, data any, a Actor
 		r.Subject = SubjectController
 	}
 	if data != nil {
-		encoded, err := json.Marshal(data)
+		encoded, err := json.Marshal(data, encodeOptions)
 		if err != nil {
 			return Record{}, fmt.Errorf("events: encoding the data of %s: %w", t, err)
 		}

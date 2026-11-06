@@ -4,7 +4,8 @@
 package stubs
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"net/http"
@@ -56,9 +57,9 @@ type admissionRequest struct {
 	Claims map[string]any `json:"claims"`
 	// Action is create or update, Existing the object an update replaces,
 	// and Manifest the defaulted object stage 2 produced.
-	Action   string          `json:"action"`
-	Existing json.RawMessage `json:"existing"`
-	Manifest json.RawMessage `json:"manifest"`
+	Action   string         `json:"action"`
+	Existing jsontext.Value `json:"existing"`
+	Manifest jsontext.Value `json:"manifest"`
 	Ref      struct {
 		ID string `json:"id"`
 	} `json:"request"`
@@ -79,7 +80,7 @@ type admission struct {
 	o        AdmissionOptions
 	outage   *outage
 	mu       sync.Mutex
-	requests []json.RawMessage
+	requests []jsontext.Value
 }
 
 // newAdmission builds the admission endpoint's handler.
@@ -115,7 +116,7 @@ func (a *admission) admit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.mu.Lock()
-	a.requests = append(a.requests, json.RawMessage(slices.Clone(body)))
+	a.requests = append(a.requests, jsontext.Value(slices.Clone(body)))
 	a.mu.Unlock()
 	if a.outage.answer(w, r) {
 		return
@@ -156,7 +157,7 @@ func (a *admission) list(w http.ResponseWriter, _ *http.Request) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.requests == nil {
-		writeJSON(w, http.StatusOK, []json.RawMessage{})
+		writeJSON(w, http.StatusOK, []jsontext.Value{})
 		return
 	}
 	writeJSON(w, http.StatusOK, a.requests)

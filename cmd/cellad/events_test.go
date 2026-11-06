@@ -9,7 +9,8 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -36,10 +37,10 @@ const (
 // record is the sink's view of one delivery. Only the fields a sink reads are
 // named, so a field this test does not mention is one the wire does not owe.
 type record struct {
-	ID     string `json:"id"`
-	Seq    int64  `json:"seq"`
-	Type   string `json:"type"`
-	Time   time.Time
+	ID     string    `json:"id"`
+	Seq    int64     `json:"seq"`
+	Type   string    `json:"type"`
+	Time   time.Time `json:"time"`
 	Object struct {
 		Kind   string            `json:"kind"`
 		ID     string            `json:"id"`
@@ -51,11 +52,11 @@ type record struct {
 		ID     string            `json:"id"`
 		Labels map[string]string `json:"labels"`
 	} `json:"sandbox"`
-	Subject   string          `json:"subject"`
-	RequestID string          `json:"requestId"`
-	Reason    string          `json:"reason"`
-	Data      json.RawMessage `json:"data"`
-	Raw       []byte          `json:"-"`
+	Subject   string         `json:"subject"`
+	RequestID string         `json:"requestId"`
+	Reason    string         `json:"reason"`
+	Data      jsontext.Value `json:"data"`
+	Raw       []byte         `json:"-"`
 }
 
 // stubSink is the operator's endpoint: it verifies every signature, refuses
@@ -357,7 +358,9 @@ func TestNoContentInEvents(t *testing.T) {
 		`"metadata":{"name":"canary"},"spec":{"env":{"API_TOKEN":"`+canarySecret+`"},`+
 		`"command":["sh","-c","sleep 60"]}}`, "application/json", 201)
 	var obj struct {
-		Status struct{ ID string } `json:"status"`
+		Status struct {
+			ID string `json:"id"`
+		} `json:"status"`
 	}
 	if err := json.Unmarshal(created, &obj); err != nil {
 		t.Fatal(err)

@@ -4,7 +4,7 @@
 package client_test
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"io"
 	"net/http"
@@ -32,8 +32,8 @@ type socketRequest struct {
 	Command []string          `json:"command,omitempty"`
 	Env     map[string]string `json:"env,omitempty"`
 	Workdir string            `json:"workdir,omitempty"`
-	Cols    int               `json:"cols,omitempty"`
-	Rows    int               `json:"rows,omitempty"`
+	Cols    int               `json:"cols,omitzero"`
+	Rows    int               `json:"rows,omitzero"`
 	Timeout string            `json:"timeout,omitempty"`
 }
 

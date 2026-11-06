@@ -7,7 +7,7 @@ package native
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"maps"
@@ -133,7 +133,7 @@ func (d *Driver) load(id string) (record, error) {
 	return r, err
 }
 func (d *Driver) save(id string, r record) error {
-	b, err := json.Marshal(r)
+	b, err := json.Marshal(r, json.Deterministic(true))
 	if err != nil {
 		return err
 	}

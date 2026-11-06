@@ -5,7 +5,7 @@ package k8s
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -757,7 +757,7 @@ func TestTheMeterReadsTheMetricsAPI(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		if !strings.HasSuffix(r.URL.Path, "/pods/sampled") {
 			w.WriteHeader(http.StatusNotFound)
-			_ = json.NewEncoder(w).Encode(metav1.Status{
+			_ = json.MarshalWrite(w, metav1.Status{
 				Kind: "Status", APIVersion: "v1", Status: metav1.StatusFailure,
 				Reason: metav1.StatusReasonNotFound, Code: http.StatusNotFound,
 			})

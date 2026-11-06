@@ -4,7 +4,8 @@
 package device
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"os"
@@ -72,7 +73,7 @@ func (Keychain) Get(environment string) (Key, bool, error) {
 
 // Put writes the environment's entry.
 func (Keychain) Put(k Key) error {
-	b, err := json.Marshal(k)
+	b, err := json.Marshal(k, storedJSON)
 	if err != nil {
 		return err
 	}
@@ -118,7 +119,7 @@ func (f KeyFile) write(m map[string]Key) error {
 		}
 		return nil
 	}
-	b, err := json.MarshalIndent(m, "", "  ")
+	b, err := json.Marshal(m, jsontext.WithIndent("  "), storedJSON)
 	if err != nil {
 		return err
 	}

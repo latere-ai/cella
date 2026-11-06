@@ -5,7 +5,7 @@ package store
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"time"
@@ -86,7 +86,7 @@ func (c *Controlled) WriteEnvironment(ctx context.Context, obj v1.Environment, i
 // the object or its version, and appends the record where the transition has
 // one. A status write design 009 names no type for is state and no event.
 func (c *Controlled) WriteEnvironmentStatus(ctx context.Context, obj v1.Environment, mutation string) error {
-	status, err := json.Marshal(obj.Status)
+	status, err := json.Marshal(obj.Status, json.Deterministic(true))
 	if err != nil {
 		return fmt.Errorf("store: encoding the environment status: %w", err)
 	}
@@ -151,11 +151,11 @@ func (c *Controlled) environmentRecord(ctx context.Context, mutation string, obj
 func encodeEnvironment(obj v1.Environment) (Object, error) {
 	status := obj.Status
 	obj.Status = v1.EnvironmentStatus{}
-	data, err := json.Marshal(obj)
+	data, err := json.Marshal(obj, json.Deterministic(true))
 	if err != nil {
 		return Object{}, fmt.Errorf("store: encoding the environment: %w", err)
 	}
-	encoded, err := json.Marshal(status)
+	encoded, err := json.Marshal(status, json.Deterministic(true))
 	if err != nil {
 		return Object{}, fmt.Errorf("store: encoding the environment status: %w", err)
 	}

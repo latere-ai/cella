@@ -5,7 +5,9 @@ package conformance
 
 import (
 	"encoding/binary"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -204,7 +206,7 @@ func (f *fake) gate(next http.Handler) http.Handler {
 func (f *fake) write(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body)
+	_ = json.MarshalWrite(w, body)
 }
 
 // refuse answers the envelope of design 008, with the sentence of the table
@@ -277,12 +279,12 @@ func (f *fake) decode(w http.ResponseWriter, r *http.Request, kind string) (map[
 		return nil, false
 	}
 	var body map[string]any
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16))
-	if err := decoder.Decode(&body); err != nil {
+	decoder := jsontext.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16))
+	if err := json.UnmarshalDecode(decoder, &body); err != nil {
 		f.refuse(w, "body_too_large")
 		return nil, false
 	}
-	if decoder.More() {
+	if _, err := decoder.ReadValue(); !errors.Is(err, io.EOF) {
 		f.refuse(w, "multi_document")
 		return nil, false
 	}
@@ -644,7 +646,7 @@ func (f *fake) exec(w http.ResponseWriter, r *http.Request) {
 		Command []string `json:"command"`
 		Timeout string   `json:"timeout"`
 	}
-	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+	if err := json.UnmarshalRead(io.LimitReader(r.Body, 1<<20), &req); err != nil {
 		f.refuse(w, "bad_request")
 		return
 	}
@@ -999,7 +1001,7 @@ func (f *fake) changeFiles(w http.ResponseWriter, r *http.Request) {
 		From string `json:"from"`
 		To   string `json:"to"`
 	}
-	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&body); err != nil {
+	if err := json.UnmarshalRead(io.LimitReader(r.Body, 1<<16), &body); err != nil {
 		f.refuse(w, "bad_request")
 		return
 	}
@@ -1082,7 +1084,7 @@ func (f *fake) followFeed(w http.ResponseWriter, r *http.Request) {
 		}
 		f.mu.Unlock()
 		for _, record := range batch {
-			if err := json.NewEncoder(w).Encode(record); err != nil {
+			if err := json.MarshalWrite(w, record); err != nil {
 				return
 			}
 		}
@@ -1383,7 +1385,7 @@ func (f *fake) mint(w http.ResponseWriter, r *http.Request) {
 	var asked struct {
 		Sub string `json:"sub"`
 	}
-	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&asked); err != nil {
+	if err := json.UnmarshalRead(io.LimitReader(r.Body, 1<<16), &asked); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}

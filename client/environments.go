@@ -5,7 +5,8 @@ package client
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -38,7 +39,7 @@ func (c *Client) GetEnvironment(ctx context.Context, ref string) (v1.Environment
 // ListEnvironments follows the cursor to the end, or to Limit objects, and
 // returns the decoded objects with their own bytes, in order. The selectors
 // are sent as the sandbox list sends them.
-func (c *Client) ListEnvironments(ctx context.Context, o ListOptions) ([]v1.Environment, []json.RawMessage, error) {
+func (c *Client) ListEnvironments(ctx context.Context, o ListOptions) ([]v1.Environment, []jsontext.Value, error) {
 	return listAll[v1.Environment](ctx, c, KindEnvironment, o)
 }
 

@@ -43,15 +43,15 @@ type Capabilities struct {
 	Detach       bool `json:"detach"`
 	// HostWorkspace says the driver binds a host folder a manifest names in
 	// spec.workspace.host as the sandbox's workspace (spec 081).
-	HostWorkspace bool `json:"hostWorkspace,omitempty"`
+	HostWorkspace bool `json:"hostWorkspace,omitzero"`
 	// ExecStdin says an exec with no terminal takes stdin on a driver that
 	// declares no Attach, as an attached command whose pipes the driver
 	// holds (spec 081). Attach implies it.
-	ExecStdin bool `json:"execStdin,omitempty"`
+	ExecStdin bool `json:"execStdin,omitzero"`
 	// EgressLocal says the driver enforces an allow list itself, with no
 	// gateway: its own proxy is the only route out, so a sandbox asking
 	// for none or an allow list needs no gateway (spec 083).
-	EgressLocal bool `json:"egressLocal,omitempty"`
+	EgressLocal bool `json:"egressLocal,omitzero"`
 	// Autosize says which resources the driver sizes inside a manifest's
 	// spec.resources.max. It is always on the wire, each flag false where
 	// the driver holds that resource fixed.

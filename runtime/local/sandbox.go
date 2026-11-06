@@ -5,7 +5,7 @@ package local
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"maps"
@@ -51,7 +51,7 @@ type record struct {
 	Egress v1.Egress
 	// Main is the main stage while it runs or has run, and Stages the
 	// detached commands started since, which a stop and a delete end.
-	Main   *hostsandbox.StageHandle  `json:",omitempty"`
+	Main   *hostsandbox.StageHandle  `json:",omitzero"`
 	Stages []hostsandbox.StageHandle `json:",omitempty"`
 	// Attached is every command with stdin running now, which a stop and a
 	// delete end, and a driver that starts after the process holding one was
@@ -84,7 +84,7 @@ func (d *Driver) load(id string) (record, error) {
 
 // save writes the record whole or not at all.
 func (d *Driver) save(r record) error {
-	raw, err := json.Marshal(r)
+	raw, err := json.Marshal(r, json.Deterministic(true))
 	if err != nil {
 		return err
 	}

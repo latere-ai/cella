@@ -4,8 +4,7 @@
 package api
 
 import (
-	"bytes"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"io"
 	"net/http"
@@ -66,7 +65,7 @@ type inputBatch struct {
 // when one of them was refused by the desktop.
 type inputResult struct {
 	Executed int          `json:"executed"`
-	Failed   *inputFailed `json:"failed,omitempty"`
+	Failed   *inputFailed `json:"failed,omitzero"`
 }
 type inputFailed struct {
 	Index  int    `json:"index"`
@@ -232,9 +231,7 @@ func (h *handler) input(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var batch inputBatch
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.DisallowUnknownFields()
-	if err = decoder.Decode(&batch); err != nil {
+	if err = json.Unmarshal(body, &batch, json.RejectUnknownMembers(true)); err != nil {
 		respondError(w, &manifest.Error{Code: "bad_request", Detail: "the body is one JSON object carrying events"})
 		return
 	}

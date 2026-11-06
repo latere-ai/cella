@@ -7,7 +7,7 @@ package device
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -66,7 +66,7 @@ func (s *stubCella) serve(w http.ResponseWriter, r *http.Request) {
 	if refuse != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(refuse.status)
-		_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{
+		_ = json.MarshalWrite(w, map[string]any{"error": map[string]any{
 			"code": refuse.code, "message": "refused", "details": map[string]any{"detail": refuse.detail},
 		}})
 		return
@@ -87,7 +87,7 @@ func (s *stubCella) serve(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(body)
 	case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/keys"):
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"token": "env-key", "jti": "jti-1", "exp": time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)})
+		_ = json.MarshalWrite(w, map[string]any{"token": "env-key", "jti": "jti-1", "exp": time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)})
 	case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/keys/"):
 		s.mu.Lock()
 		s.revoked = append(s.revoked, r.URL.Path)

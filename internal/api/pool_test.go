@@ -5,7 +5,8 @@ package api
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -88,7 +89,7 @@ func TestPoolIsBehindTheAuthorizer(t *testing.T) {
 	const served = `{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox","metadata":{"name":"served"},"spec":{}}`
 	const other = `{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox","metadata":{"name":"other"},"spec":{"command":["sh","-c","sleep 30"]}}`
 	one := decisionFunc(func(context.Context, authz.Request) (authz.Decision, error) {
-		return authz.Decision{Allow: true, Limits: json.RawMessage(`{"max_sandboxes":1}`)}, nil
+		return authz.Decision{Allow: true, Limits: jsontext.Value(`{"max_sandboxes":1}`)}, nil
 	})
 	for _, tc := range []struct {
 		name   string

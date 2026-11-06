@@ -70,7 +70,7 @@
         "id": "vol_01J0000000000000000000STAT",
         "owner": "https://issuer.example.com|alice",
         "phase": "Available",
-        "attachedTo": null,
+        "attachedTo": [],
         "createdAt": "0001-01-01T00:00:00Z"
       }
     },
@@ -92,7 +92,7 @@
         "id": "vol_01J0000000000000000000TOOL",
         "owner": "https://issuer.example.com|alice",
         "phase": "Available",
-        "attachedTo": null,
+        "attachedTo": [],
         "createdAt": "0001-01-01T00:00:00Z"
       }
     }

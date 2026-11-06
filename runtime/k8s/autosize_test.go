@@ -5,7 +5,7 @@ package k8s
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"io"
 	"slices"
 	"strings"

@@ -28,7 +28,7 @@ type SecretSpec struct {
 	Kind   string       `json:"kind,omitempty"`
 	Scope  SecretScope  `json:"scope,omitzero"`
 	Inject SecretInject `json:"inject,omitzero"`
-	OAuth  *SecretOAuth `json:"oauth,omitempty"`
+	OAuth  *SecretOAuth `json:"oauth,omitzero"`
 	Value  string       `json:"value,omitempty"`
 }
 
@@ -62,7 +62,7 @@ type SecretInject struct {
 	Header string `json:"header,omitempty"`
 	Scheme string `json:"scheme,omitempty"`
 	Query  string `json:"query,omitempty"`
-	Body   bool   `json:"body,omitempty"`
+	Body   bool   `json:"body,omitzero"`
 }
 
 // DefaultInjectHeader is the header a secret injects into when it names

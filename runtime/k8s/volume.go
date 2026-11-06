@@ -5,7 +5,7 @@ package k8s
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"maps"
@@ -426,7 +426,7 @@ func (d *Driver) settleVolume(ctx context.Context, claim string, verdict driver.
 	if verdict.Message != "" {
 		annotations[annMessage] = verdict.Message
 	}
-	patch, err := json.Marshal(map[string]any{"metadata": map[string]any{"annotations": annotations}})
+	patch, err := json.Marshal(map[string]any{"metadata": map[string]any{"annotations": annotations}}, outboundJSON)
 	if err != nil {
 		return err
 	}

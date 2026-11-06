@@ -4,7 +4,7 @@
 package api
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"strings"
 	"testing"
 
@@ -37,14 +37,18 @@ func (f *recorded) feed(query string, status int, token string) feedPage {
 func TestObjectFeed(t *testing.T) {
 	f := setupRecorded(t)
 	var obj struct {
-		Status struct{ ID string } `json:"status"`
+		Status struct {
+			ID string `json:"id"`
+		} `json:"status"`
 	}
 	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice, createBody, 201), &obj); err != nil {
 		t.Fatal(err)
 	}
 	other := strings.Replace(createBody, `"name":"work"`, `"name":"other"`, 1)
 	var second struct {
-		Status struct{ ID string } `json:"status"`
+		Status struct {
+			ID string `json:"id"`
+		} `json:"status"`
 	}
 	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice, other, 201), &second); err != nil {
 		t.Fatal(err)
@@ -138,7 +142,9 @@ func TestObjectFeedRefusals(t *testing.T) {
 func TestObjectFeedAuthorizesTheObjectsKind(t *testing.T) {
 	f := setupRecorded(t)
 	var obj struct {
-		Status struct{ ID string } `json:"status"`
+		Status struct {
+			ID string `json:"id"`
+		} `json:"status"`
 	}
 	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice, createBody, 201), &obj); err != nil {
 		t.Fatal(err)
@@ -151,7 +157,9 @@ func TestObjectFeedAuthorizesTheObjectsKind(t *testing.T) {
 	secret := `{"apiVersion":"cella.latere.ai/v1beta1","kind":"Secret","metadata":{"name":"token"},` +
 		`"spec":{"scope":{"hosts":["api.example.com"]},"value":"s3cret"}}`
 	var made struct {
-		Status struct{ ID string } `json:"status"`
+		Status struct {
+			ID string `json:"id"`
+		} `json:"status"`
 	}
 	if err := json.Unmarshal(f.request("PUT", "/v1/secrets/token", f.alice, secret, 201), &made); err != nil {
 		t.Fatal(err)

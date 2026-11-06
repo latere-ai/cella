@@ -4,7 +4,8 @@
 package postgres
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"strings"
 	"testing"
@@ -35,8 +36,8 @@ func sameDocument(t *testing.T, got, want []byte, what string) {
 	if err := json.Unmarshal(want, &w); err != nil {
 		t.Fatalf("the expected %s is not JSON: %q", what, want)
 	}
-	left, _ := json.Marshal(g)
-	right, _ := json.Marshal(w)
+	left, _ := json.Marshal(g, json.Deterministic(true))
+	right, _ := json.Marshal(w, json.Deterministic(true))
 	if string(left) != string(right) {
 		t.Errorf("%s = %s, want %s", what, left, right)
 	}
@@ -135,18 +136,18 @@ func TestUnsealRefusesWhatItCannotOpen(t *testing.T) {
 func TestTheDocumentHelpers(t *testing.T) {
 	for _, tc := range []struct {
 		name, document string
-		value          json.RawMessage
+		value          jsontext.Value
 		want           string
 		fails          bool
 	}{
-		{"into nothing", ``, json.RawMessage(`1`), `{"spec":{"env":1}}`, false},
-		{"into null", `null`, json.RawMessage(`1`), `{"spec":{"env":1}}`, false},
-		{"into a null object", `{"spec":null}`, json.RawMessage(`1`), `{"spec":{"env":1}}`, false},
-		{"over a member", `{"spec":{"env":0,"image":"i"}}`, json.RawMessage(`1`), `{"spec":{"env":1,"image":"i"}}`, false},
+		{"into nothing", ``, jsontext.Value(`1`), `{"spec":{"env":1}}`, false},
+		{"into null", `null`, jsontext.Value(`1`), `{"spec":{"env":1}}`, false},
+		{"into a null object", `{"spec":null}`, jsontext.Value(`1`), `{"spec":{"env":1}}`, false},
+		{"over a member", `{"spec":{"env":0,"image":"i"}}`, jsontext.Value(`1`), `{"spec":{"env":1,"image":"i"}}`, false},
 		{"a removal", `{"spec":{"env":0,"image":"i"}}`, nil, `{"spec":{"image":"i"}}`, false},
 		{"a removal of nothing", `{"spec":{"image":"i"}}`, nil, `{"spec":{"image":"i"}}`, false},
-		{"into an array", `[1]`, json.RawMessage(`1`), ``, true},
-		{"into a scalar object", `{"spec":3}`, json.RawMessage(`1`), ``, true},
+		{"into an array", `[1]`, jsontext.Value(`1`), ``, true},
+		{"into a scalar object", `{"spec":3}`, jsontext.Value(`1`), ``, true},
 	} {
 		got, err := put([]byte(tc.document), "spec", "env", tc.value)
 		switch {
@@ -185,7 +186,7 @@ func TestTheDocumentHelpers(t *testing.T) {
 		{``, true}, {`null`, true}, {`""`, true}, {`{}`, true},
 		{`"v"`, false}, {`{"K":"v"}`, false}, {`3`, false}, {`[`, false},
 	} {
-		if got := blank(json.RawMessage(tc.raw)); got != tc.want {
+		if got := blank(jsontext.Value(tc.raw)); got != tc.want {
 			t.Errorf("blank(%s) = %v, want %v", tc.raw, got, tc.want)
 		}
 	}
@@ -193,5 +194,32 @@ func TestTheDocumentHelpers(t *testing.T) {
 	// beside a row that would not say so.
 	if _, _, _, err := split([]byte(`[1]`), []byte(`{"egressState":{"credential":"c"}}`)); err == nil {
 		t.Error("split marked data that is not an object")
+	}
+}
+
+// TestRewrittenDocumentKeepsKeyOrderAndEmptyArrays: the document a split or a
+// put writes back has its members in key order, and a sealed value that is an
+// empty array is still written.
+func TestRewrittenDocumentKeepsKeyOrderAndEmptyArrays(t *testing.T) {
+	out, err := put([]byte(`{"z":1,"spec":{"b":2,"a":1}}`), "spec", "env", jsontext.Value(`{"K":"v"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `{"spec":{"a":1,"b":2,"env":{"K":"v"}},"z":1}`; string(out) != want {
+		t.Errorf("put wrote %s, want %s", out, want)
+	}
+	sealedValues, err := json.Marshal(held{Env: jsontext.Value(`[]`)}, json.Deterministic(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `{"env":[]}`; string(sealedValues) != want {
+		t.Errorf("held wrote %s, want %s", sealedValues, want)
+	}
+	none, err := json.Marshal(held{}, json.Deterministic(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(none) != `{}` {
+		t.Errorf("an empty held wrote %s", none)
 	}
 }

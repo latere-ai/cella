@@ -5,7 +5,7 @@ package api
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"io"
 	"net/http"
@@ -280,7 +280,10 @@ func TestFileContentThatFailsBeforeItsFirstByte(t *testing.T) {
 	}
 	out := f.expect(503, "GET", "/v1/sandboxes/"+obj.Status.ID+"/files/content?path=/workspace/a.txt", f.alice, "", "")
 	var envelope struct {
-		Error struct{ Code, Message string } `json:"error"`
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
 	}
 	if err := json.Unmarshal(out, &envelope); err != nil {
 		t.Fatalf("the answer is not an envelope: %q: %v", out, err)

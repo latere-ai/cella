@@ -6,7 +6,7 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"io"
 	"log/slog"
 	"maps"
@@ -167,7 +167,9 @@ func TestObservabilityEndToEnd(t *testing.T) {
 	created := request("POST", "/v1/sandboxes?wait=1",
 		`{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox","metadata":{"name":"observed"},"spec":{}}`, 201)
 	var obj struct {
-		Status struct{ ID string } `json:"status"`
+		Status struct {
+			ID string `json:"id"`
+		} `json:"status"`
 	}
 	if err := json.Unmarshal(created, &obj); err != nil {
 		t.Fatal(err)

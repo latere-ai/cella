@@ -6,7 +6,7 @@ package api
 import (
 	"bufio"
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"net"
@@ -45,7 +45,7 @@ func newWriterStub(t *testing.T) *writerStub {
 			return
 		}
 		rw.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(rw).Encode(map[string]string{
+		_ = json.MarshalWrite(rw, map[string]string{
 			"method": r.Method, "uri": r.RequestURI, "host": r.Host, "body": string(body),
 			"forwarded": r.Header.Get("X-Forwarded-For"), "request": r.Header.Get(RequestIDHeader),
 			"auth": r.Header.Get("Authorization"),
@@ -126,7 +126,7 @@ func TestAStandbyForwardsEveryRoute(t *testing.T) {
 	}
 	defer func() { _ = res.Body.Close() }()
 	var got map[string]string
-	if err := json.NewDecoder(res.Body).Decode(&got); err != nil {
+	if err := json.UnmarshalRead(res.Body, &got); err != nil {
 		t.Fatal(err)
 	}
 	want := map[string]string{"method": "POST", "uri": "/v1/environments/echo?limit=2", "host": "api.example.com",
@@ -208,7 +208,7 @@ func TestAStandbyHoldsUntilAWriterIsPromoted(t *testing.T) {
 		t.Fatalf("the held request was answered %d", res.StatusCode)
 	}
 	var got map[string]string
-	if err := json.NewDecoder(res.Body).Decode(&got); err != nil {
+	if err := json.UnmarshalRead(res.Body, &got); err != nil {
 		t.Fatal(err)
 	}
 	if got["body"] != "held" {
@@ -266,7 +266,7 @@ func assertControlPlaneUnavailable(t *testing.T, res *http.Response) {
 			Details map[string]any `json:"details"`
 		} `json:"error"`
 	}
-	if err := json.NewDecoder(res.Body).Decode(&envelope); err != nil {
+	if err := json.UnmarshalRead(res.Body, &envelope); err != nil {
 		t.Fatal(err)
 	}
 	if res.StatusCode != http.StatusServiceUnavailable || envelope.Error.Code != "control_plane_unavailable" ||

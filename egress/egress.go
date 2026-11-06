@@ -158,9 +158,9 @@ type Entry struct {
 	Header      string   `json:"header,omitempty"`
 	Query       string   `json:"query,omitempty"`
 	Scheme      string   `json:"scheme,omitempty"`
-	Body        bool     `json:"body,omitempty"`
+	Body        bool     `json:"body,omitzero"`
 	Value       string   `json:"value,omitempty"`
-	OAuth       *OAuth   `json:"oauth,omitempty"`
+	OAuth       *OAuth   `json:"oauth,omitzero"`
 }
 
 // DefaultPort is the port a secret's scope covers when it names none, and the

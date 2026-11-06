@@ -7,7 +7,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -288,7 +288,7 @@ func TestIssuerAtStartAndLater(t *testing.T) {
 	t.Run("a discovery document that names another issuer", func(t *testing.T) {
 		var url string
 		s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			_ = json.NewEncoder(w).Encode(map[string]any{"issuer": "https://elsewhere.example.com", "jwks_uri": url + "/jwks"})
+			_ = json.MarshalWrite(w, map[string]any{"issuer": "https://elsewhere.example.com", "jwks_uri": url + "/jwks"})
 		}))
 		defer s.Close()
 		url = s.URL
@@ -302,10 +302,10 @@ func TestIssuerAtStartAndLater(t *testing.T) {
 		var url string
 		mux := http.NewServeMux()
 		mux.HandleFunc("GET /.well-known/openid-configuration", func(w http.ResponseWriter, _ *http.Request) {
-			_ = json.NewEncoder(w).Encode(map[string]any{"issuer": url, "jwks_uri": url + "/jwks"})
+			_ = json.MarshalWrite(w, map[string]any{"issuer": url, "jwks_uri": url + "/jwks"})
 		})
 		mux.HandleFunc("GET /jwks", func(w http.ResponseWriter, _ *http.Request) {
-			_ = json.NewEncoder(w).Encode(map[string]any{"keys": []any{map[string]string{"kty": "OKP", "crv": "Ed25519"}}})
+			_ = json.MarshalWrite(w, map[string]any{"keys": []any{map[string]string{"kty": "OKP", "crv": "Ed25519"}}})
 		})
 		s := httptest.NewServer(mux)
 		defer s.Close()

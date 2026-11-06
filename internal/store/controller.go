@@ -5,7 +5,7 @@ package store
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"sync"
@@ -405,11 +405,11 @@ func (c *Controlled) Acquire(ctx context.Context, name string, ttl time.Duration
 func encode(obj v1.Sandbox) (Object, error) {
 	status := obj.Status
 	obj.Status = v1.SandboxStatus{}
-	data, err := json.Marshal(obj)
+	data, err := json.Marshal(obj, json.Deterministic(true))
 	if err != nil {
 		return Object{}, fmt.Errorf("store: encoding the sandbox: %w", err)
 	}
-	encoded, err := json.Marshal(status)
+	encoded, err := json.Marshal(status, json.Deterministic(true))
 	if err != nil {
 		return Object{}, fmt.Errorf("store: encoding the status: %w", err)
 	}

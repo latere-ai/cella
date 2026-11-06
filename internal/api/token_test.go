@@ -7,7 +7,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
-	"encoding/json"
+	"encoding/json/v2"
 	"strings"
 	"testing"
 	"time"

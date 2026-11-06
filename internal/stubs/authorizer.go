@@ -6,7 +6,8 @@ package stubs
 import (
 	"bytes"
 	"crypto/subtle"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"net/http"
@@ -73,12 +74,12 @@ func newAuthorizer(o AuthorizerOptions) (http.Handler, func(), error) {
 	s := stub.NewHandler(stub.WithToken(token), stub.WithVocabulary(authorizer.Vocabulary()))
 	allow := stub.Rule{Allow: true, TTL: o.TTL}
 	if o.Limits != "" {
-		if err := json.Unmarshal([]byte(o.Limits), &allow.Limits); err != nil {
+		if err := json.Unmarshal([]byte(o.Limits), &allow.Limits, foreignJSON); err != nil {
 			return nil, nil, fmt.Errorf("the limits are not a JSON object: %w", err)
 		}
 	}
 	if o.Filter != "" {
-		if err := json.Unmarshal([]byte(o.Filter), &allow.Filter); err != nil {
+		if err := json.Unmarshal([]byte(o.Filter), &allow.Filter, foreignJSON); err != nil {
 			return nil, nil, fmt.Errorf("the filter is not a JSON object: %w", err)
 		}
 	}
@@ -155,3 +156,11 @@ func denyOneAction(next http.Handler, token string) http.Handler {
 		next.ServeHTTP(w, r)
 	})
 }
+
+// foreignJSON reads the limits and filter an operator typed on a command
+// line: duplicate names, invalid UTF-8 and any letter case are accepted.
+var foreignJSON = json.JoinOptions(
+	jsontext.AllowDuplicateNames(true),
+	jsontext.AllowInvalidUTF8(true),
+	json.MatchCaseInsensitiveNames(true),
+)

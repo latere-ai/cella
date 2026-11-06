@@ -5,7 +5,7 @@ package stubs
 
 import (
 	"crypto/subtle"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"net/http"
 	"strings"
@@ -20,7 +20,7 @@ const maxBody = 1 << 20
 func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	if err := json.NewEncoder(w).Encode(v); err != nil {
+	if err := json.MarshalWrite(w, v); err != nil {
 		// The status is written, so the answer is already on the wire and
 		// the only thing left is not to hide the failure.
 		_, _ = fmt.Fprintf(w, "\n%v\n", err)

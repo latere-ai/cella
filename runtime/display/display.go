@@ -62,7 +62,7 @@ const (
 // zero Scale is 1.0, so the zero value is one full-size PNG.
 type ScreenshotRequest struct {
 	Format string  `json:"format,omitempty"`
-	Scale  float64 `json:"scale,omitempty"`
+	Scale  float64 `json:"scale,omitzero"`
 }
 
 // Scale bounds. Below the minimum a frame carries no readable text, and above
@@ -112,17 +112,17 @@ type Frame struct {
 // 023's: an absent field decodes to nil.
 type InputEvent struct {
 	Type      string   `json:"type"`
-	X         *int     `json:"x,omitempty"`
-	Y         *int     `json:"y,omitempty"`
-	ToX       *int     `json:"toX,omitempty"`
-	ToY       *int     `json:"toY,omitempty"`
+	X         *int     `json:"x,omitzero"`
+	Y         *int     `json:"y,omitzero"`
+	ToX       *int     `json:"toX,omitzero"`
+	ToY       *int     `json:"toY,omitzero"`
 	Button    string   `json:"button,omitempty"`
 	Modifiers []string `json:"modifiers,omitempty"`
 	Key       string   `json:"key,omitempty"`
 	Text      string   `json:"text,omitempty"`
 	Direction string   `json:"direction,omitempty"`
-	Amount    int      `json:"amount,omitempty"`
-	Ms        int      `json:"ms,omitempty"`
+	Amount    int      `json:"amount,omitzero"`
+	Ms        int      `json:"ms,omitzero"`
 }
 
 // The event types of spec 023's table.

@@ -9,7 +9,7 @@ import (
 	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/json"
+	"encoding/json/v2"
 	"math/big"
 	"net/http/httptest"
 	"strings"
@@ -366,4 +366,23 @@ func decodeSegment(t *testing.T, seg string) map[string]any {
 		t.Fatal(err)
 	}
 	return out
+}
+
+// TestTokenHeaderBytesAreFixed: the header is signed with the payload, so its
+// members are written in one order.
+func TestTokenHeaderBytesAreFixed(t *testing.T) {
+	s := newSigner(t, key(t, 1))
+	tok, err := s.MintWorkload(auth.Workload{Sandbox: "sbx_01J9", Environment: "env_01J9"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	segment, _, _ := strings.Cut(tok.Value, ".")
+	raw, err := base64.RawURLEncoding.DecodeString(segment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"alg":"RS256","kid":"` + auth.Thumbprint(&key(t, 1).PublicKey) + `","typ":"JWT"}`
+	if string(raw) != want {
+		t.Errorf("the header is %s, want %s", raw, want)
+	}
 }

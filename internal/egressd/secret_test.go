@@ -5,7 +5,7 @@ package egressd
 
 import (
 	"crypto/x509"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"net/http"
@@ -38,7 +38,7 @@ func upstreamEcho(t *testing.T) (*httptest.Server, *x509.CertPool) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(seen{
+		_ = json.MarshalWrite(w, seen{
 			Authorization: r.Header.Get("Authorization"),
 			APIKey:        r.Header.Get("X-Api-Key"),
 			Query:         r.URL.RawQuery,

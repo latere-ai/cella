@@ -5,7 +5,7 @@ package conformance
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"net/http"
 	"slices"

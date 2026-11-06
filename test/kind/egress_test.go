@@ -6,7 +6,7 @@
 package kind_test
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"net"
 	"net/http"
 	"os"

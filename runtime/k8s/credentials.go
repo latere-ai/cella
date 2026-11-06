@@ -7,7 +7,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"maps"
@@ -150,7 +150,7 @@ func encodeEnv(env map[string]string) ([]byte, error) {
 	if env == nil {
 		env = map[string]string{}
 	}
-	encoded, err := json.Marshal(env)
+	encoded, err := json.Marshal(env, storedJSON)
 	if err != nil {
 		return nil, fmt.Errorf("encoding the environment: %w", err)
 	}
@@ -170,7 +170,7 @@ func strip(s driver.CreateSpec) (driver.CreateSpec, credentials) {
 // credentials. Every write of the annotation goes through it.
 func encodeRecord(s driver.CreateSpec) (string, error) {
 	stripped, _ := strip(s)
-	encoded, err := json.Marshal(stripped)
+	encoded, err := json.Marshal(stripped, storedJSON)
 	if err != nil {
 		return "", fmt.Errorf("encoding the record: %w", err)
 	}

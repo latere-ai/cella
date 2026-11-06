@@ -7,7 +7,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"maps"
@@ -296,11 +297,11 @@ func (x *exchange) paths() []string {
 // the status fields the cases read. The spec stays raw, because a case
 // asserts what the server returned and not what this module's types hold.
 type object struct {
-	APIVersion string          `json:"apiVersion"`
-	Kind       string          `json:"kind"`
-	Metadata   objectMetadata  `json:"metadata"`
-	Spec       json.RawMessage `json:"spec"`
-	Status     objectStatus    `json:"status"`
+	APIVersion string         `json:"apiVersion"`
+	Kind       string         `json:"kind"`
+	Metadata   objectMetadata `json:"metadata"`
+	Spec       jsontext.Value `json:"spec"`
+	Status     objectStatus   `json:"status"`
 }
 
 type objectMetadata struct {

@@ -5,7 +5,7 @@ package api
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"log/slog"
 	"net/http/httptest"
 	"slices"
@@ -149,7 +149,9 @@ func (r *recorded) records(id string) []events.Record {
 func TestOperationsAreRecorded(t *testing.T) {
 	f := setupRecorded(t)
 	var obj struct {
-		Status struct{ ID string } `json:"status"`
+		Status struct {
+			ID string `json:"id"`
+		} `json:"status"`
 	}
 	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice, createBody, 201), &obj); err != nil {
 		t.Fatal(err)
@@ -250,7 +252,9 @@ func TestNoContentInOperationRecords(t *testing.T) {
 	created := strings.Replace(createBody, `"spec":{}`,
 		`"spec":{"env":{"API_TOKEN":"`+secret+`"}}`, 1)
 	var obj struct {
-		Status struct{ ID string } `json:"status"`
+		Status struct {
+			ID string `json:"id"`
+		} `json:"status"`
 	}
 	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice, created, 201), &obj); err != nil {
 		t.Fatalf("%v; body was %s", err, created)
@@ -284,7 +288,9 @@ func TestNoContentInOperationRecords(t *testing.T) {
 func TestRecordsAreOffWithoutAnEmitter(t *testing.T) {
 	f := setup(t, nil)
 	var obj struct {
-		Status struct{ ID string } `json:"status"`
+		Status struct {
+			ID string `json:"id"`
+		} `json:"status"`
 	}
 	if err := json.Unmarshal(f.request("POST", "/v1/sandboxes?wait=1", f.alice, createBody, 201), &obj); err != nil {
 		t.Fatal(err)

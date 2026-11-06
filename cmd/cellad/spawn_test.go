@@ -4,7 +4,7 @@
 package main
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"io"
 	"net/http"
 	"slices"
@@ -127,17 +127,23 @@ type sandboxRead struct {
 		Name string `json:"name"`
 	} `json:"metadata"`
 	Status struct {
-		ID, Owner, Parent, Root, Mesh string
-		Spawn                         struct {
-			Budget, Used, Depth int
+		ID     string `json:"id"`
+		Owner  string `json:"owner"`
+		Parent string `json:"parent"`
+		Root   string `json:"root"`
+		Mesh   string `json:"mesh"`
+		Spawn  struct {
+			Budget int `json:"budget"`
+			Used   int `json:"used"`
+			Depth  int `json:"depth"`
 		} `json:"spawn"`
 	} `json:"status"`
 }
 
 // refusal is the error envelope of design 008 as this case reads it.
 type refusal struct {
-	Code  string
-	Paths []string
+	Code  string   `json:"code"`
+	Paths []string `json:"paths"`
 }
 
 // spawnRoot applies a root with an allowlist boundary and spawn rights: two

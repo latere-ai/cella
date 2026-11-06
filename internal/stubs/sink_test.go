@@ -4,7 +4,7 @@
 package stubs_test
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"net/http"
 	"testing"
 	"time"
@@ -100,7 +100,7 @@ func TestTheSinkRefusesWhatItCannotVerify(t *testing.T) {
 			t.Errorf("a delivery with %s answered %d, want 401", name, code)
 		}
 	}
-	if _, read := get(t, url+"/events"); string(read) != "[]\n" {
+	if _, read := get(t, url+"/events"); string(read) != "[]" {
 		t.Errorf("a record nobody could verify was stored: %s", read)
 	}
 	// The window is what the refusals above are measured against, so the

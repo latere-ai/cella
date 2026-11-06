@@ -9,7 +9,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"slices"
@@ -238,7 +238,7 @@ func Consent(t Terms, facts []Fact) string {
 	b, err := json.Marshal(struct {
 		Terms Terms  `json:"terms"`
 		Facts []Fact `json:"facts"`
-	}{t, facts})
+	}{t, facts}, journalJSON)
 	if err != nil {
 		// Terms and facts are strings, booleans and slices of them, which
 		// always encode.

@@ -7,7 +7,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -80,11 +80,11 @@ type Entry struct {
 	To      string   `json:"to,omitempty"`
 	// Host and Port are a refused connection's, or an allowed host's.
 	Host string `json:"host,omitempty"`
-	Port int    `json:"port,omitempty"`
+	Port int    `json:"port,omitzero"`
 	// Outcome is ok, refused or failed, and Reason why.
 	Outcome  string `json:"outcome,omitempty"`
 	Reason   string `json:"reason,omitempty"`
-	ExitCode *int   `json:"exit_code,omitempty"`
+	ExitCode *int   `json:"exit_code,omitzero"`
 	// Answer and By are an approval's: allow, deny or remember and the
 	// client that gave it, or, with no one asked, remembered,
 	// session_start_allow or no_one_here.
@@ -197,7 +197,7 @@ func (a *Activity) open() error {
 // Write appends one entry, rotating first when the line would carry the file
 // past the limit.
 func (a *Activity) Write(e Entry) error {
-	line, err := json.Marshal(e)
+	line, err := json.Marshal(e, journalJSON)
 	if err != nil {
 		return err
 	}

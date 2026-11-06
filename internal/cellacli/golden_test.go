@@ -4,7 +4,8 @@
 package cellacli_test
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"flag"
 	"net/http"
 	"os"
@@ -120,8 +121,8 @@ func TestAListThatSpannedPagesIsOneEnvelope(t *testing.T) {
 		t.Fatalf("exit %d, stderr %q", got.code, got.stderr)
 	}
 	var envelope struct {
-		Items []json.RawMessage `json:"items"`
-		Next  string            `json:"next"`
+		Items []jsontext.Value `json:"items"`
+		Next  string           `json:"next"`
 	}
 	if err := json.Unmarshal([]byte(got.stdout), &envelope); err != nil {
 		t.Fatalf("the output is no envelope: %v\n%s", err, got.stdout)

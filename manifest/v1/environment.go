@@ -4,7 +4,8 @@
 package v1
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"time"
 )
@@ -64,7 +65,7 @@ type EnvironmentSpec struct {
 // WorkersSpec is the limit on an environment's live workers. Max zero sets
 // no limit.
 type WorkersSpec struct {
-	Max int `json:"max,omitempty"`
+	Max int `json:"max,omitzero"`
 }
 
 // The two modes of an environment. Inprocess is the driver cellad opened for
@@ -90,7 +91,7 @@ type Capacity struct {
 	CPU       Quantity `json:"cpu,omitempty"`
 	Memory    Quantity `json:"memory,omitempty"`
 	Disk      Quantity `json:"disk,omitempty"`
-	Sandboxes int      `json:"sandboxes,omitempty"`
+	Sandboxes int      `json:"sandboxes,omitzero"`
 	// Auto says the driver reads the ceiling from the cluster it drives
 	// rather than from this object. It is not a field of the object form: it
 	// is the word auto written in the field's place.
@@ -114,12 +115,14 @@ func (c Capacity) MarshalJSON() ([]byte, error) {
 	return json.Marshal(plain(c))
 }
 
-// UnmarshalJSON accepts the object or the word auto. Any other string is an
-// error the manifest package turns into invalid_field at spec.capacity.
-func (c *Capacity) UnmarshalJSON(data []byte) error {
-	if len(data) > 0 && data[0] == '"' {
+// UnmarshalJSONFrom accepts the object or the word auto. Any other string is
+// an error the manifest package turns into invalid_field at spec.capacity. It
+// reads through the caller's decoder so the caller's options apply, and the
+// object form takes members the schema does not know as it always has.
+func (c *Capacity) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	if dec.PeekKind() == '"' {
 		var word string
-		if err := json.Unmarshal(data, &word); err != nil {
+		if err := json.UnmarshalDecode(dec, &word); err != nil {
 			return err
 		}
 		if word != CapacityAuto {
@@ -130,7 +133,7 @@ func (c *Capacity) UnmarshalJSON(data []byte) error {
 	}
 	type plain Capacity
 	var p plain
-	if err := json.Unmarshal(data, &p); err != nil {
+	if err := json.UnmarshalDecode(dec, &p, json.RejectUnknownMembers(false)); err != nil {
 		return err
 	}
 	*c = Capacity(p)
@@ -181,10 +184,10 @@ const (
 // for nobody, each turned into a caller's sandbox by one adoption. Size zero
 // is no pool, which is every environment until an operator asks for one.
 type PoolSpec struct {
-	Size      int       `json:"size,omitempty"`
+	Size      int       `json:"size,omitzero"`
 	Image     string    `json:"image,omitempty"`
 	Resources Resources `json:"resources,omitzero"`
-	Display   *Display  `json:"display,omitempty"`
+	Display   *Display  `json:"display,omitzero"`
 }
 
 // The phases an environment passes through. Ready places, reaps and watches;
@@ -233,19 +236,19 @@ type EnvironmentStatus struct {
 	// and not opened theirs yet, Gateways how many gateways hold a stream
 	// open, and LastHeartbeat when the most recent worker was last heard
 	// from.
-	Workers int `json:"workers,omitempty"`
+	Workers int `json:"workers,omitzero"`
 	// Hosts is one entry per live worker whose driver reports the machine
 	// it runs on: its operating system, architecture, grants and network
 	// (spec 082). A manifest's workspace.host and egress resolve against
 	// what every entry allows.
 	Hosts         []HostStatus `json:"hosts,omitempty"`
-	Gateways      int          `json:"gateways,omitempty"`
+	Gateways      int          `json:"gateways,omitzero"`
 	LastHeartbeat time.Time    `json:"lastHeartbeat,omitzero"`
 	// Used is what the environment's sandboxes hold of its capacity.
 	Used Capacity `json:"used,omitzero"`
 	// Version is the store row's version, which design 008's ETag carries
 	// and an If-Match is compared against.
-	Version   int64     `json:"version,omitempty"`
+	Version   int64     `json:"version,omitzero"`
 	CreatedAt time.Time `json:"createdAt,omitzero"`
 	UpdatedAt time.Time `json:"updatedAt,omitzero"`
 }

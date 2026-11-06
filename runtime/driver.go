@@ -6,6 +6,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -69,9 +70,38 @@ type Capabilities = v1.Capabilities
 type Isolation = v1.Isolation
 
 type Lifecycle struct {
-	TTL        time.Duration `json:"ttl,omitempty"`
-	AutoStop   time.Duration `json:"autoStop,omitempty"`
-	AutoDelete time.Duration `json:"autoDelete,omitempty"`
+	TTL        time.Duration `json:"ttl,omitzero"`
+	AutoStop   time.Duration `json:"autoStop,omitzero"`
+	AutoDelete time.Duration `json:"autoDelete,omitzero"`
+}
+
+// MarshalJSON writes the durations as integer nanoseconds, the form every
+// client of the wire reads.
+func (l Lifecycle) MarshalJSON() ([]byte, error) {
+	type alias Lifecycle
+	return json.Marshal(struct {
+		alias
+		TTL        int64 `json:"ttl,omitzero"`
+		AutoStop   int64 `json:"autoStop,omitzero"`
+		AutoDelete int64 `json:"autoDelete,omitzero"`
+	}{alias(l), int64(l.TTL), int64(l.AutoStop), int64(l.AutoDelete)})
+}
+
+// UnmarshalJSON reads the durations from integer nanoseconds.
+func (l *Lifecycle) UnmarshalJSON(b []byte) error {
+	type alias Lifecycle
+	var w struct {
+		*alias
+		TTL        int64 `json:"ttl"`
+		AutoStop   int64 `json:"autoStop"`
+		AutoDelete int64 `json:"autoDelete"`
+	}
+	w.alias = (*alias)(l)
+	if err := json.Unmarshal(b, &w); err != nil {
+		return err
+	}
+	l.TTL, l.AutoStop, l.AutoDelete = time.Duration(w.TTL), time.Duration(w.AutoStop), time.Duration(w.AutoDelete)
+	return nil
 }
 
 // Resources is the compute a sandbox is granted, in Kubernetes quantity
@@ -220,7 +250,7 @@ type CreateSpec struct {
 	// Display is the virtual desktop the sandbox asks for, nil for a sandbox
 	// with no screen. The geometry is fixed at create: the X server sizes its
 	// frame buffer once and the manifest field is immutable (spec 003).
-	Display *Geometry `json:"display,omitempty"`
+	Display *Geometry `json:"display,omitzero"`
 	// Ports are what the manifest declares runs inside the sandbox. The
 	// driver records them, probes them at Inspect, and reaches nothing a
 	// caller named that is not in this list.
@@ -243,7 +273,7 @@ type CreateSpec struct {
 	// Running. An Update carrying an
 	// Adoption turns it into one caller's sandbox (spec 020). A driver that
 	// declares no Pool capability refuses it with ErrUnsupported.
-	Prewarm bool `json:"prewarm,omitempty"`
+	Prewarm bool `json:"prewarm,omitzero"`
 }
 
 // Mesh is one mesh as a driver receives it: the control plane's id for it,
@@ -298,7 +328,7 @@ type State struct {
 	Owner     string            `json:"owner"`
 	Phase     string            `json:"phase"`
 	Reason    string            `json:"reason,omitempty"`
-	ExitCode  *int              `json:"exitCode,omitempty"`
+	ExitCode  *int              `json:"exitCode,omitzero"`
 	Isolation string            `json:"isolation"`
 	Labels    map[string]string `json:"labels,omitempty"`
 	// Ports is one entry per declared port with the driver's own probe at
@@ -313,11 +343,11 @@ type State struct {
 	StoppedAt      time.Time      `json:"stoppedAt,omitzero"`
 	LastActivityAt time.Time      `json:"lastActivityAt"`
 	ExpiresAt      time.Time      `json:"expiresAt,omitzero"`
-	AutoStop       time.Duration  `json:"autoStop,omitempty"`
-	AutoDelete     time.Duration  `json:"autoDelete,omitempty"`
+	AutoStop       time.Duration  `json:"autoStop,omitzero"`
+	AutoDelete     time.Duration  `json:"autoDelete,omitzero"`
 	// Pool reports a prewarmed entry: a sandbox the control plane made for
 	// nobody, which no caller owns until it is adopted (spec 020).
-	Pool bool `json:"pool,omitempty"`
+	Pool bool `json:"pool,omitzero"`
 	// MeshID is the mesh this sandbox is a member of and Parent the sandbox
 	// that spawned it, both as the driver stamped them at create (spec 022).
 	MeshID string `json:"meshID,omitempty"`
@@ -326,11 +356,39 @@ type State struct {
 	// it, and Resize a size it was asked to hold and does not yet (spec
 	// 078). A driver that reports no size leaves both empty.
 	Resources Resources `json:"resources,omitzero"`
-	Resize    *Resize   `json:"resize,omitempty"`
+	Resize    *Resize   `json:"resize,omitzero"`
 	// Paths are the host paths of the sandbox's scratch directories, which
 	// a driver that cannot remap paths reports (spec 081).
-	Paths *v1.SandboxPaths `json:"paths,omitempty"`
+	Paths *v1.SandboxPaths `json:"paths,omitzero"`
 }
+
+// MarshalJSON writes the two durations as integer nanoseconds, the form every
+// client of the wire reads.
+func (s State) MarshalJSON() ([]byte, error) {
+	type alias State
+	return json.Marshal(struct {
+		alias
+		AutoStop   int64 `json:"autoStop,omitzero"`
+		AutoDelete int64 `json:"autoDelete,omitzero"`
+	}{alias(s), int64(s.AutoStop), int64(s.AutoDelete)})
+}
+
+// UnmarshalJSON reads the two durations from integer nanoseconds.
+func (s *State) UnmarshalJSON(b []byte) error {
+	type alias State
+	var w struct {
+		*alias
+		AutoStop   int64 `json:"autoStop"`
+		AutoDelete int64 `json:"autoDelete"`
+	}
+	w.alias = (*alias)(s)
+	if err := json.Unmarshal(b, &w); err != nil {
+		return err
+	}
+	s.AutoStop, s.AutoDelete = time.Duration(w.AutoStop), time.Duration(w.AutoDelete)
+	return nil
+}
+
 type Filter struct {
 	Owner, Phase string
 	IDs          []string

@@ -6,7 +6,7 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -49,7 +49,7 @@ func controlPlane(t *testing.T) (string, *remote.Hub, *remote.Driver) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/environments/{id}/workers", func(w http.ResponseWriter, r *http.Request) {
 		var registration remote.Registration
-		if err := json.NewDecoder(r.Body).Decode(&registration); err != nil {
+		if err := json.UnmarshalRead(r.Body, &registration); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -60,7 +60,7 @@ func controlPlane(t *testing.T) (string, *remote.Hub, *remote.Driver) {
 		}
 		registered.Environment = "env_example"
 		w.WriteHeader(http.StatusCreated)
-		_ = json.NewEncoder(w).Encode(registered)
+		_ = json.MarshalWrite(w, registered)
 	})
 	mux.HandleFunc("GET /v1/environments/{id}/operations", func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)

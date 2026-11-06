@@ -5,7 +5,7 @@ package controller
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"maps"
@@ -327,7 +327,7 @@ func (s *fileStore) Save(objects map[string]v1.Sandbox) error {
 // The caller holds s.mu.
 func (s *fileStore) write() error {
 	b, err := json.Marshal(snapshot{Version: 1, Objects: s.objects, Secrets: s.secrets,
-		Ledger: s.ledger, Environments: s.environments, Volumes: s.volumes})
+		Ledger: s.ledger, Environments: s.environments, Volumes: s.volumes}, json.Deterministic(true))
 	if err != nil {
 		return err
 	}

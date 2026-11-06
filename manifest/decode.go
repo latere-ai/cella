@@ -5,7 +5,8 @@ package manifest
 
 import (
 	"bytes"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"io"
 	"maps"
@@ -44,6 +45,17 @@ const (
 // there rather than reading a document member as a Go field.
 var unmarshaler = reflect.TypeFor[json.Unmarshaler]()
 
+// selfDecoder is the same interface in its streaming form.
+var selfDecoder = reflect.TypeFor[json.UnmarshalerFrom]()
+
+// documentJSON reads a manifest a person may have written by hand. Duplicate
+// members and invalid UTF-8 are accepted, the last duplicate winning, as
+// manifests have always been read.
+var documentJSON = json.JoinOptions(
+	jsontext.AllowDuplicateNames(true),
+	jsontext.AllowInvalidUTF8(true),
+)
+
 // decode is the one decoder design 003 gives every kind: the content types it
 // names, exactly one document, the version before the kind before any field,
 // unknown fields refused with their path, and the typed object last.
@@ -57,13 +69,12 @@ func decode(body []byte, contentType, kind string, into any) error {
 		return err
 	}
 	var tree map[string]any
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.UseNumber()
-	if err := dec.Decode(&tree); err != nil {
+	dec := jsontext.NewDecoder(bytes.NewReader(raw), documentJSON)
+	if err := json.UnmarshalDecode(dec, &tree); err != nil {
 		return fail("bad_request", err.Error())
 	}
 	var tail any
-	if err := dec.Decode(&tail); !errors.Is(err, io.EOF) {
+	if err := json.UnmarshalDecode(dec, &tail); !errors.Is(err, io.EOF) {
 		return fail("multi_document", "expected exactly one manifest")
 	}
 	if version, _ := tree["apiVersion"].(string); version != v1.APIVersion {
@@ -75,14 +86,12 @@ func decode(body []byte, contentType, kind string, into any) error {
 	if paths := unknownFields(tree, reflect.TypeOf(into), ""); len(paths) > 0 {
 		return failPaths("unknown_field", "the schema knows no field "+paths[0], paths)
 	}
-	strict := json.NewDecoder(bytes.NewReader(raw))
-	strict.DisallowUnknownFields()
-	if err := strict.Decode(into); err != nil {
+	if err := json.Unmarshal(raw, into, documentJSON, json.RejectUnknownMembers(true)); err != nil {
 		// The walk above names every member the schema does not know, so
 		// what reaches here is a value of the wrong shape. The unknown-field
 		// arm remains because the walk stops at a type that decodes itself,
 		// and that type's own decoder may still refuse a member.
-		if strings.Contains(err.Error(), "unknown field") {
+		if strings.Contains(err.Error(), "unknown object member name") {
 			return fail("unknown_field", err.Error())
 		}
 		return fail("bad_request", err.Error())
@@ -254,7 +263,8 @@ func unknownFields(value any, target reflect.Type, prefix string) []string {
 	for target.Kind() == reflect.Pointer {
 		target = target.Elem()
 	}
-	if target.Implements(unmarshaler) || reflect.PointerTo(target).Implements(unmarshaler) {
+	if target.Implements(unmarshaler) || reflect.PointerTo(target).Implements(unmarshaler) ||
+		target.Implements(selfDecoder) || reflect.PointerTo(target).Implements(selfDecoder) {
 		return nil
 	}
 	switch target.Kind() {

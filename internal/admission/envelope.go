@@ -4,7 +4,8 @@
 package admission
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 
 	"latere.ai/x/cella/manifest"
 	v1 "latere.ai/x/cella/manifest/v1"
@@ -38,32 +39,32 @@ type request struct {
 	Claims map[string]any `json:"claims"`
 	// Workload is the calling sandbox's status when a workload applies
 	// through its own token, and null otherwise.
-	Workload json.RawMessage `json:"workload"`
+	Workload jsontext.Value `json:"workload"`
 	// Action is create or update.
 	Action string `json:"action"`
 	// Existing is the current object on an update and null on a create.
-	Existing json.RawMessage `json:"existing"`
+	Existing jsontext.Value `json:"existing"`
 	// Parent is the spawning sandbox where this apply is a spawn. It is
 	// null until the spawn of spec 022 exists.
-	Parent json.RawMessage `json:"parent"`
+	Parent jsontext.Value `json:"parent"`
 	// Environment is the environment the manifest names, as the summary
 	// spec 007 states rather than the whole object.
 	Environment *environmentRef `json:"environment"`
 	// Set names the replica index of a SandboxSet apply. It is null until
 	// the sets of spec 020 exist.
-	Set json.RawMessage `json:"set"`
+	Set jsontext.Value `json:"set"`
 	// Volume is the Volume whose image source this call admits, and null
 	// on every Sandbox apply. The manifest of such a call is a Sandbox
 	// that names the volume's environment, its labels and the image and
 	// nothing else, so an endpoint that knows nothing of volumes decides
 	// on the image as it would for a sandbox, and one that does reads
 	// this member to tell the two apart (spec 007).
-	Volume json.RawMessage `json:"volume"`
+	Volume jsontext.Value `json:"volume"`
 	// Manifest is the defaulted object, the output of stage 2. Stage 1
 	// refuses an unknown field before admission runs, so the typed object
 	// is the whole of what the caller wrote and marshaling it loses
 	// nothing an endpoint could have read.
-	Manifest json.RawMessage `json:"manifest"`
+	Manifest jsontext.Value `json:"manifest"`
 	// Ref carries spec 008's X-Request-Id, which ties a refusal at the
 	// endpoint to the apply that drew it. The peer address and the user
 	// agent are the authorizer's envelope and not this one.
@@ -89,10 +90,10 @@ type environmentRef struct {
 // no allow is told apart from one that denies: the first is no decision
 // and the second is a refusal, and spec 007 answers them differently.
 type response struct {
-	Allow    *bool           `json:"allow"`
-	Manifest json.RawMessage `json:"manifest"`
-	Reason   string          `json:"reason"`
-	Warnings []string        `json:"warnings"`
+	Allow    *bool          `json:"allow"`
+	Manifest jsontext.Value `json:"manifest"`
+	Reason   string         `json:"reason"`
+	Warnings []string       `json:"warnings"`
 }
 
 // envelopeOf renders one apply as the body spec 007 states.
@@ -109,29 +110,29 @@ func envelopeOf(in *v1.Sandbox, req manifest.AdmitRequest) ([]byte, error) {
 	}
 	body.Subject, body.Issuer, body.Sub = req.Actor.Subject, req.Actor.Issuer, req.Actor.Sub
 	var err error
-	if body.Manifest, err = json.Marshal(in); err != nil {
+	if body.Manifest, err = json.Marshal(in, outboundJSON); err != nil {
 		return nil, err
 	}
 	if req.Workload != nil {
-		if body.Workload, err = json.Marshal(exported(*req.Workload)); err != nil {
+		if body.Workload, err = json.Marshal(exported(*req.Workload), outboundJSON); err != nil {
 			return nil, err
 		}
 	}
 	if req.Volume != nil {
 		volume := *req.Volume
 		volume.Status = v1.VolumeStatus{}
-		if body.Volume, err = json.Marshal(volume); err != nil {
+		if body.Volume, err = json.Marshal(volume, outboundJSON); err != nil {
 			return nil, err
 		}
 	}
 	if req.Existing != nil {
 		existing := *req.Existing
 		existing.Status = exported(existing.Status)
-		if body.Existing, err = json.Marshal(existing); err != nil {
+		if body.Existing, err = json.Marshal(existing, outboundJSON); err != nil {
 			return nil, err
 		}
 	}
-	return json.Marshal(body)
+	return json.Marshal(body, outboundJSON)
 }
 
 // exported drops the members of a status that are the control plane's own:
@@ -165,3 +166,22 @@ func summaryOf(env *v1.Environment) *environmentRef {
 		Capabilities: env.Status.Capabilities,
 	}
 }
+
+// outboundJSON renders the envelope for an endpoint this service does not
+// own: nil slices and maps stay null, members come in a fixed order so a
+// retry sends the same bytes, and a string from a manifest that is not valid
+// UTF-8 is replaced rather than failing the apply.
+var outboundJSON = json.JoinOptions(
+	json.Deterministic(true),
+	json.FormatNilSliceAsNull(true),
+	json.FormatNilMapAsNull(true),
+	jsontext.AllowInvalidUTF8(true),
+)
+
+// foreignJSON reads what an admission endpoint answers: duplicate names,
+// invalid UTF-8 and any letter case in a member name are accepted.
+var foreignJSON = json.JoinOptions(
+	jsontext.AllowDuplicateNames(true),
+	jsontext.AllowInvalidUTF8(true),
+	json.MatchCaseInsensitiveNames(true),
+)

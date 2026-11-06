@@ -4,14 +4,13 @@
 package api
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"io"
 	"io/fs"
 	"mime"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"latere.ai/x/cella/authorizer"
@@ -350,15 +349,7 @@ func (h *handler) decodeBody(w http.ResponseWriter, r *http.Request, into any) e
 	if err != nil {
 		return err
 	}
-	dec := json.NewDecoder(strings.NewReader(string(body)))
-	dec.DisallowUnknownFields()
-	if err = dec.Decode(into); err == nil {
-		var tail any
-		if dec.Decode(&tail) != io.EOF {
-			err = errors.New("expected one JSON object")
-		}
-	}
-	if err != nil {
+	if err = json.Unmarshal(body, into, json.RejectUnknownMembers(true)); err != nil {
 		return &manifest.Error{Code: "invalid_field", Detail: err.Error()}
 	}
 	return nil

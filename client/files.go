@@ -5,7 +5,7 @@ package client
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"net/http"
@@ -85,7 +85,7 @@ func (c *Client) FileRemove(ctx context.Context, ref, path string) error {
 
 // FileMkdir makes a directory and the missing parents.
 func (c *Client) FileMkdir(ctx context.Context, ref, path string) error {
-	body, err := json.Marshal(map[string]string{"path": path})
+	body, err := json.Marshal(map[string]string{"path": path}, requestJSON)
 	if err != nil {
 		return err
 	}
@@ -95,7 +95,7 @@ func (c *Client) FileMkdir(ctx context.Context, ref, path string) error {
 
 // FileMove renames one path onto another, both inside the workspace.
 func (c *Client) FileMove(ctx context.Context, ref, from, to string) error {
-	body, err := json.Marshal(map[string]string{"from": from, "to": to})
+	body, err := json.Marshal(map[string]string{"from": from, "to": to}, requestJSON)
 	if err != nil {
 		return err
 	}

@@ -4,7 +4,7 @@
 package egress
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"slices"
 	"strings"

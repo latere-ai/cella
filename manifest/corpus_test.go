@@ -5,7 +5,8 @@ package manifest
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"flag"
 	"go/ast"
@@ -294,9 +295,9 @@ func TestGoldenCorpus(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Resolve: %v", err)
 			}
-			encoded, err := json.MarshalIndent(corpusResolved{
+			encoded, err := json.Marshal(corpusResolved{
 				Sandbox: resolved.Sandbox, Secrets: resolved.Secrets, Volumes: resolved.Volumes, Warnings: resolved.Warnings,
-			}, "", "  ")
+			}, jsontext.WithIndent("  "), json.Deterministic(true))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -320,7 +321,7 @@ func TestGoldenCorpus(t *testing.T) {
 			} else if !errors.As(err, &known) {
 				t.Fatalf("%s failed with %v, which is not a contract error", input, err)
 			}
-			encoded, err := json.MarshalIndent(corpusRefusal{Code: known.Code, Path: known.Path, Paths: known.Paths}, "", "  ")
+			encoded, err := json.Marshal(corpusRefusal{Code: known.Code, Path: known.Path, Paths: known.Paths}, jsontext.WithIndent("  "), json.Deterministic(true))
 			if err != nil {
 				t.Fatal(err)
 			}

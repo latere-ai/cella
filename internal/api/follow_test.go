@@ -6,7 +6,7 @@ package api
 import (
 	"bufio"
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"io"
 	"net/http"
@@ -420,13 +420,13 @@ func TestFollowedFeedOfEveryObject(t *testing.T) {
 func TestExpiryReadsEveryNumberForm(t *testing.T) {
 	at := time.Unix(1790000000, 0)
 	for name, claim := range map[string]any{
-		"float": float64(at.Unix()), "integer": at.Unix(), "number": json.Number(strconv.FormatInt(at.Unix(), 10)),
+		"float": float64(at.Unix()), "integer": at.Unix(),
 	} {
 		if got, ok := expiry(callerWith(claim)); !ok || !got.Equal(at) {
 			t.Errorf("the %s form read as %s, %v", name, got, ok)
 		}
 	}
-	for name, claim := range map[string]any{"absent": nil, "text": "soon", "bad number": json.Number("x")} {
+	for name, claim := range map[string]any{"absent": nil, "text": "soon"} {
 		if _, ok := expiry(callerWith(claim)); ok {
 			t.Errorf("the %s form set a deadline", name)
 		}

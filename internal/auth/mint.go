@@ -9,7 +9,7 @@ import (
 	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"math/big"
@@ -109,7 +109,7 @@ func NewSigner(o SignerOptions) (*Signer, error) {
 			N: b64(k.N.Bytes()), E: b64(big.NewInt(int64(k.E)).Bytes()),
 		})
 	}
-	raw, err := json.Marshal(set)
+	raw, err := json.Marshal(set, json.Deterministic(true))
 	if err != nil {
 		return nil, err
 	}
@@ -181,7 +181,7 @@ type minted struct {
 	Iat         int64    `json:"iat"`
 	JTI         string   `json:"jti"`
 	Environment string   `json:"environment,omitempty"`
-	Spawn       *Spawn   `json:"spawn,omitempty"`
+	Spawn       *Spawn   `json:"spawn,omitzero"`
 }
 
 // mint signs one payload with the first configured key.
@@ -193,11 +193,11 @@ func (s *Signer) mint(payload minted, now, exp time.Time) (Token, error) {
 	payload.Exp = exp.Unix()
 	payload.JTI = jti
 
-	header, err := json.Marshal(map[string]string{"alg": "RS256", "typ": "JWT", "kid": s.KeyID()})
+	header, err := json.Marshal(map[string]string{"alg": "RS256", "typ": "JWT", "kid": s.KeyID()}, json.Deterministic(true))
 	if err != nil {
 		return Token{}, err
 	}
-	body, err := json.Marshal(payload)
+	body, err := json.Marshal(payload, json.Deterministic(true))
 	if err != nil {
 		return Token{}, err
 	}

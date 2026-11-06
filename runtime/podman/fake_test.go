@@ -8,7 +8,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/binary"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"io"
 	"maps"
@@ -325,20 +325,20 @@ func (f *fake) takeFault(r *http.Request) int {
 
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(v)
+	_ = json.MarshalWrite(w, v)
 }
 
 func refuse(w http.ResponseWriter, status int, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]any{"message": message, "response": status})
+	_ = json.MarshalWrite(w, map[string]any{"message": message, "response": status})
 }
 
 // ---- volumes ----
 
 func (f *fake) createVolume(w http.ResponseWriter, r *http.Request) {
 	var in volumeCreate
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+	if err := json.UnmarshalRead(r.Body, &in); err != nil {
 		refuse(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -430,7 +430,7 @@ func matches(labels, want map[string]string) bool {
 
 func (f *fake) createContainer(w http.ResponseWriter, r *http.Request) {
 	var sg specGenerator
-	if err := json.NewDecoder(r.Body).Decode(&sg); err != nil {
+	if err := json.UnmarshalRead(r.Body, &sg); err != nil {
 		refuse(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -618,7 +618,7 @@ func (f *fake) image(w http.ResponseWriter, r *http.Request, rest string) {
 
 func (f *fake) createExec(w http.ResponseWriter, r *http.Request, container string) {
 	var in execCreate
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+	if err := json.UnmarshalRead(r.Body, &in); err != nil {
 		refuse(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -1022,7 +1022,7 @@ func line(at time.Time, stream byte, text string) fakeLine {
 // which is what a second member of one mesh meets.
 func (f *fake) createNetwork(w http.ResponseWriter, r *http.Request) {
 	var body networkCreate
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	if err := json.UnmarshalRead(r.Body, &body); err != nil {
 		refuse(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -1049,7 +1049,7 @@ func (f *fake) oneNetwork(w http.ResponseWriter, r *http.Request, rest string) {
 	switch {
 	case action == "connect" && r.Method == http.MethodPost:
 		var body networkConnect
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		if err := json.UnmarshalRead(r.Body, &body); err != nil {
 			refuse(w, http.StatusBadRequest, err.Error())
 			return
 		}

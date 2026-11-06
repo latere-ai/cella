@@ -5,7 +5,8 @@ package admission
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"io"
 	"net/http"
@@ -36,12 +37,12 @@ type endpointRequest struct {
 	Issuer      string          `json:"issuer"`
 	Sub         string          `json:"sub"`
 	Claims      map[string]any  `json:"claims"`
-	Workload    json.RawMessage `json:"workload"`
+	Workload    jsontext.Value  `json:"workload"`
 	Action      string          `json:"action"`
 	Existing    *map[string]any `json:"existing"`
 	Parent      *map[string]any `json:"parent"`
-	Environment json.RawMessage `json:"environment"`
-	Set         json.RawMessage `json:"set"`
+	Environment jsontext.Value  `json:"environment"`
+	Set         jsontext.Value  `json:"set"`
 	Manifest    map[string]any  `json:"manifest"`
 	RequestRef  struct {
 		ID string `json:"id"`
@@ -97,7 +98,7 @@ func allow(t *testing.T, mutate func(map[string]any), warnings ...string) func(h
 			mutate(in.Manifest)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		_ = json.MarshalWrite(w, map[string]any{
 			"allow": true, "manifest": in.Manifest, "warnings": warnings,
 		})
 	}
@@ -196,7 +197,7 @@ func TestEnvelopeMatchesTheEndpoint(t *testing.T) {
 	}
 	// The five absent members are present and null, not omitted: an
 	// endpoint reads a fixed shape.
-	var body map[string]json.RawMessage
+	var body map[string]jsontext.Value
 	if err = json.Unmarshal(sent, &body); err != nil {
 		t.Fatal(err)
 	}
@@ -534,7 +535,7 @@ func TestAdmitCarriesTheWorkloadAndTheExisting(t *testing.T) {
 	if _, _, err := client(t, e, Options{}).Admit(t.Context(), sandbox(), req); err != nil {
 		t.Fatal(err)
 	}
-	var body map[string]json.RawMessage
+	var body map[string]jsontext.Value
 	if err := json.Unmarshal(<-e.bodies, &body); err != nil {
 		t.Fatal(err)
 	}

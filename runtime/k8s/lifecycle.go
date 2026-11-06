@@ -5,7 +5,7 @@ package k8s
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"maps"
 	"slices"
@@ -369,7 +369,7 @@ func (d *Driver) Touch(ctx context.Context, id string) error {
 	}
 	patch, err := json.Marshal(map[string]any{"metadata": map[string]any{
 		"annotations": map[string]string{annActivityAt: d.opts.Now().UTC().Format(stamp)},
-	}})
+	}}, outboundJSON)
 	if err != nil {
 		return err
 	}
@@ -453,7 +453,7 @@ func (d *Driver) apply(ctx context.Context, id string, build func(*corev1.Persis
 type patchOp struct {
 	Op    string `json:"op"`
 	Path  string `json:"path"`
-	Value any    `json:"value,omitempty"`
+	Value any    `json:"value,omitzero"`
 }
 
 // patchFor builds the guarded JSON patch. The leading test operations are the
@@ -487,7 +487,7 @@ func patchFor(pvc *corev1.PersistentVolumeClaim, c change) ([]byte, error) {
 			ops = append(ops, patchOp{Op: "remove", Path: annPath(key)})
 		}
 	}
-	return json.Marshal(ops)
+	return json.Marshal(ops, outboundJSON)
 }
 
 // annPath is the JSON pointer of one annotation key.

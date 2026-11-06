@@ -5,7 +5,8 @@ package k8s
 
 import (
 	"bufio"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"net/http"
@@ -74,7 +75,7 @@ func (e *endpoint) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if e.refuseWebSocket {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusForbidden)
-			_ = json.NewEncoder(w).Encode(metav1.Status{
+			_ = json.MarshalWrite(w, metav1.Status{
 				Kind: "Status", APIVersion: "v1",
 				Status: metav1.StatusFailure, Reason: metav1.StatusReasonForbidden, Code: http.StatusForbidden,
 				Message: `pods "x" is forbidden: cannot get resource "pods/exec"`,
@@ -207,7 +208,7 @@ func (e *endpoint) status(w io.Writer, code int) {
 			}}},
 		}
 	}
-	if err := json.NewEncoder(w).Encode(status); err != nil {
+	if err := json.MarshalWrite(w, status); err != nil {
 		e.t.Errorf("writing the status: %v", err)
 	}
 }
@@ -222,10 +223,10 @@ func run(stdin io.Reader, stdout, stderr io.Writer, resize io.Reader) int {
 	}
 	if resize != nil {
 		go func() {
-			sizes := json.NewDecoder(resize)
+			sizes := jsontext.NewDecoder(resize)
 			for {
 				var size remotecommand.TerminalSize
-				if sizes.Decode(&size) != nil {
+				if json.UnmarshalDecode(sizes, &size) != nil {
 					return
 				}
 				say(fmt.Sprintf("size %dx%d\n", size.Width, size.Height))

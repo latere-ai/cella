@@ -5,7 +5,8 @@ package api
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"math"
@@ -211,7 +212,7 @@ func writeLine(w http.ResponseWriter, line []byte) bool {
 // envelope design 008's table gives the error, on one line.
 func writeErrorLine(w http.ResponseWriter, err error, requestID string) {
 	_, envelope := errorEnvelope(err, requestID)
-	line, marshal := json.Marshal(httpjson.ErrorEnvelope{Error: envelope})
+	line, marshal := json.Marshal(httpjson.ErrorEnvelope{Error: envelope}, jsontext.AllowInvalidUTF8(true))
 	if marshal != nil {
 		line = []byte(`{"error":{"code":"` + envelope.Code + `"}}`)
 	}
@@ -233,12 +234,6 @@ func expiry(c auth.Caller) (time.Time, bool) {
 		seconds = exp
 	case int64:
 		seconds = float64(exp)
-	case json.Number:
-		parsed, err := exp.Float64()
-		if err != nil {
-			return time.Time{}, false
-		}
-		seconds = parsed
 	default:
 		return time.Time{}, false
 	}

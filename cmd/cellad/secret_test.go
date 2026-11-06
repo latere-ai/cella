@@ -7,7 +7,7 @@ import (
 	"bytes"
 	"crypto/x509"
 	"encoding/base64"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"io/fs"

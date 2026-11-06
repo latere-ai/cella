@@ -5,7 +5,8 @@ package remote
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -909,8 +910,8 @@ type WorkerState struct {
 	Worker        string       `json:"worker"`
 	LastHeartbeat time.Time    `json:"lastHeartbeat"`
 	Connected     bool         `json:"connected"`
-	Pending       bool         `json:"pending,omitempty"`
-	Host          *v1.HostInfo `json:"host,omitempty"`
+	Pending       bool         `json:"pending,omitzero"`
+	Host          *v1.HostInfo `json:"host,omitzero"`
 }
 
 // OnHeld sets what the hub tells of a create a worker holds while its host
@@ -1100,7 +1101,7 @@ func (t *transport) Open(ctx context.Context, opType string, req Request) (Strea
 		return nil, ErrNoWorker
 	}
 	id := t.hub.newID()
-	payload, err := json.Marshal(req)
+	payload, err := json.Marshal(req, json.Deterministic(true), jsontext.AllowInvalidUTF8(true))
 	if err != nil {
 		return nil, fmt.Errorf("remote: %s: %w", opType, err)
 	}
@@ -1194,9 +1195,9 @@ func (s *hubStream) Result(ctx context.Context) (Response, error) {
 	if s.hub.queue != nil {
 		record, marshalErr := json.Marshal(struct {
 			OK    bool      `json:"ok"`
-			Res   *Response `json:"response,omitempty"`
+			Res   *Response `json:"response,omitzero"`
 			Error string    `json:"error,omitempty"`
-		}{OK: err == nil, Res: &res, Error: errorText(err)})
+		}{OK: err == nil, Res: &res, Error: errorText(err)}, json.Deterministic(true), jsontext.AllowInvalidUTF8(true))
 		if marshalErr == nil {
 			if ackErr := s.hub.queue.Acknowledge(ctx, OperationIDPrefix+s.id, record); ackErr != nil {
 				s.hub.log.WarnContext(ctx, "an operation's result was not recorded", "operation", s.id, "err", ackErr)

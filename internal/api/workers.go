@@ -5,7 +5,7 @@ package api
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"net/http"
@@ -173,9 +173,7 @@ func (h *handler) registerWorker(w http.ResponseWriter, r *http.Request, key aut
 		return
 	}
 	var registration remote.Registration
-	decoder := json.NewDecoder(strings.NewReader(string(body)))
-	decoder.DisallowUnknownFields()
-	if err = decoder.Decode(&registration); err != nil {
+	if err = json.Unmarshal(body, &registration, json.RejectUnknownMembers(true)); err != nil {
 		respondError(w, &manifest.Error{Code: "bad_request", Detail: err.Error()})
 		return
 	}

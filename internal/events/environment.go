@@ -65,15 +65,15 @@ func OfEnvironment(obj v1.Environment) Object {
 // revocation named. Design 021's table fixes the fields, and the shape holds
 // nothing else, so no scan is needed to prove a record carries no credential.
 type Environment struct {
-	Workers int    `json:"workers,omitempty"`
+	Workers int    `json:"workers,omitzero"`
 	Phase   string `json:"phase,omitempty"`
 	Reason  string `json:"reason,omitempty"`
 	JTI     string `json:"jti,omitempty"`
 	Worker  string `json:"worker,omitempty"`
 	// Previous and Next are the two registrations a worker_replaced record
 	// is about, and Outcome is replaced or refused.
-	Previous *WorkerFacts `json:"previous,omitempty"`
-	Next     *WorkerFacts `json:"next,omitempty"`
+	Previous *WorkerFacts `json:"previous,omitzero"`
+	Next     *WorkerFacts `json:"next,omitzero"`
 	Outcome  string       `json:"outcome,omitempty"`
 }
 
@@ -82,7 +82,7 @@ type Environment struct {
 type WorkerFacts struct {
 	Driver    string       `json:"driver"`
 	Isolation string       `json:"isolation"`
-	Host      *v1.HostInfo `json:"host,omitempty"`
+	Host      *v1.HostInfo `json:"host,omitzero"`
 }
 
 // The outcomes a worker_replaced record carries.

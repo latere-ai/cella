@@ -6,7 +6,8 @@ package authorizer_test
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"io"
 	"net/http"
@@ -152,7 +153,7 @@ func (ownerPolicy) Decide(_ context.Context, req authz.Request) (authz.Decision,
 }
 
 // grant renders the four ceilings of spec 006 the way an endpoint does.
-func grant(rate, sandboxes, priority, volumes int) json.RawMessage {
+func grant(rate, sandboxes, priority, volumes int) jsontext.Value {
 	raw, err := json.Marshal(authorizer.WireLimits{
 		RequestsPerMinute: &rate, MaxSandboxes: &sandboxes, MaxPriority: &priority, MaxVolumes: &volumes,
 	})

@@ -5,7 +5,7 @@ package store
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"maps"
@@ -228,11 +228,11 @@ func encodeSecret(obj v1.Secret) (Object, error) {
 	status := obj.Status
 	obj.Status = v1.SecretStatus{}
 	obj.Spec.Value = ""
-	data, err := json.Marshal(obj)
+	data, err := json.Marshal(obj, json.Deterministic(true))
 	if err != nil {
 		return Object{}, fmt.Errorf("store: encoding the secret: %w", err)
 	}
-	encoded, err := json.Marshal(status)
+	encoded, err := json.Marshal(status, json.Deterministic(true))
 	if err != nil {
 		return Object{}, fmt.Errorf("store: encoding the status: %w", err)
 	}

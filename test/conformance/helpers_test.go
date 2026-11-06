@@ -5,7 +5,8 @@ package conformance
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"slices"
 	"strings"
 	"testing"
@@ -39,10 +40,10 @@ func TestTheBodyHelpers(t *testing.T) {
 	if got := replaceField([]byte("not json"), "kind", "Widget"); string(got) != "not json" {
 		t.Errorf("a body that does not decode was rewritten: %s", got)
 	}
-	if got := canonical(json.RawMessage(`{"b":1,"a":2}`)); string(got) != `{"a":2,"b":1}` {
+	if got := canonical(jsontext.Value(`{"b":1,"a":2}`)); string(got) != `{"a":2,"b":1}` {
 		t.Errorf("the canonical form is %s", got)
 	}
-	if got := canonical(json.RawMessage("not json")); string(got) != "not json" {
+	if got := canonical(jsontext.Value("not json")); string(got) != "not json" {
 		t.Errorf("a body that does not decode was rewritten: %s", got)
 	}
 	if !jsonEqual([]byte(`{"a":1,"env":"x"}`), []byte(`{"a":1,"env":"y"}`), "env") {
@@ -62,11 +63,11 @@ func TestTheBodyHelpers(t *testing.T) {
 // what arrived.
 func TestTheLiteralDefaultsAreReadOffTheAnswer(t *testing.T) {
 	honest := `{"workdir":"/workspace","workspace":{"path":"/workspace","source":"empty"},"network":{"egress":{"mode":"open"}}}`
-	if err := holdsLiteralDefaults(json.RawMessage(honest)); err != nil {
+	if err := holdsLiteralDefaults(jsontext.Value(honest)); err != nil {
 		t.Fatalf("an answer with every literal default: %v", err)
 	}
 	zeros := `{"workdir":"/workspace","workspace":{"path":"/workspace","source":"empty"},"network":{"egress":{"mode":"open"}},"mesh":{"enabled":false,"spawn":{"budget":0,"depth":0}}}`
-	if err := holdsLiteralDefaults(json.RawMessage(zeros)); err != nil {
+	if err := holdsLiteralDefaults(jsontext.Value(zeros)); err != nil {
 		t.Fatalf("an answer that writes the zero defaults out: %v", err)
 	}
 	for _, tc := range []struct{ spec, want string }{
@@ -76,7 +77,7 @@ func TestTheLiteralDefaultsAreReadOffTheAnswer(t *testing.T) {
 		{`{"workdir":"/workspace","workspace":"/workspace"}`, "spec.workspace.path absent"},
 		{`["no", "object"]`, "a specification that is a JSON object"},
 	} {
-		err := holdsLiteralDefaults(json.RawMessage(tc.spec))
+		err := holdsLiteralDefaults(jsontext.Value(tc.spec))
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: got %v, want a disagreement carrying %q", tc.spec, err, tc.want)
 		}

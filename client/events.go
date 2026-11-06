@@ -7,7 +7,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -41,22 +42,22 @@ type Event struct {
 	// every operation.
 	Object EventObject `json:"object"`
 	// Sandbox is the sandbox in context, nil where Object is itself one.
-	Sandbox *EventObject `json:"sandbox,omitempty"`
+	Sandbox *EventObject `json:"sandbox,omitzero"`
 	// Subject is who asked, and Workload the sandbox whose own token asked
 	// where one did.
 	Subject string `json:"subject"`
 	// Workload is the sandbox whose own token asked, nil where a subject
 	// asked.
-	Workload *EventWorkload `json:"workload,omitempty"`
+	Workload *EventWorkload `json:"workload,omitzero"`
 	// RequestID is the request that caused the act, empty for an act the
 	// control plane took on its own.
 	RequestID string `json:"requestId"`
 	// Reason is set on every terminal transition.
 	Reason string `json:"reason,omitempty"`
 	// Data is the per-type payload of design 009, redacted.
-	Data json.RawMessage `json:"data,omitempty"`
+	Data jsontext.Value `json:"data,omitzero"`
 	// Raw is the record's bytes as the server sent them.
-	Raw json.RawMessage `json:"-"`
+	Raw jsontext.Value `json:"-"`
 }
 
 // EventObject is the identity of the object a record is about, with the
@@ -225,6 +226,6 @@ func eventOf(raw []byte) (Event, error) {
 	if err := json.Unmarshal(raw, &e); err != nil {
 		return Event{}, fmt.Errorf("the feed sent something that is no record: %w", err)
 	}
-	e.Raw = append(json.RawMessage(nil), bytes.TrimSpace(raw)...)
+	e.Raw = append(jsontext.Value(nil), bytes.TrimSpace(raw)...)
 	return e, nil
 }

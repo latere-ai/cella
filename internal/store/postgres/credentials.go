@@ -5,7 +5,8 @@ package postgres
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"slices"
@@ -47,8 +48,8 @@ func binding(id string) []byte { return []byte("cella sandbox credentials\x00" +
 // held is what the sealed columns of one row carry: each value as the JSON
 // the row held it as.
 type held struct {
-	Env        json.RawMessage `json:"env,omitempty"`
-	Credential json.RawMessage `json:"credential,omitempty"`
+	Env        jsontext.Value `json:"env,omitzero"`
+	Credential jsontext.Value `json:"credential,omitzero"`
 }
 
 func (h held) empty() bool { return h.Env == nil && h.Credential == nil }
@@ -80,7 +81,7 @@ func seal(env store.Envelope, obj store.Object) (data, status, wrapped, sealed [
 	if h.empty() {
 		return data, status, nil, nil, nil
 	}
-	plaintext, err := json.Marshal(h)
+	plaintext, err := json.Marshal(h, json.Deterministic(true))
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("store: encoding the credentials of %s: %w", obj.ID, err)
 	}
@@ -181,7 +182,7 @@ func marked(data []byte) bool {
 // document without it and the value. A member that is absent, null, the empty
 // string or the empty object is no value, and the document comes back as it
 // was.
-func take(document []byte, outer, inner string) ([]byte, json.RawMessage, error) {
+func take(document []byte, outer, inner string) ([]byte, jsontext.Value, error) {
 	top, ok := members(document)
 	if !ok {
 		return document, nil, nil
@@ -204,20 +205,20 @@ func take(document []byte, outer, inner string) ([]byte, json.RawMessage, error)
 
 // put sets document.outer.inner to value, making the document and the object
 // where either is missing, and removes the member where value is nil.
-func put(document []byte, outer, inner string, value json.RawMessage) ([]byte, error) {
+func put(document []byte, outer, inner string, value jsontext.Value) ([]byte, error) {
 	top, ok := members(document)
 	if !ok {
 		if !null(document) {
 			return nil, errors.New("the document is not an object")
 		}
-		top = map[string]json.RawMessage{}
+		top = map[string]jsontext.Value{}
 	}
 	nested, ok := members(top[outer])
 	if !ok {
 		if !null(top[outer]) {
 			return nil, fmt.Errorf("%s is not an object", outer)
 		}
-		nested = map[string]json.RawMessage{}
+		nested = map[string]jsontext.Value{}
 	}
 	if value == nil {
 		if _, present := nested[inner]; !present {
@@ -231,22 +232,22 @@ func put(document []byte, outer, inner string, value json.RawMessage) ([]byte, e
 }
 
 // replace writes nested back as top.outer and encodes top.
-func replace(top map[string]json.RawMessage, outer string, nested map[string]json.RawMessage) ([]byte, error) {
-	encoded, err := json.Marshal(nested)
+func replace(top map[string]jsontext.Value, outer string, nested map[string]jsontext.Value) ([]byte, error) {
+	encoded, err := json.Marshal(nested, json.Deterministic(true))
 	if err != nil {
 		return nil, err
 	}
 	top[outer] = encoded
-	return json.Marshal(top)
+	return json.Marshal(top, json.Deterministic(true))
 }
 
 // members reads a JSON object as its members, and reports false for any other
 // document, which holds no member.
-func members(raw json.RawMessage) (map[string]json.RawMessage, bool) {
+func members(raw jsontext.Value) (map[string]jsontext.Value, bool) {
 	if null(raw) {
 		return nil, false
 	}
-	var m map[string]json.RawMessage
+	var m map[string]jsontext.Value
 	if err := json.Unmarshal(raw, &m); err != nil || m == nil {
 		return nil, false
 	}
@@ -254,13 +255,13 @@ func members(raw json.RawMessage) (map[string]json.RawMessage, bool) {
 }
 
 // null reports an absent document or the JSON literal null.
-func null(raw json.RawMessage) bool {
+func null(raw jsontext.Value) bool {
 	var v any
 	return len(raw) == 0 || (json.Unmarshal(raw, &v) == nil && v == nil)
 }
 
 // blank reports a member that holds no value to seal.
-func blank(raw json.RawMessage) bool {
+func blank(raw jsontext.Value) bool {
 	if null(raw) {
 		return true
 	}

@@ -24,7 +24,7 @@ package admission
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -183,7 +183,7 @@ func (c *Client) admit(ctx context.Context, in *v1.Sandbox, req manifest.AdmitRe
 		return nil, nil, unavailable("the answer is larger than %d bytes", MaxResponseBytes)
 	}
 	var answer response
-	if err = json.Unmarshal(raw, &answer); err != nil {
+	if err = json.Unmarshal(raw, &answer, foreignJSON); err != nil {
 		return nil, nil, unavailable("the answer is not JSON: %v", err)
 	}
 	// An answer that names no allow is no decision. Reading an absent

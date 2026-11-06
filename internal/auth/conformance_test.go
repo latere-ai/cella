@@ -4,7 +4,8 @@
 package auth_test
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -147,7 +148,7 @@ func bare(t *testing.T, d *auth.OwnerPolicy, token string) http.Handler {
 			return
 		}
 		var req authz.Request
-		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+		if err := json.UnmarshalRead(io.LimitReader(r.Body, 1<<20), &req); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
@@ -164,7 +165,7 @@ func bare(t *testing.T, d *auth.OwnerPolicy, token string) http.Handler {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(answer{
+		_ = json.MarshalWrite(w, answer{
 			Allow: decision.Allow, Reason: decision.Reason,
 			TTL: int(decision.TTL.Seconds()), Limits: decision.Limits, Filter: decision.Filter,
 		})
@@ -174,9 +175,9 @@ func bare(t *testing.T, d *auth.OwnerPolicy, token string) http.Handler {
 // answer is the wire form of a decision, which the shared package renders
 // from its own unexported type.
 type answer struct {
-	Allow  bool            `json:"allow"`
-	Reason string          `json:"reason,omitempty"`
-	TTL    int             `json:"ttl,omitempty"`
-	Limits json.RawMessage `json:"limits,omitempty"`
-	Filter *authz.Filter   `json:"filter,omitempty"`
+	Allow  bool           `json:"allow"`
+	Reason string         `json:"reason,omitempty"`
+	TTL    int            `json:"ttl,omitzero"`
+	Limits jsontext.Value `json:"limits,omitzero"`
+	Filter *authz.Filter  `json:"filter,omitzero"`
 }

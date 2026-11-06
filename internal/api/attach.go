@@ -5,11 +5,11 @@ package api
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"io"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
@@ -62,8 +62,8 @@ type socketRequest struct {
 	Command []string          `json:"command,omitempty"`
 	Env     map[string]string `json:"env,omitempty"`
 	Workdir string            `json:"workdir,omitempty"`
-	Cols    int               `json:"cols,omitempty"`
-	Rows    int               `json:"rows,omitempty"`
+	Cols    int               `json:"cols,omitzero"`
+	Rows    int               `json:"rows,omitzero"`
 	Timeout string            `json:"timeout,omitempty"`
 }
 
@@ -171,14 +171,8 @@ func readRequest(conn *websocket.Conn, limit int64) (socketRequest, error) {
 	if kind != websocket.TextMessage {
 		return req, errors.New("the first frame is the JSON request, as text")
 	}
-	dec := json.NewDecoder(strings.NewReader(string(data)))
-	dec.DisallowUnknownFields()
-	if err = dec.Decode(&req); err != nil {
+	if err = json.Unmarshal(data, &req, json.RejectUnknownMembers(true)); err != nil {
 		return req, err
-	}
-	var tail any
-	if dec.Decode(&tail) != io.EOF {
-		return req, errors.New("the first frame carries one JSON object")
 	}
 	return req, nil
 }
@@ -286,7 +280,7 @@ func (w *frameWriter) write(kind int, payload []byte) error {
 }
 
 func (w *frameWriter) writeJSON(v any) error {
-	payload, err := json.Marshal(v)
+	payload, err := json.Marshal(v, jsontext.AllowInvalidUTF8(true))
 	if err != nil {
 		return err
 	}

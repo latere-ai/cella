@@ -7,7 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"maps"
@@ -385,7 +385,7 @@ func (s *stack) mint(ctx context.Context, subject string) (string, error) {
 	var minted struct {
 		Token string `json:"token"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&minted); err != nil {
+	if err := json.UnmarshalRead(resp.Body, &minted); err != nil {
 		return "", err
 	}
 	if minted.Token == "" {
@@ -435,7 +435,7 @@ func control(t *testing.T, allow, refuse string) *httptest.Server {
 			var asked struct {
 				Mode string `json:"mode"`
 			}
-			if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&asked); err != nil {
+			if err := json.UnmarshalRead(io.LimitReader(r.Body, 1<<16), &asked); err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}

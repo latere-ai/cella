@@ -6,10 +6,9 @@ package api
 
 import (
 	"archive/tar"
-	"bytes"
 	"cmp"
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -853,15 +852,7 @@ func (h *handler) execRequest(w http.ResponseWriter, r *http.Request, obj v1.San
 		respondError(w, err)
 		return req, 0, false
 	}
-	dec := json.NewDecoder(bytes.NewReader(body))
-	dec.DisallowUnknownFields()
-	if err = dec.Decode(&req); err == nil {
-		var tail any
-		if dec.Decode(&tail) != io.EOF {
-			err = errors.New("expected one JSON object")
-		}
-	}
-	if err != nil {
+	if err = json.Unmarshal(body, &req, json.RejectUnknownMembers(true)); err != nil {
 		respondError(w, &manifest.Error{Code: "invalid_field", Detail: err.Error()})
 		return req, 0, false
 	}

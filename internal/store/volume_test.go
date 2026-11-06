@@ -4,7 +4,7 @@
 package store_test
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"slices"
 	"testing"
@@ -63,7 +63,7 @@ func TestVolumeCollectionRoundTrips(t *testing.T) {
 		got.Metadata.Labels["team"] != "a" || !got.Spec.Retains() {
 		t.Fatalf("read back %+v", got)
 	}
-	if got.Status.AttachedTo != nil {
+	if len(got.Status.AttachedTo) != 0 {
 		t.Fatalf("attachedTo was stored: %v", got.Status.AttachedTo)
 	}
 

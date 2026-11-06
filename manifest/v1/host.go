@@ -26,7 +26,7 @@ type HostInfo struct {
 // absolute, clean path, writable or read-only.
 type HostGrant struct {
 	Path  string `json:"path"`
-	Write bool   `json:"write,omitempty"`
+	Write bool   `json:"write,omitzero"`
 }
 
 // HostNetwork is the network the host allows a sandbox: none, an allow list

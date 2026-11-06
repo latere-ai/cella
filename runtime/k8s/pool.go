@@ -5,7 +5,7 @@ package k8s
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"maps"
@@ -143,7 +143,7 @@ func adoptionPatch(pvc *corev1.PersistentVolumeClaim, adopted driver.CreateSpec,
 		}
 	}
 	ops = append(ops, adoptionLabelOps(pvc.Labels, adopted.Name)...)
-	return json.Marshal(ops)
+	return json.Marshal(ops, outboundJSON)
 }
 
 // adoptionLabelOps names the sandbox and takes it out of the pool. The name is
@@ -195,7 +195,7 @@ func (d *Driver) projectAdopted(ctx context.Context, id string, owner *corev1.Pe
 	if labelValue.MatchString(adopted.Name) {
 		labels[labelName] = adopted.Name
 	}
-	patch, err := json.Marshal(map[string]any{"metadata": map[string]any{"labels": labels}})
+	patch, err := json.Marshal(map[string]any{"metadata": map[string]any{"labels": labels}}, outboundJSON)
 	if err != nil {
 		return err
 	}

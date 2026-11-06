@@ -4,7 +4,8 @@
 package egress
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"slices"
 	"strings"
@@ -64,13 +65,13 @@ const (
 // is absent.
 type Frame struct {
 	Type     string    `json:"type"`
-	Hello    *Hello    `json:"hello,omitempty"`
-	Snapshot *Snapshot `json:"snapshot,omitempty"`
-	Put      *Map      `json:"put,omitempty"`
-	Purge    *Purge    `json:"purge,omitempty"`
-	Ack      *Ack      `json:"ack,omitempty"`
-	Record   *Record   `json:"record,omitempty"`
-	Use      *Use      `json:"use,omitempty"`
+	Hello    *Hello    `json:"hello,omitzero"`
+	Snapshot *Snapshot `json:"snapshot,omitzero"`
+	Put      *Map      `json:"put,omitzero"`
+	Purge    *Purge    `json:"purge,omitzero"`
+	Ack      *Ack      `json:"ack,omitzero"`
+	Record   *Record   `json:"record,omitzero"`
+	Use      *Use      `json:"use,omitzero"`
 }
 
 // Hello is what a connecting gateway says about itself.
@@ -127,10 +128,10 @@ type Record struct {
 	// query string, because a query string carries values.
 	Method     string `json:"method,omitempty"`
 	Path       string `json:"path,omitempty"`
-	Status     int    `json:"status,omitempty"`
-	BytesOut   int64  `json:"bytesOut,omitempty"`
-	BytesIn    int64  `json:"bytesIn,omitempty"`
-	DurationMS int64  `json:"durationMs,omitempty"`
+	Status     int    `json:"status,omitzero"`
+	BytesOut   int64  `json:"bytesOut,omitzero"`
+	BytesIn    int64  `json:"bytesIn,omitzero"`
+	DurationMS int64  `json:"durationMs,omitzero"`
 }
 
 // maxRecordPathBytes bounds the path a record carries, so a caller cannot
@@ -194,8 +195,10 @@ func (u *Use) Normalize() error {
 }
 
 // Encode writes one frame as one JSON text message. The protocol is one
-// frame per message, so a reader never has to find a boundary inside one.
-func Encode(f Frame) ([]byte, error) { return json.Marshal(f) }
+// frame per message, so a reader never has to find a boundary inside one. A
+// record's path is what a sandbox asked a server for, so it may carry bytes
+// that are not UTF-8; they are written as U+FFFD and do not fail the frame.
+func Encode(f Frame) ([]byte, error) { return json.Marshal(f, jsontext.AllowInvalidUTF8(true)) }
 
 // Decode reads one frame from one message and refuses a type the protocol
 // does not have, so an unknown frame is a refusal rather than a silent skip.

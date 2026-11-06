@@ -6,7 +6,7 @@ package k8s
 import (
 	"bufio"
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"log/slog"
@@ -97,7 +97,7 @@ func (m *restMeter) workingSet(ctx context.Context, pod, container string) (int6
 // desktop beside it against a limit the desktop does not run under.
 func readWorkingSet(raw []byte, container string) (int64, time.Time, error) {
 	var sample podMetrics
-	if err := json.Unmarshal(raw, &sample); err != nil {
+	if err := json.Unmarshal(raw, &sample, foreignJSON); err != nil {
 		return 0, time.Time{}, fmt.Errorf("pod metrics: %w", err)
 	}
 	for _, c := range sample.Containers {
@@ -296,7 +296,7 @@ func (d *Driver) resizeInPlace(ctx context.Context, id string) error {
 	}
 	patch, err := json.Marshal(map[string]any{"spec": map[string]any{"containers": []map[string]any{
 		{"name": Container, "resources": want},
-	}}})
+	}}}, outboundJSON)
 	if err != nil {
 		return err
 	}

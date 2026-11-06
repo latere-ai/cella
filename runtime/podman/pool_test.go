@@ -4,7 +4,7 @@
 package podman
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"net/http"
 	"sync"

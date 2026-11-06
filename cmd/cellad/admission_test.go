@@ -4,7 +4,8 @@
 package main
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -26,7 +27,7 @@ type admissionEnvelope struct {
 	Issuer      string          `json:"issuer"`
 	Sub         string          `json:"sub"`
 	Claims      map[string]any  `json:"claims"`
-	Workload    json.RawMessage `json:"workload"`
+	Workload    jsontext.Value  `json:"workload"`
 	Action      string          `json:"action"`
 	Existing    *map[string]any `json:"existing"`
 	Parent      *map[string]any `json:"parent"`
@@ -35,8 +36,8 @@ type admissionEnvelope struct {
 		Name      string `json:"name"`
 		Isolation string `json:"isolation"`
 	} `json:"environment"`
-	Set        json.RawMessage `json:"set"`
-	Manifest   map[string]any  `json:"manifest"`
+	Set        jsontext.Value `json:"set"`
+	Manifest   map[string]any `json:"manifest"`
 	RequestRef struct {
 		ID string `json:"id"`
 	} `json:"request"`
@@ -77,7 +78,7 @@ func startAdmission(t *testing.T) *admissionEndpoint {
 		}
 		e.seen.Store(&in)
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(decide(&in))
+		_ = json.MarshalWrite(w, decide(&in))
 	}))
 	t.Cleanup(e.Close)
 	return e

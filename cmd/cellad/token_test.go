@@ -4,7 +4,8 @@
 package main
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"io"
 	"net/http"
 	"strings"
@@ -57,8 +58,8 @@ func TestWorkloadTokenEndToEnd(t *testing.T) {
 			`{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox","metadata":{"name":"`+name+`"},"spec":{}}`, 201)
 		var obj struct {
 			Status struct {
-				ID         string          `json:"id"`
-				TokenState json.RawMessage `json:"tokenState"`
+				ID         string         `json:"id"`
+				TokenState jsontext.Value `json:"tokenState"`
 			} `json:"status"`
 		}
 		if err := json.Unmarshal(body, &obj); err != nil {

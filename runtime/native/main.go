@@ -5,7 +5,8 @@ package native
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -35,7 +36,7 @@ type logWriter struct {
 func (w *logWriter) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	err := json.NewEncoder(w.file).Encode(logChunk{At: time.Now().UTC(), Data: p})
+	err := json.MarshalEncode(jsontext.NewEncoder(w.file), logChunk{At: time.Now().UTC(), Data: p})
 	if err != nil {
 		return 0, err
 	}

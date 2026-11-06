@@ -6,7 +6,8 @@ package auth
 import (
 	"context"
 	"crypto/rsa"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -444,6 +445,15 @@ func (k key) usable() bool {
 	return false
 }
 
+// foreignJSON reads documents an issuer publishes: duplicate names, invalid
+// UTF-8 and any letter case in a member name are accepted, as they are by
+// the issuers' own clients.
+var foreignJSON = json.JoinOptions(
+	jsontext.AllowDuplicateNames(true),
+	jsontext.AllowInvalidUTF8(true),
+	json.MatchCaseInsensitiveNames(true),
+)
+
 // maxDocumentBytes bounds a discovery document and a key set, which are
 // both small and neither of which is read from a trusted peer.
 const maxDocumentBytes = 1 << 20
@@ -468,7 +478,7 @@ func fetchJSON(ctx context.Context, client *http.Client, url string, timeout tim
 	if err != nil {
 		return fmt.Errorf("GET %s: %w", url, err)
 	}
-	if err := json.Unmarshal(body, v); err != nil {
+	if err := json.Unmarshal(body, v, foreignJSON); err != nil {
 		return fmt.Errorf("GET %s: the answer is not the JSON document expected: %w", url, err)
 	}
 	return nil

@@ -37,7 +37,7 @@ type VolumeSpec struct {
 	Class       string       `json:"class,omitempty"`
 	Access      string       `json:"access,omitempty"`
 	Source      VolumeSource `json:"source,omitzero"`
-	Retain      *bool        `json:"retain,omitempty"`
+	Retain      *bool        `json:"retain,omitzero"`
 }
 
 // Retains reports whether the volume outlives its last sandbox, which is
@@ -112,7 +112,7 @@ type VolumeMount struct {
 	Name     string `json:"name"`
 	Path     string `json:"path"`
 	Volume   string `json:"volume"`
-	ReadOnly bool   `json:"readOnly,omitempty"`
+	ReadOnly bool   `json:"readOnly,omitzero"`
 }
 
 // VolumeAttachment is one mount as the sandbox's status reports it: the

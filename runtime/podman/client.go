@@ -7,7 +7,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -87,7 +87,7 @@ func (c *client) hijack(ctx context.Context, path string, body any) (net.Conn, *
 	}
 	var payload []byte
 	if body != nil {
-		if payload, err = json.Marshal(body); err != nil {
+		if payload, err = json.Marshal(body, outboundJSON); err != nil {
 			_ = conn.Close()
 			return nil, nil, err
 		}
@@ -131,7 +131,7 @@ func (c *client) compatURL(p string) string { return "http://d/v" + apiVersion +
 func (c *client) do(ctx context.Context, method, rawURL string, body any) (*http.Response, error) {
 	var rdr io.Reader
 	if body != nil {
-		b, err := json.Marshal(body)
+		b, err := json.Marshal(body, outboundJSON)
 		if err != nil {
 			return nil, err
 		}
@@ -162,7 +162,7 @@ func (c *client) json(ctx context.Context, method, path string, body, out any) e
 		_, _ = io.Copy(io.Discard, resp.Body)
 		return nil
 	}
-	return json.NewDecoder(resp.Body).Decode(out)
+	return json.UnmarshalRead(resp.Body, out, foreignJSON)
 }
 
 // apiError is a reply podman refused with.
@@ -185,7 +185,7 @@ func statusErr(resp *http.Response) error {
 		Cause   string `json:"cause"`
 	}
 	b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
-	_ = json.Unmarshal(b, &payload)
+	_ = json.Unmarshal(b, &payload, foreignJSON)
 	msg := payload.Message
 	if msg == "" {
 		msg = strings.TrimSpace(string(b))
@@ -222,7 +222,7 @@ func query(kv ...string) string {
 // labelKeyFilter encodes the list endpoints' filter that selects every object
 // carrying a label key, whatever its value.
 func labelKeyFilter(key string) string {
-	b, err := json.Marshal(map[string][]string{"label": {key}})
+	b, err := json.Marshal(map[string][]string{"label": {key}}, outboundJSON)
 	if err != nil {
 		return ""
 	}

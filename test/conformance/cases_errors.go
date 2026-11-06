@@ -5,7 +5,8 @@ package conformance
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"net/http"
 	"strings"
@@ -127,7 +128,7 @@ func case008PublicDocuments(ctx context.Context, e *Env) error {
 		return err
 	}
 	var set struct {
-		Keys []json.RawMessage `json:"keys"`
+		Keys []jsontext.Value `json:"keys"`
 	}
 	if err := json.Unmarshal(x.Body, &set); err != nil || len(set.Keys) == 0 {
 		return x.disagree("a key set with at least one key", fmt.Sprintf("%q", x.Body))

@@ -111,7 +111,7 @@ type Mount struct {
 	Name     string `json:"name"`
 	VolumeID string `json:"volumeId"`
 	Path     string `json:"path"`
-	ReadOnly bool   `json:"readOnly,omitempty"`
+	ReadOnly bool   `json:"readOnly,omitzero"`
 }
 
 // Check refuses a spec no driver can act on: an id, a known access mode and

@@ -5,7 +5,7 @@ package client
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"net/http"
 
 	v1 "latere.ai/x/cella/manifest/v1"
@@ -31,6 +31,6 @@ func (c *Client) GetVolume(ctx context.Context, ref string) (v1.Volume, []byte, 
 // ListVolumes follows the cursor to the end, or to Limit objects, and returns
 // the decoded objects with their own bytes, in order. Owner and Labels
 // narrow the list.
-func (c *Client) ListVolumes(ctx context.Context, o ListOptions) ([]v1.Volume, []json.RawMessage, error) {
+func (c *Client) ListVolumes(ctx context.Context, o ListOptions) ([]v1.Volume, []jsontext.Value, error) {
 	return listAll[v1.Volume](ctx, c, KindVolume, o)
 }

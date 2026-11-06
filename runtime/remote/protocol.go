@@ -15,7 +15,8 @@ package remote
 import (
 	"context"
 	"crypto/rand"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -165,7 +166,7 @@ type Registration struct {
 	Version      string               `json:"version,omitempty"`
 	// Host is the machine the worker runs on, as its driver reports it
 	// (spec 082), and nil for a driver that reports none.
-	Host *v1.HostInfo `json:"host,omitempty"`
+	Host *v1.HostInfo `json:"host,omitzero"`
 }
 
 // Registered is what the control plane answers a registration with: the id
@@ -184,12 +185,12 @@ type Registered struct {
 type Request struct {
 	// ID is the sandbox the call is about, empty on List.
 	ID     string                 `json:"id,omitempty"`
-	Spec   *runtime.CreateSpec    `json:"spec,omitempty"`
-	Change *runtime.Change        `json:"change,omitempty"`
-	Filter *runtime.Filter        `json:"filter,omitempty"`
-	Exec   *ExecRequest           `json:"exec,omitempty"`
-	Attach *runtime.AttachRequest `json:"attach,omitempty"`
-	Logs   *runtime.LogsRequest   `json:"logs,omitempty"`
+	Spec   *runtime.CreateSpec    `json:"spec,omitzero"`
+	Change *runtime.Change        `json:"change,omitzero"`
+	Filter *runtime.Filter        `json:"filter,omitzero"`
+	Exec   *ExecRequest           `json:"exec,omitzero"`
+	Attach *runtime.AttachRequest `json:"attach,omitzero"`
+	Logs   *runtime.LogsRequest   `json:"logs,omitzero"`
 	// Token is the workload token the worker's driver projects. CreateSpec
 	// never serializes it, because a driver that keeps the spec beside the
 	// sandbox must not keep the credential; on this wire it travels once,
@@ -200,8 +201,8 @@ type Request struct {
 	Path     string      `json:"path,omitempty"`
 	Dest     string      `json:"dest,omitempty"`
 	To       string      `json:"to,omitempty"`
-	Mode     fs.FileMode `json:"mode,omitempty"`
-	MaxBytes int64       `json:"maxBytes,omitempty"`
+	Mode     fs.FileMode `json:"mode,omitzero"`
+	MaxBytes int64       `json:"maxBytes,omitzero"`
 }
 
 // ExecRequest is runtime.ExecRequest with the reader replaced by a flag: the
@@ -210,21 +211,46 @@ type ExecRequest struct {
 	Command []string          `json:"command,omitempty"`
 	Env     map[string]string `json:"env,omitempty"`
 	Workdir string            `json:"workdir,omitempty"`
-	TTY     bool              `json:"tty,omitempty"`
-	Stdin   bool              `json:"stdin,omitempty"`
-	Timeout time.Duration     `json:"timeout,omitempty"`
+	TTY     bool              `json:"tty,omitzero"`
+	Stdin   bool              `json:"stdin,omitzero"`
+	Timeout time.Duration     `json:"timeout,omitzero"`
+}
+
+// MarshalJSON writes the timeout as integer nanoseconds, the form every
+// client of the wire reads.
+func (r ExecRequest) MarshalJSON() ([]byte, error) {
+	type alias ExecRequest
+	return json.Marshal(struct {
+		alias
+		Timeout int64 `json:"timeout,omitzero"`
+	}{alias(r), int64(r.Timeout)})
+}
+
+// UnmarshalJSON reads the timeout from integer nanoseconds.
+func (r *ExecRequest) UnmarshalJSON(b []byte) error {
+	type alias ExecRequest
+	var w struct {
+		*alias
+		Timeout int64 `json:"timeout"`
+	}
+	w.alias = (*alias)(r)
+	if err := json.Unmarshal(b, &w); err != nil {
+		return err
+	}
+	r.Timeout = time.Duration(w.Timeout)
+	return nil
 }
 
 // Response is one operation's non-stream returns. A field a method does not
 // return is absent.
 type Response struct {
-	Ref     *runtime.Ref       `json:"ref,omitempty"`
-	State   *runtime.State     `json:"state,omitempty"`
+	Ref     *runtime.Ref       `json:"ref,omitzero"`
+	State   *runtime.State     `json:"state,omitzero"`
 	States  []runtime.State    `json:"states,omitempty"`
-	Info    *runtime.FileInfo  `json:"info,omitempty"`
+	Info    *runtime.FileInfo  `json:"info,omitzero"`
 	Infos   []runtime.FileInfo `json:"infos,omitempty"`
-	Exit    *int               `json:"exit,omitempty"`
-	Written int64              `json:"written,omitempty"`
+	Exit    *int               `json:"exit,omitzero"`
+	Written int64              `json:"written,omitzero"`
 }
 
 // Error carries a driver's refusal across the seam in the driver's own
@@ -365,29 +391,29 @@ type Message struct {
 	// Operation and Request are one call, down; Response, OK and Error its
 	// answer, up.
 	Operation string    `json:"operation,omitempty"`
-	Request   *Request  `json:"request,omitempty"`
-	OK        bool      `json:"ok,omitempty"`
-	Response  *Response `json:"response,omitempty"`
-	Error     *Error    `json:"error,omitempty"`
+	Request   *Request  `json:"request,omitzero"`
+	OK        bool      `json:"ok,omitzero"`
+	Response  *Response `json:"response,omitzero"`
+	Error     *Error    `json:"error,omitzero"`
 	// Cols and Rows are a resize.
-	Cols int `json:"cols,omitempty"`
-	Rows int `json:"rows,omitempty"`
+	Cols int `json:"cols,omitzero"`
+	Rows int `json:"rows,omitzero"`
 	// States is what the worker's driver observes, and Relist asks the
 	// control plane to read the whole environment again.
 	States []runtime.State `json:"states,omitempty"`
-	Relist bool            `json:"relist,omitempty"`
+	Relist bool            `json:"relist,omitzero"`
 	// Window is the credit the side saying hello grants per sub-stream, and
 	// Watch says the worker's driver watches. A hello from a release before
 	// credit carries neither, which is how the other side knows to keep the
 	// stream as it was.
-	Window int  `json:"window,omitempty"`
-	Watch  bool `json:"watch,omitempty"`
+	Window int  `json:"window,omitzero"`
+	Watch  bool `json:"watch,omitzero"`
 	// Stream and Bytes are a credit: the sub-stream, never control, and how
 	// many more bytes of it the far side may send.
-	Stream int   `json:"stream,omitempty"`
-	Bytes  int64 `json:"bytes,omitempty"`
+	Stream int   `json:"stream,omitzero"`
+	Bytes  int64 `json:"bytes,omitzero"`
 	// Event is one change a worker's driver observed.
-	Event *Event `json:"event,omitempty"`
+	Event *Event `json:"event,omitzero"`
 }
 
 // ErrFrame is a frame this protocol cannot read. Every one of them closes the
@@ -425,7 +451,7 @@ func DecodeFrame(raw []byte) (operation string, stream byte, payload []byte, err
 
 // EncodeMessage writes one control frame.
 func EncodeMessage(operation string, m Message) ([]byte, error) {
-	payload, err := json.Marshal(m)
+	payload, err := json.Marshal(m, jsontext.AllowInvalidUTF8(true))
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrFrame, err)
 	}
