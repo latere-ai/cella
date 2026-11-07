@@ -10,9 +10,14 @@ base/prometheusrule.yaml   alert templates, beside the kustomization and outside
 bootstrap/     the Namespace and the Secrets, applied once by hand
 examples/kind/     a laptop cluster: memory store, node port, no dependencies
 examples/generic/  a cluster an installation runs on: Postgres, an authorizer, a sink, a gateway
-prod/              Latere's own installation, applied by the release workflow; not in the deploy archive
+prod/              the maintainer's own installation, not an install path; not in the deploy archive
 prod-bootstrap/    what an operator applies for prod/ by hand, and the identity the workflow deploys with
 ```
+
+`prod/` is the maintainer's own installation and not an install path. The
+`deploy` job of the release workflow applies it only where the repository
+variable `CELLA_RELEASE_DEPLOY` is set, so a fork deploys nothing.
+`prod-bootstrap/` is what an operator applies beside it by hand.
 
 ## Apply order
 
