@@ -5,12 +5,6 @@ metadata:
   namespace: latere
   labels:
     app: cellad
-    # Out of the Dash0 operator's injection, on the workload and on its
-    # Pods. The injection adds an init container that copies a preload
-    # library into the Pod, which a static Go binary never loads, and on a
-    # busy node that copy took twenty of the thirty-four seconds a rollout
-    # left the core unanswered. cellad names the collector itself below.
-    dash0.com/enable: "false"
 spec:
   # Two replicas, rolled one at a time (cella spec 076). One is the writer: it
   # holds the writer lease in the store, runs the loops, holds the gateways'
@@ -35,7 +29,6 @@ spec:
     metadata:
       labels:
         app: cellad
-        dash0.com/enable: "false"
     spec:
       serviceAccountName: cellad
       # The token is mounted, unlike platformd's, because the k8s driver
@@ -337,19 +330,6 @@ spec:
                 secretKeyRef:
                   name: cella-db
                   key: DATABASE_POOL_URL
-            # Telemetry from pkg/otel is a noop until the endpoint is set.
-            # The Dash0 operator does not inject into cellad (the label
-            # above), so cellad names the node-local collector itself, with
-            # the values the operator injects everywhere else: the node's
-            # address and the collector's OTLP over HTTP host port.
-            - name: OTEL_NODE_IP
-              valueFrom:
-                fieldRef:
-                  fieldPath: status.hostIP
-            - name: OTEL_EXPORTER_OTLP_ENDPOINT
-              value: "http://$(OTEL_NODE_IP):40318"
-            - name: OTEL_EXPORTER_OTLP_PROTOCOL
-              value: "http/protobuf"
           ports:
             - name: http
               containerPort: 8080

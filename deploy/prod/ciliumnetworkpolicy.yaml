@@ -5,10 +5,8 @@
 # default-deny outbound, so each of these lists everything its workload dials.
 # A destination that is a cluster Pod is named as an endpoint, because Cilium
 # decides on the destination's identity after any DNAT and not on the address
-# the workload dialed. That is why the collector rule names the collector Pod
-# on 4318 and not the node address the Dash0 operator injects, and why a
-# public hostname served by this cluster's own ingress is the ingress
-# controller's identity on 443.
+# the workload dialed. That is why a public hostname served by this cluster's
+# own ingress is the ingress controller's identity on 443.
 ---
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
@@ -85,14 +83,6 @@ spec:
         - ports:
             - port: "8080"
               protocol: TCP
-    # OTLP export to the Dash0 operator's collector.
-    - toEndpoints:
-        - matchLabels:
-            io.kubernetes.pod.namespace: dash0-system
-      toPorts:
-        - ports:
-            - port: "4318"
-              protocol: TCP
 ---
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
@@ -148,11 +138,4 @@ spec:
       toPorts:
         - ports:
             - port: "443"
-              protocol: TCP
-    - toEndpoints:
-        - matchLabels:
-            io.kubernetes.pod.namespace: dash0-system
-      toPorts:
-        - ports:
-            - port: "4318"
               protocol: TCP

@@ -28,6 +28,10 @@ refused before it is pushed.
   `ttl` was kept for sixty seconds whatever the variable said. It is now
   kept for the variable's value, at most 600 seconds.
 
+### Changed
+
+- **The production manifests no longer name a telemetry collector.** `deploy/prod` drops the collector's egress rules and the OTLP settings from `cellad`; telemetry stays off until `OTEL_EXPORTER_OTLP_ENDPOINT` is set.
+
 ## v0.24.0 - 2026-11-05
 
 ### Added

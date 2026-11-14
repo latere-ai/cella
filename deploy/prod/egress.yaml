@@ -109,8 +109,8 @@ spec:
             # one installation naming one pair.
             - name: CELLA_OIDC_AUDIENCE
               value: "cella,api.latere.ai"
-            # No OTEL_EXPORTER_OTLP_ENDPOINT here; the Dash0 operator injects
-            # it and skips a container that already sets it.
+            # No OTEL_EXPORTER_OTLP_ENDPOINT here; telemetry stays off until
+            # one is set.
           ports:
             - name: proxy
               containerPort: 3128
