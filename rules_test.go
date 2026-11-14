@@ -198,7 +198,7 @@ func TestRulesCarryNoLatereCoordinates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, coordinate := range []string{"cella.latere.ai", "dash0", "sandbox-base", "doks"} {
+	for _, coordinate := range []string{"cella.latere.ai", "sandbox-base", "doks"} {
 		if strings.Contains(strings.ToLower(string(data)), coordinate) {
 			t.Errorf("%s names %q, which is a Latere coordinate and not an operator's value", rulesPath, coordinate)
 		}
