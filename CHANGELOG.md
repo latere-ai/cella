@@ -30,6 +30,8 @@ refused before it is pushed.
 
 ### Changed
 
+- Built with Go 1.27.4, which fixes GO-2026-6859.
+
 - **The production manifests no longer name a telemetry collector.** `deploy/prod` drops the collector's egress rules and the OTLP settings from `cellad`; telemetry stays off until `OTEL_EXPORTER_OTLP_ENDPOINT` is set.
 
 ## v0.24.0 - 2026-11-05
