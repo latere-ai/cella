@@ -33,6 +33,13 @@ if [ -z "${CELLA_DOCKER:-}" ]; then
   elif command -v podman > /dev/null 2>&1; then
     CELLA_DOCKER=podman
     export KIND_EXPERIMENTAL_PROVIDER=podman
+    # docs/install.md names docker, as most of its readers have it, and
+    # `kind load docker-image` runs the docker command itself whatever the
+    # provider. Here docker is podman, under the name both of them call.
+    shim=$(mktemp -d)
+    printf '#!/bin/sh\nexec podman "$@"\n' > "$shim/docker"
+    chmod +x "$shim/docker"
+    PATH="$shim:$PATH"
   else
     echo "kind-stack: neither docker nor podman is on PATH" >&2
     exit 1
@@ -56,7 +63,7 @@ finish() {
     kubectl -n cella logs deploy/cellad-egress --tail=200 || true
   fi
   kind delete cluster --name "$cluster" > /dev/null 2>&1 || true
-  rm -rf "$logs"
+  rm -rf "$logs" ${shim:+"$shim"}
   exit "$status"
 }
 trap finish EXIT
