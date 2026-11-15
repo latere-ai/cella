@@ -114,7 +114,10 @@ jobs:
   conformance:
     name: the candidate passes what is built
     needs: build
-    runs-on: ubuntu-latest
+    # Ubuntu 26.04's Docker keeps images in containerd's store, where a
+    # pulled multi-platform image has one platform's content, and kind's load
+    # imports every platform the index names, so it fails on the missing one.
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
       contents: read
@@ -311,7 +314,10 @@ jobs:
     # deploy sits above publish in the graph and is skipped on a fork, so
     # the results this job waits on are named, as on publish.
     if: ${{ always() && needs.build.result == 'success' && needs.publish.result == 'success' }}
-    runs-on: ubuntu-latest
+    # Ubuntu 26.04's Docker keeps images in containerd's store, where a
+    # pulled multi-platform image has one platform's content, and kind's load
+    # imports every platform the index names, so it fails on the missing one.
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
       contents: read
