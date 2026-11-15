@@ -20,6 +20,12 @@ refused before it is pushed.
 
 ### Fixed
 
+- **A worker stops on a refusal even when its first write loses the race.**
+  When the control plane closed a new stream with a refusal such as
+  `key_revoked`, a worker whose write met the closed connection first
+  reported the broken pipe and reconnected. It now reads the close's reason
+  and stops, as it did when the close arrived first.
+
 - **Your authorization endpoint hears the request id.** `request.id` was
   sent empty. It is now the id the answer carries in `X-Request-Id` and the
   logs name, the caller's own when it sent one.

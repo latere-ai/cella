@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -320,8 +321,10 @@ func (s *workerSocket) WriteFrame(raw []byte) error {
 		return err
 	}
 	err := s.conn.WriteMessage(websocket.BinaryMessage, raw)
-	if errors.Is(err, websocket.ErrCloseSent) {
-		// The peer's close was answered: the link reads its reason next.
+	if errors.Is(err, websocket.ErrCloseSent) || errors.Is(err, syscall.EPIPE) || errors.Is(err, syscall.ECONNRESET) {
+		// The peer's close was answered, or the peer closed the connection
+		// before this side read its close frame: the link reads the reason
+		// next, from the frame already received.
 		return fmt.Errorf("%w: %w", remote.ErrClosing, err)
 	}
 	return err
