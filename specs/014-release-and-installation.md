@@ -3,7 +3,7 @@ title: "Release and installation: images, binaries, attestations, the deploy man
 status: in-progress
 track: core
 depends_on:
-  - specs/002-repository-scaffold.md
+  - specs/.archive/002-repository-scaffold.md
   - specs/012-test-stubs-and-tiers.md
   - specs/015-conformance-suite.md
 affects: [.github/workflows/release.yml, .github/workflows/verify.yml, Dockerfile.ci, deploy/, tools/release/, docs/install.md, docs/upgrades/, cmd/cellad/]

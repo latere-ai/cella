@@ -7,7 +7,7 @@ depends_on:
   - specs/018-egress-and-secrets.md
   - specs/020-scheduling-and-sets.md
   - specs/021-data-plane-workers.md
-  - specs/082-the-worker-as-a-library.md
+  - specs/.archive/082-the-worker-as-a-library.md
 affects: [manifest/v1/, authorizer/, internal/auth/, internal/api/, runtime/remote/, controller/, internal/config/, api/openapi.yaml, docs/api.md, docs/workers.md, CHANGELOG.md]
 effort: medium
 created: 2026-10-18

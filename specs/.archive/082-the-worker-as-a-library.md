@@ -6,7 +6,7 @@ depends_on:
   - specs/004-runtime-contract.md
   - specs/013-security-and-threat-model.md
   - specs/021-data-plane-workers.md
-  - specs/081-local-driver.md
+  - specs/.archive/081-local-driver.md
 affects: [worker/ (new, from internal/worker/), internal/worker/ (removed), runtime/remote/, manifest/v1/, controller/, internal/api/, cmd/cellad/, arch_test.go, api/openapi.yaml, docs/workers.md, CHANGELOG.md]
 effort: medium
 created: 2026-10-18

@@ -3,7 +3,7 @@ title: "Agent client: the cella command, its client package, exit codes, output,
 status: in-progress
 track: core
 depends_on:
-  - specs/002-repository-scaffold.md
+  - specs/.archive/002-repository-scaffold.md
   - specs/003-manifest-contract.md
   - specs/006-identity.md
   - specs/008-api.md

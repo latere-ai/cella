@@ -5,7 +5,7 @@ track: core
 depends_on:
   - specs/004-runtime-contract.md
   - specs/005-lifecycle-controller.md
-  - specs/025-native-runtime-migration.md
+  - specs/.archive/025-native-runtime-migration.md
 affects: [runtime/native/, runtime/driver.go]
 effort: medium
 created: 2026-09-19

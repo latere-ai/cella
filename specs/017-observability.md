@@ -3,7 +3,7 @@ title: "Observability: one metric table across three roles, traces across the se
 status: in-progress
 track: core
 depends_on:
-  - specs/002-repository-scaffold.md
+  - specs/.archive/002-repository-scaffold.md
   - specs/005-lifecycle-controller.md
   - specs/006-identity.md
   - specs/008-api.md

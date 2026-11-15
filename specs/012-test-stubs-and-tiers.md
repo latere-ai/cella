@@ -3,7 +3,7 @@ title: "Test stubs and tiers: the stubs, the bootstrap of make run, the driver t
 status: in-progress
 track: core
 depends_on:
-  - specs/002-repository-scaffold.md
+  - specs/.archive/002-repository-scaffold.md
   - specs/004-runtime-contract.md
   - specs/006-identity.md
   - specs/007-admission.md

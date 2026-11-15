@@ -4,7 +4,7 @@ status: in-progress
 track: core
 depends_on:
   - specs/001-architecture.md
-  - specs/002-repository-scaffold.md
+  - specs/.archive/002-repository-scaffold.md
 affects: [authorizer/, internal/auth/, internal/config/, internal/api/, test/stubs/]
 effort: medium
 created: 2026-09-12
