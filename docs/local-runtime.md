@@ -24,9 +24,11 @@ or Kubernetes runtime.
   srt echo ok
   ```
 
-  On Ubuntu 24.04 and later, AppArmor may block the unprivileged user
-  namespaces bubblewrap needs, and `srt echo ok` fails until they are
-  allowed.
+  On Ubuntu 24.04, AppArmor blocks the unprivileged user namespaces
+  bubblewrap needs, and `srt echo ok` fails until they are allowed
+  (`sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`).
+  Ubuntu 26.04 refuses the nested user namespace the sandbox runtime
+  applies its seccomp filter from, even with that setting off.
 - Your own account. A worker started as root refuses to start with
   `local_runs_as_root`: the local runtime confines a person's own
   account, and as root no folder you grant would hold anything back.
