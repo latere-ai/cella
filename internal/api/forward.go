@@ -184,13 +184,6 @@ func (f *Forwarder) forward(w http.ResponseWriter, r *http.Request, target strin
 	return !notSent.Load()
 }
 
-// RefuseNoWriter answers a request no replica could take within its hold, with
-// the request id it carried or one minted for it: 503 control_plane_unavailable.
-func RefuseNoWriter(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set(RequestIDHeader, requestID(r))
-	respondError(w, ErrNoWriter)
-}
-
 // rewrite points the request at the writer. The path is the one the caller
 // sent, taken from the request line: the public listener strips its base
 // before the API sees a request, and the writer's listener serves the same
