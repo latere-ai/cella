@@ -52,7 +52,21 @@ fi
 if ! kind get clusters 2>/dev/null | grep -qx "$name"; then
   kind create cluster --name "$name" --config "$overlay/kind.yaml" >&2
 fi
-kind load docker-image cellad:dev cella-stubs:dev cella-display:dev --name "$name" >&2
+# kind's docker-image loader asks Docker for the images. Where podman built
+# them, they are loaded from an archive instead, under the name the cluster
+# looks them up by: podman files an unqualified cellad:dev as
+# localhost/cellad:dev, and the cluster asks for docker.io/library/cellad:dev.
+if [ "$(basename "$docker")" != "podman" ]; then
+  kind load docker-image cellad:dev cella-stubs:dev cella-display:dev --name "$name" >&2
+else
+  archive="$work/image.tar"
+  for image in cellad:dev cella-stubs:dev cella-display:dev; do
+    podman tag "$image" "docker.io/library/$image" >&2
+    podman save -o "$archive" "docker.io/library/$image" >&2
+    kind load image-archive "$archive" --name "$name" >&2
+    rm -f "$archive"
+  done
+fi
 
 # 3. The namespace, the two mandatory Secrets, and the overlay. The secret
 # key is minted only where the cluster holds none yet: a new one would not
