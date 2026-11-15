@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.25.0 - 2026-11-15
+
 ### Added
 
 - **`CELLA_TRUSTED_PROXIES` names the proxies in front of the public
