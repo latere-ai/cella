@@ -458,6 +458,9 @@ func TestTheReleaseRunsSpec014sJobsInOrder(t *testing.T) {
 			map[string]string{"contents": "read", "packages": "read", "attestations": "read"}},
 	}
 	pinned := regexp.MustCompile(`@[0-9a-f]{40}$`)
+	// GitHub's hosted Ubuntu, by its moving label or one release pinned, as a
+	// job pins it when the moving label lands on an image the job cannot use.
+	hostedUbuntu := regexp.MustCompile(`^ubuntu-(latest|[0-9]{2}\.[0-9]{2})$`)
 	versions := map[string]bool{}
 	for name, w := range want {
 		job, ok := jobs[name].(map[string]any)
@@ -480,8 +483,8 @@ func TestTheReleaseRunsSpec014sJobsInOrder(t *testing.T) {
 			if job["uses"] != nil {
 				t.Errorf("%s calls %v; it is cella's own job", name, job["uses"])
 			}
-			if got := str(job["runs-on"]); got != "ubuntu-latest" {
-				t.Errorf("%s runs on %q, want a hosted runner, ubuntu-latest", name, got)
+			if got := str(job["runs-on"]); !hostedUbuntu.MatchString(got) {
+				t.Errorf("%s runs on %q, want a hosted runner, ubuntu-latest or a pinned ubuntu-YY.MM", name, got)
 			}
 			for _, s := range list(job["steps"]) {
 				if uses := str(dig(s, "uses")); uses != "" && !pinned.MatchString(uses) {
