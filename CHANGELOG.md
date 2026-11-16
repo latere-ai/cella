@@ -6,6 +6,8 @@ refused before it is pushed.
 
 ## Unreleased
 
+## v0.26.0 - 2026-11-16
+
 ### Changed
 
 - **Sandboxes, volumes, environments and the records behind them refuse a
