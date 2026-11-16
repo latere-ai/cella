@@ -391,3 +391,23 @@ identity:
   overlays:
     - deploy/prod
     - deploy/prod-bootstrap
+
+# The status types every switch is held exhaustive over, so a phase or state
+# added to a lifecycle is handled, or named as ignored, wherever one is
+# switched on.
+enums:
+  go:
+    types:
+      - manifest/v1.SandboxPhase
+      - manifest/v1.VolumePhase
+      - manifest/v1.EnvironmentPhase
+      - internal/store.OperationState
+      - internal/store.DeliveryState
+      - internal/store.KeyState
+      - internal/store.RowState
+      - device.EngineState
+    parsers:
+      manifest/v1.ParseSandboxPhase: Reads a sandbox phase written as text outside the control plane, such as a driver's report or a stored column, and names it without judging it.
+      manifest/v1.ParseVolumePhase: Reads a volume phase written as text outside the control plane, such as a driver's report, and names it without judging it.
+      manifest/v1.ParseEnvironmentPhase: Reads an environment phase written as text outside the control plane, such as a stored column, and names it without judging it.
+      internal/store.ParseDeliveryState: Reads the delivery state a query derived from an event's timestamps and names it.
