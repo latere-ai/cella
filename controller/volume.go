@@ -201,7 +201,7 @@ func (c *Controller) DeleteVolume(ctx context.Context, id string) (v1.Volume, er
 	if holders := c.attachedToLocked(id); len(holders) > 0 {
 		return c.volumeRead(id), fmt.Errorf("%w: it is mounted by %s", ErrVolumeBusy, strings.Join(holders, ", "))
 	}
-	if held.Status.Phase != v1.VolumeDeleting {
+	if VolumeLifecycle.Can(held.Status.Phase, v1.VolumeDeleting) {
 		held.Status.Phase = v1.VolumeDeleting
 		held.Status.UpdatedAt = time.Now().UTC()
 		if err := c.persistVolume(ctx, VolumeAct{Type: MutationVolumeStatus, Object: held}); err != nil {
@@ -346,7 +346,7 @@ func (c *Controller) bindVolumesLocked(obj *v1.Sandbox) error {
 		}
 		if vol.Status.Phase != v1.VolumeAvailable && vol.Status.Phase != v1.VolumePending {
 			return &manifest.Error{Code: "invalid_field", Path: "spec.volumes",
-				Detail: "the volume " + m.Volume + " is " + vol.Status.Phase}
+				Detail: "the volume " + m.Volume + " is " + string(vol.Status.Phase)}
 		}
 		if err := c.attachableLocked(vol, m.ReadOnly); err != nil {
 			return err
@@ -488,7 +488,7 @@ func (c *Controller) releaseVolumesLocked(ctx context.Context, obj v1.Sandbox) {
 	woken := false
 	for _, a := range obj.Status.Volumes {
 		vol, held := c.volumeObjects[a.Volume]
-		if !held || vol.Spec.Retains() || vol.Status.Phase == v1.VolumeDeleting || len(c.attachedToLocked(a.Volume)) > 0 {
+		if !held || vol.Spec.Retains() || !VolumeLifecycle.Can(vol.Status.Phase, v1.VolumeDeleting) || len(c.attachedToLocked(a.Volume)) > 0 {
 			continue
 		}
 		vol.Status.Phase = v1.VolumeDeleting
@@ -641,7 +641,9 @@ func (c *Controller) settleVolume(ctx context.Context, vd driver.VolumeDriver, i
 		}
 		return
 	}
-	if cur.Status.Phase != v1.VolumePending {
+	// What the driver reported lands only from a phase with a step to it: a
+	// volume that left Pending was settled by someone else.
+	if !VolumeLifecycle.Can(cur.Status.Phase, state.Phase) {
 		return
 	}
 	now := time.Now().UTC()
@@ -666,7 +668,9 @@ func (c *Controller) settleVolume(ctx context.Context, vd driver.VolumeDriver, i
 			c.log.WarnContext(ctx, "the failed volume was not written", "volume", id, "err", err)
 			return
 		}
-	default:
+	case v1.VolumePending, v1.VolumeDeleting, v1.VolumeLost:
+		// The driver reported no end of the fill, or one that is not its to
+		// report: the row is left as it is.
 		return
 	}
 	// A sandbox waiting for this volume is placed and waits on the
@@ -700,7 +704,7 @@ func (c *Controller) observeVolumes(ctx context.Context) error {
 			continue
 		}
 		c.mu.Lock()
-		if cur, held := c.volumeObjects[obj.Status.ID]; held && cur.Status.Phase == v1.VolumeAvailable {
+		if cur, held := c.volumeObjects[obj.Status.ID]; held && VolumeLifecycle.Can(cur.Status.Phase, v1.VolumeLost) {
 			cur.Status.Phase = v1.VolumeLost
 			cur.Status.UpdatedAt = time.Now().UTC()
 			failed = errors.Join(failed, c.persistVolume(ctx, VolumeAct{Type: MutationVolumeStatus, Object: cur}))
@@ -724,10 +728,15 @@ func volumeSpecOf(obj v1.Volume) driver.VolumeSpec {
 // mutex is held.
 func (c *Controller) persistVolume(ctx context.Context, act VolumeAct) error {
 	act.Object.Status.AttachedTo = nil
+	id := act.Object.Status.ID
+	previous, held := c.volumeObjects[id]
+	if err := VolumeLifecycle.Move(id, previous.Status.Phase, held, act.Object.Status.Phase); err != nil {
+		return err
+	}
 	if err := c.volumes.WriteVolume(ctx, act); err != nil {
 		return err
 	}
-	c.volumeObjects[act.Object.Status.ID] = manifest.CloneVolume(act.Object)
+	c.volumeObjects[id] = manifest.CloneVolume(act.Object)
 	// A durable store journaled the record inside the write above. A
 	// snapshot store has no journal, so the emitter takes the act here.
 	if c.durable == nil && c.events != nil {

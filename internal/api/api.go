@@ -636,6 +636,9 @@ func started(obj v1.Sandbox) bool {
 	switch obj.Status.Phase {
 	case controller.PhaseQueued, driver.Pending, controller.PhaseStarting:
 		return false
+	case driver.Running, controller.PhaseStopping, driver.Stopped, controller.PhaseFailed, controller.PhaseLost,
+		controller.PhaseRecovering, controller.PhaseDeleting:
+		return true
 	}
 	return true
 }
@@ -781,7 +784,7 @@ func (h *handler) list(w http.ResponseWriter, r *http.Request) {
 		}
 		// The phase selector reads what the row answers: the runtime's phase
 		// where the read succeeded, the last written one where it did not.
-		if q.Get("phase") != "" && q.Get("phase") != obj.Status.Phase {
+		if want := v1.ParseSandboxPhase(q.Get("phase")); len(want) > 0 && want != obj.Status.Phase {
 			continue
 		}
 		if len(items) == limit {

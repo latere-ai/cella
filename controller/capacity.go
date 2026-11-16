@@ -65,10 +65,12 @@ func askOf(obj v1.Sandbox) (usage, error) {
 // memory and its slot of the count: every phase in which the driver runs it or
 // is bringing it up or down. A queued sandbox holds nothing yet, and a lost
 // one holds nothing the control plane can see.
-func holdsCompute(phase string) bool {
+func holdsCompute(phase v1.SandboxPhase) bool {
 	switch phase {
 	case PhaseQueued, PhaseDeleting, PhaseFailed, PhaseLost, driver.Stopped:
 		return false
+	case driver.Pending, PhaseStarting, driver.Running, PhaseStopping, PhaseRecovering:
+		return true
 	}
 	return true
 }
@@ -87,6 +89,8 @@ func holdsDisk(obj v1.Sandbox) bool {
 		return false
 	case PhaseFailed:
 		return obj.Status.Reason != ReasonNoCapacity && obj.Status.Reason != ReasonStartDeadline
+	case driver.Pending, PhaseStarting, driver.Running, PhaseStopping, driver.Stopped, PhaseRecovering:
+		return true
 	}
 	return true
 }

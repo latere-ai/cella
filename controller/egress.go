@@ -145,6 +145,8 @@ func (c *Controller) carryEnv(ctx context.Context, obj *v1.Sandbox, secrets map[
 	switch obj.Status.Phase {
 	case PhaseQueued, PhaseLost, PhaseRecovering, PhaseDeleting:
 		return nil
+	case driver.Pending, PhaseStarting, driver.Running, PhaseStopping, driver.Stopped, PhaseFailed:
+		// A driver holds it, and the change goes to the driver below.
 	}
 	if placed(*obj) {
 		return nil
@@ -180,6 +182,8 @@ func (c *Controller) carryBoundary(ctx context.Context, held, obj v1.Sandbox, m 
 	switch obj.Status.Phase {
 	case PhaseQueued, PhaseLost, PhaseRecovering, PhaseDeleting:
 		return nil
+	case driver.Pending, PhaseStarting, driver.Running, PhaseStopping, driver.Stopped, PhaseFailed:
+		// A driver holds it, and the change goes to the driver below.
 	}
 	if placed(obj) {
 		return nil
@@ -563,7 +567,7 @@ func (c *Controller) EgressMaps(ctx context.Context) []egress.Map {
 	for _, obj := range c.objects {
 		// The gateway serves the control plane's own environment alone,
 		// and a sandbox on any other is none of its business.
-		if obj.Status.Phase == "Deleting" || c.sandboxEnvironment(obj) != c.environment {
+		if obj.Status.Phase == PhaseDeleting || c.sandboxEnvironment(obj) != c.environment {
 			continue
 		}
 		sb := clone(obj)

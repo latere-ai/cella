@@ -11,6 +11,8 @@ import (
 	"slices"
 	"time"
 
+	v1 "latere.ai/x/cella/manifest/v1"
+
 	driver "latere.ai/x/cella/runtime"
 )
 
@@ -392,10 +394,12 @@ func (c *Controller) enforceToken(ctx context.Context, state driver.State, now t
 // renewed. A stopped sandbox is: its files and its record are intact, it
 // starts again with what it holds, and a token that expired while it was
 // stopped would leave it unable to call back.
-func rotatable(phase string) bool {
+func rotatable(phase v1.SandboxPhase) bool {
 	switch phase {
 	case PhaseDeleting, PhaseFailed, PhaseLost, PhaseRecovering:
 		return false
+	case driver.Pending, PhaseQueued, PhaseStarting, driver.Running, PhaseStopping, driver.Stopped:
+		return true
 	}
 	return true
 }

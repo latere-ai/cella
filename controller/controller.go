@@ -29,20 +29,20 @@ import (
 // design 005. Lost is a desired sandbox with no observed counterpart, and
 // Recovering is one being recreated from its desired state.
 const (
-	PhaseFailed     = "Failed"
-	PhaseDeleting   = "Deleting"
-	PhaseLost       = "Lost"
-	PhaseRecovering = "Recovering"
+	PhaseFailed     = v1.SandboxFailed
+	PhaseDeleting   = v1.SandboxDeleting
+	PhaseLost       = v1.SandboxLost
+	PhaseRecovering = v1.SandboxRecovering
 	// PhaseQueued is a sandbox a queued environment holds until it fits. No
 	// driver holds it (spec 057).
-	PhaseQueued = "Queued"
+	PhaseQueued = v1.SandboxQueued
 	// PhaseStarting is a sandbox the runtime has taken and not yet reported
 	// ready. A driver reports it; the controller writes it after a start
 	// whose read did not yet show the start (spec 080).
-	PhaseStarting = "Starting"
+	PhaseStarting = v1.SandboxStarting
 	// PhaseStopping is a sandbox whose workload the runtime is ending. A
 	// driver reports it.
-	PhaseStopping = "Stopping"
+	PhaseStopping = v1.SandboxStopping
 )
 
 var (
@@ -499,6 +499,9 @@ func (c *Controller) Close() error {
 func (c *Controller) persist(ctx context.Context, obj v1.Sandbox, mutation string) error {
 	id := obj.Status.ID
 	previous, held := c.objects[id]
+	if err := SandboxLifecycle.Move(id, previous.Status.Phase, held, obj.Status.Phase); err != nil {
+		return err
+	}
 	c.objects[id] = clone(obj)
 	var err error
 	if c.durable != nil {
@@ -694,10 +697,12 @@ func refused(err error) bool {
 // this list does not name takes a slot, so a driver's phase the controller
 // does not know errs toward refusing. It is not holdsCompute, which asks what
 // the environment's resources hold now.
-func holdsSlot(phase string) bool {
+func holdsSlot(phase v1.SandboxPhase) bool {
 	switch phase {
 	case driver.Stopped, PhaseFailed, PhaseDeleting:
 		return false
+	case driver.Pending, PhaseQueued, PhaseStarting, driver.Running, PhaseStopping, PhaseLost, PhaseRecovering:
+		return true
 	}
 	return true
 }
@@ -1159,12 +1164,14 @@ func (c *Controller) failCreateFor(ctx context.Context, obj v1.Sandbox, reason s
 // still coming up is a status write and no event. Without this a sandbox
 // that runs from creation would never say it started, and a meter that opens
 // its interval there would read it as never having run.
-func phaseMutation(phase string) string {
+func phaseMutation(phase v1.SandboxPhase) string {
 	switch phase {
 	case driver.Running:
 		return MutationStarted
 	case PhaseFailed:
 		return MutationFailed
+	case driver.Pending, PhaseQueued, PhaseStarting, PhaseStopping, driver.Stopped, PhaseLost, PhaseRecovering, PhaseDeleting:
+		return MutationStatus
 	}
 	return MutationStatus
 }
@@ -1275,8 +1282,8 @@ func (c *Controller) read(ctx context.Context, obj v1.Sandbox) (out v1.Sandbox, 
 	}
 	state, err := d.Inspect(ctx, obj.Status.ID)
 	if errors.Is(err, driver.ErrNotFound) {
-		if obj.Status.Phase != driver.Pending && obj.Status.Phase != "Failed" {
-			obj.Status.Phase = "Lost"
+		if obj.Status.Phase != driver.Pending && obj.Status.Phase != PhaseFailed {
+			obj.Status.Phase = PhaseLost
 		}
 		return obj, false, nil
 	}
@@ -1388,7 +1395,7 @@ func (c *Controller) Start(ctx context.Context, id string, max int) (v1.Sandbox,
 		if err := restartable(recorded, held); err != nil {
 			return obj, err
 		}
-	default:
+	case driver.Pending, PhaseQueued, PhaseStarting, driver.Running, PhaseStopping, PhaseLost, PhaseRecovering, PhaseDeleting:
 		return obj, ErrPhase
 	}
 	owner := obj.Status.Owner
@@ -1778,6 +1785,8 @@ func (c *Controller) resize(ctx context.Context, held v1.Sandbox, obj *v1.Sandbo
 		// No driver holds the sandbox now. The size reaches it with the
 		// create or the start that brings it back, which reads sizeFor.
 		return nil
+	case driver.Pending, PhaseStarting, driver.Running, PhaseStopping, driver.Stopped, PhaseFailed:
+		// A driver holds it, and the size goes to the driver below.
 	}
 	if placed(held) {
 		return nil

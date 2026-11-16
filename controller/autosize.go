@@ -354,6 +354,9 @@ func (c *Controller) persistWith(ctx context.Context, obj v1.Sandbox, mutation s
 	}
 	id := obj.Status.ID
 	previous, held := c.objects[id]
+	if err := SandboxLifecycle.Move(id, previous.Status.Phase, held, obj.Status.Phase); err != nil {
+		return err
+	}
 	c.objects[id] = clone(obj)
 	if err := writer.WriteData(ctx, clone(obj), mutation, data); err != nil {
 		if held {
@@ -671,6 +674,8 @@ func (c *Controller) rising(obj v1.Sandbox, state driver.State, d driver.Driver)
 		return reason, true
 	case PhaseStopping:
 		return reason, false
+	case driver.Pending, PhaseQueued, PhaseStarting, driver.Running, PhaseFailed, PhaseLost, PhaseRecovering, PhaseDeleting:
+		// Nothing of a restart the control plane made is left to finish.
 	}
 	return "", false
 }
@@ -796,6 +801,8 @@ func (c *Controller) claim(id string) (sizing, bool) {
 	switch obj.Status.Phase {
 	case PhaseDeleting, PhaseQueued, PhaseLost, PhaseRecovering:
 		return sizing{}, false
+	case driver.Pending, PhaseStarting, driver.Running, PhaseStopping, driver.Stopped, PhaseFailed:
+		// A driver holds it, and its size is read below.
 	}
 	d, err := c.driverFor(obj.Status.Environment)
 	if err != nil {
@@ -933,7 +940,7 @@ func (c *Controller) sizeOne(ctx context.Context, id string, observed *driver.St
 		}
 		return c.recordSize(ctx, id, *state, false)
 	case driver.Running:
-	default:
+	case driver.Pending, PhaseQueued, PhaseStarting, PhaseStopping, PhaseLost, PhaseRecovering, PhaseDeleting:
 		return nil
 	}
 	if state.Resize != nil {

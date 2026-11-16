@@ -282,6 +282,9 @@ func (c *Controller) applyEnvironment(ctx context.Context, obj v1.Environment, i
 		obj.Status.UpdatedAt = now
 		mutation = MutationEnvironmentUpdated
 	}
+	if err := EnvironmentLifecycle.Move(obj.Metadata.Name, existing.Status.Phase, held, obj.Status.Phase); err != nil {
+		return obj, false, err
+	}
 	if ifVersion == 0 {
 		ifVersion = obj.Status.Version
 	}
@@ -537,6 +540,9 @@ func (c *Controller) phaseOf(ctx context.Context, name string) error {
 		return nil
 	}
 	next.Status.UpdatedAt = c.clock.Now()
+	if err := EnvironmentLifecycle.Move(name, obj.Status.Phase, true, next.Status.Phase); err != nil {
+		return err
+	}
 	mutation := transitionMutation(obj.Status.Phase, next.Status.Phase)
 	c.envMu.Lock()
 	c.environments[name] = next
@@ -561,7 +567,7 @@ func (c *Controller) phaseOf(ctx context.Context, name string) error {
 // environment answers from its driver's own readiness and a worker's from the
 // heartbeats its workers sent; either is Offline once nothing has answered
 // for the offline window.
-func (c *Controller) phase(ctx context.Context, obj v1.Environment, d driver.Driver, workers int) (string, string) {
+func (c *Controller) phase(ctx context.Context, obj v1.Environment, d driver.Driver, workers int) (v1.EnvironmentPhase, string) {
 	if obj.Spec.Mode == v1.EnvironmentInprocess {
 		if err := d.Ready(ctx); err != nil {
 			return c.lapsed(obj, v1.EnvironmentReady, v1.ReasonDriverNotReady)
@@ -573,7 +579,7 @@ func (c *Controller) phase(ctx context.Context, obj v1.Environment, d driver.Dri
 		c.markAnswered(obj.Metadata.Name)
 		return v1.EnvironmentReady, ""
 	}
-	if obj.Status.Phase == "" || obj.Status.Phase == v1.EnvironmentPending {
+	if len(obj.Status.Phase) == 0 || obj.Status.Phase == v1.EnvironmentPending {
 		// Nothing has ever registered, so there is no heartbeat to have
 		// lost: the environment is applied and waiting for its data plane.
 		return v1.EnvironmentPending, ""
@@ -584,7 +590,7 @@ func (c *Controller) phase(ctx context.Context, obj v1.Environment, d driver.Dri
 // lapsed holds an environment at its phase until the offline window has
 // passed with no answer, then moves it to Offline with the reason given. The
 // window is what keeps one missed heartbeat from emptying an environment.
-func (c *Controller) lapsed(obj v1.Environment, pending, reason string) (string, string) {
+func (c *Controller) lapsed(obj v1.Environment, pending v1.EnvironmentPhase, reason string) (v1.EnvironmentPhase, string) {
 	name := obj.Metadata.Name
 	c.answerMu.Lock()
 	since, seen := c.answered[name]
@@ -699,7 +705,7 @@ func sameObserved(a, b v1.EnvironmentStatus) bool {
 
 // transitionMutation is the record one phase change produces, and the empty
 // string for a status write design 009 names no type for.
-func transitionMutation(from, to string) string {
+func transitionMutation(from, to v1.EnvironmentPhase) string {
 	switch {
 	case from == to:
 		return ""

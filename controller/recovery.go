@@ -72,10 +72,12 @@ func (c *Controller) vanished(environment string, states []driver.State) []strin
 }
 
 // canBeLost reports whether a phase can become Lost.
-func canBeLost(phase string) bool {
+func canBeLost(phase v1.SandboxPhase) bool {
 	switch phase {
 	case driver.Pending, PhaseQueued, PhaseFailed, PhaseDeleting:
 		return false
+	case PhaseStarting, driver.Running, PhaseStopping, driver.Stopped, PhaseLost, PhaseRecovering:
+		return true
 	}
 	return true
 }
@@ -122,7 +124,7 @@ func (c *Controller) graceLocked(ctx context.Context, obj v1.Sandbox, now time.T
 	since, marked := c.lost[id]
 	if !marked {
 		c.lost[id] = now
-		if obj.Status.Phase == PhaseLost {
+		if !SandboxLifecycle.Can(obj.Status.Phase, PhaseLost) {
 			return false, nil
 		}
 		obj.Status.Phase = PhaseLost
@@ -150,7 +152,7 @@ func (c *Controller) recoverLocked(ctx context.Context, obj v1.Sandbox, now time
 	if next, waiting := c.retry[id]; waiting && now.Before(next) {
 		return false, nil
 	}
-	if obj.Status.Phase != PhaseLost && obj.Status.Phase != PhaseRecovering {
+	if SandboxLifecycle.Can(obj.Status.Phase, PhaseLost) {
 		obj.Status.Phase = PhaseLost
 		obj.Status.Reason = ReasonLost
 		if err := c.persist(ctx, obj, MutationLost); err != nil {
