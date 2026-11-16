@@ -32,6 +32,13 @@ refused before it is pushed.
 
 ### Fixed
 
+- **A writer whose lease renewal was slow stops before a standby can take
+  over.** The writer counted its term from when a renewal's answer came back,
+  while the store counted it from when the request arrived, so a slow
+  renewal could leave the old writer writing for up to a second after a
+  standby took the lease. The writer now counts from the moment it sent the
+  renewal, stops a fifth of the term early, and gives up a renewal that is
+  still unanswered at that deadline.
 - **An environment's phase is kept in its row.** The phase column of an
   environment stayed at the value the row was created with while its status
   moved, so a list filtered by phase read a stale one. Every status write now
