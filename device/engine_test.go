@@ -563,7 +563,7 @@ func TestEngineFollowsTheWorkerState(t *testing.T) {
 	p.endStream("")
 	var details []string
 	deadline := time.After(30 * time.Second)
-	for len(details) < 3 || details[len(details)-1] != StateOnline {
+	for len(details) < 3 || details[len(details)-1] != string(StateOnline) {
 		select {
 		case ev := <-events:
 			if ev.Kind != EventStatus {
@@ -572,7 +572,7 @@ func TestEngineFollowsTheWorkerState(t *testing.T) {
 			// The online of the first connection came before the stream
 			// ended, and is not part of what is read here.
 			if ev.Status.State == StateOnline && len(details) > 0 {
-				details = append(details, StateOnline)
+				details = append(details, string(StateOnline))
 			} else if ev.Status.State == StateOffline {
 				details = append(details, ev.Status.Detail)
 			}

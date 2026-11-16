@@ -134,7 +134,7 @@ type Engine struct {
 	policy   Policy
 	key      Key
 	retiring *Key
-	state    string
+	state    EngineState
 	detail   string
 	driver   runtime.Driver
 	host     v1.HostInfo
@@ -303,23 +303,37 @@ func (e *Engine) statusLocked() Status {
 	return s
 }
 
-// setState records the state and tells every client when it changed.
-func (e *Engine) setState(state, detail string) {
+// setState records the state and tells every client when it changed. It
+// reports whether the state changed: a change the engine does not have, a
+// state the engine already holds, and any change under a pause but a pause
+// leave it as it was.
+func (e *Engine) setState(state EngineState, detail string) bool {
 	e.mu.Lock()
 	if e.paused && state != StatePaused {
 		// A worker ending under a pause reports its stream ended; the
 		// computer is paused, which is what the person reads.
 		e.mu.Unlock()
-		return
+		return false
 	}
 	if e.state == state && e.detail == detail {
 		e.mu.Unlock()
-		return
+		return false
+	}
+	moved := e.state != state
+	if moved {
+		if err := EngineTable.Check(e.state, state); err != nil {
+			// A step the engine does not have changes nothing, and is
+			// reported where a developer reads it.
+			slog.Warn("device engine: refused a change of state", "err", err)
+			e.mu.Unlock()
+			return false
+		}
 	}
 	e.state, e.detail = state, detail
 	status := e.statusLocked()
 	e.mu.Unlock()
 	e.hub.publish(Event{Kind: EventStatus, Status: &status})
+	return moved
 }
 
 // notice tells every client a sentence the person should read.

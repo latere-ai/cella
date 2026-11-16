@@ -26,16 +26,19 @@ const (
 	EventNetworkRefused = "network_refused"
 )
 
+// EngineState is the state of the engine, as Status.State serves it.
+type EngineState string
+
 // The states of the engine.
 const (
-	StateStarting = "starting"
-	StateOnline   = "online"
-	StateOffline  = "offline"
-	StatePaused   = "paused"
+	StateStarting EngineState = "starting"
+	StateOnline   EngineState = "online"
+	StateOffline  EngineState = "offline"
+	StatePaused   EngineState = "paused"
 	// StateNotConnected is `serve` on a computer no device is connected as
 	// yet, or whose device was removed: it waits for a client to connect it
 	// through the control socket.
-	StateNotConnected = "not_connected"
+	StateNotConnected EngineState = "not_connected"
 )
 
 // Event is one thing a client of the engine is told: a change of status, a
@@ -78,9 +81,9 @@ type Status struct {
 	Name   string `json:"name"`
 	// State is starting, online, offline, paused or not_connected, and
 	// Detail why it is offline.
-	State  string `json:"state"`
-	Online bool   `json:"online"`
-	Detail string `json:"detail,omitempty"`
+	State  EngineState `json:"state"`
+	Online bool        `json:"online"`
+	Detail string      `json:"detail,omitempty"`
 	// Sessions is how many sessions have a sandbox running on the computer.
 	Sessions int `json:"sessions"`
 	// Waiting is how many creates wait for the person.
