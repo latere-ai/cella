@@ -25,6 +25,47 @@ const (
 	idlePoll    = 50 * time.Millisecond
 )
 
+// The writer's own deadline. The store records the lease's expiry from the
+// instant it received a renewal, which is never earlier than the instant the
+// writer sent it, so a writer that counts its term from the send ends first.
+// It ends writerMargin short of the term, which covers the time between its
+// decision and its last write: writerStopBy, the bound on how long the
+// process takes to stop serving. formal/WriterLease.tla is checked with these
+// values.
+const (
+	writerMarginDiv = 5
+	writerStopBy    = time.Second
+)
+
+// writerMargin is how far short of ttl the writer's deadline falls.
+func writerMargin(ttl time.Duration) time.Duration { return ttl / writerMarginDiv }
+
+// writerDeadline is the instant after which a writer whose last granted
+// renewal was sent at sent must not write.
+func writerDeadline(sent time.Time, ttl time.Duration) time.Time {
+	return sent.Add(ttl - writerMargin(ttl))
+}
+
+// writerClock is the time the lease loops read, so a test drives them with a
+// clock of its own.
+type writerClock struct {
+	now    func() time.Time
+	ticker func(d time.Duration) (<-chan time.Time, func())
+	timer  func(d time.Duration) (<-chan time.Time, func())
+}
+
+var realWriterClock = writerClock{
+	now: time.Now,
+	ticker: func(d time.Duration) (<-chan time.Time, func()) {
+		t := time.NewTicker(d)
+		return t.C, t.Stop
+	},
+	timer: func(d time.Duration) (<-chan time.Time, func()) {
+		t := time.NewTimer(d)
+		return t.C, func() { t.Stop() }
+	},
+}
+
 // errDemoted is a writer that lost the writer lease: another replica holds it,
 // or no renewal succeeded for the lease's whole term. The process exits and
 // comes back as a standby.
@@ -197,8 +238,9 @@ type leaseHolder interface {
 // awaitWriterLease takes the writer lease once it is free, polling each
 // leasePoll. A standby reads the row first and asks to take it only when no
 // live holder has it, so its poll takes no row lock while a writer holds it.
-// It returns true once held and false when stop closes first.
-func awaitWriterLease(ctx context.Context, lease leaseHolder, stop <-chan struct{}, log *slog.Logger) bool {
+// It returns when the taking request was sent and true once held, and false
+// when stop closes first.
+func awaitWriterLease(ctx context.Context, lease leaseHolder, stop <-chan struct{}, log *slog.Logger) (time.Time, bool) {
 	ticker := time.NewTicker(leasePoll)
 	defer ticker.Stop()
 	for {
@@ -207,19 +249,20 @@ func awaitWriterLease(ctx context.Context, lease leaseHolder, stop <-chan struct
 		case err != nil:
 			log.WarnContext(ctx, "the writer lease could not be read", "err", err)
 		case !row.Live || row.Holder == lease.Holder():
+			sent := time.Now()
 			held, err := lease.Acquire(ctx, store.WriterLease, controller.LeaseTTL)
 			if err != nil {
 				log.WarnContext(ctx, "the writer lease could not be taken", "err", err)
 			}
 			if held {
-				return true
+				return sent, true
 			}
 		}
 		select {
 		case <-stop:
-			return false
+			return time.Time{}, false
 		case <-ctx.Done():
-			return false
+			return time.Time{}, false
 		case <-ticker.C:
 		}
 	}
@@ -227,29 +270,74 @@ func awaitWriterLease(ctx context.Context, lease leaseHolder, stop <-chan struct
 
 // watchWriterLease renews the writer lease each leasePoll for as long as this
 // process is the writer, and returns errDemoted once it is not: the store
-// reports another holder, or no renewal succeeded for ttl. One failed renewal
-// is not a loss, since the next may succeed well inside the term. It returns
-// nil when stop closes first.
-func watchWriterLease(ctx context.Context, lease leaseHolder, ttl time.Duration, stop <-chan struct{}, log *slog.Logger) error {
-	ticker := time.NewTicker(leasePoll)
-	defer ticker.Stop()
-	renewed := time.Now()
+// reports another holder, or the writer's deadline passed. The deadline is
+// counted from the send of the last granted renewal, since, which for the
+// first is the request that took the lease, and a renewal in flight is
+// abandoned when it is reached. One failed or slow renewal is not a loss
+// while the deadline holds. It returns nil when stop closes first.
+func watchWriterLease(ctx context.Context, lease leaseHolder, ttl time.Duration, since time.Time, stop <-chan struct{}, log *slog.Logger) error {
+	return watchWriterLeaseOn(ctx, realWriterClock, lease, ttl, since, stop, log)
+}
+
+func watchWriterLeaseOn(ctx context.Context, clk writerClock, lease leaseHolder, ttl time.Duration, since time.Time, stop <-chan struct{}, log *slog.Logger) error {
+	ticks, stopTicks := clk.ticker(leasePoll)
+	defer stopTicks()
+	type answer struct {
+		held bool
+		err  error
+	}
+	sent := since
+	var failure error
 	for {
+		deadline := writerDeadline(sent, ttl)
+		expired, stopTimer := clk.timer(max(deadline.Sub(clk.now()), 0))
 		select {
 		case <-stop:
+			stopTimer()
 			return nil
-		case <-ticker.C:
+		case <-expired:
+			return demotedAfter(ttl, failure)
+		case <-ticks:
+			stopTimer()
 		}
-		held, err := lease.Acquire(ctx, store.WriterLease, ttl)
-		switch {
-		case err == nil && !held:
-			return fmt.Errorf("%w: another replica holds it", errDemoted)
-		case err == nil:
-			renewed = time.Now()
-		case time.Since(renewed) > ttl:
-			return fmt.Errorf("%w: no renewal succeeded for %s: %w", errDemoted, ttl, err)
-		default:
-			log.WarnContext(ctx, "the writer lease was not renewed", "err", err, "since", time.Since(renewed))
+		renewal, cancel := context.WithCancel(ctx)
+		sentAt := clk.now()
+		answered := make(chan answer, 1)
+		go func() {
+			held, err := lease.Acquire(renewal, store.WriterLease, ttl)
+			answered <- answer{held, err}
+		}()
+		expired, stopTimer = clk.timer(max(deadline.Sub(clk.now()), 0))
+		select {
+		case <-stop:
+			stopTimer()
+			cancel()
+			return nil
+		case <-expired:
+			cancel()
+			return demotedAfter(ttl, failure)
+		case a := <-answered:
+			stopTimer()
+			cancel()
+			switch {
+			case a.err == nil && !a.held:
+				return fmt.Errorf("%w: another replica holds it", errDemoted)
+			case a.err == nil:
+				sent, failure = sentAt, nil
+			default:
+				failure = a.err
+				log.WarnContext(ctx, "the writer lease was not renewed", "err", a.err, "since", clk.now().Sub(sent))
+			}
 		}
 	}
+}
+
+// demotedAfter is the loss of a writer whose deadline passed with no renewal
+// granted, with the last failure where there was one.
+func demotedAfter(ttl time.Duration, failure error) error {
+	window := ttl - writerMargin(ttl)
+	if failure == nil {
+		return fmt.Errorf("%w: no renewal was granted within %s", errDemoted, window)
+	}
+	return fmt.Errorf("%w: no renewal succeeded for %s: %w", errDemoted, window, failure)
 }

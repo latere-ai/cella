@@ -766,7 +766,8 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 	if fenced {
 		go func() {
 			defer close(acquireDone)
-			if !awaitWriterLease(run, bound, stopAcquire, tel.log) {
+			leaseSent, taken := awaitWriterLease(run, bound, stopAcquire, tel.log)
+			if !taken {
 				close(watchDone)
 				return
 			}
@@ -788,7 +789,7 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 			}
 			go func() {
 				defer close(watchDone)
-				if err := watchWriterLease(run, bound, controller.LeaseTTL, stopWatch, tel.log); err != nil {
+				if err := watchWriterLease(run, bound, controller.LeaseTTL, leaseSent, stopWatch, tel.log); err != nil {
 					registry.LeaseHeld(metrics.LeaseWriter, false)
 					demoted <- err
 				}

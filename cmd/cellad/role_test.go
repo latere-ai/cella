@@ -201,7 +201,10 @@ func (l *scriptedLease) takes() int {
 func TestAStandbyTakesTheWriterLeaseOnlyOnceItIsFree(t *testing.T) {
 	lease := &scriptedLease{row: store.Lease{Name: store.WriterLease, Holder: "the-writer", Live: true}}
 	took := make(chan bool, 1)
-	go func() { took <- awaitWriterLease(t.Context(), lease, nil, slog.New(slog.DiscardHandler)) }()
+	go func() {
+		_, held := awaitWriterLease(t.Context(), lease, nil, slog.New(slog.DiscardHandler))
+		took <- held
+	}()
 	time.Sleep(2500 * time.Millisecond)
 	if n := lease.takes(); n != 0 {
 		t.Fatalf("the standby asked to take a lease a live writer holds %d times", n)
@@ -227,19 +230,19 @@ func TestLosingTheWriterLeaseExits(t *testing.T) {
 	outage := errors.New("the store did not answer")
 	t.Run("another holder", func(t *testing.T) {
 		lease := &scriptedLease{acquire: []func() (bool, error){func() (bool, error) { return false, nil }}}
-		if err := watchWriterLease(t.Context(), lease, 15*time.Second, nil, log); !errors.Is(err, errDemoted) {
+		if err := watchWriterLease(t.Context(), lease, 15*time.Second, time.Now(), nil, log); !errors.Is(err, errDemoted) {
 			t.Errorf("a renewal into another holder answered %v, want errDemoted", err)
 		}
 	})
 	t.Run("no renewal for the term", func(t *testing.T) {
 		lease := &scriptedLease{acquire: []func() (bool, error){func() (bool, error) { return false, outage }}}
 		started := time.Now()
-		err := watchWriterLease(t.Context(), lease, 2*time.Second, nil, log)
+		err := watchWriterLease(t.Context(), lease, 2*time.Second, time.Now(), nil, log)
 		if !errors.Is(err, errDemoted) || !errors.Is(err, outage) {
 			t.Errorf("a store that stopped answering answered %v, want errDemoted with the outage", err)
 		}
-		if waited := time.Since(started); waited < 2*time.Second {
-			t.Errorf("the writer was demoted after %v, before its term", waited)
+		if waited, want := time.Since(started), 2*time.Second-writerMargin(2*time.Second); waited < want {
+			t.Errorf("the writer was demoted after %v, before its deadline of %v", waited, want)
 		}
 	})
 	t.Run("one failed renewal", func(t *testing.T) {
@@ -249,7 +252,7 @@ func TestLosingTheWriterLeaseExits(t *testing.T) {
 		}}
 		stop := make(chan struct{})
 		time.AfterFunc(3500*time.Millisecond, func() { close(stop) })
-		if err := watchWriterLease(t.Context(), lease, 2*time.Second, stop, log); err != nil {
+		if err := watchWriterLease(t.Context(), lease, 4*time.Second, time.Now(), stop, log); err != nil {
 			t.Errorf("one failed renewal demoted the writer: %v", err)
 		}
 	})
