@@ -6,6 +6,43 @@ refused before it is pushed.
 
 ## Unreleased
 
+### Changed
+
+- **Sandboxes, volumes, environments and the records behind them refuse a
+  step their lifecycle does not have.** A sandbox cannot leave Deleting,
+  become Recovering from anything but Lost, or be Queued from anywhere but
+  Running; a volume that is Lost or Deleting never returns to Available; an
+  environment never goes back to Pending; a worker operation that is done
+  keeps its result; a journal event is delivered or dropped once, from
+  pending; a revoked environment key stays revoked; a deleted object stays
+  deleted. The same holds on Postgres and on the in-memory store, and a
+  refused write changes nothing. Each lifecycle is written down as a table,
+  the tables are checked by proofs and model checks, and tests drive every
+  writer through every pair of states, and every pair of racing writers.
+- **Phases have named types.** `v1.SandboxPhase`, `v1.VolumePhase`,
+  `v1.EnvironmentPhase` and `device.EngineState` replace plain strings in
+  `status.phase`, `runtime.State.Phase`, `runtime.VolumeState.Phase`,
+  `runtime.Filter.Phase` and `device.Status.State`. The values on the wire
+  and in storage are unchanged. Go code that compares a phase with a string
+  constant keeps compiling; code that assigns one to a `string` converts it.
+- **`Keys.Revoke` and the journal's `Acknowledge`, `Drop` and `Defer` report
+  a record that is not in the state they need** with an error that wraps
+  `statemachine.ErrIllegalTransition`; `Journal` gains `Delivery`, and
+  `Desired.PutStatus` takes the phase it writes and the phases it may leave.
+
+### Fixed
+
+- **An environment's phase is kept in its row.** The phase column of an
+  environment stayed at the value the row was created with while its status
+  moved, so a list filtered by phase read a stale one. Every status write now
+  writes the column, and a migration brings the rows already stored to the
+  phase their status holds.
+- **A journal event that was delivered or dropped is no longer marked
+  again.** A second outcome overwrote the first, so an event could be both
+  acknowledged and dropped. Only a pending event takes an outcome.
+- **A write at the version of a deleted row no longer brings it back.** The
+  row stays deleted, and its name stays free.
+
 ## v0.25.0 - 2026-11-15
 
 ### Added
