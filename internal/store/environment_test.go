@@ -195,7 +195,7 @@ func TestBridgeRefusesAStatusItCannotRead(t *testing.T) {
 		t.Fatal(err)
 	}
 	err := s.Tx(ctx, func(tx store.Tx) error {
-		return tx.Desired().PutStatus(ctx, store.KindEnvironment, "eu-gpu", []byte("not a status"))
+		return tx.Desired().PutStatus(ctx, store.KindEnvironment, "eu-gpu", "", nil, []byte("not a status"))
 	})
 	if err != nil {
 		t.Fatal(err)

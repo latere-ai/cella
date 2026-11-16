@@ -64,6 +64,16 @@ func TestPostgresStore(t *testing.T) {
 	})
 }
 
+// TestPostgresLifecycles drives the Postgres writers through every lifecycle
+// table: each statement binds the table's sources, so the SQL is what is
+// tested.
+func TestPostgresLifecycles(t *testing.T) {
+	admin := server(t)
+	storetest.Lifecycles(t, func(t storetest.TB, key []byte) store.Store {
+		return open(t, database(t, admin), key, time.Hour)
+	})
+}
+
 // TestPostgresStoreInExecMode runs the same contract with the serving pool in
 // the exec query mode a transaction pooler's DSN selects. In that mode the
 // server describes no parameter, so the driver encodes each value from its Go

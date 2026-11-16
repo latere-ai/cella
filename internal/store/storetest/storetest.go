@@ -23,6 +23,8 @@ import (
 	"testing"
 	"time"
 
+	v1 "latere.ai/x/cella/manifest/v1"
+
 	"latere.ai/x/cella/internal/store"
 	driver "latere.ai/x/cella/runtime"
 )
@@ -250,7 +252,7 @@ func status(t TB, open Opener) {
 	ctx := context.Background()
 	version := put(t, s, object("sbx_a", "alice", "one"), 0)
 	with(t, s, func(tx store.Tx) error {
-		if err := tx.Desired().PutStatus(ctx, store.KindSandbox, "sbx_a", []byte(`{"phase":"Running"}`)); err != nil {
+		if err := tx.Desired().PutStatus(ctx, store.KindSandbox, "sbx_a", "", nil, []byte(`{"phase":"Running"}`)); err != nil {
 			return err
 		}
 		return tx.Desired().SetLastApplied(ctx, "sbx_a", []byte(`{"image":"one"}`))
@@ -269,7 +271,7 @@ func status(t TB, open Opener) {
 		return nil
 	})
 	fails(t, s, store.ErrNotFound, "a status on a row that is not there", func(tx store.Tx) error {
-		return tx.Desired().PutStatus(ctx, store.KindSandbox, "sbx_gone", nil)
+		return tx.Desired().PutStatus(ctx, store.KindSandbox, "sbx_gone", "", nil, nil)
 	})
 	fails(t, s, store.ErrNotFound, "the last applied state of a row that is not there", func(tx store.Tx) error {
 		_, err := tx.Desired().LastApplied(ctx, "sbx_gone")
@@ -307,7 +309,7 @@ func sizes(t TB, open Opener) {
 		`"conditions":[{"type":"MemoryAtCeiling","status":"False","reason":"BelowCeiling"}]}`)
 	record := []byte(`{"data":{"resource":"memory","from":"256Mi","to":"768Mi","reason":"oom","moved":true}}`)
 	with(t, s, func(tx store.Tx) error {
-		if err := tx.Desired().PutStatus(ctx, store.KindSandbox, "sbx_sized", held); err != nil {
+		if err := tx.Desired().PutStatus(ctx, store.KindSandbox, "sbx_sized", "", nil, held); err != nil {
 			return err
 		}
 		_, err := tx.Journal().Append(ctx, store.Event{ObjectID: "sbx_sized", Type: "sandbox.resized", Payload: record})
@@ -335,7 +337,7 @@ func sizes(t TB, open Opener) {
 	larger := []byte(`{"phase":"Running","resources":{"cpu":"2","memory":"1280Mi","disk":"5Gi"},"moves":1}`)
 	failure := errors.New("the record was not appended")
 	fails(t, s, failure, "a change of size whose record failed", func(tx store.Tx) error {
-		if err := tx.Desired().PutStatus(ctx, store.KindSandbox, "sbx_sized", larger); err != nil {
+		if err := tx.Desired().PutStatus(ctx, store.KindSandbox, "sbx_sized", "", nil, larger); err != nil {
 			return err
 		}
 		return failure
@@ -393,7 +395,7 @@ func observed(t TB, open Opener) {
 	ctx := context.Background()
 	put(t, s, object("sbx_a", "alice", "one"), 0)
 	with(t, s, func(tx store.Tx) error {
-		return tx.Desired().PutStatus(ctx, store.KindSandbox, "sbx_a", []byte(`{"phase":"Running"}`))
+		return tx.Desired().PutStatus(ctx, store.KindSandbox, "sbx_a", "", nil, []byte(`{"phase":"Running"}`))
 	})
 	with(t, s, func(tx store.Tx) error {
 		if err := tx.Observed().Put(ctx, "env_one", state("sbx_a", "alice", "Running")); err != nil {
@@ -406,7 +408,7 @@ func observed(t TB, open Opener) {
 		if err != nil {
 			return err
 		}
-		if environment != "env_one" || got.Phase != "Running" || got.Labels["tier"] != "prod" {
+		if environment != "env_one" || got.Phase != driver.Running || got.Labels["tier"] != "prod" {
 			t.Errorf("the observed row is %+v on %q", got, environment)
 		}
 		return nil
@@ -1008,7 +1010,7 @@ func credentials(t TB, open Opener) {
 		readsBack(t, s, obj, version, "a write")
 		obj.Status = []byte(`{"id":"sbx_a","phase":"Stopped","egressState":{"credential":"c-next","version":3}}`)
 		with(t, s, func(tx store.Tx) error {
-			return tx.Desired().PutStatus(ctx, store.KindSandbox, "sbx_a", obj.Status)
+			return tx.Desired().PutStatus(ctx, store.KindSandbox, "sbx_a", "", nil, obj.Status)
 		})
 		readsBack(t, s, obj, version, "a status write")
 		with(t, s, func(tx store.Tx) error {
@@ -1262,7 +1264,7 @@ func labeled(o store.Object, tier, phase, environment string) store.Object {
 // state is one observed sandbox.
 func state(id, owner, phase string) driver.State {
 	return driver.State{
-		ID: id, Owner: owner, Name: id, Phase: phase,
+		ID: id, Owner: owner, Name: id, Phase: v1.ParseSandboxPhase(phase),
 		Labels:    map[string]string{"tier": "prod"},
 		CreatedAt: time.Now().UTC().Truncate(time.Millisecond),
 	}
@@ -1447,15 +1449,19 @@ func keys(t TB, open Opener) {
 	})
 
 	// A revocation marks the row, and a revocation that retried keeps the
-	// instant of the first. A jti the registry holds no row for is no error.
+	// instant of the first and is refused as a step the lifecycle lacks, as is
+	// one of a jti the registry holds no row for.
 	with(t, s, func(tx store.Tx) error {
 		if err := tx.Keys().Revoke(ctx, "01JKEY1", now.Add(time.Minute)); err != nil {
 			return err
 		}
-		if err := tx.Keys().Revoke(ctx, "01JKEY1", now.Add(2*time.Minute)); err != nil {
-			return err
+		if err := tx.Keys().Revoke(ctx, "01JKEY1", now.Add(2*time.Minute)); !errors.Is(err, store.ErrIllegalTransition) {
+			t.Errorf("a second revocation = %v, want ErrIllegalTransition", err)
 		}
-		return tx.Keys().Revoke(ctx, "01JNOROW", now)
+		if err := tx.Keys().Revoke(ctx, "01JNOROW", now); !errors.Is(err, store.ErrIllegalTransition) {
+			t.Errorf("a revocation of a jti with no row = %v, want ErrIllegalTransition", err)
+		}
+		return nil
 	})
 	marked, _ := list("eu-gpu", store.Page{Limit: 1})
 	if len(marked) != 1 || !marked[0].RevokedAt.Equal(now.Add(time.Minute)) {

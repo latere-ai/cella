@@ -36,11 +36,16 @@ func TestRetentionPrunesWhatIsDone(t *testing.T) {
 			}
 		}
 		for _, op := range []store.Operation{
-			{ID: "op_done", Environment: "env_a", Type: "Exec", State: store.OperationDone, CreatedAt: old},
+			{ID: "op_done", Environment: "env_a", Type: "Exec", CreatedAt: old},
 			{ID: "op_waiting", Environment: "env_a", Type: "Exec", CreatedAt: old},
-			{ID: "op_fresh", Environment: "env_a", Type: "Exec", State: store.OperationDone, CreatedAt: recent},
+			{ID: "op_fresh", Environment: "env_a", Type: "Exec", CreatedAt: recent},
 		} {
 			if err := tx.Operations().Enqueue(t.Context(), op); err != nil {
+				return err
+			}
+		}
+		for _, id := range []string{"op_done", "op_fresh"} {
+			if err := tx.Operations().Acknowledge(t.Context(), id, nil); err != nil {
 				return err
 			}
 		}

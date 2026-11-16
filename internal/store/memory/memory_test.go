@@ -21,6 +21,12 @@ func TestMemoryStore(t *testing.T) {
 	storetest.Run(t, open)
 }
 
+// TestMemoryLifecycles drives the memory adapter's writers through every
+// lifecycle table.
+func TestMemoryLifecycles(t *testing.T) {
+	storetest.Lifecycles(t, open)
+}
+
 func open(t storetest.TB, key []byte) store.Store {
 	t.Helper()
 	s, err := memory.Open(memory.Options{Key: key})
@@ -98,7 +104,7 @@ func TestMemoryHonorsACancelledContext(t *testing.T) {
 			}},
 			{"a delete", func() error { return tx.Desired().Delete(gone, store.KindSandbox, "sbx_a") }},
 			{"a count", func() error { _, err := tx.Desired().Count(gone, store.KindSandbox, "alice"); return err }},
-			{"a status", func() error { return tx.Desired().PutStatus(gone, store.KindSandbox, "sbx_a", nil) }},
+			{"a status", func() error { return tx.Desired().PutStatus(gone, store.KindSandbox, "sbx_a", "", nil, nil) }},
 			{"the last applied state", func() error { _, err := tx.Desired().LastApplied(gone, "sbx_a"); return err }},
 			{"a last applied write", func() error { return tx.Desired().SetLastApplied(gone, "sbx_a", nil) }},
 			{"an observed write", func() error { return tx.Observed().Put(gone, "env_one", driver.State{ID: "sbx_a"}) }},

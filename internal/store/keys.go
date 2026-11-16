@@ -5,6 +5,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"latere.ai/x/cella/internal/auth"
@@ -39,7 +40,12 @@ func (r *KeyRegistry) Revoke(ctx context.Context, jti string, at, exp time.Time)
 		if err := tx.Revocations().Revoke(ctx, jti, exp); err != nil {
 			return err
 		}
-		return tx.Keys().Revoke(ctx, jti, at)
+		// A key revoked already, or one with no record, has nothing to
+		// end, and a revocation that retried is not a failure.
+		if err := tx.Keys().Revoke(ctx, jti, at); err != nil && !errors.Is(err, ErrIllegalTransition) {
+			return err
+		}
+		return nil
 	})
 }
 

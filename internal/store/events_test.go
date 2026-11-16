@@ -21,7 +21,7 @@ import (
 
 // labeled is one sandbox with the labels a plane stamped on it and an
 // environment value that must not reach a record.
-func labeled(id, phase, reason string) v1.Sandbox {
+func labeled(id string, phase v1.SandboxPhase, reason string) v1.Sandbox {
 	obj := sandbox(id, "build", phase)
 	obj.Metadata.Labels = map[string]string{"tenant": "acme"}
 	obj.Spec.Image = "registry.example/base:1"
@@ -78,7 +78,7 @@ func TestRecordCommitsWithTheMutation(t *testing.T) {
 
 	// A second writer's conditional write fails, and no record survives it.
 	other := store.ForController(s, "default", store.Delivered)
-	if err := other.Write(ctx, labeled("sbx_a", driver.Running, ""), controller.MutationStarted); err == nil {
+	if err := other.Write(ctx, labeled("sbx_a", driver.Pending, ""), controller.MutationStarted); err == nil {
 		t.Fatal("a write at the wrong version was accepted")
 	}
 	if held := recordsOf(t, s, "sbx_a"); len(held) != 1 {
@@ -132,7 +132,10 @@ func TestDeletedRecordCarriesTheObjectThatWent(t *testing.T) {
 func TestJournaledActsAreNotAllDelivered(t *testing.T) {
 	c, s := bound(t)
 	ctx := t.Context()
-	for _, tc := range []struct{ mutation, phase string }{
+	for _, tc := range []struct {
+		mutation string
+		phase    v1.SandboxPhase
+	}{
 		{controller.MutationCreated, driver.Pending},
 		{controller.MutationStatus, driver.Running},
 		{controller.MutationStarted, driver.Running},
@@ -175,7 +178,7 @@ func TestJournaledActsAreNotAllDelivered(t *testing.T) {
 // is one mutation per object, named as such and never delivered.
 func TestSaveJournalsEveryObjectItWrote(t *testing.T) {
 	c, s := bound(t)
-	if err := c.Save(map[string]v1.Sandbox{"sbx_a": labeled("sbx_a", driver.Running, "")}); err != nil {
+	if err := c.Save(map[string]v1.Sandbox{"sbx_a": labeled("sbx_a", driver.Pending, "")}); err != nil {
 		t.Fatal(err)
 	}
 	held := recordsOf(t, s, "sbx_a")
@@ -196,11 +199,11 @@ func TestSaveJournalsEveryObjectItWrote(t *testing.T) {
 func TestOperationRecordsHaveNoMutation(t *testing.T) {
 	c, s := bound(t)
 	ctx := t.Context()
-	if err := c.Write(ctx, labeled("sbx_a", driver.Running, ""), controller.MutationCreated); err != nil {
+	if err := c.Write(ctx, labeled("sbx_a", driver.Pending, ""), controller.MutationCreated); err != nil {
 		t.Fatal(err)
 	}
 	record, err := events.Operation(events.TypeExec,
-		events.OfSandbox(labeled("sbx_a", driver.Running, "")),
+		events.OfSandbox(labeled("sbx_a", driver.Pending, "")),
 		events.Exec{ExitCode: 7, DurationMS: 12},
 		events.Actor{Subject: "alice", RequestID: "req_2"}, time.Now().UTC())
 	if err != nil {

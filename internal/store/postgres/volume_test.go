@@ -34,7 +34,12 @@ func TestVolumesOutliveTheProcess(t *testing.T) {
 	gone.Metadata.Name = "gone"
 	gone.Status.ID = "vol_gone"
 	for _, obj := range []v1.Volume{kept, gone} {
-		if err := bridge.WriteVolume(ctx, controller.VolumeAct{Type: controller.MutationVolumeCreated, Object: obj}); err != nil {
+		pending := obj
+		pending.Status.Phase = v1.VolumePending
+		if err := bridge.WriteVolume(ctx, controller.VolumeAct{Type: controller.MutationVolumeCreated, Object: pending}); err != nil {
+			t.Fatal(err)
+		}
+		if err := bridge.WriteVolume(ctx, controller.VolumeAct{Type: controller.MutationVolumeStatus, Object: obj}); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -258,8 +258,12 @@ func (x desired) Put(ctx context.Context, obj store.Object, ifVersion int64) (in
 		return 0, store.ErrVersionConflict
 	case ifVersion != 0 && !held:
 		return 0, store.ErrNotFound
+	case ifVersion != 0 && !current.DeletedAt.IsZero():
+		return 0, store.ErrNotFound
 	case ifVersion != 0 && current.Version != ifVersion:
 		return 0, store.ErrVersionConflict
+	case ifVersion != 0 && obj.Sources != nil && !slices.Contains(obj.Sources, current.Phase):
+		return 0, fmt.Errorf("%w: the %s %s is %s", store.ErrIllegalTransition, strings.ToLower(obj.Kind), obj.ID, current.Phase)
 	}
 	for id, other := range x.d.objects {
 		if id != obj.ID && other.DeletedAt.IsZero() &&
@@ -271,7 +275,7 @@ func (x desired) Put(ctx context.Context, obj store.Object, ifVersion int64) (in
 	row := cloneObject(obj)
 	row.Version = ifVersion + 1
 	row.UpdatedAt = now
-	row.DeletedAt = time.Time{}
+	row.Sources = nil
 	if held {
 		row.CreatedAt = current.CreatedAt
 		row.LastApplied = slices.Clone(current.LastApplied)
@@ -329,14 +333,22 @@ func (x desired) Delete(ctx context.Context, kind, id string) error {
 		return err
 	}
 	row, held := x.d.objects[id]
-	if !held || row.Kind != kind || !row.DeletedAt.IsZero() {
-		return store.ErrNotFound
+	if !held || row.Kind != kind || !slices.Contains(store.RowSources(store.RowDeleted), string(rowState(row))) {
+		return fmt.Errorf("%w: %w", store.ErrNotFound, store.ErrIllegalTransition)
 	}
 	row.DeletedAt = time.Now().UTC()
 	row.UpdatedAt = row.DeletedAt
 	row.Version++
 	x.d.objects[id] = row
 	return nil
+}
+
+// rowState is the state of an object's row as RowTable names it.
+func rowState(row store.Object) store.RowState {
+	if row.DeletedAt.IsZero() {
+		return store.RowLive
+	}
+	return store.RowDeleted
 }
 
 func (x desired) Count(ctx context.Context, kind, owner string) (int, error) {
@@ -352,13 +364,19 @@ func (x desired) Count(ctx context.Context, kind, owner string) (int, error) {
 	return n, nil
 }
 
-func (x desired) PutStatus(ctx context.Context, kind, id string, status []byte) error {
+func (x desired) PutStatus(ctx context.Context, kind, id, phase string, sources []string, status []byte) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	row, held := x.d.objects[id]
 	if !held || row.Kind != kind || !row.DeletedAt.IsZero() {
 		return store.ErrNotFound
+	}
+	if sources != nil && !slices.Contains(sources, row.Phase) {
+		return fmt.Errorf("%w: the %s %s is %s", store.ErrIllegalTransition, strings.ToLower(kind), id, row.Phase)
+	}
+	if phase != "" {
+		row.Phase = phase
 	}
 	row.Status = slices.Clone(status)
 	row.UpdatedAt = time.Now().UTC()
@@ -421,7 +439,7 @@ func (x observed) List(ctx context.Context, f store.Filter, p store.Page) ([]dri
 		if id <= p.Cursor {
 			continue
 		}
-		if !matches(f, row.state.Owner, row.state.Phase, row.environment, id, row.state.Labels) {
+		if !matches(f, row.state.Owner, string(row.state.Phase), row.environment, id, row.state.Labels) {
 			continue
 		}
 		rows = append(rows, cloneState(row.state))
@@ -528,16 +546,33 @@ func (x journal) Undelivered(ctx context.Context) (int, error) {
 	return n, nil
 }
 
+func (x journal) Delivery(ctx context.Context, id string) (store.DeliveryState, error) {
+	if err := ctx.Err(); err != nil {
+		return store.ParseDeliveryState(""), err
+	}
+	for _, events := range x.d.events {
+		for _, e := range events {
+			if e.ID == id {
+				return store.DeliveryOf(e), nil
+			}
+		}
+	}
+	return store.ParseDeliveryState(""), store.ErrNotFound
+}
+
+// Acknowledge, Drop and Defer are the writers of an event's delivery. The
+// first two end a pending event; Defer records one failed attempt of a
+// pending event and is no step.
 func (x journal) Acknowledge(ctx context.Context, id string, at time.Time) error {
-	return x.finish(ctx, id, func(e *store.Event) { e.AckedAt = at.UTC() })
+	return x.finish(ctx, id, store.DeliveryDelivered, func(e *store.Event) { e.AckedAt = at.UTC() })
 }
 
 func (x journal) Drop(ctx context.Context, id string, at time.Time) error {
-	return x.finish(ctx, id, func(e *store.Event) { e.DroppedAt = at.UTC() })
+	return x.finish(ctx, id, store.DeliveryDropped, func(e *store.Event) { e.DroppedAt = at.UTC() })
 }
 
 func (x journal) Defer(ctx context.Context, id string, next time.Time) error {
-	return x.finish(ctx, id, func(e *store.Event) {
+	return x.finish(ctx, id, store.DeliveryPending, func(e *store.Event) {
 		e.Attempts++
 		e.NextAttemptAt = next.UTC()
 	})
@@ -545,8 +580,9 @@ func (x journal) Defer(ctx context.Context, id string, next time.Time) error {
 
 // finish applies one delivery outcome to one row. An id no row holds is
 // ErrNotFound: the caller read it from Pending, so its absence is a fact
-// worth reporting rather than a write that quietly did nothing.
-func (x journal) finish(ctx context.Context, id string, apply func(*store.Event)) error {
+// worth reporting rather than a write that quietly did nothing. An event that
+// is not pending is left as it is and the write is ErrIllegalTransition.
+func (x journal) finish(ctx context.Context, id string, to store.DeliveryState, apply func(*store.Event)) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -554,6 +590,12 @@ func (x journal) finish(ctx context.Context, id string, apply func(*store.Event)
 		for i := range events {
 			if events[i].ID != id {
 				continue
+			}
+			// A write to pending is the record of an attempt, which only a
+			// pending event takes; any other write is a step of the table.
+			from := store.DeliveryOf(events[i])
+			if from != store.DeliveryPending || (to != store.DeliveryPending && !store.DeliveryTable.Can(from, to)) {
+				return fmt.Errorf("%w: the event %s is %s", store.ErrIllegalTransition, id, from)
 			}
 			apply(&events[i])
 			x.d.events[object] = events
@@ -837,17 +879,33 @@ func (x keys) Record(ctx context.Context, k store.Key) error {
 	return nil
 }
 
+// keyState is the state of an environment key as KeyTable names it.
+func keyState(k store.Key) store.KeyState {
+	if k.RevokedAt.IsZero() {
+		return store.KeyActive
+	}
+	return store.KeyRevoked
+}
+
 func (x keys) Revoke(ctx context.Context, jti string, at time.Time) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	k, held := x.d.keys[jti]
-	if !held || (!k.RevokedAt.IsZero() && !k.RevokedAt.After(at)) {
+	if !held {
+		return fmt.Errorf("%w: the key %s is not active", store.ErrIllegalTransition, jti)
+	}
+	if keyState(k) == store.KeyActive {
+		k.RevokedAt = at.UTC()
+		x.d.keys[jti] = k
 		return nil
 	}
-	k.RevokedAt = at.UTC()
-	x.d.keys[jti] = k
-	return nil
+	// A key revoked already keeps the earlier of the two instants.
+	if k.RevokedAt.After(at) {
+		k.RevokedAt = at.UTC()
+		x.d.keys[jti] = k
+	}
+	return fmt.Errorf("%w: the key %s is not active", store.ErrIllegalTransition, jti)
 }
 
 func (x keys) List(ctx context.Context, environment string, p store.Page) ([]store.Key, string, error) {
@@ -946,8 +1004,11 @@ func (x operations) Enqueue(ctx context.Context, op store.Operation) error {
 		return store.ErrVersionConflict
 	}
 	row := cloneOperation(op)
-	if row.State == "" {
+	if len(row.State) == 0 {
 		row.State = store.OperationQueued
+	}
+	if err := store.OperationTable.CheckStart(row.State); err != nil {
+		return fmt.Errorf("store: enqueueing operation %s: %w", op.ID, err)
 	}
 	if row.CreatedAt.IsZero() {
 		row.CreatedAt = time.Now().UTC()
@@ -979,7 +1040,7 @@ func (x operations) Claim(ctx context.Context, environment, worker string, n int
 	for _, op := range x.d.operations {
 		switch {
 		case op.Environment != environment:
-		case op.State == store.OperationQueued:
+		case store.OperationTable.Can(op.State, store.OperationClaimed):
 			claimable = append(claimable, op)
 		case op.State == store.OperationClaimed && op.ClaimedBy != worker && !live[op.ClaimedBy]:
 			claimable = append(claimable, op)
@@ -1013,7 +1074,7 @@ func (x operations) Acknowledge(ctx context.Context, opID string, result []byte)
 	if !held {
 		return store.ErrNotFound
 	}
-	if op.State == store.OperationDone {
+	if !store.OperationTable.Can(op.State, store.OperationDone) {
 		return nil // the answer the caller was given stands
 	}
 	op.State, op.Result = store.OperationDone, slices.Clone(result)

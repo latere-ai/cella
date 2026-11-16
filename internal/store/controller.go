@@ -32,8 +32,12 @@ type Controlled struct {
 	// written, which is what makes each write conditional. A write whose row
 	// moved under another replica is ErrVersionConflict and not a silent
 	// overwrite.
+	// phases is the phase of each of those rows as it was read or written,
+	// which tells a write that changes the phase, a step of the lifecycle,
+	// from one that keeps it.
 	mu       sync.Mutex
 	versions map[string]int64
+	phases   map[string]string
 
 	// delivery says whether a record this bridge journals is waiting for a
 	// sink; see Delivery.
@@ -59,7 +63,7 @@ type Controlled struct {
 func ForController(s Store, environment string, d Delivery) *Controlled {
 	return &Controlled{
 		store: s, environment: environment, holder: Holder(),
-		versions: map[string]int64{}, delivery: d, metrics: nopMetrics{},
+		versions: map[string]int64{}, phases: map[string]string{}, delivery: d, metrics: nopMetrics{},
 		acquired: map[string]struct{}{},
 	}
 }
@@ -98,6 +102,7 @@ func (c *Controlled) Load() (map[string]v1.Sandbox, error) {
 	ctx := context.Background()
 	objects := map[string]v1.Sandbox{}
 	versions := map[string]int64{}
+	phases := map[string]string{}
 	cursor := ""
 	for {
 		var (
@@ -122,6 +127,7 @@ func (c *Controlled) Load() (map[string]v1.Sandbox, error) {
 			}
 			objects[row.ID] = obj
 			versions[row.ID] = row.Version
+			phases[row.ID] = row.Phase
 		}
 		if next == "" {
 			break
@@ -129,7 +135,7 @@ func (c *Controlled) Load() (map[string]v1.Sandbox, error) {
 		cursor = next
 	}
 	c.mu.Lock()
-	c.versions = versions
+	c.versions, c.phases = versions, phases
 	c.mu.Unlock()
 	return objects, nil
 }
@@ -184,8 +190,11 @@ func (c *Controlled) WriteData(ctx context.Context, obj v1.Sandbox, mutation str
 		row.Environment = c.environment
 	}
 	c.mu.Lock()
-	version := c.versions[row.ID]
+	version, last := c.versions[row.ID], c.phases[row.ID]
 	c.mu.Unlock()
+	if err := guard(controller.SandboxLifecycle, &row, obj.Status.Phase, version, last); err != nil {
+		return fmt.Errorf("store: writing the sandbox %s: %w", row.ID, err)
+	}
 	event, err := c.record(ctx, mutation, obj, data)
 	if err != nil {
 		return err
@@ -206,7 +215,7 @@ func (c *Controlled) WriteData(ctx context.Context, obj v1.Sandbox, mutation str
 		return err
 	}
 	c.mu.Lock()
-	c.versions[row.ID] = written
+	c.versions[row.ID], c.phases[row.ID] = written, row.Phase
 	c.mu.Unlock()
 	return nil
 }
@@ -227,8 +236,11 @@ func (c *Controlled) WriteSpawn(ctx context.Context, obj v1.Sandbox, mutation, p
 		row.Environment = c.environment
 	}
 	c.mu.Lock()
-	version := c.versions[row.ID]
+	version, last := c.versions[row.ID], c.phases[row.ID]
 	c.mu.Unlock()
+	if err := guard(controller.SandboxLifecycle, &row, obj.Status.Phase, version, last); err != nil {
+		return fmt.Errorf("store: writing the sandbox %s: %w", row.ID, err)
+	}
 	event, err := c.record(ctx, mutation, obj, nil)
 	if err != nil {
 		return err
@@ -255,7 +267,7 @@ func (c *Controlled) WriteSpawn(ctx context.Context, obj v1.Sandbox, mutation, p
 		return err
 	}
 	c.mu.Lock()
-	c.versions[row.ID] = written
+	c.versions[row.ID], c.phases[row.ID] = written, row.Phase
 	c.mu.Unlock()
 	return nil
 }
@@ -415,7 +427,7 @@ func encode(obj v1.Sandbox) (Object, error) {
 	}
 	return Object{
 		Kind: KindSandbox, ID: status.ID, Owner: status.Owner, Name: obj.Metadata.Name,
-		Environment: status.Environment, Phase: status.Phase, Labels: obj.Metadata.Labels,
+		Environment: status.Environment, Phase: string(status.Phase), Labels: obj.Metadata.Labels,
 		Data: data, Status: encoded,
 	}, nil
 }

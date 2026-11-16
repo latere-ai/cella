@@ -128,7 +128,12 @@ type Object struct {
 	Name        string
 	Environment string
 	Phase       string
-	Labels      map[string]string
+	// Sources, on a write of an existing row, is the phases the row may hold
+	// for the write to land: the sources of Phase in the kind's lifecycle,
+	// and Phase itself. A row in any other phase is left as it is and the
+	// write is ErrIllegalTransition. Nil puts no condition on the phase.
+	Sources []string
+	Labels  map[string]string
 	// Data is the resolved object as JSON, without its status.
 	Data []byte
 	// Status is what the controller writes beside the object. Rebuild never
@@ -212,8 +217,11 @@ type Desired interface {
 	// objects, excluding phase Deleting.
 	Count(ctx context.Context, kind, owner string) (int, error)
 	// PutStatus writes the controller's status without touching the object
-	// or its version.
-	PutStatus(ctx context.Context, kind, id string, status []byte) error
+	// or its version. A non-empty phase is the phase the status carries, and
+	// is written to the row's phase column with it; sources are the phases
+	// the row may hold for the write to land, as on Object, and a row in
+	// another is left as it is and the write is ErrIllegalTransition.
+	PutStatus(ctx context.Context, kind, id, phase string, sources []string, status []byte) error
 	// LastApplied reads the desired state the controller last applied.
 	LastApplied(ctx context.Context, id string) ([]byte, error)
 	// SetLastApplied records the desired state the controller just applied.
@@ -289,6 +297,9 @@ type Journal interface {
 	// design 017's cella_events_pending gauge reads: Pending answers what
 	// one pass may take now, which is neither the backlog nor a bound on it.
 	Undelivered(ctx context.Context) (int, error)
+	// Delivery reads where one event is in its delivery. An id no row holds is
+	// ErrNotFound.
+	Delivery(ctx context.Context, id string) (DeliveryState, error)
 	// Acknowledge marks one event delivered.
 	Acknowledge(ctx context.Context, id string, at time.Time) error
 	// Defer records one failed attempt and when the next is due.
@@ -383,9 +394,11 @@ type Keys interface {
 	// Record writes one minted key. A jti already recorded is refused,
 	// because a jti names one key.
 	Record(ctx context.Context, k Key) error
-	// Revoke marks the key revoked at the instant given, keeping the earliest
-	// mark. A jti with no row is no error: a key minted before its row could
-	// be kept is ended by the revocation list alone.
+	// Revoke marks an active key revoked at the instant given. A key that is
+	// revoked already keeps the earliest mark, and a jti with no row is left
+	// alone: both are ErrIllegalTransition, which the registry does not treat
+	// as a failure, since a key minted before its row could be kept is ended
+	// by the revocation list alone.
 	Revoke(ctx context.Context, jti string, at time.Time) error
 	// List returns one page of an environment's keys in jti order, which is
 	// the order they were minted in, and the cursor of the next page.
@@ -405,22 +418,13 @@ type Operation struct {
 	SandboxID   string
 	Type        string
 	Payload     []byte
-	State       string
+	State       OperationState
 	ClaimedBy   string
 	ClaimedAt   time.Time
 	Attempts    int
 	Result      []byte
 	CreatedAt   time.Time
 }
-
-// The states one operation passes through. A queued row waits for a worker, a
-// claimed row is one worker's until its lease lapses, and a done row carries
-// the result and is kept until the sweep forgets it.
-const (
-	OperationQueued  = "queued"
-	OperationClaimed = "claimed"
-	OperationDone    = "done"
-)
 
 // Worker is one registration of a data plane worker and its last heartbeat.
 type Worker struct {

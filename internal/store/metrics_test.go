@@ -48,7 +48,7 @@ func TestStoreOperationsAreMeasured(t *testing.T) {
 	obj := v1.Sandbox{}
 	obj.Metadata.Name = "work"
 	obj.Spec.Environment = "default"
-	obj.Status = v1.SandboxStatus{ID: "sbx_measured", Owner: "alice", Environment: "default", Phase: driver.Running}
+	obj.Status = v1.SandboxStatus{ID: "sbx_measured", Owner: "alice", Environment: "default", Phase: driver.Pending}
 
 	if _, err := c.Load(); err != nil {
 		t.Fatal(err)
@@ -56,7 +56,7 @@ func TestStoreOperationsAreMeasured(t *testing.T) {
 	if err := c.Write(t.Context(), obj, "created"); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.Rebuild(t.Context(), "default", []driver.State{{ID: obj.Status.ID, Phase: driver.Running}}); err != nil {
+	if err := c.Rebuild(t.Context(), "default", []driver.State{{ID: obj.Status.ID, Phase: driver.Pending}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := c.Events(t.Context(), obj.Status.ID, 10); err != nil {

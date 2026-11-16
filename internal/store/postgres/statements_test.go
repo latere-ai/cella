@@ -43,7 +43,7 @@ func TestStatementsReportFailures(t *testing.T) {
 			}},
 			{"a delete", func() error { return tx.Desired().Delete(gone, store.KindSandbox, "sbx_a") }},
 			{"a count", func() error { _, err := tx.Desired().Count(gone, store.KindSandbox, "alice"); return err }},
-			{"a status", func() error { return tx.Desired().PutStatus(gone, store.KindSandbox, "sbx_a", []byte(`{}`)) }},
+			{"a status", func() error { return tx.Desired().PutStatus(gone, store.KindSandbox, "sbx_a", "", nil, []byte(`{}`)) }},
 			{"the last applied state", func() error { _, err := tx.Desired().LastApplied(gone, "sbx_a"); return err }},
 			{"a last applied write", func() error { return tx.Desired().SetLastApplied(gone, "sbx_a", []byte(`{}`)) }},
 			{"an observed write", func() error { return tx.Observed().Put(gone, "env_one", driver.State{ID: "sbx_a"}) }},

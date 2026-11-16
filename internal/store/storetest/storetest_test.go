@@ -212,11 +212,13 @@ func (stubDesired) ByName(context.Context, string, string, string) (store.Object
 func (stubDesired) List(context.Context, string, store.Filter, store.Page) ([]store.Object, string, error) {
 	return nil, "", nil
 }
-func (stubDesired) Delete(context.Context, string, string) error            { return nil }
-func (stubDesired) Count(context.Context, string, string) (int, error)      { return 0, nil }
-func (stubDesired) PutStatus(context.Context, string, string, []byte) error { return nil }
-func (stubDesired) LastApplied(context.Context, string) ([]byte, error)     { return []byte(`{}`), nil }
-func (stubDesired) SetLastApplied(context.Context, string, []byte) error    { return nil }
+func (stubDesired) Delete(context.Context, string, string) error       { return nil }
+func (stubDesired) Count(context.Context, string, string) (int, error) { return 0, nil }
+func (stubDesired) PutStatus(context.Context, string, string, string, []string, []byte) error {
+	return nil
+}
+func (stubDesired) LastApplied(context.Context, string) ([]byte, error)  { return []byte(`{}`), nil }
+func (stubDesired) SetLastApplied(context.Context, string, []byte) error { return nil }
 
 type stubObserved struct{}
 
@@ -242,6 +244,9 @@ func (stubJournal) Prune(context.Context, time.Time) (int, error) { return 0, ni
 func (stubJournal) Undelivered(context.Context) (int, error)      { return 0, nil }
 func (stubJournal) Pending(context.Context, int, time.Time) ([]store.Event, error) {
 	return nil, nil
+}
+func (stubJournal) Delivery(context.Context, string) (store.DeliveryState, error) {
+	return store.DeliveryPending, nil
 }
 func (stubJournal) Acknowledge(context.Context, string, time.Time) error { return nil }
 func (stubJournal) Defer(context.Context, string, time.Time) error       { return nil }

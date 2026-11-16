@@ -32,7 +32,7 @@ func sandbox(id, name string, env map[string]string, credential string) v1.Sandb
 		Metadata: v1.Metadata{Name: name, Labels: map[string]string{"team": "a"}},
 		Spec:     v1.SandboxSpec{Image: "img", Env: env},
 		Status: v1.SandboxStatus{
-			ID: id, Owner: "alice", Environment: "default", Phase: "Running",
+			ID: id, Owner: "alice", Environment: "default", Phase: "Pending",
 			EgressState: &v1.EgressState{Credential: credential, Version: 3},
 		},
 	}
@@ -201,7 +201,7 @@ func TestNoRowHoldsACredential(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := s.Tx(ctx, func(tx store.Tx) error {
-		return tx.Desired().PutStatus(ctx, store.KindSandbox, "sbx_a", status)
+		return tx.Desired().PutStatus(ctx, store.KindSandbox, "sbx_a", "", nil, status)
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -519,12 +519,12 @@ func TestAWriteCannotForgeTheMarker(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := s.Tx(ctx, func(tx store.Tx) error {
-		return tx.Desired().PutStatus(ctx, store.KindSandbox, "sbx_a", []byte(`{"phase":"Stopped"}`))
+		return tx.Desired().PutStatus(ctx, store.KindSandbox, "sbx_a", "", nil, []byte(`{"phase":"Stopped"}`))
 	}); err == nil || !strings.Contains(err.Error(), "sbx_a") {
 		t.Errorf("a status write over a row sealed under another key = %v", err)
 	}
 	if err := keyless.Tx(ctx, func(tx store.Tx) error {
-		return tx.Desired().PutStatus(ctx, store.KindSandbox, "sbx_gone", []byte(`{}`))
+		return tx.Desired().PutStatus(ctx, store.KindSandbox, "sbx_gone", "", nil, []byte(`{}`))
 	}); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("a status write on a store without a key over no row = %v, want ErrNotFound", err)
 	}

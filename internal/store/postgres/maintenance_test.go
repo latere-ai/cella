@@ -175,7 +175,11 @@ func TestAMaintenanceRunWaitsForNoWriter(t *testing.T) {
 	if _, err := postgres.Rotate(ctx, o, storetest.NextKey); !errors.Is(err, postgres.ErrWriterRunning) {
 		t.Errorf("Rotate under a writer = %v, want ErrWriterRunning", err)
 	}
-	if got := schemaAt(t, dsn); got != int64(migrations.SealedCredentials) {
+	highest, err := migrations.Highest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := schemaAt(t, dsn); got != int64(highest) {
 		t.Errorf("a refused run moved the schema to %d", got)
 	}
 	holds(t, loaded(t, s), "sbx_a", map[string]string{"API_KEY": "v"}, "c")

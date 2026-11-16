@@ -45,7 +45,7 @@ func TestVolumeCollectionRoundTrips(t *testing.T) {
 	if err := bridge.WriteVolume(ctx, controller.VolumeAct{Type: controller.MutationVolumeStatus, Object: obj}); err != nil {
 		t.Fatal(err)
 	}
-	holder := sandbox("sbx_holder", "holder", "Running")
+	holder := sandbox("sbx_holder", "holder", "Pending")
 	if err := bridge.WriteVolume(ctx, controller.VolumeAct{
 		Type: controller.MutationVolumeAttached, Object: obj, Sandbox: &holder, Mode: controller.VolumeModeReadOnly,
 	}); err != nil {
@@ -83,7 +83,7 @@ func TestVolumeCollectionRoundTrips(t *testing.T) {
 	if err := json.Unmarshal(attach.Data, &data); err != nil {
 		t.Fatal(err)
 	}
-	want2 := events.Volume{Phase: v1.VolumeAvailable, Access: v1.VolumeAccessSharedRead, Source: v1.VolumeSourceImage,
+	want2 := events.Volume{Phase: string(v1.VolumeAvailable), Access: v1.VolumeAccessSharedRead, Source: v1.VolumeSourceImage,
 		Image: obj.Spec.Source.Image, Mode: controller.VolumeModeReadOnly}
 	if attach.Sandbox == nil || attach.Sandbox.ID != "sbx_holder" || attach.Object.Kind != events.KindVolume || data != want2 {
 		t.Fatalf("the attach record is %+v with %+v", attach, data)
@@ -91,7 +91,9 @@ func TestVolumeCollectionRoundTrips(t *testing.T) {
 
 	// A second bridge that never read the row cannot overwrite it.
 	stale := store.ForController(s, "default", store.Delivered)
-	if err := stale.WriteVolume(ctx, controller.VolumeAct{Type: controller.MutationVolumeUpdated, Object: obj}); !errors.Is(err, controller.ErrVersionConflict) {
+	pending := obj
+	pending.Status.Phase = v1.VolumePending
+	if err := stale.WriteVolume(ctx, controller.VolumeAct{Type: controller.MutationVolumeUpdated, Object: pending}); !errors.Is(err, controller.ErrVersionConflict) {
 		t.Fatalf("a write over a row this bridge never read: %v", err)
 	}
 
@@ -115,6 +117,9 @@ func TestVolumeCollectionRoundTrips(t *testing.T) {
 func TestAFailedVolumeCarriesItsReason(t *testing.T) {
 	bridge, s := bound(t)
 	obj := volume("vol_f", "broken")
+	if err := bridge.WriteVolume(t.Context(), controller.VolumeAct{Type: controller.MutationVolumeCreated, Object: obj}); err != nil {
+		t.Fatal(err)
+	}
 	obj.Status.Phase = v1.VolumeFailed
 	obj.Status.Reason = string(events.ReasonSourceTooLarge)
 	if err := bridge.WriteVolume(t.Context(), controller.VolumeAct{Type: controller.MutationVolumeFailed, Object: obj}); err != nil {

@@ -66,7 +66,7 @@ func TestRotateThenUnsealADatabase(t *testing.T) {
 	}
 	obj := v1.Sandbox{APIVersion: v1.APIVersion, Kind: v1.KindSandbox, Metadata: v1.Metadata{Name: "work"},
 		Spec:   v1.SandboxSpec{Image: "img", Env: map[string]string{"API_KEY": "command-canary"}},
-		Status: v1.SandboxStatus{ID: "sbx_a", Owner: "alice", Phase: "Running", EgressState: &v1.EgressState{Credential: "command-credential"}}}
+		Status: v1.SandboxStatus{ID: "sbx_a", Owner: "alice", Phase: v1.SandboxPending, EgressState: &v1.EgressState{Credential: "command-credential"}}}
 	if err := store.ForController(s, "default", store.Journaled).Write(t.Context(), obj, controller.MutationCreated); err != nil {
 		t.Fatal(err)
 	}

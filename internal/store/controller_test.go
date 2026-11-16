@@ -33,7 +33,7 @@ func bound(t *testing.T) (*store.Controlled, store.Store) {
 }
 
 // sandbox is one desired sandbox as the controller holds it.
-func sandbox(id, name, phase string) v1.Sandbox {
+func sandbox(id, name string, phase v1.SandboxPhase) v1.Sandbox {
 	return v1.Sandbox{
 		APIVersion: v1.APIVersion, Kind: "Sandbox",
 		Metadata: v1.Metadata{Name: name, Labels: map[string]string{"team": "a"}, Annotations: map[string]string{"note": "kept"}},
@@ -49,7 +49,7 @@ func sandbox(id, name, phase string) v1.Sandbox {
 // the labels and annotations a recovery recreates the sandbox from.
 func TestBridgeRoundTrip(t *testing.T) {
 	c, _ := bound(t)
-	obj := sandbox("sbx_a", "work", driver.Running)
+	obj := sandbox("sbx_a", "work", driver.Pending)
 	if err := c.Write(t.Context(), obj, controller.MutationCreated); err != nil {
 		t.Fatalf("writing the object: %v", err)
 	}
@@ -65,7 +65,7 @@ func TestBridgeRoundTrip(t *testing.T) {
 		got.Metadata.Annotations["note"] != "kept" || got.Spec.Workdir != "/workspace" {
 		t.Errorf("the manifest reads back %+v", got)
 	}
-	if got.Status.ID != "sbx_a" || got.Status.Owner != "alice" || got.Status.Phase != driver.Running ||
+	if got.Status.ID != "sbx_a" || got.Status.Owner != "alice" || got.Status.Phase != driver.Pending ||
 		!got.Status.CreatedAt.Equal(obj.Status.CreatedAt) {
 		t.Errorf("the status reads back %+v", got.Status)
 	}
@@ -88,7 +88,7 @@ func TestBridgeWritesAreConditional(t *testing.T) {
 	if err := first.Write(t.Context(), obj, controller.MutationCreated); err != nil {
 		t.Fatalf("the first write: %v", err)
 	}
-	obj.Status.Phase = driver.Running
+	obj.Status.Phase = driver.Pending
 	if err := first.Write(t.Context(), obj, controller.MutationUpdated); err != nil {
 		t.Fatalf("the second write of the same holder: %v", err)
 	}
@@ -110,7 +110,7 @@ func TestBridgeWritesAreConditional(t *testing.T) {
 // ended it first.
 func TestBridgeRemoves(t *testing.T) {
 	c, _ := bound(t)
-	if err := c.Write(t.Context(), sandbox("sbx_a", "work", driver.Running), controller.MutationCreated); err != nil {
+	if err := c.Write(t.Context(), sandbox("sbx_a", "work", driver.Pending), controller.MutationCreated); err != nil {
 		t.Fatal(err)
 	}
 	for range 2 {
@@ -140,7 +140,7 @@ func TestBridgeLoadsEveryPage(t *testing.T) {
 	c, _ := bound(t)
 	const many = store.DefaultPageLimit + 5
 	for i := range many {
-		obj := sandbox(fmt.Sprintf("sbx_%04d", i), fmt.Sprintf("work-%04d", i), driver.Running)
+		obj := sandbox(fmt.Sprintf("sbx_%04d", i), fmt.Sprintf("work-%04d", i), driver.Pending)
 		if err := c.Write(t.Context(), obj, controller.MutationCreated); err != nil {
 			t.Fatalf("writing %d: %v", i, err)
 		}
@@ -159,13 +159,13 @@ func TestBridgeLoadsEveryPage(t *testing.T) {
 // and each is routed to the driver of its own (spec 021).
 func TestBridgeLoadsEveryEnvironment(t *testing.T) {
 	c, s := bound(t)
-	if err := c.Write(t.Context(), sandbox("sbx_a", "work", driver.Running), controller.MutationCreated); err != nil {
+	if err := c.Write(t.Context(), sandbox("sbx_a", "work", driver.Pending), controller.MutationCreated); err != nil {
 		t.Fatal(err)
 	}
 	elsewhere := store.ForController(s, "other", store.Delivered)
 	// A name is unique per owner and kind across every environment, which is
 	// design 010's index and not a per environment one.
-	obj := sandbox("sbx_b", "work-elsewhere", driver.Running)
+	obj := sandbox("sbx_b", "work-elsewhere", driver.Pending)
 	obj.Status.Environment = "other"
 	if err := elsewhere.Write(t.Context(), obj, controller.MutationCreated); err != nil {
 		t.Fatal(err)
@@ -185,8 +185,8 @@ func TestBridgeLoadsEveryEnvironment(t *testing.T) {
 func TestBridgeSavesTheWholeMap(t *testing.T) {
 	c, _ := bound(t)
 	objects := map[string]v1.Sandbox{
-		"sbx_a": sandbox("sbx_a", "one", driver.Running),
-		"sbx_b": sandbox("sbx_b", "two", driver.Running),
+		"sbx_a": sandbox("sbx_a", "one", driver.Pending),
+		"sbx_b": sandbox("sbx_b", "two", driver.Pending),
 	}
 	if err := c.Save(objects); err != nil {
 		t.Fatalf("saving: %v", err)
@@ -208,7 +208,7 @@ func TestBridgeSavesTheWholeMap(t *testing.T) {
 // own contract, where the lost rule of design 005 reads it.
 func TestBridgeRebuilds(t *testing.T) {
 	c, s := bound(t)
-	states := []driver.State{{ID: "sbx_a", Owner: "alice", Phase: driver.Running}}
+	states := []driver.State{{ID: "sbx_a", Owner: "alice", Phase: driver.Pending}}
 	if err := c.Rebuild(t.Context(), "default", states); err != nil {
 		t.Fatalf("rebuilding: %v", err)
 	}
@@ -217,7 +217,7 @@ func TestBridgeRebuilds(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if environment != "default" || got.Phase != driver.Running {
+		if environment != "default" || got.Phase != driver.Pending {
 			t.Errorf("the index holds %+v on %q", got, environment)
 		}
 		return nil
@@ -304,7 +304,7 @@ func TestBridgeReportsAStoreFailure(t *testing.T) {
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
-	obj := sandbox("sbx_a", "work", driver.Running)
+	obj := sandbox("sbx_a", "work", driver.Pending)
 	if err := c.Write(t.Context(), obj, controller.MutationCreated); err == nil {
 		t.Error("a write to a closed store was reported as done")
 	}
@@ -336,7 +336,7 @@ func TestBridgeSpawnDebitsWithTheChild(t *testing.T) {
 	ctx := t.Context()
 	const parent = "sbx_parent"
 
-	first := sandbox("sbx_one", "one", driver.Running)
+	first := sandbox("sbx_one", "one", driver.Pending)
 	if err := c.WriteSpawn(ctx, first, controller.MutationCreated, parent, 1); err != nil {
 		t.Fatalf("the first spawn: %v", err)
 	}
@@ -348,7 +348,7 @@ func TestBridgeSpawnDebitsWithTheChild(t *testing.T) {
 		t.Fatalf("the spawn journaled %d records (%v), want one", len(events), err)
 	}
 
-	second := sandbox("sbx_two", "two", driver.Running)
+	second := sandbox("sbx_two", "two", driver.Pending)
 	err = c.WriteSpawn(ctx, second, controller.MutationCreated, parent, 1)
 	if !errors.Is(err, controller.ErrBudgetExhausted) {
 		t.Fatalf("the second spawn answered %v, want the controller's sentinel", err)
@@ -385,7 +385,7 @@ func TestBridgeSpawnDebitsWithTheChild(t *testing.T) {
 func TestBridgeWritesARecordWithItsOwnData(t *testing.T) {
 	c, _ := bound(t)
 	ctx := t.Context()
-	parent := sandbox("sbx_parent", "planner", driver.Running)
+	parent := sandbox("sbx_parent", "planner", driver.Pending)
 	if err := c.Write(ctx, parent, controller.MutationCreated); err != nil {
 		t.Fatal(err)
 	}
@@ -428,7 +428,7 @@ func TestBridgeWritesARecordWithItsOwnData(t *testing.T) {
 func TestBridgeWritesASizeWithItsRecord(t *testing.T) {
 	c, s := bound(t)
 	ctx := t.Context()
-	obj := sandbox("sbx_sized", "work", driver.Running)
+	obj := sandbox("sbx_sized", "work", driver.Pending)
 	obj.Spec.Resources = v1.Resources{CPU: "500m", Memory: "256Mi", Disk: "5Gi", Max: v1.ResourceMax{CPU: "2", Memory: "4Gi"}}
 	obj.Status.Resources = v1.Size{CPU: "2", Memory: "256Mi", Disk: "5Gi"}
 	if err := c.Write(ctx, obj, controller.MutationCreated); err != nil {

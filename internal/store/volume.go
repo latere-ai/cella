@@ -22,6 +22,7 @@ func (c *Controlled) LoadVolumes() (map[string]v1.Volume, error) {
 	ctx := context.Background()
 	volumes := map[string]v1.Volume{}
 	versions := map[string]int64{}
+	phases := map[string]string{}
 	cursor := ""
 	for {
 		var (
@@ -43,6 +44,7 @@ func (c *Controlled) LoadVolumes() (map[string]v1.Volume, error) {
 			}
 			volumes[row.ID] = obj
 			versions[row.ID] = row.Version
+			phases[row.ID] = row.Phase
 		}
 		if next == "" {
 			break
@@ -51,6 +53,7 @@ func (c *Controlled) LoadVolumes() (map[string]v1.Volume, error) {
 	}
 	c.mu.Lock()
 	maps.Copy(c.versions, versions)
+	maps.Copy(c.phases, phases)
 	c.mu.Unlock()
 	return volumes, nil
 }
@@ -62,11 +65,14 @@ func (c *Controlled) LoadVolumes() (map[string]v1.Volume, error) {
 func (c *Controlled) WriteVolume(ctx context.Context, act controller.VolumeAct) error {
 	id := act.Object.Status.ID
 	c.mu.Lock()
-	version := c.versions[id]
+	version, last := c.versions[id], c.phases[id]
 	c.mu.Unlock()
 	row, err := encodeVolume(act.Object)
 	if err != nil {
 		return err
+	}
+	if err := guard(controller.VolumeLifecycle, &row, act.Object.Status.Phase, version, last); err != nil {
+		return fmt.Errorf("store: writing the volume %s: %w", id, err)
 	}
 	event, err := c.volumeRecord(ctx, act)
 	if err != nil {
@@ -84,7 +90,7 @@ func (c *Controlled) WriteVolume(ctx context.Context, act controller.VolumeAct) 
 		return err
 	}
 	c.mu.Lock()
-	c.versions[id] = written
+	c.versions[id], c.phases[id] = written, row.Phase
 	c.mu.Unlock()
 	return nil
 }
@@ -140,7 +146,7 @@ func encodeVolume(obj v1.Volume) (Object, error) {
 	}
 	return Object{
 		Kind: KindVolume, ID: status.ID, Owner: status.Owner, Name: obj.Metadata.Name,
-		Environment: obj.Spec.Environment, Phase: status.Phase, Labels: obj.Metadata.Labels,
+		Environment: obj.Spec.Environment, Phase: string(status.Phase), Labels: obj.Metadata.Labels,
 		Data: data, Status: encoded,
 	}, nil
 }

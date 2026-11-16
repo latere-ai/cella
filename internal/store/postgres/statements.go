@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	v1 "latere.ai/x/cella/manifest/v1"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
@@ -90,11 +92,13 @@ func (x desired) Put(ctx context.Context, obj store.Object, ifVersion int64) (in
 	var version int64
 	err = x.q.QueryRow(ctx, `update objects set owner = $3, name = $4, environment = $5, phase = $6,
 			labels = $7, data = $8, status = $9, sealed_key = $11, sealed = $12,
-			version = version + 1, updated_at = now(), deleted_at = null
-		where id = $1 and kind = $2 and version = $10 returning version`,
-		obj.ID, obj.Kind, obj.Owner, obj.Name, obj.Environment, obj.Phase, labels, data, status, ifVersion, wrapped, sealed).Scan(&version)
+			version = version + 1, updated_at = now()
+		where id = $1 and kind = $2 and version = $10 and `+liveRow+`
+			and ($13::text[] is null or `+heldPhase+` = any($13::text[])) returning version`,
+		obj.ID, obj.Kind, obj.Owner, obj.Name, obj.Environment, obj.Phase, labels, data, status, ifVersion, wrapped, sealed,
+		obj.Sources).Scan(&version)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return 0, x.whyNoRow(ctx, obj.Kind, obj.ID)
+		return 0, x.whyNoRow(ctx, obj.Kind, obj.ID, ifVersion)
 	}
 	if err != nil {
 		return 0, writeError(err, "writing the object")
@@ -102,18 +106,37 @@ func (x desired) Put(ctx context.Context, obj store.Object, ifVersion int64) (in
 	return version, nil
 }
 
+// heldPhase is the phase a row holds, read from the status the controller
+// writes and not from the denormalized column: the status is what a sandbox, a
+// volume and an environment carry in common and what a reader is served, so it
+// is what a write is checked against.
+const heldPhase = `coalesce(status->>'phase', phase)`
+
+// liveRow is the condition of a write of a row that has not been deleted. It
+// is RowLive spelled as the column that derives it.
+const liveRow = `deleted_at is null`
+
 // whyNoRow tells a conditional write that matched nothing from a row that is
-// not there at all, which are different answers to the caller.
-func (x desired) whyNoRow(ctx context.Context, kind, id string) error {
-	var version int64
-	err := x.q.QueryRow(ctx, `select version from objects where id = $1 and kind = $2`, id, kind).Scan(&version)
-	if errors.Is(err, pgx.ErrNoRows) {
+// not there at all, and from one whose phase the write may not leave, which are
+// different answers to the caller. A row another writer deleted is not there.
+func (x desired) whyNoRow(ctx context.Context, kind, id string, ifVersion int64) error {
+	var (
+		version int64
+		phase   string
+		live    bool
+	)
+	err := x.q.QueryRow(ctx, `select version, `+heldPhase+`, `+liveRow+` from objects where id = $1 and kind = $2`, id, kind).
+		Scan(&version, &phase, &live)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !live) {
 		return store.ErrNotFound
 	}
 	if err != nil {
 		return fmt.Errorf("store: reading the object's version: %w", err)
 	}
-	return store.ErrVersionConflict
+	if version != ifVersion {
+		return store.ErrVersionConflict
+	}
+	return fmt.Errorf("%w: the %s %s is %s", store.ErrIllegalTransition, strings.ToLower(kind), id, phase)
 }
 
 func (x desired) Get(ctx context.Context, kind, id string) (store.Object, error) {
@@ -166,15 +189,21 @@ func (x desired) Delete(ctx context.Context, kind, id string) error {
 		strip = ", " + stripCredentials
 	}
 	tag, err := x.q.Exec(ctx, `update objects set deleted_at = now(), updated_at = now(), version = version + 1`+strip+`
-		where id = $1 and kind = $2 and deleted_at is null`, id, kind)
+		where id = $1 and kind = $2 and `+rowState+` = any($3)`, id, kind, store.RowSources(store.RowDeleted))
 	if err != nil {
 		return fmt.Errorf("store: deleting the object: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		return store.ErrNotFound
+		// The row is gone or already deleted: either way nothing is left to
+		// end, and a second delete is a step the lifecycle does not have.
+		return fmt.Errorf("%w: %w", store.ErrNotFound, store.ErrIllegalTransition)
 	}
 	return nil
 }
+
+// rowState is the state of an object's row as RowTable names it, derived from
+// the column the delete sets.
+const rowState = `(case when deleted_at is null then 'live' else 'deleted' end)`
 
 func (x desired) Count(ctx context.Context, kind, owner string) (int, error) {
 	var n int
@@ -186,25 +215,40 @@ func (x desired) Count(ctx context.Context, kind, owner string) (int, error) {
 	return n, nil
 }
 
-func (x desired) PutStatus(ctx context.Context, kind, id string, status []byte) error {
+func (x desired) PutStatus(ctx context.Context, kind, id, phase string, sources []string, status []byte) error {
 	if kind == store.KindSandbox && x.env.Ready() {
-		return x.putSandboxStatus(ctx, id, status)
+		return x.putSandboxStatus(ctx, id, phase, sources, status)
 	}
-	tag, err := x.q.Exec(ctx, `update objects set status = $3, updated_at = now()
-		where id = $1 and kind = $2 and deleted_at is null`, id, kind, jsonText(status))
+	tag, err := x.q.Exec(ctx, `update objects set status = $3, phase = coalesce(nullif($4, ''), phase), updated_at = now()
+		where id = $1 and kind = $2 and `+liveRow+` and ($5::text[] is null or `+heldPhase+` = any($5::text[]))`,
+		id, kind, jsonText(status), phase, sources)
 	if err != nil {
 		return fmt.Errorf("store: writing the status: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		return store.ErrNotFound
+		return x.whyNoStatus(ctx, kind, id)
 	}
 	return nil
+}
+
+// whyNoStatus tells a status write that matched nothing: no live row has the
+// id, or the row's phase is not one the write may leave.
+func (x desired) whyNoStatus(ctx context.Context, kind, id string) error {
+	var phase string
+	err := x.q.QueryRow(ctx, `select `+heldPhase+` from objects where id = $1 and kind = $2 and `+liveRow, id, kind).Scan(&phase)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return store.ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("store: reading the object's phase: %w", err)
+	}
+	return fmt.Errorf("%w: the %s %s is %s", store.ErrIllegalTransition, strings.ToLower(kind), id, phase)
 }
 
 // putSandboxStatus is PutStatus for a sandbox on a store that seals: the
 // credential a status carries is sealed with the environment the row already
 // holds, so the row is read, opened, and written back whole.
-func (x desired) putSandboxStatus(ctx context.Context, id string, status []byte) error {
+func (x desired) putSandboxStatus(ctx context.Context, id, phase string, sources []string, status []byte) error {
 	obj := store.Object{Kind: store.KindSandbox, ID: id}
 	var wrapped, sealed []byte
 	err := x.q.QueryRow(ctx, `select data, status, sealed_key, sealed from objects
@@ -224,10 +268,15 @@ func (x desired) putSandboxStatus(ctx context.Context, id string, status []byte)
 	if err != nil {
 		return err
 	}
-	if _, err = x.q.Exec(ctx, `update objects set data = $3, status = $4, sealed_key = $5, sealed = $6, updated_at = now()
-		where id = $1 and kind = $2 and deleted_at is null`,
-		id, store.KindSandbox, jsonText(data), jsonText(encoded), wrapped, sealed); err != nil {
+	tag, err := x.q.Exec(ctx, `update objects set data = $3, status = $4, sealed_key = $5, sealed = $6,
+			phase = coalesce(nullif($7, ''), phase), updated_at = now()
+		where id = $1 and kind = $2 and `+liveRow+` and ($8::text[] is null or `+heldPhase+` = any($8::text[]))`,
+		id, store.KindSandbox, jsonText(data), jsonText(encoded), wrapped, sealed, phase, sources)
+	if err != nil {
 		return fmt.Errorf("store: writing the status: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return x.whyNoStatus(ctx, store.KindSandbox, id)
 	}
 	return nil
 }
@@ -284,7 +333,7 @@ func (x observed) Put(ctx context.Context, environment string, s driver.State) e
 // before the encoder sees it.
 func validUTF8State(s driver.State) driver.State {
 	clean := func(v string) string { return strings.ToValidUTF8(v, "\uFFFD") }
-	s.ID, s.Name, s.Owner, s.Phase = clean(s.ID), clean(s.Name), clean(s.Owner), clean(s.Phase)
+	s.ID, s.Name, s.Owner, s.Phase = clean(s.ID), clean(s.Name), clean(s.Owner), v1.ParseSandboxPhase(clean(string(s.Phase)))
 	s.Reason, s.Isolation, s.MeshID, s.Parent = clean(s.Reason), clean(s.Isolation), clean(s.MeshID), clean(s.Parent)
 	if s.Labels != nil {
 		labels := make(map[string]string, len(s.Labels))
@@ -394,6 +443,9 @@ func (x journal) Append(ctx context.Context, e store.Event) (int64, error) {
 	if e.At.IsZero() {
 		e.At = time.Now().UTC()
 	}
+	if err := store.DeliveryTable.CheckStart(store.DeliveryOf(e)); err != nil {
+		return 0, fmt.Errorf("store: appending to the journal: %w", err)
+	}
 	var seq int64
 	err := x.q.QueryRow(ctx, `insert into events (id, object_id, seq, type, at, payload, acked_at)
 		select $1, $2, coalesce(max(seq), 0) + 1, $3, $4, $5, $6 from events where object_id = $2
@@ -455,30 +507,63 @@ func (x journal) Undelivered(ctx context.Context) (int, error) {
 	return n, nil
 }
 
+// deliveryState is the delivery state of an event as DeliveryTable names it,
+// derived from the two columns the outcomes set.
+const deliveryState = `(case when acked_at is not null then 'delivered'
+	when dropped_at is not null then 'dropped' else 'pending' end)`
+
+func (x journal) Delivery(ctx context.Context, id string) (store.DeliveryState, error) {
+	var state string
+	err := x.q.QueryRow(ctx, `select `+deliveryState+` from events where id = $1`, id).Scan(&state)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return store.ParseDeliveryState(""), store.ErrNotFound
+	}
+	if err != nil {
+		return store.ParseDeliveryState(""), fmt.Errorf("store: reading the delivery of an event: %w", err)
+	}
+	return store.ParseDeliveryState(state), nil
+}
+
+// Acknowledge, Drop and Defer are the writers of an event's delivery. The
+// first two end a pending event, the states with a step to delivered and to
+// dropped; Defer records one failed attempt of a pending event and is no step.
 func (x journal) Acknowledge(ctx context.Context, id string, at time.Time) error {
-	return x.finish(ctx, `update events set acked_at = $2 where id = $1`, id, at)
+	return x.finish(ctx, `update events set acked_at = $2 where id = $1 and `+deliveryState+` = any($3::text[])`,
+		id, at, store.DeliverySources(store.DeliveryDelivered))
 }
 
 func (x journal) Drop(ctx context.Context, id string, at time.Time) error {
-	return x.finish(ctx, `update events set dropped_at = $2 where id = $1`, id, at)
+	return x.finish(ctx, `update events set dropped_at = $2 where id = $1 and `+deliveryState+` = any($3::text[])`,
+		id, at, store.DeliverySources(store.DeliveryDropped))
 }
 
 func (x journal) Defer(ctx context.Context, id string, next time.Time) error {
-	return x.finish(ctx, `update events set attempts = attempts + 1, next_attempt_at = $2 where id = $1`, id, next)
+	return x.finish(ctx, `update events set attempts = attempts + 1, next_attempt_at = $2
+		where id = $1 and `+deliveryState+` = any($3::text[])`,
+		id, next, []string{string(store.DeliveryPending)})
 }
 
 // finish applies one delivery outcome. An id no row holds is ErrNotFound: the
 // caller read it from Pending, so its absence is a fact worth reporting
-// rather than a write that quietly did nothing.
-func (x journal) finish(ctx context.Context, statement, id string, at time.Time) error {
-	tag, err := x.q.Exec(ctx, statement, id, at.UTC())
+// rather than a write that quietly did nothing. An event that is not pending
+// is left as it is and the write is ErrIllegalTransition.
+func (x journal) finish(ctx context.Context, statement, id string, at time.Time, from []string) error {
+	tag, err := x.q.Exec(ctx, statement, id, at.UTC(), from)
 	if err != nil {
 		return fmt.Errorf("store: recording a delivery outcome: %w", err)
 	}
-	if tag.RowsAffected() == 0 {
+	if tag.RowsAffected() > 0 {
+		return nil
+	}
+	var state string
+	err = x.q.QueryRow(ctx, `select `+deliveryState+` from events where id = $1`, id).Scan(&state)
+	if errors.Is(err, pgx.ErrNoRows) {
 		return store.ErrNotFound
 	}
-	return nil
+	if err != nil {
+		return fmt.Errorf("store: recording a delivery outcome: %w", err)
+	}
+	return fmt.Errorf("%w: the event %s is %s", store.ErrIllegalTransition, id, state)
 }
 
 // nullTime is a zero time as SQL null, so an unset column stays unset.
@@ -878,16 +963,33 @@ func (x keys) Record(ctx context.Context, k store.Key) error {
 	return nil
 }
 
+// Revoke ends an active key: the states with a step to revoked, derived from
+// revoked_at. A key that is not active, or has no record, is left as it is and
+// the write is ErrIllegalTransition; a revocation stamped earlier than the
+// recorded one still replaces its instant, which moves the mark and not the
+// state, so the earliest mark is kept whichever revocation came first.
 func (x keys) Revoke(ctx context.Context, jti string, at time.Time) error {
-	// The earliest mark is kept, so a revocation that retried does not move
-	// the instant a console shows.
-	_, err := x.q.Exec(ctx, `update environment_keys set revoked_at = $2
-		where jti = $1 and (revoked_at is null or revoked_at > $2)`, jti, at.UTC())
+	tag, err := x.q.Exec(ctx, `update environment_keys set revoked_at = $2
+		where jti = $1 and `+keyState+` = any($3::text[])`, jti, at.UTC(), store.KeySources(store.KeyRevoked))
 	if err != nil {
 		return fmt.Errorf("store: marking the key %s revoked: %w", jti, err)
 	}
-	return nil
+	if tag.RowsAffected() > 0 {
+		return nil
+	}
+	// The key is revoked already, or has no record. A revocation stamped
+	// earlier than the recorded one replaces it: the instant moves, the
+	// state does not.
+	if _, err = x.q.Exec(ctx, `update environment_keys set revoked_at = $2
+		where jti = $1 and revoked_at > $2`, jti, at.UTC()); err != nil {
+		return fmt.Errorf("store: marking the key %s revoked: %w", jti, err)
+	}
+	return fmt.Errorf("%w: the key %s is not active", store.ErrIllegalTransition, jti)
 }
+
+// keyState is the state of an environment key as KeyTable names it, derived
+// from the column the revocation sets.
+const keyState = `(case when revoked_at is null then 'active' else 'revoked' end)`
 
 func (x keys) List(ctx context.Context, environment string, p store.Page) ([]store.Key, string, error) {
 	rows, err := x.q.Query(ctx, `select jti, environment, subject, minted_at, expires_at, revoked_at
@@ -1013,8 +1115,11 @@ func (x operations) Enqueue(ctx context.Context, op store.Operation) error {
 	if op.ID == "" || op.Environment == "" || op.Type == "" {
 		return errors.New("store: an operation names an id, an environment and a type")
 	}
-	if op.State == "" {
+	if len(op.State) == 0 {
 		op.State = store.OperationQueued
+	}
+	if err := store.OperationTable.CheckStart(op.State); err != nil {
+		return fmt.Errorf("store: enqueueing operation %s: %w", op.ID, err)
 	}
 	if op.CreatedAt.IsZero() {
 		op.CreatedAt = time.Now().UTC()
@@ -1035,7 +1140,10 @@ func (x operations) Enqueue(ctx context.Context, op store.Operation) error {
 
 // Claim takes rows nobody holds and rows whose holder stopped heartbeating,
 // in one statement with the rows locked, so a row is claimed once however
-// many replicas claim at the same instant.
+// many replicas claim at the same instant. A row nobody holds is queued, the
+// states with a step to claimed; a row whose holder lapsed is claimed already
+// and stays so under its new holder, which is the protocol of the claim and
+// no step of the lifecycle.
 func (x operations) Claim(ctx context.Context, environment, worker string, n int, lapsed time.Time) ([]store.Operation, error) {
 	if environment == "" || worker == "" {
 		return nil, errors.New("store: a claim names an environment and a worker")
@@ -1044,18 +1152,19 @@ func (x operations) Claim(ctx context.Context, environment, worker string, n int
 		return nil, nil
 	}
 	rows, err := x.q.Query(ctx, `update operations set
-			state = 'claimed', claimed_by = $2, claimed_at = now(), attempts = attempts + 1
+			state = $5, claimed_by = $2, claimed_at = now(), attempts = attempts + 1
 		where id in (
 			select o.id from operations o
 			left join workers w on w.environment = o.environment and w.worker = o.claimed_by
 			where o.environment = $1 and (
-				o.state = 'queued'
-				or (o.state = 'claimed' and o.claimed_by <> $2
+				o.state = any($6::text[])
+				or (o.state = $5 and o.claimed_by <> $2
 					and (w.worker is null or w.last_heartbeat < $3)))
 			order by o.created_at, o.id
 			limit $4
 			for update of o skip locked)
-		returning `+operationColumns, environment, worker, lapsed.UTC(), n)
+		returning `+operationColumns, environment, worker, lapsed.UTC(), n,
+		store.OperationClaimed, store.OperationSources(store.OperationClaimed))
 	if err != nil {
 		return nil, fmt.Errorf("store: claiming operations of %s: %w", environment, err)
 	}
@@ -1083,8 +1192,9 @@ func (x operations) Claim(ctx context.Context, environment, worker string, n int
 }
 
 func (x operations) Acknowledge(ctx context.Context, opID string, result []byte) error {
-	tag, err := x.q.Exec(ctx, `update operations set state = 'done', result = $2
-		where id = $1 and state <> 'done'`, opID, jsonText(result))
+	tag, err := x.q.Exec(ctx, `update operations set state = $3, result = $2
+		where id = $1 and state = any($4::text[])`, opID, jsonText(result),
+		store.OperationDone, store.OperationSources(store.OperationDone))
 	if err != nil {
 		return fmt.Errorf("store: acknowledging operation %s: %w", opID, err)
 	}
@@ -1171,7 +1281,7 @@ func (x operations) Forget(ctx context.Context, environment, worker string) erro
 }
 
 func (x operations) Prune(ctx context.Context, before time.Time) (int, error) {
-	tag, err := x.q.Exec(ctx, `delete from operations where state = 'done' and created_at < $1`, before.UTC())
+	tag, err := x.q.Exec(ctx, `delete from operations where state = $2 and created_at < $1`, before.UTC(), store.OperationDone)
 	if err != nil {
 		return 0, fmt.Errorf("store: forgetting finished operations: %w", err)
 	}

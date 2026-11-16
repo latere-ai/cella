@@ -44,6 +44,9 @@ func (c *Controlled) LoadEnvironments() (map[string]v1.Environment, error) {
 				return nil, err
 			}
 			out[row.ID] = obj
+			c.mu.Lock()
+			c.phases[row.ID] = row.Phase
+			c.mu.Unlock()
 		}
 		if next == "" {
 			return out, nil
@@ -64,6 +67,11 @@ func (c *Controlled) WriteEnvironment(ctx context.Context, obj v1.Environment, i
 	if err != nil {
 		return 0, err
 	}
+	// An update of an environment keeps its phase, which moves only through
+	// the status write below.
+	if err := guard(controller.EnvironmentLifecycle, &row, obj.Status.Phase, ifVersion, string(obj.Status.Phase)); err != nil {
+		return 0, fmt.Errorf("store: writing the environment %s: %w", obj.Metadata.Name, err)
+	}
 	var written int64
 	err = c.write(ctx, func(tx Tx) error {
 		next, err := tx.Desired().Put(ctx, row, ifVersion)
@@ -78,6 +86,11 @@ func (c *Controlled) WriteEnvironment(ctx context.Context, obj v1.Environment, i
 	})
 	if errors.Is(err, ErrVersionConflict) {
 		return 0, controller.ErrVersionConflict
+	}
+	if err == nil {
+		c.mu.Lock()
+		c.phases[obj.Metadata.Name] = string(obj.Status.Phase)
+		c.mu.Unlock()
 	}
 	return written, err
 }
@@ -96,8 +109,17 @@ func (c *Controlled) WriteEnvironmentStatus(ctx context.Context, obj v1.Environm
 			return err
 		}
 	}
-	return c.write(ctx, func(tx Tx) error {
-		if err := tx.Desired().PutStatus(ctx, KindEnvironment, obj.Metadata.Name, status); err != nil {
+	// A status that keeps the phase lands only while the row is still in it;
+	// one that changes it is a step of the lifecycle.
+	c.mu.Lock()
+	last := c.phases[obj.Metadata.Name]
+	c.mu.Unlock()
+	sources := controller.EnvironmentLifecycle.Steps(obj.Status.Phase)
+	if v1.ParseEnvironmentPhase(last) == obj.Status.Phase {
+		sources = []string{last}
+	}
+	err = c.write(ctx, func(tx Tx) error {
+		if err := tx.Desired().PutStatus(ctx, KindEnvironment, obj.Metadata.Name, string(obj.Status.Phase), sources, status); err != nil {
 			return err
 		}
 		if mutation == "" {
@@ -106,6 +128,12 @@ func (c *Controlled) WriteEnvironmentStatus(ctx context.Context, obj v1.Environm
 		_, err := tx.Journal().Append(ctx, event)
 		return err
 	})
+	if err == nil {
+		c.mu.Lock()
+		c.phases[obj.Metadata.Name] = string(obj.Status.Phase)
+		c.mu.Unlock()
+	}
+	return err
 }
 
 // RemoveEnvironment deletes one Environment and appends the mutation, in one
@@ -137,7 +165,7 @@ func (c *Controlled) RemoveEnvironment(ctx context.Context, name, mutation strin
 // transaction.
 func (c *Controlled) environmentRecord(ctx context.Context, mutation string, obj v1.Environment) (Event, error) {
 	rec, err := events.EnvironmentMutation(events.Type(mutation), obj,
-		events.Environment{Workers: obj.Status.Workers, Phase: obj.Status.Phase, Reason: obj.Status.Reason},
+		events.Environment{Workers: obj.Status.Workers, Phase: string(obj.Status.Phase), Reason: obj.Status.Reason},
 		events.ActorFrom(ctx), time.Now().UTC())
 	if err != nil {
 		return Event{}, err
@@ -161,7 +189,7 @@ func encodeEnvironment(obj v1.Environment) (Object, error) {
 	}
 	return Object{
 		Kind: KindEnvironment, ID: obj.Metadata.Name, Owner: status.Owner, Name: obj.Metadata.Name,
-		Environment: obj.Metadata.Name, Phase: status.Phase, Labels: obj.Metadata.Labels,
+		Environment: obj.Metadata.Name, Phase: string(status.Phase), Labels: obj.Metadata.Labels,
 		Data: data, Status: encoded,
 	}, nil
 }
