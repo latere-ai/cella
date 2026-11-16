@@ -105,7 +105,7 @@ func (c *Controller) debit(ctx context.Context, obj v1.Sandbox, parent *v1.Sandb
 	}
 	id := obj.Status.ID
 	previous, held := c.objects[id]
-	if err := SandboxLifecycle.Move(id, previous.Status.Phase, held, obj.Status.Phase); err != nil {
+	if err := checkMove(SandboxLifecycle, id, previous.Status.Phase, held, obj.Status.Phase); err != nil {
 		return err
 	}
 	c.objects[id] = clone(obj)

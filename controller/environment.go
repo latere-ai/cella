@@ -282,7 +282,7 @@ func (c *Controller) applyEnvironment(ctx context.Context, obj v1.Environment, i
 		obj.Status.UpdatedAt = now
 		mutation = MutationEnvironmentUpdated
 	}
-	if err := EnvironmentLifecycle.Move(obj.Metadata.Name, existing.Status.Phase, held, obj.Status.Phase); err != nil {
+	if err := checkMove(EnvironmentLifecycle, obj.Metadata.Name, existing.Status.Phase, held, obj.Status.Phase); err != nil {
 		return obj, false, err
 	}
 	if ifVersion == 0 {
@@ -540,7 +540,7 @@ func (c *Controller) phaseOf(ctx context.Context, name string) error {
 		return nil
 	}
 	next.Status.UpdatedAt = c.clock.Now()
-	if err := EnvironmentLifecycle.Move(name, obj.Status.Phase, true, next.Status.Phase); err != nil {
+	if err := checkMove(EnvironmentLifecycle, name, obj.Status.Phase, true, next.Status.Phase); err != nil {
 		return err
 	}
 	mutation := transitionMutation(obj.Status.Phase, next.Status.Phase)

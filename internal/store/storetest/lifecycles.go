@@ -67,34 +67,34 @@ func path[S ~string](table *statemachine.Table[S], to S) []S {
 
 // phased is the writer of one kind of object with a phase: it creates a row,
 // moves it to a phase and reads the phase back.
-type phased interface {
+type phased[P ~string] interface {
 	prefix() string
-	table() *statemachine.Table[controller.State]
+	table() *statemachine.Table[P]
 	// create writes the first phase of a new record, and move writes the next.
-	create(ctx context.Context, c *store.Controlled, id string, phase string) error
-	move(ctx context.Context, c *store.Controlled, id string, phase string) error
+	create(ctx context.Context, c *store.Controlled, id string, phase P) error
+	move(ctx context.Context, c *store.Controlled, id string, phase P) error
 	// refresh reads the versions a bridge holds back from the store.
 	refresh(c *store.Controlled) error
-	phase(t *testing.T, s store.Store, id string) string
+	phase(t *testing.T, s store.Store, id string) P
 	kind() string
 }
 
 var objects atomic.Int64
 
-func objectLifecycle(t *testing.T, open Opener, kind phased) {
+func objectLifecycle[P ~string](t *testing.T, open Opener, kind phased[P]) {
 	s := opened(t, open, Key)
 	ctx := context.Background()
 	table := kind.table()
 	bridge := store.ForController(s, "env_one", store.Delivered)
-	d := statemachinetest.Driver[controller.State]{
-		Enter: func(t *testing.T, state controller.State) string {
+	d := statemachinetest.Driver[P]{
+		Enter: func(t *testing.T, state P) string {
 			id := fmt.Sprintf("%s_%d", kind.prefix(), objects.Add(1))
 			for i, step := range path(table, state) {
 				var err error
 				if i == 0 {
-					err = kind.create(ctx, bridge, id, string(step))
+					err = kind.create(ctx, bridge, id, step)
 				} else {
-					err = kind.move(ctx, bridge, id, string(step))
+					err = kind.move(ctx, bridge, id, step)
 				}
 				if err != nil {
 					t.Fatalf("entering %s: %s: %v", state, step, err)
@@ -102,7 +102,7 @@ func objectLifecycle(t *testing.T, open Opener, kind phased) {
 			}
 			return id
 		},
-		Move: func(id string, to controller.State) error {
+		Move: func(id string, to P) error {
 			// A writer that read a row another writer moved is refused as
 			// stale and reads again, as a writer on the lifecycle's
 			// single-writer lease does after its own conflict.
@@ -120,69 +120,50 @@ func objectLifecycle(t *testing.T, open Opener, kind phased) {
 				if rerr != nil {
 					return rerr
 				}
-				if lower(held) == string(to) {
+				if held == string(to) {
 					return fmt.Errorf("%s %s is %s already: %w", kind.kind(), id, held, statemachine.ErrIllegalTransition)
 				}
-				err = kind.move(ctx, writer, id, string(to))
+				err = kind.move(ctx, writer, id, to)
 				if !errors.Is(err, controller.ErrVersionConflict) && !errors.Is(err, store.ErrVersionConflict) {
 					return err
 				}
 			}
 			return err
 		},
-		State: func(t *testing.T, id string) controller.State {
-			return controller.State(lower(kind.phase(t, s, id)))
+		State: func(t *testing.T, id string) P {
+			return kind.phase(t, s, id)
 		},
 	}
 	statemachinetest.Exhaustive(t, table, d)
 	statemachinetest.Race(t, table, d)
 }
 
-func lower(s string) string {
-	out := []byte(s)
-	for i, c := range out {
-		if c >= 'A' && c <= 'Z' {
-			out[i] = c + 'a' - 'A'
-		}
-	}
-	return string(out)
-}
-
 // sandboxes writes sandboxes through Controlled.Write.
 type sandboxes struct{}
 
 func (sandboxes) prefix() string { return "sbx" }
-func (sandboxes) table() *statemachine.Table[controller.State] {
-	return controller.SandboxLifecycle.Table()
+func (sandboxes) table() *statemachine.Table[v1.SandboxPhase] {
+	return controller.SandboxLifecycle
 }
 
-func sandbox(id string, phase string) v1.Sandbox {
+func sandbox(id string, phase v1.SandboxPhase) v1.Sandbox {
 	return v1.Sandbox{
 		APIVersion: v1.APIVersion, Kind: v1.KindSandbox,
 		Metadata: v1.Metadata{Name: id},
 		Spec:     v1.SandboxSpec{Environment: "env_one"},
-		Status:   v1.SandboxStatus{ID: id, Owner: "alice", Environment: "env_one", Phase: v1.ParseSandboxPhase(phase), CreatedAt: time.Now().UTC()},
+		Status:   v1.SandboxStatus{ID: id, Owner: "alice", Environment: "env_one", Phase: phase, CreatedAt: time.Now().UTC()},
 	}
 }
 
-func (sandboxes) create(ctx context.Context, c *store.Controlled, id, phase string) error {
-	return c.Write(ctx, sandbox(id, titled(phase)), controller.MutationCreated)
+func (sandboxes) create(ctx context.Context, c *store.Controlled, id string, phase v1.SandboxPhase) error {
+	return c.Write(ctx, sandbox(id, phase), controller.MutationCreated)
 }
-func (sandboxes) move(ctx context.Context, c *store.Controlled, id, phase string) error {
-	return c.Write(ctx, sandbox(id, titled(phase)), controller.MutationStatus)
+func (sandboxes) move(ctx context.Context, c *store.Controlled, id string, phase v1.SandboxPhase) error {
+	return c.Write(ctx, sandbox(id, phase), controller.MutationStatus)
 }
 func (sandboxes) refresh(c *store.Controlled) error { _, err := c.Load(); return err }
-func (sandboxes) phase(t *testing.T, s store.Store, id string) string {
-	return rowPhase(t, s, store.KindSandbox, id)
-}
-
-// titled is a table state as the phase the object carries: the first letter
-// in upper case.
-func titled(state string) string {
-	if state == "" {
-		return state
-	}
-	return string(state[0]-'a'+'A') + state[1:]
+func (sandboxes) phase(t *testing.T, s store.Store, id string) v1.SandboxPhase {
+	return v1.ParseSandboxPhase(rowPhase(t, s, store.KindSandbox, id))
 }
 
 func (sandboxes) kind() string    { return store.KindSandbox }
@@ -215,28 +196,28 @@ func rowPhase(t *testing.T, s store.Store, kind, id string) string {
 type volumes struct{}
 
 func (volumes) prefix() string { return "vol" }
-func (volumes) table() *statemachine.Table[controller.State] {
-	return controller.VolumeLifecycle.Table()
+func (volumes) table() *statemachine.Table[v1.VolumePhase] {
+	return controller.VolumeLifecycle
 }
 
-func volume(id, phase string) v1.Volume {
+func volume(id string, phase v1.VolumePhase) v1.Volume {
 	return v1.Volume{
 		APIVersion: v1.APIVersion, Kind: v1.KindVolume,
 		Metadata: v1.Metadata{Name: id},
 		Spec:     v1.VolumeSpec{Environment: "env_one", Size: "1Gi"},
-		Status:   v1.VolumeStatus{ID: id, Owner: "alice", Phase: v1.ParseVolumePhase(phase)},
+		Status:   v1.VolumeStatus{ID: id, Owner: "alice", Phase: phase},
 	}
 }
 
-func (volumes) create(ctx context.Context, c *store.Controlled, id, phase string) error {
-	return c.WriteVolume(ctx, controller.VolumeAct{Type: controller.MutationVolumeCreated, Object: volume(id, titled(phase))})
+func (volumes) create(ctx context.Context, c *store.Controlled, id string, phase v1.VolumePhase) error {
+	return c.WriteVolume(ctx, controller.VolumeAct{Type: controller.MutationVolumeCreated, Object: volume(id, phase)})
 }
-func (volumes) move(ctx context.Context, c *store.Controlled, id, phase string) error {
-	return c.WriteVolume(ctx, controller.VolumeAct{Type: controller.MutationVolumeStatus, Object: volume(id, titled(phase))})
+func (volumes) move(ctx context.Context, c *store.Controlled, id string, phase v1.VolumePhase) error {
+	return c.WriteVolume(ctx, controller.VolumeAct{Type: controller.MutationVolumeStatus, Object: volume(id, phase)})
 }
 func (volumes) refresh(c *store.Controlled) error { _, err := c.LoadVolumes(); return err }
-func (volumes) phase(t *testing.T, s store.Store, id string) string {
-	return rowPhase(t, s, store.KindVolume, id)
+func (volumes) phase(t *testing.T, s store.Store, id string) v1.VolumePhase {
+	return v1.ParseVolumePhase(rowPhase(t, s, store.KindVolume, id))
 }
 
 // environments writes environments through Controlled.WriteEnvironmentStatus,
@@ -245,29 +226,29 @@ func (volumes) phase(t *testing.T, s store.Store, id string) string {
 type environments struct{}
 
 func (environments) prefix() string { return "env" }
-func (environments) table() *statemachine.Table[controller.State] {
-	return controller.EnvironmentLifecycle.Table()
+func (environments) table() *statemachine.Table[v1.EnvironmentPhase] {
+	return controller.EnvironmentLifecycle
 }
 
-func environment(id, phase string) v1.Environment {
+func environment(id string, phase v1.EnvironmentPhase) v1.Environment {
 	return v1.Environment{
 		APIVersion: v1.APIVersion, Kind: v1.KindEnvironment,
 		Metadata: v1.Metadata{Name: id},
 		Spec:     v1.EnvironmentSpec{Mode: v1.EnvironmentWorker},
-		Status:   v1.EnvironmentStatus{ID: id, Owner: "alice", Phase: v1.ParseEnvironmentPhase(phase)},
+		Status:   v1.EnvironmentStatus{ID: id, Owner: "alice", Phase: phase},
 	}
 }
 
-func (environments) create(ctx context.Context, c *store.Controlled, id, phase string) error {
-	_, err := c.WriteEnvironment(ctx, environment(id, titled(phase)), 0, controller.MutationEnvironmentCreated)
+func (environments) create(ctx context.Context, c *store.Controlled, id string, phase v1.EnvironmentPhase) error {
+	_, err := c.WriteEnvironment(ctx, environment(id, phase), 0, controller.MutationEnvironmentCreated)
 	return err
 }
-func (environments) move(ctx context.Context, c *store.Controlled, id, phase string) error {
-	return c.WriteEnvironmentStatus(ctx, environment(id, titled(phase)), "")
+func (environments) move(ctx context.Context, c *store.Controlled, id string, phase v1.EnvironmentPhase) error {
+	return c.WriteEnvironmentStatus(ctx, environment(id, phase), "")
 }
 func (environments) refresh(c *store.Controlled) error { _, err := c.LoadEnvironments(); return err }
-func (environments) phase(t *testing.T, s store.Store, id string) string {
-	return rowPhase(t, s, store.KindEnvironment, id)
+func (environments) phase(t *testing.T, s store.Store, id string) v1.EnvironmentPhase {
+	return v1.ParseEnvironmentPhase(rowPhase(t, s, store.KindEnvironment, id))
 }
 
 var nonce atomic.Int64

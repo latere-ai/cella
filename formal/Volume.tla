@@ -3,12 +3,12 @@
 (* The Volume table, for the writers of Transition.tla. *)
 EXTENDS Transition
 
-MCStates == {"available", "deleting", "failed", "lost", "pending"}
-MCInitial == {"pending"}
+MCStates == {"Available", "Deleting", "Failed", "Lost", "Pending"}
+MCInitial == {"Pending"}
 MCSucc == [s \in MCStates |->
-    CASE s = "available" -> {"deleting", "lost"}
-      [] s = "failed" -> {"deleting"}
-      [] s = "lost" -> {"deleting"}
-      [] s = "pending" -> {"available", "deleting", "failed"}
+    CASE s = "Available" -> {"Deleting", "Lost"}
+      [] s = "Failed" -> {"Deleting"}
+      [] s = "Lost" -> {"Deleting"}
+      [] s = "Pending" -> {"Available", "Deleting", "Failed"}
       [] OTHER -> {}]
 =============================================================================

@@ -114,7 +114,7 @@ func (c *Controlled) WriteEnvironmentStatus(ctx context.Context, obj v1.Environm
 	c.mu.Lock()
 	last := c.phases[obj.Metadata.Name]
 	c.mu.Unlock()
-	sources := controller.EnvironmentLifecycle.Steps(obj.Status.Phase)
+	sources := sources(controller.EnvironmentLifecycle, obj.Status.Phase)
 	if v1.ParseEnvironmentPhase(last) == obj.Status.Phase {
 		sources = []string{last}
 	}

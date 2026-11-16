@@ -312,8 +312,8 @@ k8s.io/utils v0.0.0-20261023123148-ca04ba58ecab h1:pjQrNLaF//ytZtWwCAHtW+pqwSKjt
 k8s.io/utils v0.0.0-20261023123148-ca04ba58ecab/go.mod h1:DdQ0BJxlQtuMlKDqdg7X5IMMQCXIk2b3d1/4M9OhUYo=
 latere.ai/x/ci-gate v0.72.0 h1:UC0ddraFlaTl5LlIFkPSjFN3mwHDHDgy+483oChUgbI=
 latere.ai/x/ci-gate v0.72.0/go.mod h1:D42NeIEQpp3vgpLrWa8am0WDO8foDqs0tJylJD9/qec=
-latere.ai/x/pkg v0.116.0 h1:Qo6NzP3nMPev/b+EcOL+zEZOzRXJNRldGaumXZW1aQg=
-latere.ai/x/pkg v0.116.0/go.mod h1:w+fV7OaQfqaFBOyR5ouQui4oJ9YpjRv5avU4R9BHMXE=
+latere.ai/x/pkg v0.117.0 h1:n7KS6G1Ka9QbER7RP/INpq0B9bvz5r9cVM+AX24GhXw=
+latere.ai/x/pkg v0.117.0/go.mod h1:coiXiJfcFbITH6uROBRGos8Frok6qxdEj6PXqDVu/JY=
 mvdan.cc/sh/v3 v3.14.1 h1:bXkhQWNHCs0KZEChF8hYS6FC+T2N9mUZLbQv9blditI=
 mvdan.cc/sh/v3 v3.14.1/go.mod h1:syYCoFET8w9tvevxiXUtY8/ICrU+l26jHmhJDra3Vwo=
 pgregory.net/rapid v1.2.0 h1:keKAYRcjm+e1F0oAuU5F5+YPAWcyxNNRK2wud503Gnk=

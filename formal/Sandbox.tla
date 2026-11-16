@@ -3,17 +3,17 @@
 (* The Sandbox table, for the writers of Transition.tla. *)
 EXTENDS Transition
 
-MCStates == {"deleting", "failed", "lost", "pending", "queued", "recovering", "running", "starting", "stopped", "stopping"}
-MCInitial == {"pending", "queued"}
+MCStates == {"Deleting", "Failed", "Lost", "Pending", "Queued", "Recovering", "Running", "Starting", "Stopped", "Stopping"}
+MCInitial == {"Pending", "Queued"}
 MCSucc == [s \in MCStates |->
-    CASE s = "failed" -> {"deleting", "pending", "running", "starting"}
-      [] s = "lost" -> {"deleting", "failed", "recovering"}
-      [] s = "pending" -> {"deleting", "failed", "running", "starting", "stopped"}
-      [] s = "queued" -> {"deleting", "failed", "lost", "pending", "running", "starting"}
-      [] s = "recovering" -> {"deleting", "failed", "running", "starting"}
-      [] s = "running" -> {"deleting", "failed", "lost", "queued", "starting", "stopped", "stopping"}
-      [] s = "starting" -> {"deleting", "failed", "lost", "running", "stopped", "stopping"}
-      [] s = "stopped" -> {"deleting", "lost", "pending", "running", "starting"}
-      [] s = "stopping" -> {"deleting", "failed", "lost", "stopped"}
+    CASE s = "Failed" -> {"Deleting", "Pending", "Running", "Starting"}
+      [] s = "Lost" -> {"Deleting", "Failed", "Recovering"}
+      [] s = "Pending" -> {"Deleting", "Failed", "Running", "Starting", "Stopped"}
+      [] s = "Queued" -> {"Deleting", "Failed", "Lost", "Pending", "Running", "Starting"}
+      [] s = "Recovering" -> {"Deleting", "Failed", "Running", "Starting"}
+      [] s = "Running" -> {"Deleting", "Failed", "Lost", "Queued", "Starting", "Stopped", "Stopping"}
+      [] s = "Starting" -> {"Deleting", "Failed", "Lost", "Running", "Stopped", "Stopping"}
+      [] s = "Stopped" -> {"Deleting", "Lost", "Pending", "Running", "Starting"}
+      [] s = "Stopping" -> {"Deleting", "Failed", "Lost", "Stopped"}
       [] OTHER -> {}]
 =============================================================================

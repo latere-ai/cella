@@ -7,18 +7,18 @@ import Statemachine
 namespace Machines.Environment
 
 inductive State where
-  | «offline»
-  | «pending»
-  | «ready»
+  | «Offline»
+  | «Pending»
+  | «Ready»
   deriving DecidableEq, Repr
 
 def machine : Statemachine.Machine State where
-  states := [.«offline», .«pending», .«ready»]
-  initial := [.«pending», .«ready»]
+  states := [.«Offline», .«Pending», .«Ready»]
+  initial := [.«Pending», .«Ready»]
   next
-    | .«offline» => [.«ready»]
-    | .«pending» => [.«ready»]
-    | .«ready» => [.«offline»]
+    | .«Offline» => [.«Ready»]
+    | .«Pending» => [.«Ready»]
+    | .«Ready» => [.«Offline»]
 
 /-- Every state is reached from an initial state. -/
 theorem all_reachable : machine.AllReachable := by decide

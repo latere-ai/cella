@@ -8,30 +8,30 @@ Claims about the sandbox phase table, proved over the table that
 namespace Proofs.Sandbox
 open Machines.Sandbox Statemachine
 
-/-- A deleting sandbox stays deleting: nothing follows `deleting`, so no
+/-- A deleting sandbox stays deleting: nothing follows `Deleting`, so no
 driver read and no recovery brings it back. -/
-theorem deleting_stays (s : State) (r : Reaches machine .«deleting» s) :
-    s = .«deleting» :=
-  machine.terminal_stays terminal_deleting r
+theorem deleting_stays (s : State) (r : Reaches machine .«Deleting» s) :
+    s = .«Deleting» :=
+  machine.terminal_stays «terminal_Deleting» r
 
-/-- Only the controller's recovery makes a sandbox `recovering`, and only
-from `lost`. -/
+/-- Only the controller's recovery makes a sandbox `Recovering`, and only
+from `Lost`. -/
 theorem recovering_only_from_lost :
-    ∀ s ∈ machine.states, State.«recovering» ∈ machine.next s → s = .«lost» := by
+    ∀ s ∈ machine.states, State.«Recovering» ∈ machine.next s → s = .«Lost» := by
   decide
 
-/-- A sandbox waits in `queued` only from `pending` at creation or from
-`running` by preemption, and a queued one is never reported by a driver:
-the states that lead to `queued` are `running` alone. -/
+/-- A sandbox waits in `Queued` only from `Pending` at creation or from
+`Running` by preemption, and a queued one is never reported by a driver:
+the states that lead to `Queued` are `Running` alone. -/
 theorem queued_only_by_preemption :
-    ∀ s ∈ machine.states, State.«queued» ∈ machine.next s → s = .«running» := by
+    ∀ s ∈ machine.states, State.«Queued» ∈ machine.next s → s = .«Running» := by
   decide
 
 /-- A sandbox the control plane failed itself or the driver lost is never
-`pending` again from `lost`: from `lost` only recovery, failure or a delete
+`Pending` again from `Lost`: from `Lost` only recovery, failure or a delete
 follow. -/
-theorem lost_leaves_by_recovery (s : State) (h : s ∈ machine.next .«lost») :
-    s = .«recovering» ∨ s = .«failed» ∨ s = .«deleting» := by
+theorem lost_leaves_by_recovery (s : State) (h : s ∈ machine.next .«Lost») :
+    s = .«Recovering» ∨ s = .«Failed» ∨ s = .«Deleting» := by
   revert s; decide
 
 /-- Concurrent writers that check the phase they land on keep the table,

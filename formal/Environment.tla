@@ -3,11 +3,11 @@
 (* The Environment table, for the writers of Transition.tla. *)
 EXTENDS Transition
 
-MCStates == {"offline", "pending", "ready"}
-MCInitial == {"pending", "ready"}
+MCStates == {"Offline", "Pending", "Ready"}
+MCInitial == {"Pending", "Ready"}
 MCSucc == [s \in MCStates |->
-    CASE s = "offline" -> {"ready"}
-      [] s = "pending" -> {"ready"}
-      [] s = "ready" -> {"offline"}
+    CASE s = "Offline" -> {"Ready"}
+      [] s = "Pending" -> {"Ready"}
+      [] s = "Ready" -> {"Offline"}
       [] OTHER -> {}]
 =============================================================================

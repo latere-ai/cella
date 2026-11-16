@@ -730,7 +730,7 @@ func (c *Controller) persistVolume(ctx context.Context, act VolumeAct) error {
 	act.Object.Status.AttachedTo = nil
 	id := act.Object.Status.ID
 	previous, held := c.volumeObjects[id]
-	if err := VolumeLifecycle.Move(id, previous.Status.Phase, held, act.Object.Status.Phase); err != nil {
+	if err := checkMove(VolumeLifecycle, id, previous.Status.Phase, held, act.Object.Status.Phase); err != nil {
 		return err
 	}
 	if err := c.volumes.WriteVolume(ctx, act); err != nil {

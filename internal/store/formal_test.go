@@ -22,9 +22,9 @@ var update = flag.Bool("update", false, "rewrite the formal models under formal/
 // every lifecycle table of the module.
 func TestFormalModels(t *testing.T) {
 	statemachinetest.Models(t, "../../formal", *update,
-		controller.SandboxLifecycle.Table().Graph(),
-		controller.VolumeLifecycle.Table().Graph(),
-		controller.EnvironmentLifecycle.Table().Graph(),
+		controller.SandboxLifecycle.Graph(),
+		controller.VolumeLifecycle.Graph(),
+		controller.EnvironmentLifecycle.Graph(),
 		store.OperationTable.Graph(),
 		store.DeliveryTable.Graph(),
 		store.KeyTable.Graph(),
@@ -41,13 +41,13 @@ func TestEveryPhaseIsInItsLifecycle(t *testing.T) {
 		v1.SandboxStopping, v1.SandboxStopped, v1.SandboxFailed, v1.SandboxLost, v1.SandboxRecovering, v1.SandboxDeleting}
 	volume := []v1.VolumePhase{v1.VolumePending, v1.VolumeAvailable, v1.VolumeFailed, v1.VolumeDeleting, v1.VolumeLost}
 	environment := []v1.EnvironmentPhase{v1.EnvironmentPending, v1.EnvironmentReady, v1.EnvironmentOffline}
-	if got := controller.SandboxLifecycle.Phases(); !sameSet(got, sandbox) {
+	if got := controller.SandboxLifecycle.States(); !sameSet(got, sandbox) {
 		t.Errorf("SandboxLifecycle has %v, want %v", got, sandbox)
 	}
-	if got := controller.VolumeLifecycle.Phases(); !sameSet(got, volume) {
+	if got := controller.VolumeLifecycle.States(); !sameSet(got, volume) {
 		t.Errorf("VolumeLifecycle has %v, want %v", got, volume)
 	}
-	if got := controller.EnvironmentLifecycle.Phases(); !sameSet(got, environment) {
+	if got := controller.EnvironmentLifecycle.States(); !sameSet(got, environment) {
 		t.Errorf("EnvironmentLifecycle has %v, want %v", got, environment)
 	}
 }

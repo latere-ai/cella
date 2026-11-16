@@ -19,6 +19,12 @@ refused before it is pushed.
   refused write changes nothing. Each lifecycle is written down as a table,
   the tables are checked by proofs and model checks, and tests drive every
   writer through every pair of states, and every pair of racing writers.
+  The sandbox, volume and environment tables are exported as
+  `controller.SandboxLifecycle`, `controller.VolumeLifecycle` and
+  `controller.EnvironmentLifecycle`, each a `statemachine.Table` over
+  `v1.SandboxPhase`, `v1.VolumePhase` and `v1.EnvironmentPhase`, and
+  `device.EngineTable` is one over `device.EngineState`; a state is the
+  phase as stored, such as `Pending`.
 - **Phases have named types.** `v1.SandboxPhase`, `v1.VolumePhase`,
   `v1.EnvironmentPhase` and `device.EngineState` replace plain strings in
   `status.phase`, `runtime.State.Phase`, `runtime.VolumeState.Phase`,

@@ -8,15 +8,15 @@ Claims about the environment phase table, proved over the table that
 namespace Proofs.Environment
 open Machines.Environment Statemachine
 
-/-- An environment never returns to `pending`: nothing has a step to it. -/
+/-- An environment never returns to `Pending`: nothing has a step to it. -/
 theorem never_pending_again :
-    ∀ s ∈ machine.states, State.«pending» ∉ machine.next s := by
+    ∀ s ∈ machine.states, State.«Pending» ∉ machine.next s := by
   decide
 
-/-- Once an environment has been `ready` it is only ever `ready` or
-`offline`. -/
-theorem ready_stays_placed (s : State) (r : Reaches machine .«ready» s) :
-    s ∈ [State.«ready», .«offline»] :=
+/-- Once an environment has been `Ready` it is only ever `Ready` or
+`Offline`. -/
+theorem ready_stays_placed (s : State) (r : Reaches machine .«Ready» s) :
+    s ∈ [State.«Ready», .«Offline»] :=
   machine.reaches_closed (by decide) r (by decide)
 
 /-- Concurrent writers that check the phase they land on keep the table. -/

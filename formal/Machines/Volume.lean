@@ -7,27 +7,27 @@ import Statemachine
 namespace Machines.Volume
 
 inductive State where
-  | «available»
-  | «deleting»
-  | «failed»
-  | «lost»
-  | «pending»
+  | «Available»
+  | «Deleting»
+  | «Failed»
+  | «Lost»
+  | «Pending»
   deriving DecidableEq, Repr
 
 def machine : Statemachine.Machine State where
-  states := [.«available», .«deleting», .«failed», .«lost», .«pending»]
-  initial := [.«pending»]
+  states := [.«Available», .«Deleting», .«Failed», .«Lost», .«Pending»]
+  initial := [.«Pending»]
   next
-    | .«available» => [.«deleting», .«lost»]
-    | .«deleting» => []
-    | .«failed» => [.«deleting»]
-    | .«lost» => [.«deleting»]
-    | .«pending» => [.«available», .«deleting», .«failed»]
+    | .«Available» => [.«Deleting», .«Lost»]
+    | .«Deleting» => []
+    | .«Failed» => [.«Deleting»]
+    | .«Lost» => [.«Deleting»]
+    | .«Pending» => [.«Available», .«Deleting», .«Failed»]
 
 /-- Every state is reached from an initial state. -/
 theorem all_reachable : machine.AllReachable := by decide
 
-/-- Nothing follows `deleting`. -/
-theorem terminal_deleting : machine.Terminal .«deleting» := by decide
+/-- Nothing follows `Deleting`. -/
+theorem «terminal_Deleting» : machine.Terminal .«Deleting» := by decide
 
 end Machines.Volume

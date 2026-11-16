@@ -7,37 +7,37 @@ import Statemachine
 namespace Machines.Sandbox
 
 inductive State where
-  | «deleting»
-  | «failed»
-  | «lost»
-  | «pending»
-  | «queued»
-  | «recovering»
-  | «running»
-  | «starting»
-  | «stopped»
-  | «stopping»
+  | «Deleting»
+  | «Failed»
+  | «Lost»
+  | «Pending»
+  | «Queued»
+  | «Recovering»
+  | «Running»
+  | «Starting»
+  | «Stopped»
+  | «Stopping»
   deriving DecidableEq, Repr
 
 def machine : Statemachine.Machine State where
-  states := [.«deleting», .«failed», .«lost», .«pending», .«queued», .«recovering», .«running», .«starting», .«stopped», .«stopping»]
-  initial := [.«pending», .«queued»]
+  states := [.«Deleting», .«Failed», .«Lost», .«Pending», .«Queued», .«Recovering», .«Running», .«Starting», .«Stopped», .«Stopping»]
+  initial := [.«Pending», .«Queued»]
   next
-    | .«deleting» => []
-    | .«failed» => [.«deleting», .«pending», .«running», .«starting»]
-    | .«lost» => [.«deleting», .«failed», .«recovering»]
-    | .«pending» => [.«deleting», .«failed», .«running», .«starting», .«stopped»]
-    | .«queued» => [.«deleting», .«failed», .«lost», .«pending», .«running», .«starting»]
-    | .«recovering» => [.«deleting», .«failed», .«running», .«starting»]
-    | .«running» => [.«deleting», .«failed», .«lost», .«queued», .«starting», .«stopped», .«stopping»]
-    | .«starting» => [.«deleting», .«failed», .«lost», .«running», .«stopped», .«stopping»]
-    | .«stopped» => [.«deleting», .«lost», .«pending», .«running», .«starting»]
-    | .«stopping» => [.«deleting», .«failed», .«lost», .«stopped»]
+    | .«Deleting» => []
+    | .«Failed» => [.«Deleting», .«Pending», .«Running», .«Starting»]
+    | .«Lost» => [.«Deleting», .«Failed», .«Recovering»]
+    | .«Pending» => [.«Deleting», .«Failed», .«Running», .«Starting», .«Stopped»]
+    | .«Queued» => [.«Deleting», .«Failed», .«Lost», .«Pending», .«Running», .«Starting»]
+    | .«Recovering» => [.«Deleting», .«Failed», .«Running», .«Starting»]
+    | .«Running» => [.«Deleting», .«Failed», .«Lost», .«Queued», .«Starting», .«Stopped», .«Stopping»]
+    | .«Starting» => [.«Deleting», .«Failed», .«Lost», .«Running», .«Stopped», .«Stopping»]
+    | .«Stopped» => [.«Deleting», .«Lost», .«Pending», .«Running», .«Starting»]
+    | .«Stopping» => [.«Deleting», .«Failed», .«Lost», .«Stopped»]
 
 /-- Every state is reached from an initial state. -/
 theorem all_reachable : machine.AllReachable := by decide
 
-/-- Nothing follows `deleting`. -/
-theorem terminal_deleting : machine.Terminal .«deleting» := by decide
+/-- Nothing follows `Deleting`. -/
+theorem «terminal_Deleting» : machine.Terminal .«Deleting» := by decide
 
 end Machines.Sandbox

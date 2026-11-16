@@ -5,8 +5,6 @@ package store
 
 import (
 	"latere.ai/x/pkg/statemachine"
-
-	"latere.ai/x/cella/controller"
 )
 
 // ErrIllegalTransition is a write that would take a record along a step its
@@ -150,15 +148,15 @@ func DeliveryOf(e Event) DeliveryState {
 // must start the lifecycle; a write that keeps the phase it last read lands
 // only while the row is still in it; and a write that changes the phase is a
 // step, which lands only from a phase with a step to `to`.
-func guard[P ~string](l *controller.Lifecycle[P], row *Object, to P, version int64, last string) error {
+func guard[P ~string](t *statemachine.Table[P], row *Object, to P, version int64, last string) error {
 	if version == 0 {
-		return l.CheckStart(to)
+		return t.CheckStart(to)
 	}
 	if last == string(to) {
 		row.Sources = []string{string(to)}
 		return nil
 	}
-	row.Sources = l.Steps(to)
+	row.Sources = sources(t, to)
 	return nil
 }
 
