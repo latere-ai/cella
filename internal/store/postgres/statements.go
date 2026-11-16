@@ -1139,11 +1139,20 @@ func (x operations) Enqueue(ctx context.Context, op store.Operation) error {
 }
 
 // Claim takes rows nobody holds and rows whose holder stopped heartbeating,
-// in one statement with the rows locked, so a row is claimed once however
-// many replicas claim at the same instant. A row nobody holds is queued, the
-// states with a step to claimed; a row whose holder lapsed is claimed already
-// and stays so under its new holder, which is the protocol of the claim and
-// no step of the lifecycle.
+// so a row is claimed once however many replicas claim at the same instant. A
+// row nobody holds is queued, the states with a step to claimed; a row whose
+// holder lapsed is claimed already and stays so under its new holder, which
+// is the protocol of the claim and no step of the lifecycle.
+//
+// It runs in two statements of the caller's transaction. The first locks the
+// candidates. The second takes, from the locked rows, those that are still
+// claimable when read again. One statement is not enough: when another claim
+// commits a row between this statement's snapshot and its lock, Postgres
+// rechecks the row it locked but keeps the worker row it joined before, which
+// for a row nobody held is no worker at all, so the new holder would read as
+// lapsed and the row would be claimed twice. The second statement reads a
+// snapshot taken after the lock was granted, which holds the other claim and
+// its worker.
 func (x operations) Claim(ctx context.Context, environment, worker string, n int, lapsed time.Time) ([]store.Operation, error) {
 	if environment == "" || worker == "" {
 		return nil, errors.New("store: a claim names an environment and a worker")
@@ -1151,20 +1160,35 @@ func (x operations) Claim(ctx context.Context, environment, worker string, n int
 	if n <= 0 {
 		return nil, nil
 	}
-	rows, err := x.q.Query(ctx, `update operations set
-			state = $5, claimed_by = $2, claimed_at = now(), attempts = attempts + 1
-		where id in (
-			select o.id from operations o
-			left join workers w on w.environment = o.environment and w.worker = o.claimed_by
-			where o.environment = $1 and (
-				o.state = any($6::text[])
-				or (o.state = $5 and o.claimed_by <> $2
-					and (w.worker is null or w.last_heartbeat < $3)))
-			order by o.created_at, o.id
-			limit $4
-			for update of o skip locked)
-		returning `+operationColumns, environment, worker, lapsed.UTC(), n,
-		store.OperationClaimed, store.OperationSources(store.OperationClaimed))
+	// claimable is the claim's condition on a row o, read against the
+	// workers table: queued, or claimed by another worker that is gone or
+	// stopped heartbeating.
+	const claimable = `(o.state = any($4::text[])
+		or (o.state = $3 and o.claimed_by <> $2
+			and not exists (select 1 from workers w
+				where w.environment = o.environment and w.worker = o.claimed_by
+					and w.last_heartbeat >= $5)))`
+	locked, err := x.q.Query(ctx, `select o.id from operations o
+		where o.environment = $1 and `+claimable+`
+		order by o.created_at, o.id
+		limit $6
+		for update of o skip locked`,
+		environment, worker, store.OperationClaimed, store.OperationSources(store.OperationClaimed), lapsed.UTC(), n)
+	if err != nil {
+		return nil, fmt.Errorf("store: locking operations of %s to claim: %w", environment, err)
+	}
+	ids, err := pgx.CollectRows(locked, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("store: locking operations of %s to claim: %w", environment, err)
+	}
+	if len(ids) == 0 {
+		return []store.Operation{}, nil
+	}
+	rows, err := x.q.Query(ctx, `update operations o set
+			state = $3, claimed_by = $2, claimed_at = now(), attempts = attempts + 1
+		where o.environment = $1 and o.id = any($6::text[]) and `+claimable+`
+		returning `+operationColumns, environment, worker, store.OperationClaimed,
+		store.OperationSources(store.OperationClaimed), lapsed.UTC(), ids)
 	if err != nil {
 		return nil, fmt.Errorf("store: claiming operations of %s: %w", environment, err)
 	}

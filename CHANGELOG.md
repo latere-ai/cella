@@ -32,6 +32,11 @@ refused before it is pushed.
 
 ### Fixed
 
+- **An operation is claimed by one worker even when two claim it at the same
+  instant.** When one claim committed while another was about to lock the same
+  queued operation, the second read the new holder as gone and claimed the
+  operation again, so two workers could run it. The claim now locks its rows
+  first and checks them again before taking them.
 - **A writer whose lease renewal was slow stops before a standby can take
   over.** The writer counted its term from when a renewal's answer came back,
   while the store counted it from when the request arrived, so a slow
