@@ -575,7 +575,7 @@ func TestPhaseTable(t *testing.T) {
 	for name, tc := range map[string]struct {
 		st      status
 		stopped bool
-		phase   string
+		phase   v1.SandboxPhase
 		code    *int
 	}{
 		"absent":       {status{}, false, driver.Stopped, nil},

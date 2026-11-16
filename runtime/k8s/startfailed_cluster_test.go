@@ -35,7 +35,7 @@ func (c *cluster) claim() string {
 }
 
 // awaitRead reads the sandbox until it is in a phase.
-func (c *cluster) awaitRead(phase string) v1.Sandbox {
+func (c *cluster) awaitRead(phase v1.SandboxPhase) v1.Sandbox {
 	c.t.Helper()
 	deadline := time.Now().Add(clusterWait)
 	for {

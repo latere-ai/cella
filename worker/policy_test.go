@@ -335,7 +335,7 @@ func TestRunStopsItsSandboxes(t *testing.T) {
 		if err != nil {
 			t.Fatalf("the inspect failed: %v", err)
 		}
-		return state.Phase
+		return string(state.Phase)
 	}
 
 	t.Run("a context that ends stops them", func(t *testing.T) {
@@ -346,7 +346,7 @@ func TestRunStopsItsSandboxes(t *testing.T) {
 		if err := stop(); err != nil {
 			t.Fatalf("Run returned %v", err)
 		}
-		if got := phase(t, host, id); got != driver.Stopped {
+		if got := phase(t, host, id); got != string(driver.Stopped) {
 			t.Errorf("after the worker stopped the sandbox is %s, want Stopped", got)
 		}
 	})
@@ -358,7 +358,7 @@ func TestRunStopsItsSandboxes(t *testing.T) {
 		if err := stop(); err != nil {
 			t.Fatalf("Run returned %v", err)
 		}
-		if got := phase(t, host, id); got != driver.Running {
+		if got := phase(t, host, id); got != string(driver.Running) {
 			t.Errorf("with KeepOnExit the sandbox is %s, want Running", got)
 		}
 	})
@@ -368,7 +368,7 @@ func TestRunStopsItsSandboxes(t *testing.T) {
 	}{
 		{remote.ReasonKeyRevoked, "gone"},
 		{remote.ReasonServeRefused, "gone"},
-		{remote.ReasonWorkerReplaced, driver.Running},
+		{remote.ReasonWorkerReplaced, string(driver.Running)},
 	} {
 		t.Run("a stream closed with "+c.reason, func(t *testing.T) {
 			p, host := newPlane(t), nativeDriver(t)

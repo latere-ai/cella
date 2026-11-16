@@ -630,7 +630,7 @@ func (s *sized) readers() (*watched, func()) {
 					w.saw("unread: " + err.Error())
 					continue
 				}
-				what := fresh.Status.Phase
+				what := string(fresh.Status.Phase)
 				if fresh.Status.Reason != "" {
 					what += " " + fresh.Status.Reason
 				}
@@ -654,7 +654,7 @@ func (w *watched) runningOrStartingAs(t *testing.T, reasons ...string) {
 	t.Helper()
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	allowed := map[string]bool{driver.Running: true}
+	allowed := map[string]bool{string(driver.Running): true}
 	for _, reason := range reasons {
 		allowed["Starting "+reason] = true
 	}

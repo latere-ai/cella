@@ -46,7 +46,7 @@ func mustCreate(t *testing.T, c *Controller, obj v1.Sandbox, owner string) v1.Sa
 	return got
 }
 
-func sandboxPhase(t *testing.T, c *Controller, id string) (string, string) {
+func sandboxPhase(t *testing.T, c *Controller, id string) (v1.SandboxPhase, string) {
 	t.Helper()
 	obj, err := c.Get(t.Context(), id, "")
 	if err != nil {

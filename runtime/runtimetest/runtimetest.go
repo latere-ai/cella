@@ -18,6 +18,8 @@ import (
 	"testing"
 	"time"
 
+	v1 "latere.ai/x/cella/manifest/v1"
+
 	"latere.ai/x/cella/runtime"
 )
 
@@ -203,7 +205,7 @@ func create(t tb, d runtime.Driver, opts Options, spec runtime.CreateSpec) runti
 }
 
 // waitPhase polls Inspect until the phase is reached or pollTimeout passes.
-func waitPhase(t tb, d runtime.Driver, id, phase string) runtime.State {
+func waitPhase(t tb, d runtime.Driver, id string, phase v1.SandboxPhase) runtime.State {
 	t.Helper()
 	deadline := time.Now().Add(pollTimeout)
 	var state runtime.State

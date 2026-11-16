@@ -1088,7 +1088,7 @@ func stateOf(i identity, r record, st status) driver.State {
 // phaseOf is the package documentation's table. The stop flag is read only for
 // a container that has ended, because that is where an operator's stop and a
 // workload that died look the same to podman.
-func phaseOf(st status, stopped bool) (string, *int) {
+func phaseOf(st status, stopped bool) (v1.SandboxPhase, *int) {
 	if !st.present {
 		return driver.Stopped, nil
 	}
@@ -1098,16 +1098,16 @@ func phaseOf(st status, stopped bool) (string, *int) {
 	case "created", "configured", "initialized":
 		return driver.Pending, nil
 	case "stopping":
-		return "Stopping", nil
+		return v1.SandboxStopping, nil
 	case "removing":
-		return "Deleting", nil
+		return v1.SandboxDeleting, nil
 	case "exited", "stopped", "dead":
 		if stopped {
 			return driver.Stopped, nil
 		}
 		code := st.exitCode
 		if code != 0 {
-			return "Failed", &code
+			return v1.SandboxFailed, &code
 		}
 		return driver.Stopped, &code
 	default:

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	v1 "latere.ai/x/cella/manifest/v1"
 	"latere.ai/x/cella/runtime"
 )
 
@@ -36,7 +37,7 @@ type fakeDialer struct {
 }
 
 // fakeBox is one sandbox the fake holds: its phase is all a dial reads.
-type fakeBox struct{ phase string }
+type fakeBox struct{ phase v1.SandboxPhase }
 
 func newFakeDialer() *fakeDialer { return &fakeDialer{boxes: map[string]*fakeBox{}} }
 

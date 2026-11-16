@@ -44,7 +44,7 @@ func MutationData(kind Type, obj v1.Sandbox) any {
 	if kind == TypeCreated {
 		return CreatedOf(obj)
 	}
-	return Phase{Phase: obj.Status.Phase}
+	return Phase{Phase: string(obj.Status.Phase)}
 }
 
 // The controller's seam this type satisfies. A change to either side that

@@ -749,7 +749,7 @@ func TestApplyEnvironmentRefusals(t *testing.T) {
 }
 
 // phase reads one environment's phase.
-func phase(t *testing.T, c *Controller, name string) string {
+func phase(t *testing.T, c *Controller, name string) v1.EnvironmentPhase {
 	t.Helper()
 	obj, err := c.GetEnvironment(name)
 	if err != nil {

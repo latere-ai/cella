@@ -79,7 +79,7 @@ func VolumeMutation(t Type, obj v1.Volume, sandbox *v1.Sandbox, mode string, a A
 		reason = Reason(obj.Status.Reason)
 	}
 	data := Volume{
-		Phase: obj.Status.Phase, Access: obj.Spec.Access,
+		Phase: string(obj.Status.Phase), Access: obj.Spec.Access,
 		Source: obj.Spec.Source.Kind, Image: obj.Spec.Source.Image, Mode: mode,
 	}
 	return build(t, reason, OfVolume(obj), context, data, a, at)

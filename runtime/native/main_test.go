@@ -17,10 +17,11 @@ import (
 	"testing"
 	"time"
 
+	v1 "latere.ai/x/cella/manifest/v1"
 	driver "latere.ai/x/cella/runtime"
 )
 
-func waitState(t *testing.T, d *Driver, id, phase string) driver.State {
+func waitState(t *testing.T, d *Driver, id string, phase v1.SandboxPhase) driver.State {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
@@ -85,8 +86,9 @@ func TestMainExitStatusAndLogs(t *testing.T) {
 	ctx := context.Background()
 	d, _ := fresh(t)
 	for _, tc := range []struct {
-		id, script, phase string
-		code              int
+		id, script string
+		phase      v1.SandboxPhase
+		code       int
 	}{{"ok", "printf 'first\\nsecond\\nthird\\n'; printf error >&2", driver.Stopped, 0}, {"failed", "printf failure; exit 9", "Failed", 9}} {
 		_, err := d.Create(ctx, driver.CreateSpec{ID: tc.id, Command: []string{"sh", "-c", tc.script}})
 		check(t, err)

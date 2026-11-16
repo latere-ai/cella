@@ -13,6 +13,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	v1 "latere.ai/x/cella/manifest/v1"
 	driver "latere.ai/x/cella/runtime"
 )
 
@@ -51,7 +52,7 @@ func TestPhaseTable(t *testing.T) {
 		name  string
 		claim func(*corev1.PersistentVolumeClaim)
 		pod   *corev1.Pod
-		phase string
+		phase v1.SandboxPhase
 		code  *int
 	}{
 		{"claim only", nil, nil, driver.Stopped, nil},

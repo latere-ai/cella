@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	v1 "latere.ai/x/cella/manifest/v1"
+
 	"latere.ai/x/cella/runtime"
 )
 
@@ -36,7 +38,7 @@ func volumeDriverOf(t tb, d runtime.Driver) runtime.VolumeDriver {
 
 // waitVolume polls InspectVolume until the volume reaches the phase, and fails
 // on a fill that failed or a wait past pollTimeout.
-func waitVolume(t tb, vd runtime.VolumeDriver, id, phase string) runtime.VolumeState {
+func waitVolume(t tb, vd runtime.VolumeDriver, id string, phase v1.VolumePhase) runtime.VolumeState {
 	t.Helper()
 	deadline := time.Now().Add(pollTimeout)
 	for {

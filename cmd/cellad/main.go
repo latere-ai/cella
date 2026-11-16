@@ -357,7 +357,7 @@ func serve(ctx context.Context, args []string, getenv config.Getenv, stdout, std
 			}
 			phases := make([]string, 0, 16)
 			for _, obj := range control.List() {
-				phases = append(phases, obj.Status.Phase)
+				phases = append(phases, string(obj.Status.Phase))
 			}
 			return phaseCounts(phases)
 		},

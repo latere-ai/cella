@@ -22,7 +22,7 @@ import (
 )
 
 // act is one sandbox as the controller hands it over.
-func act(kind, phase, reason string) controller.Act {
+func act(kind string, phase v1.SandboxPhase, reason string) controller.Act {
 	return controller.Act{Type: kind, Object: v1.Sandbox{
 		Metadata: v1.Metadata{Name: "build", Labels: map[string]string{"tenant": "acme"}},
 		Spec:     v1.SandboxSpec{Image: "registry.example/base:1", Env: map[string]string{"API_TOKEN": "sk-ant-shaped-like-a-secret"}},

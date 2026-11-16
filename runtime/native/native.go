@@ -81,7 +81,7 @@ func New(root string) (*Driver, error) {
 			return nil, err
 		}
 		if len(r.Command) > 0 && r.State.Phase == driver.Running {
-			r.State.Phase = "Lost"
+			r.State.Phase = driver.Lost
 			r.State.Reason = "ProcessUnrecoverable"
 			if err := d.save(entry.Name(), r); err != nil {
 				return nil, err
@@ -297,7 +297,7 @@ func (d *Driver) Start(ctx context.Context, id string) error {
 	if r.State.Phase == driver.Running {
 		return nil
 	}
-	if r.State.Phase == "Lost" {
+	if r.State.Phase == driver.Lost {
 		return driver.ErrUnsupported
 	}
 	if len(r.Command) > 0 {
@@ -319,7 +319,7 @@ func (d *Driver) Stop(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	if r.State.Phase == "Lost" {
+	if r.State.Phase == driver.Lost {
 		return driver.ErrUnsupported
 	}
 	if main := d.mains[id]; main != nil {

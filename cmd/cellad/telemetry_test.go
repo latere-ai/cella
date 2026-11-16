@@ -544,7 +544,7 @@ func TestPhaseCountsFolds(t *testing.T) {
 // and cella_workers_connected: environments are counted by phase and reason,
 // and every environment carries its worker count, zero included.
 func TestEnvironmentSeriesFold(t *testing.T) {
-	environment := func(name, phase, reason string, workers int) v1.Environment {
+	environment := func(name string, phase v1.EnvironmentPhase, reason string, workers int) v1.Environment {
 		var obj v1.Environment
 		obj.Metadata.Name = name
 		obj.Status.Phase, obj.Status.Reason, obj.Status.Workers = phase, reason, workers

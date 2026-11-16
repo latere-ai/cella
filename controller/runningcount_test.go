@@ -19,7 +19,7 @@ import (
 // holding writes a sandbox of owner in phase straight into desired state, as
 // the controller would have left it, so a case can put a phase in front of
 // the count that no driver reaches on demand.
-func holding(t *testing.T, c *Controller, owner, name, phase string) {
+func holding(t *testing.T, c *Controller, owner, name string, phase v1.SandboxPhase) {
 	t.Helper()
 	id := newID()
 	c.mu.Lock()
@@ -46,7 +46,7 @@ func stoppedSandbox(t *testing.T, c *Controller, owner, name string) string {
 }
 
 // phaseOf is the phase desired state holds for id.
-func phaseOf(c *Controller, id string) string {
+func phaseOf(c *Controller, id string) v1.SandboxPhase {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.objects[id].Status.Phase
@@ -58,7 +58,7 @@ func phaseOf(c *Controller, id string) string {
 // is stopped, failed or deleting.
 func TestTheCountHoldsWhatRunsOrWillRun(t *testing.T) {
 	for _, tc := range []struct {
-		phase string
+		phase v1.SandboxPhase
 		holds bool
 	}{
 		{driver.Pending, true},
@@ -73,7 +73,7 @@ func TestTheCountHoldsWhatRunsOrWillRun(t *testing.T) {
 		{PhaseFailed, false},
 		{PhaseDeleting, false},
 	} {
-		t.Run(tc.phase, func(t *testing.T) {
+		t.Run(string(tc.phase), func(t *testing.T) {
 			c, _ := newController(t)
 			holding(t, c, "alice", "old", tc.phase)
 			// Another owner's sandbox is never this owner's count.
@@ -215,9 +215,9 @@ func TestTwoStartsRaceForOneSlot(t *testing.T) {
 	if won.Load() != 1 || refused.Load() != 1 {
 		t.Fatalf("%d starts ran and %d were refused, want one each", won.Load(), refused.Load())
 	}
-	phases := []string{phaseOf(c, ids[0]), phaseOf(c, ids[1])}
+	phases := []v1.SandboxPhase{phaseOf(c, ids[0]), phaseOf(c, ids[1])}
 	slices.Sort(phases)
-	if !slices.Equal(phases, []string{PhaseStarting, driver.Stopped}) {
+	if !slices.Equal(phases, []v1.SandboxPhase{PhaseStarting, driver.Stopped}) {
 		t.Fatalf("desired state holds %v, want one Starting and one Stopped", phases)
 	}
 }

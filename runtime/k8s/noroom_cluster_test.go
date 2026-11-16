@@ -165,7 +165,7 @@ func TestClusterAKillWithNoRoomForMoreIsStartedAgainAtItsSize(t *testing.T) {
 				seen.saw("unread: " + err.Error())
 				continue
 			}
-			what := fresh.Status.Phase
+			what := string(fresh.Status.Phase)
 			if strings.HasPrefix(fresh.Status.Reason, "Memory") {
 				what += " " + fresh.Status.Reason
 			}
@@ -215,7 +215,7 @@ func TestClusterAKillWithNoRoomForMoreIsStartedAgainAtItsSize(t *testing.T) {
 		undone.Round(time.Millisecond), back.Round(time.Millisecond), saw)
 	raised, held := "Starting "+v1.ReasonMemoryRaised, "Starting "+v1.ReasonMemoryNotRaised
 	for what, n := range saw {
-		if what != driver.Running && what != raised && what != held {
+		if what != string(driver.Running) && what != raised && what != held {
 			t.Errorf("readers saw %q %d times; a sandbox the control plane is starting again reads Running or Starting only", what, n)
 		}
 	}

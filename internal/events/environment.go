@@ -109,7 +109,7 @@ func (e *Emitter) EmitEnvironment(ctx context.Context, a controller.EnvironmentA
 		return
 	}
 	record, err := EnvironmentMutation(kind, a.Object,
-		Environment{Workers: a.Workers, Phase: a.Object.Status.Phase, Reason: a.Reason},
+		Environment{Workers: a.Workers, Phase: string(a.Object.Status.Phase), Reason: a.Reason},
 		ActorFrom(ctx), time.Now().UTC())
 	if err != nil {
 		e.log.WarnContext(ctx, "the event was not built",

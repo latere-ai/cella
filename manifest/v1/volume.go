@@ -85,24 +85,32 @@ var VolumeSources = []string{VolumeSourceEmpty, VolumeSourceSnapshot, VolumeSour
 // is derived at read from the sandboxes whose desired state mounts the
 // volume, Stopped ones included.
 type VolumeStatus struct {
-	ID         string    `json:"id"`
-	Owner      string    `json:"owner"`
-	Phase      string    `json:"phase"`
-	Reason     string    `json:"reason,omitempty"`
-	Message    string    `json:"message,omitempty"`
-	AttachedTo []string  `json:"attachedTo"`
-	Capacity   Quantity  `json:"capacity,omitempty"`
-	CreatedAt  time.Time `json:"createdAt"`
-	UpdatedAt  time.Time `json:"updatedAt,omitzero"`
+	ID         string      `json:"id"`
+	Owner      string      `json:"owner"`
+	Phase      VolumePhase `json:"phase"`
+	Reason     string      `json:"reason,omitempty"`
+	Message    string      `json:"message,omitempty"`
+	AttachedTo []string    `json:"attachedTo"`
+	Capacity   Quantity    `json:"capacity,omitempty"`
+	CreatedAt  time.Time   `json:"createdAt"`
+	UpdatedAt  time.Time   `json:"updatedAt,omitzero"`
 }
+
+// VolumePhase is the phase of a Volume, as status.phase holds it.
+type VolumePhase string
+
+// ParseVolumePhase reads a phase written as text outside the control plane,
+// such as a driver's report. It names the text as a phase and does not judge
+// it.
+func ParseVolumePhase(text string) VolumePhase { return VolumePhase(text) }
 
 // The phases of a Volume.
 const (
-	VolumePending   = "Pending"
-	VolumeAvailable = "Available"
-	VolumeFailed    = "Failed"
-	VolumeDeleting  = "Deleting"
-	VolumeLost      = "Lost"
+	VolumePending   VolumePhase = "Pending"
+	VolumeAvailable VolumePhase = "Available"
+	VolumeFailed    VolumePhase = "Failed"
+	VolumeDeleting  VolumePhase = "Deleting"
+	VolumeLost      VolumePhase = "Lost"
 )
 
 // VolumeMount is one entry of a Sandbox's spec.volumes: the mount's own name,

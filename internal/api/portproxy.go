@@ -56,7 +56,7 @@ func (h *handler) portProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	if obj.Status.Phase != runtime.Running {
 		respondError(w, &manifest.Error{Code: "upstream_unavailable",
-			Detail: "the sandbox is " + obj.Status.Phase + ", and a port is reached only while it runs"})
+			Detail: "the sandbox is " + string(obj.Status.Phase) + ", and a port is reached only while it runs"})
 		return
 	}
 	dialer, ok := h.dialerOf(w, obj)

@@ -92,7 +92,7 @@ func (h *handler) dial(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if obj.Status.Phase != runtime.Running {
-		respondError(w, &manifest.Error{Code: "phase_conflict", Detail: "the sandbox is " + obj.Status.Phase + ", and a port is reached only while it runs"})
+		respondError(w, &manifest.Error{Code: "phase_conflict", Detail: "the sandbox is " + string(obj.Status.Phase) + ", and a port is reached only while it runs"})
 		return
 	}
 	dialer, ok := h.dialerOf(w, obj)

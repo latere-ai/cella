@@ -54,7 +54,7 @@ func TestTheSnapshotStoreTakesWritersUnderDifferentLocks(t *testing.T) {
 	wg.Go(func() {
 		for i := range rounds {
 			next := environment
-			next.Status.Phase = fmt.Sprintf("Phase%02d", i)
+			next.Status.Phase = v1.EnvironmentPhase(fmt.Sprintf("Phase%02d", i))
 			if err := s.WriteEnvironmentStatus(t.Context(), next, ""); err != nil {
 				environmentErr = err
 				return
@@ -86,7 +86,7 @@ func TestTheSnapshotStoreTakesWritersUnderDifferentLocks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := environments["default"].Status.Phase; got != fmt.Sprintf("Phase%02d", rounds-1) {
+	if got := environments["default"].Status.Phase; got != v1.EnvironmentPhase(fmt.Sprintf("Phase%02d", rounds-1)) {
 		t.Errorf("the snapshot holds the environment at %q, want the last phase written", got)
 	}
 }

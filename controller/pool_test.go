@@ -746,7 +746,8 @@ func TestPoolShapeReadsEveryField(t *testing.T) {
 // before any driver held it. A queued sandbox holds nothing yet.
 func TestCapacityCountsThePhases(t *testing.T) {
 	for _, tc := range []struct {
-		phase, reason string
+		phase         v1.SandboxPhase
+		reason        string
 		compute, disk bool
 	}{
 		{driver.Pending, "", true, true},

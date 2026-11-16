@@ -313,12 +313,12 @@ func (d *Driver) refresh(ctx context.Context, r *record) (bool, error) {
 	r.State.Phase, r.State.Reason = driver.Stopped, "Exited"
 	switch {
 	case status.Gone:
-		r.State.Phase, r.State.Reason, r.State.ExitCode = "Failed", "Lost", nil
+		r.State.Phase, r.State.Reason, r.State.ExitCode = driver.Failed, "Lost", nil
 	default:
 		code := status.ExitCode
 		r.State.ExitCode = &code
 		if code != 0 {
-			r.State.Phase = "Failed"
+			r.State.Phase = driver.Failed
 		}
 	}
 	return true, nil

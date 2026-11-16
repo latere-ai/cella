@@ -63,7 +63,7 @@ func (d *Driver) startMainLocked(ctx context.Context, id string, r *record) erro
 	e, err := d.execLocked(ctx, id, driver.ExecRequest{Command: argv}, 0, 0)
 	if err != nil {
 		_ = log.Close()
-		r.State.Phase = "Failed"
+		r.State.Phase = driver.Failed
 		r.State.Reason = "DriverFailed"
 		return errors.Join(err, d.save(id, *r))
 	}
@@ -119,10 +119,10 @@ func (d *Driver) supervise(ctx context.Context, id string, main *mainProcess, lo
 		r.State.ExitCode = &code
 		r.State.StoppedAt = time.Now().UTC()
 		if code != 0 || runErr != nil {
-			r.State.Phase = "Failed"
+			r.State.Phase = driver.Failed
 		}
 		if logErr != nil {
-			r.State.Phase = "Failed"
+			r.State.Phase = driver.Failed
 			r.State.Reason = "LogWriteFailed"
 		}
 	}

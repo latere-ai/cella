@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	v1 "latere.ai/x/cella/manifest/v1"
+
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -111,7 +113,7 @@ func (d *Driver) CreateVolume(ctx context.Context, spec driver.VolumeSpec) (driv
 		if err != nil {
 			return driver.Ref{}, err
 		}
-		if image && existing.Annotations[annPhase] == driver.VolumePending {
+		if image && v1.ParseVolumePhase(existing.Annotations[annPhase]) == driver.VolumePending {
 			if err := d.putFillPod(ctx, spec, size, existing); err != nil {
 				return driver.Ref{}, err
 			}
@@ -238,7 +240,7 @@ func (d *Driver) volumeClaim(spec driver.VolumeSpec, size resource.Quantity) *co
 		Annotations: map[string]string{
 			annOwner: spec.Owner, annVolumeName: spec.Name, annSize: spec.Size,
 			annAccess: spec.Access, annSource: spec.Source.Kind, annImage: spec.Source.Image,
-			annCreatedAt: d.opts.Now().UTC().Format(stamp), annPhase: phase,
+			annCreatedAt: d.opts.Now().UTC().Format(stamp), annPhase: string(phase),
 		},
 		Spec: corev1.PersistentVolumeClaimSpec{
 			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
@@ -440,12 +442,12 @@ func (d *Driver) settleVolume(ctx context.Context, claim string, verdict driver.
 func volumeStateOf(claim *corev1.PersistentVolumeClaim) driver.VolumeState {
 	state := driver.VolumeState{
 		ID:       claim.Labels[labelVolume],
-		Phase:    claim.Annotations[annPhase],
+		Phase:    v1.ParseVolumePhase(claim.Annotations[annPhase]),
 		Reason:   claim.Annotations[annReason],
 		Message:  claim.Annotations[annMessage],
 		Capacity: claim.Annotations[annSize],
 	}
-	if state.Phase == "" {
+	if len(state.Phase) == 0 {
 		state.Phase = driver.VolumePending
 	}
 	if granted, ok := claim.Status.Capacity[corev1.ResourceStorage]; ok && claim.Status.Phase == corev1.ClaimBound {

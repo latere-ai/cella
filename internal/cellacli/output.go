@@ -101,7 +101,7 @@ func sandboxColumns(wide bool) []string {
 
 func sandboxRow(obj v1.Sandbox, wide bool, now time.Time) []string {
 	row := []string{
-		dash(obj.Metadata.Name), dash(obj.Status.Phase), conditionOf(obj, v1.ConditionReady),
+		dash(obj.Metadata.Name), dash(string(obj.Status.Phase)), conditionOf(obj, v1.ConditionReady),
 		dash(obj.Spec.Image), age(obj.Status.CreatedAt, now), dash(obj.Status.Owner),
 	}
 	if wide {

@@ -40,9 +40,14 @@ var (
 )
 
 const (
-	Pending        = "Pending"
-	Running        = "Running"
-	Stopped        = "Stopped"
+	Pending = v1.SandboxPending
+	Running = v1.SandboxRunning
+	Stopped = v1.SandboxStopped
+	Failed  = v1.SandboxFailed
+	Lost    = v1.SandboxLost
+)
+
+const (
 	IsolationNone  = "none"
 	DefaultWorkdir = "/workspace"
 )
@@ -326,7 +331,7 @@ type State struct {
 	ID        string            `json:"id"`
 	Name      string            `json:"name"`
 	Owner     string            `json:"owner"`
-	Phase     string            `json:"phase"`
+	Phase     v1.SandboxPhase   `json:"phase"`
 	Reason    string            `json:"reason,omitempty"`
 	ExitCode  *int              `json:"exitCode,omitzero"`
 	Isolation string            `json:"isolation"`
@@ -390,8 +395,9 @@ func (s *State) UnmarshalJSON(b []byte) error {
 }
 
 type Filter struct {
-	Owner, Phase string
-	IDs          []string
+	Owner string
+	Phase v1.SandboxPhase
+	IDs   []string
 	// MeshID selects the members of one mesh and Parent the children of one
 	// sandbox. Both read the stamped identity, so a substrate answers them
 	// without reading every object.
@@ -476,7 +482,7 @@ func (f Filter) Selects(s State) bool {
 	switch {
 	case f.Owner != "" && s.Owner != f.Owner:
 		return false
-	case f.Phase != "" && s.Phase != f.Phase:
+	case len(f.Phase) > 0 && s.Phase != f.Phase:
 		return false
 	case f.Pool != nil && s.Pool != *f.Pool:
 		return false

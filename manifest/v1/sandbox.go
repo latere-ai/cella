@@ -180,13 +180,39 @@ type Lifecycle struct {
 	TTL        Duration `json:"ttl,omitempty"`
 	AutoDelete Duration `json:"autoDelete,omitempty"`
 }
+
+// SandboxPhase is the phase of a Sandbox, as status.phase holds it.
+type SandboxPhase string
+
+// The phases of a Sandbox. A driver reports Pending, Starting, Running,
+// Stopping, Stopped and Failed; Queued, Lost, Recovering and Deleting are the
+// control plane's own, and Failed is also written by it.
+const (
+	SandboxPending    SandboxPhase = "Pending"
+	SandboxQueued     SandboxPhase = "Queued"
+	SandboxStarting   SandboxPhase = "Starting"
+	SandboxRunning    SandboxPhase = "Running"
+	SandboxStopping   SandboxPhase = "Stopping"
+	SandboxStopped    SandboxPhase = "Stopped"
+	SandboxFailed     SandboxPhase = "Failed"
+	SandboxLost       SandboxPhase = "Lost"
+	SandboxRecovering SandboxPhase = "Recovering"
+	SandboxDeleting   SandboxPhase = "Deleting"
+)
+
+// ParseSandboxPhase reads a phase written as text outside the control plane,
+// such as a driver's report or a stored column. It names the text as a phase
+// and does not judge it: a phase this version does not know is held, and the
+// lifecycle refuses any step to or from it.
+func ParseSandboxPhase(text string) SandboxPhase { return SandboxPhase(text) }
+
 type SandboxStatus struct {
-	ID          string `json:"id"`
-	Owner       string `json:"owner"`
-	Environment string `json:"environment"`
-	Driver      string `json:"driver"`
-	Isolation   string `json:"isolation"`
-	Phase       string `json:"phase"`
+	ID          string       `json:"id"`
+	Owner       string       `json:"owner"`
+	Environment string       `json:"environment"`
+	Driver      string       `json:"driver"`
+	Isolation   string       `json:"isolation"`
+	Phase       SandboxPhase `json:"phase"`
 	// Parent is the spawning sandbox's id and Root the id of the sandbox at
 	// the top of the tree, which is the sandbox's own when a subject applied
 	// it. Both are written at create and never change.

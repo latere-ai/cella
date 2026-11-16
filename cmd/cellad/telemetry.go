@@ -138,7 +138,7 @@ func environmentSeries(environments []v1.Environment) []metrics.Series {
 	type state struct{ phase, reason string }
 	counts := map[state]int{}
 	for _, obj := range environments {
-		counts[state{obj.Status.Phase, obj.Status.Reason}]++
+		counts[state{string(obj.Status.Phase), obj.Status.Reason}]++
 	}
 	out := make([]metrics.Series, 0, len(counts))
 	for s, n := range counts {

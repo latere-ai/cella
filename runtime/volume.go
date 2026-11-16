@@ -76,11 +76,11 @@ type VolumeSpec struct {
 // reason and the driver's own sentence where the fill failed, and the
 // capacity it granted, in quantity syntax.
 type VolumeState struct {
-	ID       string `json:"id"`
-	Phase    string `json:"phase"`
-	Reason   string `json:"reason,omitempty"`
-	Message  string `json:"message,omitempty"`
-	Capacity string `json:"capacity,omitempty"`
+	ID       string         `json:"id"`
+	Phase    v1.VolumePhase `json:"phase"`
+	Reason   string         `json:"reason,omitempty"`
+	Message  string         `json:"message,omitempty"`
+	Capacity string         `json:"capacity,omitempty"`
 }
 
 // VolumeDriver is the optional interface of a driver that declares the

@@ -132,7 +132,7 @@ func volumeReferences(ctx context.Context, obj *v1.Sandbox, env *v1.Environment,
 		case volume.Spec.Environment != obj.Spec.Environment:
 			return nil, failAt("invalid_field", path, "The volume lives in the environment "+volume.Spec.Environment+", and a sandbox mounts volumes of its own environment only.")
 		case volume.Status.Phase != v1.VolumeAvailable && volume.Status.Phase != v1.VolumePending:
-			return nil, failAt("invalid_field", path, "The volume is "+volume.Status.Phase+"; a sandbox mounts a volume that is Available or still being filled.")
+			return nil, failAt("invalid_field", path, "The volume is "+string(volume.Status.Phase)+"; a sandbox mounts a volume that is Available or still being filled.")
 		case volume.Spec.Access == v1.VolumeAccessSharedRead && !m.ReadOnly:
 			return nil, failAt("volume_busy", path, "The volume is shared read-only, so a mount of it sets readOnly.")
 		}

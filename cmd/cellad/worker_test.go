@@ -52,7 +52,7 @@ func TestWorkerEndToEnd(t *testing.T) {
 	if v, ok := sample(out, `cella_workers_connected{environment="default"}`); !ok || v != 1 {
 		t.Errorf("the scrape reads the connected workers as %v, %v", v, ok)
 	}
-	if v, ok := sample(out, `cella_environments{phase="`+obj.Status.Phase+`",reason="`+obj.Status.Reason+`"}`); !ok || v != 1 {
+	if v, ok := sample(out, `cella_environments{phase="`+string(obj.Status.Phase)+`",reason="`+obj.Status.Reason+`"}`); !ok || v != 1 {
 		t.Errorf("the scrape reads the environments in %s as %v, %v", obj.Status.Phase, v, ok)
 	}
 

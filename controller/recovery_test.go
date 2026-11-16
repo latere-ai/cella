@@ -167,8 +167,8 @@ func TestLostForVanishedSandbox(t *testing.T) {
 // one whose object is already gone is a delete cut short between the driver
 // and the row, and the reaper finishes it rather than keeping it (spec 076).
 func TestLostSuppressedForEndedSandbox(t *testing.T) {
-	for _, phase := range []string{driver.Pending, PhaseFailed, PhaseDeleting} {
-		t.Run(phase, func(t *testing.T) {
+	for _, phase := range []v1.SandboxPhase{driver.Pending, PhaseFailed, PhaseDeleting} {
+		t.Run(string(phase), func(t *testing.T) {
 			c, d, _, st := recovering(t, false, Options{})
 			obj := created(t, c, "work")
 			id := obj.Status.ID

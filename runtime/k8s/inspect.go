@@ -10,6 +10,8 @@ import (
 	"slices"
 	"time"
 
+	v1 "latere.ai/x/cella/manifest/v1"
+
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -21,11 +23,11 @@ import (
 // contract's constants; the rest are the names spec 004 fixes for every
 // driver.
 const (
-	phaseStarting = "Starting"
-	phaseStopping = "Stopping"
-	phaseDeleting = "Deleting"
-	phaseFailed   = "Failed"
-	phaseLost     = "Lost"
+	phaseStarting = v1.SandboxStarting
+	phaseStopping = v1.SandboxStopping
+	phaseDeleting = v1.SandboxDeleting
+	phaseFailed   = v1.SandboxFailed
+	phaseLost     = v1.SandboxLost
 )
 
 // Inspect reads one sandbox's two objects and assembles its state.
@@ -152,7 +154,7 @@ func state(pvc *corev1.PersistentVolumeClaim, pod *corev1.Pod) driver.State {
 }
 
 // phase applies the package's phase table.
-func phase(pvc *corev1.PersistentVolumeClaim, pod *corev1.Pod) (string, string, *int, time.Time) {
+func phase(pvc *corev1.PersistentVolumeClaim, pod *corev1.Pod) (v1.SandboxPhase, string, *int, time.Time) {
 	switch {
 	case pvc.DeletionTimestamp != nil:
 		return phaseDeleting, "", nil, parseStamp(pvc.Annotations, annStoppedAt)

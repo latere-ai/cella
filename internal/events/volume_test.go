@@ -16,7 +16,7 @@ import (
 )
 
 // aVolume is one Volume as the controller hands it over.
-func aVolume(phase, reason string) v1.Volume {
+func aVolume(phase v1.VolumePhase, reason string) v1.Volume {
 	return v1.Volume{
 		APIVersion: v1.APIVersion, Kind: v1.KindVolume,
 		Metadata: v1.Metadata{Name: "grader", Labels: map[string]string{"tenant": "acme"}},
@@ -51,7 +51,7 @@ func TestVolumeRecords(t *testing.T) {
 	if err := json.Unmarshal(attach.Data, &data); err != nil {
 		t.Fatal(err)
 	}
-	if data.Mode != controller.VolumeModeReadOnly || data.Source != v1.VolumeSourceImage || data.Phase != v1.VolumeAvailable {
+	if data.Mode != controller.VolumeModeReadOnly || data.Source != v1.VolumeSourceImage || data.Phase != string(v1.VolumeAvailable) {
 		t.Fatalf("the data is %+v", data)
 	}
 	failed, err := events.VolumeMutation(events.TypeVolumeFailed, aVolume(v1.VolumeFailed, "SourceTooLarge"), nil, "",

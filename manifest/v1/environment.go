@@ -190,16 +190,24 @@ type PoolSpec struct {
 	Display   *Display  `json:"display,omitzero"`
 }
 
+// EnvironmentPhase is the phase of an Environment, as status.phase holds it.
+type EnvironmentPhase string
+
+// ParseEnvironmentPhase reads a phase written as text outside the control
+// plane, such as a stored column. It names the text as a phase and does not
+// judge it.
+func ParseEnvironmentPhase(text string) EnvironmentPhase { return EnvironmentPhase(text) }
+
 // The phases an environment passes through. Ready places, reaps and watches;
 // Degraded and Offline refuse a create and leave running sandboxes alone; and
 // on Offline a sandbox with no observed counterpart is held Lost rather than
 // reaped, because a data plane reporting nothing is not a data plane
 // reporting an empty world.
 const (
-	EnvironmentPending  = "Pending"
-	EnvironmentReady    = "Ready"
-	EnvironmentDegraded = "Degraded"
-	EnvironmentOffline  = "Offline"
+	EnvironmentPending  EnvironmentPhase = "Pending"
+	EnvironmentReady    EnvironmentPhase = "Ready"
+	EnvironmentDegraded EnvironmentPhase = "Degraded"
+	EnvironmentOffline  EnvironmentPhase = "Offline"
 )
 
 // The reasons a phase below Ready carries. A live driver with no gateway
@@ -223,8 +231,8 @@ type EnvironmentStatus struct {
 	ID    string `json:"id,omitempty"`
 	Owner string `json:"owner,omitempty"`
 	// Phase and Reason are the machine of spec 021; Reason is empty on Ready.
-	Phase  string `json:"phase,omitempty"`
-	Reason string `json:"reason,omitempty"`
+	Phase  EnvironmentPhase `json:"phase,omitempty"`
+	Reason string           `json:"reason,omitempty"`
 	// Driver is recorded from the first registration, or from the in-process
 	// driver, and every later worker must report the same name.
 	Driver    string    `json:"driver,omitempty"`

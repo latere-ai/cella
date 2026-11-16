@@ -1405,7 +1405,7 @@ func TestSizingLeavesOtherSandboxesAndPhasesAlone(t *testing.T) {
 		state.Resources = held(driver.Resources{CPU: "500m", Memory: "256Mi", Disk: "5Gi"})
 		f.states[id] = state
 	})
-	for _, phase := range []string{PhaseDeleting, PhaseQueued, PhaseLost, PhaseRecovering} {
+	for _, phase := range []v1.SandboxPhase{PhaseDeleting, PhaseQueued, PhaseLost, PhaseRecovering} {
 		c.mu.Lock()
 		obj := c.objects[id]
 		obj.Status.Phase = phase
@@ -1962,7 +1962,7 @@ func readers(t *testing.T, c *Controller, id string) (*phases, func()) {
 					seen.saw("unread", err.Error())
 					continue
 				}
-				seen.saw(fresh.Status.Phase, fresh.Status.Reason)
+				seen.saw(string(fresh.Status.Phase), fresh.Status.Reason)
 			}
 		})
 	}
@@ -1997,9 +1997,9 @@ func onlyRunningAndStarting(t *testing.T, seen *phases) {
 func onlyRunningAndStartingAs(t *testing.T, seen *phases, reasons ...string) {
 	t.Helper()
 	saw := seen.all()
-	allowed := map[string]bool{driver.Running: true}
+	allowed := map[string]bool{string(driver.Running): true}
 	for _, reason := range reasons {
-		allowed[PhaseStarting+" "+reason] = true
+		allowed[string(PhaseStarting)+" "+reason] = true
 	}
 	for phase, n := range saw {
 		if !allowed[phase] {
@@ -2551,12 +2551,12 @@ func TestTheObservedIndexHoldsNoRisingSandboxAsFailed(t *testing.T) {
 	rows, _ := store.index(c.environment)
 	got := map[string]string{}
 	for _, row := range rows {
-		got[row.ID] = row.Phase + " " + row.Reason
+		got[row.ID] = string(row.Phase) + " " + row.Reason
 	}
 	want := map[string]string{
-		rising.Status.ID:    PhaseStarting + " " + v1.ReasonMemoryRaised,
-		atCeiling.Status.ID: PhaseFailed + " " + reasonOOMKilled,
-		"sbx_untracked":     PhaseFailed + " " + reasonOOMKilled,
+		rising.Status.ID:    string(PhaseStarting) + " " + v1.ReasonMemoryRaised,
+		atCeiling.Status.ID: string(PhaseFailed) + " " + reasonOOMKilled,
+		"sbx_untracked":     string(PhaseFailed) + " " + reasonOOMKilled,
 	}
 	for id, phase := range want {
 		if got[id] != phase {
@@ -2659,7 +2659,7 @@ func TestAMoveCutShortIsFinished(t *testing.T) {
 		t.Helper()
 		return cutAt(t, func(*sizeDriver, string) {})
 	}
-	phaseIs := func(d *sizeDriver, id, phase string) {
+	phaseIs := func(d *sizeDriver, id string, phase v1.SandboxPhase) {
 		d.set(func(f *fakeDriver) {
 			state := f.states[id]
 			state.Phase = phase

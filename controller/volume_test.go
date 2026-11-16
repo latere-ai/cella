@@ -527,7 +527,7 @@ func TestTheVolumeCeilingCountsTheOwnersVolumes(t *testing.T) {
 	}
 	fillPass(t, c)
 	vd.Fill = nil
-	for id, want := range map[string]string{kept.Status.ID: v1.VolumeAvailable, lost.Status.ID: v1.VolumeLost, broken.Status.ID: v1.VolumeFailed} {
+	for id, want := range map[string]v1.VolumePhase{kept.Status.ID: v1.VolumeAvailable, lost.Status.ID: v1.VolumeLost, broken.Status.ID: v1.VolumeFailed} {
 		if got, err := c.GetVolume(t.Context(), id, "alice"); err != nil || got.Status.Phase != want {
 			t.Fatalf("the volume %s is %+v, %v; want %s", id, got.Status, err, want)
 		}

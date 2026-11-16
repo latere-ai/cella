@@ -377,7 +377,7 @@ func TestClusterAKilledSandboxNeverReadsFailed(t *testing.T) {
 				seen.saw("unread: " + err.Error())
 				continue
 			}
-			what := fresh.Status.Phase
+			what := string(fresh.Status.Phase)
 			if fresh.Status.Reason == v1.ReasonMemoryRaised {
 				what += " " + fresh.Status.Reason
 			}
@@ -407,7 +407,7 @@ func TestClusterAKilledSandboxNeverReadsFailed(t *testing.T) {
 		group, code, runErr, ended.Round(time.Millisecond), back.Round(time.Millisecond), saw)
 	starting := "Starting " + v1.ReasonMemoryRaised
 	for what, n := range saw {
-		if what != driver.Running && what != starting {
+		if what != string(driver.Running) && what != starting {
 			t.Errorf("readers saw %q %d times; a sandbox being given more memory reads Running or Starting only", what, n)
 		}
 	}

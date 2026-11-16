@@ -18,6 +18,7 @@ import (
 	kruntime "k8s.io/apimachinery/pkg/runtime"
 	k8stesting "k8s.io/client-go/testing"
 
+	v1 "latere.ai/x/cella/manifest/v1"
 	driver "latere.ai/x/cella/runtime"
 )
 
@@ -107,7 +108,7 @@ func TestVolumeClaimAndFillPodRender(t *testing.T) {
 	}
 	for key, want := range map[string]string{
 		annOwner: "alice@example.com", annVolumeName: "grader", annSize: "2Gi", annAccess: driver.AccessSharedRead,
-		annSource: driver.SourceImage, annImage: sourceImage, annPhase: driver.VolumePending,
+		annSource: driver.SourceImage, annImage: sourceImage, annPhase: string(driver.VolumePending),
 	} {
 		if got := claim.Annotations[key]; got != want {
 			t.Errorf("claim annotation %s = %q, want %q", key, got, want)
@@ -252,7 +253,7 @@ func TestFillVerdicts(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		status  func(*corev1.Pod)
-		phase   string
+		phase   v1.VolumePhase
 		reason  string
 		message string
 	}{
@@ -313,7 +314,7 @@ func TestFillVerdicts(t *testing.T) {
 				t.Fatal("the fill pod outlived its verdict")
 			}
 			claim := h.volumeClaim(t, id)
-			if claim.Annotations[annPhase] != tc.phase || claim.Annotations[annReason] != tc.reason || claim.Annotations[annMessage] != tc.message {
+			if claim.Annotations[annPhase] != string(tc.phase) || claim.Annotations[annReason] != tc.reason || claim.Annotations[annMessage] != tc.message {
 				t.Fatalf("the claim records %v", claim.Annotations)
 			}
 			again, err := h.InspectVolume(t.Context(), id)

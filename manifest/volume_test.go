@@ -307,7 +307,7 @@ func volumesOptions(volumes ...v1.Volume) Options {
 	return o
 }
 
-func storedVolume(name, id, access, phase string) v1.Volume {
+func storedVolume(name, id, access string, phase v1.VolumePhase) v1.Volume {
 	return v1.Volume{
 		APIVersion: v1.APIVersion, Kind: v1.KindVolume, Metadata: v1.Metadata{Name: name},
 		Spec:   v1.VolumeSpec{Environment: "default", Size: "1Gi", Access: access, Source: v1.VolumeSource{Kind: v1.VolumeSourceEmpty}},

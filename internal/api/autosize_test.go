@@ -135,7 +135,7 @@ func (d *sizingDriver) kill(id string) {
 }
 
 // phaseOf reads the phase and the reason one answer carries.
-func phaseOf(t *testing.T, body []byte) (phase, reason string) {
+func phaseOf(t *testing.T, body []byte) (phase v1.SandboxPhase, reason string) {
 	t.Helper()
 	var obj v1.Sandbox
 	if err := json.Unmarshal(body, &obj); err != nil {
@@ -219,7 +219,7 @@ func TestAKilledSandboxUnderACeilingNeverAnswersFailed(t *testing.T) {
 						note("GET unreadable")
 						continue
 					}
-					note(strings.TrimSpace(one.Status.Phase + " " + one.Status.Reason))
+					note(strings.TrimSpace(string(one.Status.Phase) + " " + one.Status.Reason))
 					continue
 				}
 				status, answer := get("/v1/sandboxes")
@@ -230,7 +230,7 @@ func TestAKilledSandboxUnderACeilingNeverAnswersFailed(t *testing.T) {
 					note("list " + http.StatusText(status))
 					continue
 				}
-				note(strings.TrimSpace(page.Items[0].Status.Phase + " " + page.Items[0].Status.Reason))
+				note(strings.TrimSpace(string(page.Items[0].Status.Phase) + " " + page.Items[0].Status.Reason))
 			}
 		})
 	}
@@ -299,11 +299,11 @@ func TestAKilledSandboxUnderACeilingNeverAnswersFailed(t *testing.T) {
 	group.Wait()
 	starting := "Starting " + v1.ReasonMemoryRaised
 	for what, n := range seen {
-		if what != runtime.Running && what != starting {
+		if what != string(runtime.Running) && what != starting {
 			t.Errorf("clients were answered %q %d times; a sandbox being started again answers Running or Starting only", what, n)
 		}
 	}
-	if seen[starting] == 0 || seen[runtime.Running] == 0 {
+	if seen[starting] == 0 || seen[string(runtime.Running)] == 0 {
 		t.Fatalf("clients were answered %v, want both Running and Starting", seen)
 	}
 

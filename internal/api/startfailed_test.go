@@ -23,7 +23,7 @@ import (
 const failsOnce = `if [ -f again ]; then exec sleep 300; fi; : > again; exit 3`
 
 // awaitPhase reads a sandbox until it is in a phase.
-func (f *fixture) awaitPhase(id, phase string) v1.Sandbox {
+func (f *fixture) awaitPhase(id string, phase v1.SandboxPhase) v1.Sandbox {
 	f.t.Helper()
 	deadline := time.Now().Add(20 * time.Second)
 	for {

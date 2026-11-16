@@ -192,10 +192,14 @@ func withValue(body []byte, c *invocation, fromEnv, fromFile string) ([]byte, er
 func waitForRunning(ctx context.Context, client *cellaclient.Client, obj v1.Sandbox, raw []byte, deadline time.Time, timeout time.Duration) (v1.Sandbox, []byte, error) {
 	for {
 		switch obj.Status.Phase {
-		case "Running":
+		case v1.SandboxRunning:
 			return obj, raw, nil
-		case "Failed":
+		case v1.SandboxFailed:
 			return obj, raw, fmt.Errorf("the sandbox is Failed: %s", obj.Status.Reason)
+		case v1.SandboxPending, v1.SandboxQueued, v1.SandboxStarting, v1.SandboxStopping, v1.SandboxStopped,
+			v1.SandboxLost, v1.SandboxRecovering, v1.SandboxDeleting:
+			// Not running yet, or on its way elsewhere: the wait goes on
+			// until the deadline, which names the phase it ended in.
 		}
 		if time.Now().After(deadline) {
 			return obj, raw, fmt.Errorf("the sandbox is %s after %s", obj.Status.Phase, timeout)
